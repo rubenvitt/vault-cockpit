@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { generateKeyPairSync, createSign, createHash } from 'node:crypto';
 import { createApp } from '../src/http/app.js';
 import { createWebHttp } from '../src/web/http.js';
+import { loadShortcuts } from '../src/web/shortcuts.js';
 import { createOidcLogin } from '../src/web/oidc.js';
 import { createCookieSigner, parseCookies } from '../src/web/session.js';
 import { createSettingsStore } from '../src/cockpit/settings.js';
@@ -99,7 +100,7 @@ const graph = {
 };
 const search = async (q) => ({ results: [{ path: 'wiki/a.md', title: 'A', snippet: `zu ${q}`, streams: ['text', 'semantic'] }], total: 1, degraded: null });
 
-async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSubjects = ['ruben'], calendars = null, actions = null } = {}) {
+async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSubjects = ['ruben'], calendars = null, actions = null, shortcuts = [] } = {}) {
   const idp = fakeIdp(idpOptions);
   const settings = createSettingsStore({ defaults: { tz: 'Europe/Berlin', inboxFolder: 'inbox', zunderUrl: 'https://zunder.env', zunderToken: 'zt_env' }, logger: quiet });
   const tokens = createTokenStore({ logger: quiet });
@@ -108,6 +109,7 @@ async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSu
     settings,
     actions,
     tokens,
+    shortcuts,
     calendars,
     graph,
     search,
@@ -590,5 +592,26 @@ test('Schnelleingabe: Notiz und Aufgabe; ohne JavaScript bleibt der Text bei Feh
     },
     {},
     { actions },
+  );
+});
+
+test('Kurzbefehle: in den Einstellungen verlinkt, nur angemeldet zu laden', async () => {
+  const shortcuts = loadShortcuts();
+  assert.deepEqual(shortcuts.map((s) => s.slug), ['notiz', 'sprachmemo'], 'beide signierten Dateien liegen im Repo');
+  await withServer(
+    async ({ call, login }) => {
+      const anon = await call('/kurzbefehle/notiz.shortcut');
+      assert.equal(anon.status, 303);
+      await login();
+      const page = await (await call('/einstellungen')).text();
+      assert.match(page, /href="\/kurzbefehle\/notiz\.shortcut"/);
+      assert.match(page, /href="\/kurzbefehle\/sprachmemo\.shortcut"/);
+      const file = await call('/kurzbefehle/sprachmemo.shortcut');
+      assert.equal(file.status, 200);
+      assert.match(file.headers.get('content-disposition'), /attachment;.*Sprachmemo%20ins%20Cockpit\.shortcut/);
+      assert.deepEqual(Buffer.from(await file.arrayBuffer()), shortcuts[1].data);
+    },
+    {},
+    { shortcuts },
   );
 });
