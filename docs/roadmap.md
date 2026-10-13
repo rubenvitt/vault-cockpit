@@ -17,10 +17,38 @@ Vault-Integration.
 
 1. **Sync-Adapter:** [Obsidian Headless](https://www.npmjs.com/package/obsidian-headless)
    (offizieller CLI-Client, Node 22+, open beta) hält eine Vault-Kopie auf dem Server
-   aktuell. Austauschbar gebaut, damit ein eigener Sync später nur ein weiterer Adapter ist.
+   aktuell. Er läuft als Sidecar-Container im Stack des Cockpits (siehe „Sync“ unten).
+   Austauschbar gebaut, damit ein eigener Sync später nur ein weiterer Adapter ist.
 2. **Kern:** Index (SQLite mit Volltext, Links, Frontmatter — existiert), lokale
    Embeddings (z. B. bge-m3), Konnektoren zu Zunder, Timing und Kalender per CalDAV.
 3. **Oberflächen:** MCP (existiert), Web-UI als Cockpit, Capture-Endpunkte.
+
+### Sync
+
+**Heute:** `ob sync --continuous` läuft direkt auf dem Host als systemd-User-Unit,
+ohne Container. Der Prozess schreibt in denselben Ordner, den der MCP-Container
+als `/vault` mountet. Was der Connector schreibt, verteilt dieser Prozess also
+weiter. Die Unit steht in keinem Deploy- oder Update-Skript, deshalb bleibt die
+Client-Version stehen, bis jemand sie von Hand anhebt.
+
+**Ziel (entschieden 13.10.2026): Sidecar im Cockpit-Stack.**
+
+- Ein eigener Dienst `vault-sync` in der Compose-Datei führt `ob sync --continuous`
+  aus. Cockpit und Sidecar teilen sich das Vault-Volume. Der Sync-Client kommt so
+  nicht ins Cockpit-Image, und das Cockpit bleibt frei von proprietärem Code.
+- Der Sidecar wird mit dem Stack deployt und aktualisiert. Die Version von
+  `obsidian-headless` wird gepinnt, weil der Client noch Beta ist und
+  bidirektional in den Vault schreibt.
+- Login-Zustand und Gerätename liegen in einem eigenen Config-Volume des
+  Sidecars. Beide Container laufen mit derselben UID (1000), damit
+  Dateirechte stimmen.
+- Im Cockpit ist der **Sync-Adapter** schmal: Er meldet Dateiänderungen
+  (inkrementeller Reindex statt nur Komplettaufbau im Intervall) und den Zustand
+  des Syncs (läuft, letzter Abgleich, Fehler). Ein eigener Sync aus Schritt 5
+  ersetzt nur den Sidecar und seinen Adapter.
+- **Genau ein Sync pro Ordner.** Beim Umstieg wird die Host-Unit gestoppt und
+  deaktiviert, bevor der Sidecar startet. Sonst schreiben zwei Clients in
+  dieselben Dateien.
 
 ### Kein eigenes LLM im Service
 
@@ -46,7 +74,7 @@ Der Service liefert nur Werkzeuge und Zustand. Intelligenz kommt von außen per 
 ## Reihenfolge
 
 0. Übernahme des bestehenden Vault-MCP (Index, Link-Graph, Capture, Bearbeiten, OAuth) — erledigt
-1. Headless-Sync als Adapter, Deployment vom alten Vault-MCP übernehmen
+1. Headless-Sync als Sidecar mit Adapter, Host-Unit ablösen, Deployment vom alten Vault-MCP übernehmen
 2. Capture mit Zunder-Weiterleitung
 3. Cockpit-Web-UI
 4. Graph + semantische Suche
