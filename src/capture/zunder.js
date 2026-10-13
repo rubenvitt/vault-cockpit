@@ -52,6 +52,12 @@ export function createZunderClient({ url, token, fetch = globalThis.fetch, timeo
       return out?.task ?? null;
     },
 
+    /** Setzt den Status einer Aufgabe (`update_task`), für die Zunder-Brücke. */
+    async setStatus(id, status) {
+      const out = await callTool('update_task', { task_id: id, status });
+      return out?.task ?? null;
+    },
+
     /** Legt eine Aufgabe in der Zunder-Inbox an und liefert `{ id, ref, url }`. */
     async createTask({ title, description, vaultLinks }) {
       const args = { title: clampTitle(title) };

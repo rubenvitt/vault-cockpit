@@ -7,7 +7,7 @@ import { buildIndex, openIndex } from '../src/vault/index.js';
 import { compilePolicy } from '../src/vault/policy.js';
 import { createEditor } from '../src/vault/edit.js';
 import { createStateStore } from '../src/capture/state.js';
-import { createZunderBridge, findMarkedTasks, findLinkedTasks, closeLine, linkLine } from '../src/capture/bridge.js';
+import { createZunderBridge, findMarkedTasks, findLinkedTasks, findLinkedCheckboxes, closeLine, linkLine } from '../src/capture/bridge.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
 const policy = compilePolicy({ sensitive: { 'areas/Gesundheit': 'gesundheit' } });
@@ -130,8 +130,15 @@ function backVault() {
 
 function statusZunder(statuses) {
   const asked = [];
+  const set = [];
   return {
     asked,
+    set,
+    async setStatus(id, status) {
+      set.push([id, status]);
+      statuses[id] = status;
+      return { id, status };
+    },
     taskUrl: (id) => `https://zunder.test/#/aufgabe/${id}`,
     async getTask(id) {
       asked.push(id);
@@ -157,7 +164,7 @@ test('syncBack hakt erledigte Aufgaben ab und markiert verworfene', async () => 
   backVault();
   const z = statusZunder({ d1: 'done', d2: 'done', o1: 'in_progress', x1: 'dropped' });
   const bridge = createZunderBridge({ index: idx, editor, zunder: z, state, logger: quiet });
-  assert.equal(await bridge.syncBack(), 3);
+  assert.deepEqual(await bridge.syncBack(), { closed: 3, reported: 0 });
 
   const after = read('projects/Beta.md');
   assert.match(after, /- \[x\] Erledigt in Zunder \[↗ VCP-1\]/);
@@ -174,7 +181,7 @@ test('syncBack: nicht abrufbare Aufgaben bleiben offen, der Rest läuft weiter',
   backVault();
   const z = statusZunder({ d2: 'done' });
   const bridge = createZunderBridge({ index: idx, editor, zunder: z, state, logger: quiet });
-  assert.equal(await bridge.syncBack(), 1);
+  assert.equal((await bridge.syncBack()).closed, 1);
   const after = read('projects/Beta.md');
   assert.match(after, /- \[ \] Erledigt in Zunder/);
   assert.match(after, /1\. \[x\] Nummeriert erledigt/);
@@ -192,8 +199,102 @@ test('Hinweg und Rückweg: übertragene Aufgabe wird nach dem Erledigen abgehakt
   };
   const bridge = createZunderBridge({ index: idx, editor, zunder: z, state, logger: quiet });
   await bridge.scanAll();
-  assert.equal(await bridge.syncBack(), 0);
+  assert.deepEqual(await bridge.syncBack(), { closed: 0, reported: 0 });
   statuses.t1 = 'done';
-  assert.equal(await bridge.syncBack(), 1);
+  assert.deepEqual(await bridge.syncBack(), { closed: 1, reported: 0 });
+  assert.deepEqual(await bridge.syncBack(), { closed: 0, reported: 0 }, 'selbst geschlossen ist kein Abhaken im Vault');
   assert.match(read('projects/Alpha.md'), /- \[x\] Angebot schreiben \[↗ VCP-1\]/);
+});
+
+test('findLinkedCheckboxes liefert auch geschlossene Checkboxen mit Markierung', () => {
+  const found = findLinkedCheckboxes(`- [ ] A ${linked('a')}\n- [X] B ${linked('b')}\n- [-] C ${linked('c')}\n- [/] D ${linked('d')}`);
+  assert.deepEqual(found.map((f) => [f.id, f.mark]), [['a', ' '], ['b', 'x'], ['c', '-']]);
+});
+
+/** Notiz neu schreiben und Index samt Editor neu aufbauen (wie nach einem Sync). */
+function rewrite(p, text) {
+  put(p, text);
+  idx.close();
+  buildIndex({ vaultPath: root, dbPath: ':memory:', policy, persist: (db, vp) => (idx = openIndex(db, { vaultPath: vp, policy })) });
+  editor = createEditor({ vaultPath: root, index: idx });
+}
+
+test('im Vault abgehakt → Zunder erledigt, abgebrochen → verworfen', async () => {
+  rewrite('projects/Gamma.md', `- [ ] Eins ${linked('a')}\n- [ ] Zwei ${linked('b')}\n- [ ] Drei ${linked('c')}\n`);
+  const statuses = { a: 'open', b: 'in_progress', c: 'open' };
+  const z = statusZunder(statuses);
+  let bridge = createZunderBridge({ index: idx, editor, zunder: z, state, logger: quiet });
+  assert.deepEqual(await bridge.syncBack(), { closed: 0, reported: 0 }, 'erster Blick merkt nur');
+
+  rewrite('projects/Gamma.md', `- [x] Eins ${linked('a')}\n- [-] Zwei ${linked('b')}\n- [ ] Drei ${linked('c')}\n`);
+  bridge = createZunderBridge({ index: idx, editor, zunder: z, state, logger: quiet });
+  assert.deepEqual(await bridge.syncBack(), { closed: 0, reported: 2 });
+  assert.deepEqual(z.set, [['a', 'done'], ['b', 'dropped']]);
+
+  assert.deepEqual(await bridge.syncBack(), { closed: 0, reported: 0 }, 'nur einmal melden');
+});
+
+test('in Zunder wieder geöffnet: abgehakte Checkbox erledigt die Aufgabe nicht erneut', async () => {
+  rewrite('projects/Gamma.md', `- [ ] Eins ${linked('a')}\n`);
+  const statuses = { a: 'open' };
+  const z = statusZunder(statuses);
+  let bridge = createZunderBridge({ index: idx, editor, zunder: z, state, logger: quiet });
+  await bridge.syncBack();
+  rewrite('projects/Gamma.md', `- [x] Eins ${linked('a')}\n`);
+  bridge = createZunderBridge({ index: idx, editor, zunder: z, state, logger: quiet });
+  assert.equal((await bridge.syncBack()).reported, 1);
+
+  statuses.a = 'open'; // in Zunder wieder geöffnet
+  z.asked.length = 0;
+  assert.deepEqual(await bridge.syncBack(), { closed: 0, reported: 0 });
+  assert.equal(statuses.a, 'open');
+  assert.deepEqual(z.asked, [], 'abgehakte Zeilen ohne Übergang fragen Zunder nicht');
+});
+
+test('schon abgehakt beim ersten Blick und in Zunder geschlossen: nichts melden', async () => {
+  rewrite('projects/Gamma.md', `- [x] Alt ${linked('a')}\n- [ ] Neu ${linked('b')}\n`);
+  const z = statusZunder({ a: 'open', b: 'dropped' });
+  let bridge = createZunderBridge({ index: idx, editor, zunder: z, state, logger: quiet });
+  assert.deepEqual(await bridge.syncBack(), { closed: 1, reported: 0 });
+  assert.match(read('projects/Gamma.md'), /- \[-\] Neu/);
+
+  // Zunder verworfen, Vault danach abgehakt: Zunder bleibt verworfen.
+  rewrite('projects/Gamma.md', `- [x] Alt ${linked('a')}\n- [x] Neu ${linked('b')}\n`);
+  bridge = createZunderBridge({ index: idx, editor, zunder: z, state, logger: quiet });
+  assert.deepEqual(await bridge.syncBack(), { closed: 0, reported: 0 });
+  assert.deepEqual(z.set, []);
+});
+
+test('scheitert die Meldung an Zunder, folgt sie beim nächsten Durchlauf', async () => {
+  rewrite('projects/Gamma.md', `- [ ] Eins ${linked('a')}\n`);
+  const statuses = { a: 'open' };
+  const z = statusZunder(statuses);
+  let down = true;
+  const flaky = { ...z, setStatus: (id, s) => (down ? Promise.reject(new Error('HTTP 503')) : z.setStatus(id, s)) };
+  let bridge = createZunderBridge({ index: idx, editor, zunder: flaky, state, logger: quiet });
+  await bridge.syncBack();
+  rewrite('projects/Gamma.md', `- [x] Eins ${linked('a')}\n`);
+  bridge = createZunderBridge({ index: idx, editor, zunder: flaky, state, logger: quiet });
+  assert.equal((await bridge.syncBack()).reported, 0);
+  down = false;
+  assert.equal((await bridge.syncBack()).reported, 1);
+  assert.equal(statuses.a, 'done');
+});
+
+test('Hinweg, dann im Vault abgehakt: Aufgabe wird in Zunder erledigt', async () => {
+  const statuses = {};
+  const z = {
+    ...statusZunder(statuses),
+    async createTask() {
+      statuses.t1 = 'open';
+      return { id: 't1', ref: 'VCP-1', url: 'https://zunder.test/#/aufgabe/t1' };
+    },
+  };
+  const bridge = createZunderBridge({ index: idx, editor, zunder: z, state, logger: quiet });
+  await bridge.scanAll();
+  // Vor dem ersten Abgleich abgehakt: zählt, weil die Brücke die Zeile beim Verlinken als offen gemerkt hat.
+  rewrite('projects/Alpha.md', read('projects/Alpha.md').replace('- [ ] Angebot', '- [x] Angebot'));
+  const again = createZunderBridge({ index: idx, editor, zunder: z, state, logger: quiet });
+  assert.deepEqual(await again.syncBack(), { closed: 0, reported: 1 });
+  assert.equal(statuses.t1, 'done');
 });

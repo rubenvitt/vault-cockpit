@@ -29,6 +29,8 @@ export function createStateStore(file = null) {
 
   return {
     get: (key) => data[key] ?? null,
+    /** Alle Schlüssel mit diesem Anfang. */
+    keys: (prefix = '') => Object.keys(data).filter((k) => k.startsWith(prefix)),
     set(key, value) {
       data[key] = value;
       save();
