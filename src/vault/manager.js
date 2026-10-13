@@ -4,11 +4,10 @@ import { DEFAULT_POLICY } from './policy.js';
 /**
  * Hält den Index aktuell.
  *
- * Der Vault wird von Obsidian Sync fortlaufend verändert — neue und gelöschte
- * Notizen würden sonst nie im Suchindex ankommen. Ein vollständiger Neuaufbau
- * dauert bei einigen tausend Notizen nur Sekunden, deshalb genügt ein periodischer
- * Komplettaufbau; eine inkrementelle Verfolgung einzelner Dateien wäre mehr
- * Komplexität ohne spürbaren Gewinn.
+ * Der Vault wird vom Sync fortlaufend verändert. Meldet der Sync-Adapter
+ * geänderte Dateien, liest applyChanges() nur diese neu ein. Der periodische
+ * Komplettaufbau bleibt als Netz für alles, was der Adapter nicht sieht
+ * (verpasste Ereignisse, umbenannte Ordner, Neustarts).
  *
  * Der Notizinhalt selbst wird ohnehin immer frisch von der Platte gelesen —
  * veralten kann nur der Suchindex und der Link-Graph.
@@ -16,6 +15,7 @@ import { DEFAULT_POLICY } from './policy.js';
 export function createIndexManager({ vaultPath, dbPath, policy = DEFAULT_POLICY, intervalMinutes = 0, logger = console }) {
   let current = null;
   let builtAt = 0;
+  let changedAt = 0;
   let timer = null;
 
   function rebuild() {
@@ -35,6 +35,21 @@ export function createIndexManager({ vaultPath, dbPath, policy = DEFAULT_POLICY,
     return count;
   }
 
+  /**
+   * Geänderte Notizen (Vault-relative Pfade) einzeln neu einlesen. Ist dabei
+   * eine Datei entstanden oder verschwunden, werden alle Linkziele neu
+   * aufgelöst, damit Backlinks stimmen.
+   */
+  function applyChanges(paths) {
+    let presenceChanged = false;
+    for (const path of new Set(paths)) {
+      const { existed, exists } = current.refresh(path);
+      if (existed !== exists) presenceChanged = true;
+    }
+    if (presenceChanged) current.relinkAll();
+    changedAt = Date.now();
+  }
+
   rebuild();
 
   if (intervalMinutes > 0) {
@@ -50,7 +65,9 @@ export function createIndexManager({ vaultPath, dbPath, policy = DEFAULT_POLICY,
 
   return {
     rebuild,
+    applyChanges,
     lastBuiltAt: () => builtAt,
+    lastChangedAt: () => changedAt,
     stop() {
       if (timer) clearInterval(timer);
       current?.close();
