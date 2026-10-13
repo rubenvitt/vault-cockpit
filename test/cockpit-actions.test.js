@@ -27,6 +27,14 @@ function fakeZunder({ fail = false } = {}) {
       calls.push(['moveTask', id, location]);
       return { id, ref: 'VCP-1', title: 'Steuer', status: 'open', location: { ...location, name: 'Finanzen' } };
     },
+    async startFlame(id) {
+      calls.push(['startFlame', id]);
+      return { task: { id, title: 'Steuer', status: 'in_progress', flame_started_at: '2026-10-14T07:00:00Z', flame_running: true }, running: true, timing: { configured: true, used: true } };
+    },
+    async stopFlame(id) {
+      calls.push(['stopFlame', id]);
+      return { task: { id, title: 'Steuer', status: 'in_progress', flame_started_at: '2026-10-14T07:00:00Z', flame_ended_at: '2026-10-14T07:42:00Z' }, running: false, timing: { configured: true, used: false, error: 'Timing antwortet nicht' } };
+    },
     async createTask(args) {
       calls.push(['createTask', args]);
       return { id: `t${calls.length}`, ref: `ZUN-${calls.length}`, url: `https://zunder.test/#/aufgabe/t${calls.length}` };
@@ -128,6 +136,20 @@ test('setPhoenix: Schritt einer Woche setzen und wieder entfernen', async () => 
   await a.setPhoenix('abc', '');
   assert.deepEqual(calls, [['updateTask', 'abc', { phoenix: { role: 'feuer_schritt', fire: '2026-W42' } }], ['updateTask', 'abc', { phoenix: null }]]);
   await assert.rejects(a.setPhoenix('abc', '2026-W60'), (e) => e.status === 400 && /keine Kalenderwoche/.test(e.message));
+});
+
+test('flame: Start und Stopp über Zunder, Timing-Ergebnis wird mitgegeben', async () => {
+  const a = actions();
+  const on = await a.flame('abc', true);
+  assert.equal(on.running, true);
+  assert.equal(on.timing, true);
+  assert.equal(on.startedAt, '2026-10-14T07:00:00Z');
+  const off = await a.flame('abc', false);
+  assert.equal(off.running, false);
+  assert.equal(off.endedAt, '2026-10-14T07:42:00Z');
+  assert.equal(off.timing, 'Timing antwortet nicht');
+  assert.deepEqual(calls, [['startFlame', 'abc'], ['stopFlame', 'abc']]);
+  await assert.rejects(a.flame('../x', true), (e) => e.status === 400);
 });
 
 test('capture: Notiz landet im Inbox-Ordner aus den Einstellungen und sofort im Index', async () => {

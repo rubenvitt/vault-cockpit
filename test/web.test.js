@@ -64,13 +64,14 @@ function fakeIdp({ sub = 'ruben', aud = CLIENT, nonceOverride = null } = {}) {
 
 const cockpit = {
   async week(id) {
-    if (id === 'kaputt') return null;
+    if (id === 'kaputt' || id === 'unbekannt') return null;
     return {
       tz: 'Europe/Berlin',
       vaultName: null,
       week: { id: '2026-W42', year: 2026, week: 42, monday: '2026-10-12', sunday: '2026-10-18', prev: '2026-W41', next: '2026-W43', current: true },
       today: '2026-10-14',
       feuer: { ok: true, data: null },
+      burning: id === 'brennt' ? { id: 'f9', ref: null, title: 'Deep Work', startedAt: '2026-10-14T07:00:00Z', url: 'https://zunder.test/#/aufgabe/f9' } : null,
       flames: { ok: true, data: [] },
       rocks: {
         ok: true,
@@ -462,6 +463,12 @@ function fakeActions() {
       calls.push(['phoenix', id, fire]);
       return { id, ref: null, title: 'Zahnarzt', status: 'open', phoenix: fire ? { role: 'feuer_schritt', fire } : null };
     },
+    async flame(id, on) {
+      calls.push(['flame', id, on]);
+      return on
+        ? { id, ref: 'VCP-1', title: 'Steuer', status: 'in_progress', running: true, startedAt: '2026-10-14T07:00:00Z', endedAt: null, timing: true }
+        : { id, ref: 'VCP-1', title: 'Steuer', status: 'in_progress', running: false, startedAt: '2026-10-14T07:00:00Z', endedAt: '2026-10-14T07:42:00Z', timing: false };
+    },
     async capture({ text, captureId }) {
       calls.push(['capture', text, captureId]);
       if (fail) {
@@ -710,6 +717,29 @@ test('Zuordnen und Phönix: Meldung mit Rückgängig', async () => {
       const dropped = await (await call('/aktion/status', { method: 'POST', form: { id: 'z1', status: 'dropped', prev: 'open', csrf }, accept: 'application/json' })).json();
       assert.equal(dropped.message, 'Verworfen: VCP-1 Steuer');
       assert.deepEqual(dropped.undo, { action: '/aktion/status', fields: { id: 'z1', status: 'open' } });
+    },
+    {},
+    { actions },
+  );
+});
+
+test('Flammen: Knopf an Big Rocks, Leiste mit Timer und Stopp, Meldungen', async () => {
+  const actions = fakeActions();
+  await withServer(
+    async ({ call, login }) => {
+      await login();
+      const html = await (await call('/')).text();
+      assert.match(html, /action="\/aktion\/flamme" class="act flame-form">[^]*?name="id" value="t1"[^]*?name="an" value="1"[^]*?aria-label="Flamme starten: Steuer &lt;abgeben&gt;"/);
+      assert.ok(!html.includes('class="burning"'));
+      const burning = await (await call('/?woche=brennt')).text();
+      assert.match(burning, /<div class="burning" role="status">[^]*?Flamme läuft: <a href="https:\/\/zunder\.test\/#\/aufgabe\/f9">Deep Work<\/a>[^]*?data-since="2026-10-14T07:00:00Z">seit 09:00<[^]*?name="an" value="0"/);
+
+      const csrf = csrfFrom(html);
+      const on = await (await call('/aktion/flamme', { method: 'POST', form: { id: 't1', an: '1', csrf }, accept: 'application/json' })).json();
+      assert.equal(on.message, 'Flamme läuft: VCP-1 Steuer · Timing misst mit');
+      const off = await (await call('/aktion/flamme', { method: 'POST', form: { id: 't1', an: '0', csrf }, accept: 'application/json' })).json();
+      assert.equal(off.message, 'Flamme gestoppt: VCP-1 Steuer · 42 min');
+      assert.deepEqual(actions.calls, [['flame', 't1', true], ['flame', 't1', false]]);
     },
     {},
     { actions },

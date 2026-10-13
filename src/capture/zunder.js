@@ -76,6 +76,18 @@ export function createZunderClient({ url, token, fetch = globalThis.fetch, timeo
       return out?.areas ?? [];
     },
 
+    /**
+     * Startet bzw. stoppt die Flamme (Deep-Work-Block) einer Aufgabe. Liefert
+     * `{ task, running, timing: { configured, used, error } }`; eine laufende
+     * Flamme an einer anderen Aufgabe endet beim Start.
+     */
+    async startFlame(id) {
+      return callTool('start_flame', { task_id: id });
+    },
+    async stopFlame(id) {
+      return callTool('stop_flame', { task_id: id });
+    },
+
     /** Legt eine Aufgabe in der Zunder-Inbox an und liefert `{ id, ref, url }`. */
     async createTask({ title, description, vaultLinks }) {
       const args = { title: clampTitle(title) };

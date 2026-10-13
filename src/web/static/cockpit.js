@@ -204,12 +204,27 @@
       closeMenus();
       toast(data.message, data.undo ? { action: { label: 'Rückgängig', run: () => replay(data.undo) } } : {});
       await refresh();
+      tick();
     } catch (err) {
       toast(err.message, { kind: 'error' });
     } finally {
       form.classList.remove('busy');
     }
   });
+
+  // --- Laufende Flamme: Timer ----------------------------------------------
+
+  const pad = (n) => String(n).padStart(2, '0');
+  function tick() {
+    for (const el of document.querySelectorAll('[data-since]')) {
+      const s = Math.max(0, Math.floor((Date.now() - Date.parse(el.dataset.since)) / 1000));
+      if (Number.isNaN(s)) continue;
+      const h = Math.floor(s / 3600);
+      el.textContent = `${h ? `${h}:` : ''}${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`;
+    }
+  }
+  tick();
+  setInterval(tick, 1000);
 
   // --- Schnelleingabe -------------------------------------------------------
 

@@ -56,6 +56,7 @@ const HTML_HEADERS = {
  *   Arbeit, blockiert, offen, verworfen), `POST /aktion/faellig` verschiebt die
  *   Fälligkeit, `POST /aktion/zuordnen` legt eine Aufgabe aus der Inbox in einen
  *   Bereich oder ein Projekt, `POST /aktion/phoenix` markiert einen Phönix-Schritt,
+ *   `POST /aktion/flamme` startet (`an=1`) oder stoppt eine Flamme,
  *   `POST /aktion/erfassen` ist die Schnelleingabe (Notiz, mit `!` eine
  *   Zunder-Aufgabe). Alle brauchen Sitzung, gleiche Herkunft und das CSRF-Token
  *   der Sitzung. Mit `Accept: application/json` antworten sie mit JSON (für
@@ -164,6 +165,12 @@ export function createWebHttp({ cockpit, settings, actions = null, tokens = null
     if (loc.kind === 'project') return loc.area_name ? `${loc.area_name} / ${loc.name}` : (loc.name ?? 'Projekt');
     return loc.name ?? loc.area_name ?? 'Bereich';
   };
+  const flameMessage = (t, on) => {
+    const failed = typeof t.timing === 'string' ? ` · Timing: ${t.timing}` : '';
+    if (on) return `Flamme läuft: ${taskName(t)}${t.timing === true ? ' · Timing misst mit' : failed}`;
+    const minutes = t.startedAt && t.endedAt ? Math.round((Date.parse(t.endedAt) - Date.parse(t.startedAt)) / 60_000) : null;
+    return `Flamme gestoppt: ${taskName(t)}${minutes != null ? ` · ${minutes} min` : ''}${failed}`;
+  };
   const captureMessage = (r) => {
     if (r.kind === 'task') return `${r.duplicate ? 'Schon erfasst' : 'Aufgabe angelegt'}: ${r.ref ?? 'neue Aufgabe'} liegt in der Zunder-Inbox`;
     return `${r.duplicate ? 'Schon erfasst' : 'Notiz angelegt'}: ${r.path}`;
@@ -206,6 +213,12 @@ export function createWebHttp({ cockpit, settings, actions = null, tokens = null
           logger.info?.(`Cockpit: ${task.ref ?? task.id} Phönix ${now || '–'} (${session.sub})`);
           const message = now ? `Phönix-Schritt KW ${Number(now.slice(6))}: ${taskName(task)}` : `Kein Phönix-Schritt mehr: ${taskName(task)}`;
           return { message, task, undo };
+        },
+        async '/aktion/flamme'(form, session) {
+          const on = form.get('an') === '1';
+          const task = await actions.flame(form.get('id'), on);
+          logger.info?.(`Cockpit: Flamme ${on ? 'an' : 'aus'} ${task.ref ?? task.id} (${session.sub})`);
+          return { message: flameMessage(task, on), task };
         },
         async '/aktion/erfassen'(form) {
           const result = await actions.capture({ text: form.get('text') ?? '', captureId: form.get('cid') });

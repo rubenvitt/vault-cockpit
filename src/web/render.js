@@ -148,7 +148,31 @@ function assignForm(t, ctx) {
         </form>`;
 }
 
-function taskItem(t, tz, ctx = {}, { area = false, mark = null, live = false, inbox = false } = {}) {
+const FLAME_SVG = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5c.4 2.2 3.5 3.6 3.5 7.2A3.5 3.5 0 0 1 8 14.5a3.5 3.5 0 0 1-3.5-3.8c0-1.6.9-2.6 1.6-3.3.2 1 .7 1.7 1.4 2 .1-2.6-.4-4.6.5-7.9z"/></svg>';
+const STOP_SVG = '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.5"/></svg>';
+
+/** Knopf „Flamme starten/stoppen“ an Flammen und Big Rocks. */
+function flameButton(t, ctx) {
+  const label = `${t.running ? 'Flamme stoppen' : 'Flamme starten'}: ${t.title}`;
+  return `${formHead(ctx, '/aktion/flamme', { id: t.id, an: t.running ? '0' : '1' }).replace('class="act"', 'class="act flame-form"')}
+      <button type="submit" class="flame-btn${t.running ? ' running' : ''}" aria-label="${esc(label)}" title="${esc(label)}">${t.running ? STOP_SVG : FLAME_SVG}</button>
+    </form>`;
+}
+
+/** Leiste oben, solange irgendwo eine Flamme brennt: Timer und Stopp mit einem Klick. */
+function burningBar(model, tz, ctx) {
+  const t = model.burning;
+  if (!t || !ctx.write) return '';
+  const since = t.startedAt ? `seit ${localTime(new Date(t.startedAt), tz)}` : 'läuft';
+  return `<div class="burning" role="status">
+    <span class="ember" aria-hidden="true">${FLAME_SVG}</span>
+    <span class="burning-text">Flamme läuft: <a href="${esc(t.url)}">${esc(t.ref ? `${t.ref} ${t.title}` : t.title)}</a></span>
+    <span class="timer"${t.startedAt ? ` data-since="${esc(t.startedAt)}"` : ''}>${esc(since)}</span>
+    ${formHead(ctx, '/aktion/flamme', { id: t.id, an: '0' })}<button type="submit" class="chip stop">${STOP_SVG} Stopp</button></form>
+  </div>`;
+}
+
+function taskItem(t, tz, ctx = {}, { area = false, mark = null, live = false, inbox = false, flame = false } = {}) {
   const meta = [t.ref, area ? t.area : t.project, dueLabel(t.due, tz), ...(t.extra ? [t.extra] : [])].filter(Boolean).map(esc).join(' · ');
   const writable = ctx.write && t.id;
   const lead = writable
@@ -157,6 +181,7 @@ function taskItem(t, tz, ctx = {}, { area = false, mark = null, live = false, in
   return `<li class="task status-${esc(t.status)}${t.overdue ? ' overdue' : ''}" data-id="${esc(t.id ?? '')}" data-status="${esc(t.status)}" data-title="${esc(t.title)}">
     ${lead}
     <span class="body"><a href="${esc(t.url)}">${esc(t.title)}</a>${meta || live ? `<span class="meta">${meta}${live ? `${meta ? ' · ' : ''}<span class="live">läuft</span>` : ''}</span>` : ''}</span>
+    ${writable && flame && t.status !== 'done' && t.status !== 'dropped' ? flameButton(t, ctx) : ''}
     ${writable ? taskMenu(t, { ...ctx, tz }, { inbox }) : ''}
   </li>`;
 }
@@ -191,7 +216,7 @@ function feuerSection(model, tz, vaultName, ctx) {
     flames = `<ul class="flames">${fl.data
       .map((t) => {
         const extra = t.running ? null : t.minutes != null ? `${t.minutes} min` : null;
-        return taskItem({ ...t, ref: null, project: null, extra }, tz, ctx, { mark: t.status === 'done' ? '✓' : '🕯️', live: t.running });
+        return taskItem({ ...t, ref: null, project: null, extra }, tz, ctx, { mark: t.status === 'done' ? '✓' : '🕯️', live: t.running, flame: true });
       })
       .join('')}</ul>`;
   }
@@ -212,7 +237,7 @@ function rocksSection(model, tz, ctx) {
       .map(
         (g) => `<article class="rock${g.tasks.length && g.done === g.tasks.length ? ' all-done' : ''}">
           <h3>${esc(g.area)} <span class="count" data-count>${g.done}/${g.tasks.length}</span></h3>
-          <ul>${g.tasks.map((t) => taskItem(t, tz, ctx)).join('')}</ul>
+          <ul>${g.tasks.map((t) => taskItem(t, tz, ctx, { flame: true, live: t.running })).join('')}</ul>
         </article>`,
       )
       .join('')}</div>`;
@@ -354,6 +379,7 @@ ${write ? '<script src="/static/cockpit.js" defer></script>' : ''}
 </header>
 ${write ? `<div class="capture-wrap">${captureBar(ctx, draft)}</div>` : ''}
 <main>
+${burningBar(model, tz, ctx)}
 ${feuerSection(model, tz, vaultName, ctx)}
 ${rocksSection(model, tz, ctx)}
 ${calendarSection(model, tz)}
@@ -647,6 +673,27 @@ code { font-size: 13px; background: var(--line); padding: 1px 4px; border-radius
 .toast-action:hover { background: rgb(127 127 127 / .2); }
 .toast-close { font-size: 20px; line-height: 1; padding: 0 6px; opacity: .7; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(10px); } }
+/* --- Flammen: Knopf an Aufgaben, Leiste oben --- */
+.flame-form { margin: 0; flex: none; display: flex; }
+.flame-btn { width: 30px; height: 26px; display: grid; place-items: center; padding: 0; cursor: pointer; border: 0;
+  border-radius: var(--r-sm); background: none; color: var(--muted); }
+.flame-btn svg { width: 15px; height: 15px; fill: currentColor; }
+.flame-btn:hover { background: var(--accent-soft); color: var(--accent); }
+.flame-btn.running { color: var(--accent); }
+.flame-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.burning { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 14px 10px 12px;
+  border-radius: var(--r-lg); background: var(--accent); color: #fff; box-shadow: 0 4px 16px rgb(194 65 12 / .25); }
+.burning a { color: inherit; text-decoration-color: rgb(255 255 255 / .5); }
+.burning .ember svg { width: 20px; height: 20px; fill: currentColor; display: block; animation: flicker 1.6s ease-in-out infinite; }
+.burning-text { flex: 1; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.burning .timer { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 17px; }
+.burning form { margin: 0; }
+.burning .chip.stop { background: rgb(255 255 255 / .18); color: #fff; border-color: rgb(255 255 255 / .45); display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.burning .chip.stop svg { width: 12px; height: 12px; fill: currentColor; }
+.burning .chip.stop:hover { background: rgb(255 255 255 / .3); }
+@keyframes flicker { 50% { transform: scale(1.12) rotate(-4deg); opacity: .85; } }
+@media (prefers-color-scheme: dark) { .burning { color: #1b1009; } .burning .chip.stop { color: #1b1009; border-color: rgb(0 0 0 / .3); background: rgb(0 0 0 / .1); } }
+
 /* --- Menü an Aufgaben: Bausteine .menu, .chip --- */
 .task { position: relative; }
 .task .body { flex: 1; }

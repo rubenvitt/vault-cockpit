@@ -220,7 +220,10 @@ setzt den Status (in Arbeit, blockiert, offen) und verschiebt die Fälligkeit
 die Aufgabe danach neu ein. Dort markiert man auch einen Phönix-Schritt der
 angezeigten Woche. In der Zunder-Inbox kommt **Zuordnen** (Bereich, Projekt oder
 „Lose“) und **Verwerfen** dazu, sodass sich die Inbox im Cockpit auf null bringen
-lässt. Auf dem iPhone öffnet sich das Menü als Leiste von unten.
+lässt. Auf dem iPhone öffnet sich das Menü als Leiste von unten. Flammen und
+Big Rocks haben einen **Flammen-Knopf**: Er startet einen Deep-Work-Block in
+Zunder (und Timing, falls dort angebunden); solange eine Flamme brennt, steht
+oben eine Leiste mit Timer und „Stopp“.
 Oben auf der Seite liegt eine
 **Schnelleingabe** mit derselben Logik wie `/capture`: Text wird eine Notiz im
 Inbox-Ordner, mit `!` vorne eine Aufgabe in der Zunder-Inbox. `/` oder `n` springt

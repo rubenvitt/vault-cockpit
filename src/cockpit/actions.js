@@ -109,6 +109,28 @@ export function createCockpitActions({ vaultPath, settings, policy, state, zunde
       return summary(await call((z) => z.moveTask(id, location)));
     },
 
+    /**
+     * Startet (`on`) oder stoppt eine Flamme. Liefert die Aufgabe mit
+     * Start/Ende und ob Timing mitgemessen hat (`timing`: true, false oder
+     * eine Fehlermeldung).
+     */
+    async flame(id, on) {
+      checkId(id);
+      let out;
+      const task = await call(async (z) => {
+        out = await (on ? z.startFlame(id) : z.stopFlame(id));
+        return out?.task;
+      });
+      const t = out.timing ?? {};
+      return {
+        ...summary(task),
+        running: Boolean(out.running),
+        startedAt: task.flame_started_at ?? null,
+        endedAt: task.flame_ended_at ?? null,
+        timing: t.error ? String(t.error) : Boolean(t.used),
+      };
+    },
+
     /** Markiert eine Aufgabe als Phönix-Schritt einer Woche (`2026-W42`); leer entfernt die Markierung. */
     async setPhoenix(id, fire) {
       checkId(id);

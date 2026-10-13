@@ -244,6 +244,7 @@ function fakeZunder(tasks, { fail = null } = {}) {
       calls.push(f);
       if (fail && fail(f)) throw new Error('Zunder antwortet mit HTTP 502');
       return tasks.filter((t) => {
+        if (f.flame_running) return Boolean(t.flame_running);
         if (f.phoenix_fire) return t.phoenix?.fire === f.phoenix_fire;
         if (f.location === 'inbox') return t.location.kind === 'inbox' && f.status.includes(t.status);
         if (f.due_after) return t.due && t.due.slice(0, 10) >= f.due_after && t.due.slice(0, 10) <= f.due_before;
@@ -376,4 +377,19 @@ test('renderWeek: escaped Inhalte, Feuer-Ziel mit Markdown, Navigation', async (
 test('inline: Wikilinks, Code, Betonung, Escaping', () => {
   assert.equal(inline('[[Ziel|Sichtbar]] und [[Notiz]]'), 'Sichtbar und Notiz');
   assert.equal(inline('*kursiv* **fett** `x<y`'), '<em>kursiv</em> <strong>fett</strong> <code>x&lt;y</code>');
+});
+
+test('Wochenmodell: laufende Flamme kommt oben an, auch aus einer anderen Woche', async () => {
+  const tasks = [
+    ...TASKS,
+    { id: 'b1', title: 'Alt', status: 'in_progress', due: null, location: loc('Programmieren'), flame_running: true, flame_started_at: '2026-10-13T06:00:00Z' },
+    { id: 'b2', title: 'Neu', status: 'in_progress', due: null, location: loc('Programmieren'), flame_running: true, flame_started_at: '2026-10-13T08:00:00Z' },
+  ];
+  const cockpit = createCockpit({ index: fakeIndex([]), settings: settingsWith(), zunderFor: () => fakeZunder(tasks), now: fixedNow, logger: quiet });
+  const m = await cockpit.week('2026-W40');
+  assert.equal(m.burning.id, 'b2');
+  assert.equal(m.burning.startedAt, '2026-10-13T08:00:00Z');
+  assert.equal(m.burning.running, true);
+  const none = await createCockpit({ index: fakeIndex([]), settings: settingsWith(), zunderFor: () => fakeZunder(TASKS), now: fixedNow, logger: quiet }).week();
+  assert.equal(none.burning, null);
 });

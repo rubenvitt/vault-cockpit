@@ -42,6 +42,7 @@ export function createCockpit({ index, settings, zunderFor, calendars = null, no
     project: t.location?.kind === 'project' ? (t.location.name ?? null) : null,
     phoenix: t.phoenix?.role ?? null,
     fire: t.phoenix?.fire ?? null,
+    running: Boolean(t.flame_running),
     url: zunder.taskUrl(t.id),
   });
 
@@ -77,7 +78,7 @@ export function createCockpit({ index, settings, zunderFor, calendars = null, no
 
       const feuer = await settle('Feuer-Notiz', () => findFeuer(index, week, { current }));
 
-      const [phoenix, due, open, zInbox, events, inbox] = await Promise.all([
+      const [phoenix, due, open, zInbox, events, inbox, burning] = await Promise.all([
         zunder
           ? settle('Zunder (Phönix)', () => zunder.filterTasks({ phoenix_fire: week.id, include_closed: true, limit: 200 }))
           : notConfigured('Zunder'),
@@ -100,6 +101,8 @@ export function createCockpit({ index, settings, zunderFor, calendars = null, no
           : notConfigured('Zunder'),
         calendars?.configured() ? settle('Kalender', () => calendars.events(week.start, week.end)) : notConfigured('Kalender'),
         settle('Vault-Inbox', () => index.listFolder(captureFolder, { limit: 50 })),
+        // Die gerade laufende Flamme, egal in welcher Woche sie geplant war.
+        zunder ? settle('Zunder (Flamme)', () => zunder.filterTasks({ flame_running: true, limit: 5 })) : notConfigured('Zunder'),
       ]);
 
       // Flammen: Deep-Work-Blöcke der Woche. Geplant ist `due`, gemessen haben
@@ -171,6 +174,13 @@ export function createCockpit({ index, settings, zunderFor, calendars = null, no
             )
           : { ok: true, data: [] };
 
+      const live = burning.ok
+        ? (burning.data
+            .filter((t) => t.flame_running)
+            .sort((a, b) => String(b.flame_started_at).localeCompare(String(a.flame_started_at)))
+            .map((t) => ({ ...task(t), startedAt: t.flame_started_at ?? null }))[0] ?? null)
+        : null;
+
       const section = (r, data) => (r.ok ? { ok: true, data } : { ok: false, error: r.error, unconfigured: Boolean(r.unconfigured) });
 
       return {
@@ -179,6 +189,7 @@ export function createCockpit({ index, settings, zunderFor, calendars = null, no
         week: { id: week.id, year: week.year, week: week.week, monday: week.monday, sunday: week.sunday, prev: week.prev, next: week.next, current },
         today,
         feuer: section(feuer, feuer.data),
+        burning: live,
         flames: section(phoenix, flames),
         rocks: phoenix.ok || due.ok ? { ok: true, data: rocks, partial: !(phoenix.ok && due.ok) } : section(phoenix),
         calendar: events.ok ? { ok: true, data: days, errors: events.data.errors } : section(events),
