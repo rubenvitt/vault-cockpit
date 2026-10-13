@@ -196,6 +196,7 @@ export function renderWeek(model, { tz = 'Europe/Berlin', vaultName = null, user
     <a href="/?woche=${esc(w.prev)}" rel="prev">← KW ${Number(w.prev.slice(6))}</a>
     ${w.current ? '' : '<a href="/">Diese Woche</a>'}
     <a href="/?woche=${esc(w.next)}" rel="next">KW ${Number(w.next.slice(6))} →</a>
+    <a href="/graph">Suche &amp; Graph</a>
     <form method="post" action="/logout"><button type="submit" title="${esc(user ?? '')}">Abmelden</button></form>
   </nav>
 </header>

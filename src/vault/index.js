@@ -174,13 +174,13 @@ function resolveLinks(db, { source = null } = {}) {
 }
 
 /** FTS5-Sonderzeichen entschärfen und die Anfrage als Phrase/Präfix aufbauen. */
-function toMatchQuery(query) {
+function toMatchQuery(query, { any = false } = {}) {
   const terms = String(query)
     .split(/\s+/)
     .map((t) => t.replace(/["*()^:]/g, '').trim())
     .filter(Boolean);
   if (terms.length === 0) return null;
-  return terms.map((t) => `"${t}"`).join(' AND ');
+  return terms.map((t) => `"${t}"`).join(any ? ' OR ' : ' AND ');
 }
 
 export function openIndex(dbOrPath, { vaultPath = process.env.VAULT_PATH ?? '/vault', policy = DEFAULT_POLICY } = {}) {
@@ -198,9 +198,10 @@ export function openIndex(dbOrPath, { vaultPath = process.env.VAULT_PATH ?? '/va
         type = null,
         limit = 10,
         offset = 0,
+        any = false,
       } = opts;
 
-      const match = toMatchQuery(query);
+      const match = toMatchQuery(query, { any });
       if (!match) return { results: [], total: 0, hasMore: false };
 
       const where = ['notes_fts MATCH ?'];
@@ -312,6 +313,42 @@ export function openIndex(dbOrPath, { vaultPath = process.env.VAULT_PATH ?? '/va
         )
         .all(type)
         .map((r) => ({ ...r, frontmatter: JSON.parse(r.frontmatter) }));
+    },
+
+    /** Pfade, die die Filter der Suche erfüllen (ohne Suchbegriff), für die Vektorsuche. */
+    filterPaths({ include = ['core'], includeSensitive = false, tag = null, folder = null, type = null } = {}) {
+      const where = [`class IN (${include.map(() => '?').join(',')})`];
+      const params = [...include];
+      if (!includeSensitive) where.push('sensitivity IS NULL');
+      if (folder) {
+        where.push('(folder = ? OR folder LIKE ?)');
+        params.push(folder, `${folder}/%`);
+      }
+      if (type) {
+        where.push('type = ?');
+        params.push(type);
+      }
+      if (tag) {
+        where.push('EXISTS (SELECT 1 FROM note_tags t WHERE t.path = notes.path AND t.tag = ?)');
+        params.push(tag);
+      }
+      return new Set(db.prepare(`SELECT path FROM notes WHERE ${where.join(' AND ')}`).all(...params).map((r) => r.path));
+    },
+
+    /** Eigene Notizen, die eingebettet werden (auch vertrauliche, gefiltert wird beim Ausliefern). */
+    embeddablePaths() {
+      return db.prepare("SELECT path FROM notes WHERE class = 'core' ORDER BY path").all().map((r) => r.path);
+    },
+
+    /** Metadaten mehrerer Notizen ohne Inhalt, als Map path → Zeile. */
+    describe(paths) {
+      const out = new Map();
+      const stmt = db.prepare('SELECT path, title, class, sensitivity, type, status, updated, created, basename FROM notes WHERE path = ?');
+      for (const p of new Set(paths)) {
+        const row = stmt.get(p);
+        if (row) out.set(p, row);
+      }
+      return out;
     },
 
     stats() {

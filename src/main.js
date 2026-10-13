@@ -18,6 +18,10 @@ import { createCockpit } from './cockpit/data.js';
 import { createCalDavClient } from './cockpit/caldav.js';
 import { createOidcLogin } from './web/oidc.js';
 import { createWebHttp } from './web/http.js';
+import { createOllamaEmbedder } from './semantic/embedder.js';
+import { createSemanticIndex } from './semantic/index.js';
+import { hybridSearch } from './semantic/search.js';
+import { createGraph } from './graph/graph.js';
 
 function required(name) {
   const v = process.env[name];
@@ -70,6 +74,22 @@ const index = createIndexManager({
   policy: POLICY,
   intervalMinutes: Number(process.env.REINDEX_INTERVAL_MIN ?? 15),
 });
+
+// Semantische Suche (Schritt 4): Embeddings über einen Ollama-Server, eigener
+// Vektorspeicher neben dem Index. Aus, bis EMBED_URL gesetzt ist.
+const semantic = process.env.EMBED_URL
+  ? createSemanticIndex({
+      dbPath: process.env.VECTOR_DB ?? '/data/vectors.db',
+      vaultPath: VAULT_PATH,
+      index,
+      embedder: createOllamaEmbedder({ url: process.env.EMBED_URL, model: process.env.EMBED_MODEL || 'bge-m3' }),
+    })
+  : null;
+if (semantic) {
+  index.onChange(({ full, paths }) => semantic.schedule(full ? null : paths));
+  semantic.schedule();
+}
+
 const SYNC_ADAPTER = process.env.SYNC_ADAPTER ?? 'obsidian-headless';
 const sync = createSyncAdapter({
   kind: SYNC_ADAPTER,
@@ -144,9 +164,12 @@ const calendar = process.env.CALDAV_URL
       tz: TZ,
     })
   : null;
+const graph = createGraph({ index, semantic, zunder, calendar, tz: TZ });
 const webHttp = process.env.WEB_CLIENT_ID
   ? createWebHttp({
       cockpit: createCockpit({ index, zunder, calendar, captureFolder: CAPTURE_FOLDER, tz: TZ }),
+      graph,
+      search: (query) => hybridSearch({ index, semantic, query, limit: 30 }),
       oidc: createOidcLogin({
         issuer: ISSUER,
         clientId: process.env.WEB_CLIENT_ID,
@@ -167,6 +190,8 @@ const mcpHttp = createVaultMcpHandler({
   capture,
   editor,
   sync,
+  semantic,
+  graph,
   captureFolder: CAPTURE_FOLDER,
   layoutHint: POLICY.layoutHint,
   // Synchron: die Prüfung ist in der HTTP-Schicht bereits gelaufen.
@@ -198,6 +223,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`  Sync        : ${SYNC_ADAPTER} (${sync.status().state})`);
   console.log(`  Capture     : ${captureHttp ? '/capture, /funke' : 'Endpunkte aus (CAPTURE_TOKEN)'}${mail ? `, Mail aus „${mail.status().mailbox}“` : ''}`);
   console.log(`  Zunder      : ${zunder ? `${process.env.ZUNDER_URL} (! → Inbox${bridge ? `, Brücke #${bridge.tag}` : ''})` : 'aus (ZUNDER_URL, ZUNDER_TOKEN)'}`);
+  console.log(`  Semantik    : ${semantic ? `${semantic.model} über ${process.env.EMBED_URL}` : 'aus (EMBED_URL)'}`);
   console.log(`  Cockpit     : ${webHttp ? `${PUBLIC_URL}/ (Termine ${calendar ? 'per CalDAV' : 'aus'})` : 'aus (WEB_CLIENT_ID)'}`);
 });
 
@@ -207,6 +233,7 @@ for (const sig of ['SIGTERM', 'SIGINT']) {
     sync.stop();
     mail?.stop();
     index.stop();
+    semantic?.close();
     app.close(() => process.exit(0));
   });
 }

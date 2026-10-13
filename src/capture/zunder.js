@@ -46,6 +46,12 @@ export function createZunderClient({ url, token, fetch = globalThis.fetch, timeo
       return out?.tasks ?? [];
     },
 
+    /** Eine Aufgabe (`get_task`), für Aufgaben-Knoten im Graphen. */
+    async getTask(id) {
+      const out = await callTool('get_task', { task_id: id });
+      return out?.task ?? null;
+    },
+
     /** Legt eine Aufgabe in der Zunder-Inbox an und liefert `{ id, ref, url }`. */
     async createTask({ title, description, vaultLinks }) {
       const args = { title: clampTitle(title) };

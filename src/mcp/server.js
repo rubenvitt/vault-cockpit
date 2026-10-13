@@ -1,6 +1,7 @@
 import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod';
 import { readNote, MAX_RESULT_CHARS } from './read.js';
+import { hybridSearch } from '../semantic/search.js';
 
 const ok = (data) => ({
   content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
@@ -30,6 +31,8 @@ export function createVaultMcpHandler({
   capture,
   editor,
   sync = null,
+  semantic = null,
+  graph = null,
   verifyToken,
   captureFolder = 'inbox',
   layoutHint = null,
@@ -50,15 +53,20 @@ export function createVaultMcpHandler({
       {
         title: 'Vault durchsuchen',
         description:
-          'Durchsucht den Obsidian-Vault des Nutzers per Volltextsuche und liefert die besten Treffer mit Textausschnitt. ' +
+          'Durchsucht den Obsidian-Vault des Nutzers und liefert die besten Treffer mit Textausschnitt. ' +
           'Das ist der Einstiegspunkt für fast jede Frage an den Vault — erst suchen, dann die interessanten Notizen mit vault_read lesen. ' +
+          'Standard ist die hybride Suche: Volltext, inhaltliche Ähnlichkeit (Embeddings, findet auch andere Formulierungen) und Nachbarschaft im Link-Graphen, ' +
+          'zusammengeführt zu einer Rangliste; "streams" zeigt je Treffer, welche davon ihn gefunden haben. ' +
+          'mode "text" ist die reine Volltextsuche (alle Begriffe müssen vorkommen), mode "semantic" sucht nur nach Bedeutung. ' +
           'Standardmäßig werden nur eigene Notizen durchsucht; importierte Readwise-Artikel bleiben außen vor, weil sie den Bestand sonst dominieren.',
         inputSchema: {
-          query: z.string().describe('Suchbegriffe. Mehrere Wörter werden UND-verknüpft. Deutsche Umlaute werden toleriert.'),
+          query: z.string().describe('Suchbegriffe oder eine Frage in natürlicher Sprache. Deutsche Umlaute werden toleriert.'),
+          mode: z.enum(['hybrid', 'text', 'semantic']).optional()
+            .describe('hybrid (Standard): Volltext + Bedeutung + Graph. text: nur Volltext, Wörter UND-verknüpft. semantic: nur Bedeutung.'),
           tag: z.string().optional().describe('Nur Notizen mit diesem Tag, ohne Raute, z.B. "projekt-x".'),
           folder: z.string().optional().describe('Nur unterhalb dieses Ordners, z.B. "wiki/concepts" oder "projects".'),
           type: z.string().optional().describe('Nur Notizen mit diesem Frontmatter-type, z.B. "concept", "entity", "daily-note".'),
-          include_readwise: z.boolean().optional().describe('Importierte Readwise-Artikel mitdurchsuchen. Standard: false.'),
+          include_readwise: z.boolean().optional().describe('Importierte Readwise-Artikel mitdurchsuchen (nur Volltext, sie haben keine Embeddings). Standard: false.'),
           include_sensitive: z.boolean().optional()
             .describe('Vertrauliche Ordner einbeziehen (in den Treffern am Feld sensitivity erkennbar). Standard: false. Nur auf ausdrücklichen Wunsch setzen.'),
           limit: z.number().int().min(1).max(50).optional().describe('Anzahl der Treffer, Standard 10.'),
@@ -67,7 +75,7 @@ export function createVaultMcpHandler({
         annotations: READ_ONLY,
       },
       read(async (args) => {
-        const res = index.search(args.query, {
+        const filters = {
           include: args.include_readwise ? ['core', 'readwise'] : ['core'],
           includeSensitive: args.include_sensitive === true,
           tag: args.tag ?? null,
@@ -75,20 +83,99 @@ export function createVaultMcpHandler({
           type: args.type ?? null,
           limit: args.limit ?? 10,
           offset: args.offset ?? 0,
-        });
+        };
+        const mode = args.mode ?? 'hybrid';
+        if (mode === 'text') {
+          const res = index.search(args.query, filters);
+          return ok({
+            mode,
+            total: res.total,
+            has_more: res.hasMore,
+            results: res.results.map((r) => ({
+              path: r.path,
+              title: r.title,
+              type: r.type,
+              status: r.status,
+              updated: r.updated,
+              sensitivity: r.sensitivity,
+              snippet: r.snippet,
+            })),
+          });
+        }
+        const res = await hybridSearch({ index, semantic, query: args.query, mode, ...filters });
         return ok({
+          mode,
           total: res.total,
           has_more: res.hasMore,
-          results: res.results.map((r) => ({
-            path: r.path,
-            title: r.title,
-            type: r.type,
-            status: r.status,
-            updated: r.updated,
-            sensitivity: r.sensitivity,
-            snippet: r.snippet,
+          ...(res.degraded ? { degraded: res.degraded } : {}),
+          results: res.results,
+        });
+      }),
+    );
+
+    server.registerTool(
+      'vault_similar',
+      {
+        title: 'Ähnliche Notizen',
+        description:
+          'Findet Notizen, die einer Notiz inhaltlich ähneln (Embeddings), und markiert, ob sie bereits verlinkt sind. ' +
+          'Treffer mit "linked": false sind Kandidaten für neue Querverbindungen.',
+        inputSchema: {
+          path: z.string().describe('Pfad der Notiz relativ zur Vault-Wurzel.'),
+          unlinked_only: z.boolean().optional().describe('Nur Notizen, die noch nicht in eine der beiden Richtungen verlinkt sind. Standard: false.'),
+          include_sensitive: z.boolean().optional().describe('Vertrauliche Ordner einbeziehen. Standard: false.'),
+          limit: z.number().int().min(1).max(50).optional().describe('Anzahl der Treffer, Standard 10.'),
+        },
+        annotations: READ_ONLY,
+      },
+      read(async (args) => {
+        if (!semantic) return fail('Die semantische Suche ist auf dem Server nicht eingerichtet (EMBED_URL).');
+        const allowed = index.filterPaths({ includeSensitive: args.include_sensitive === true });
+        if (!allowed.has(args.path)) return fail(`Notiz "${args.path}" wurde nicht gefunden.`);
+        const limit = args.limit ?? 10;
+        const linked = new Set([...index.outgoingLinks(args.path), ...index.backlinks(args.path)].map((n) => n.path));
+        const hits = semantic.similarTo(args.path, { limit: limit + (args.unlinked_only ? linked.size : 0), allow: (p) => allowed.has(p) });
+        if (!hits) return fail(`Für "${args.path}" gibt es noch keine Embeddings. Der Abgleich läuft im Hintergrund, Stand in vault_stats.`);
+        const picked = hits.filter((h) => !args.unlinked_only || !linked.has(h.path)).slice(0, limit);
+        const meta = index.describe(picked.map((h) => h.path));
+        return ok({
+          path: args.path,
+          results: picked.map((h) => ({
+            path: h.path,
+            title: meta.get(h.path)?.title ?? meta.get(h.path)?.basename ?? h.path,
+            type: meta.get(h.path)?.type ?? null,
+            similarity: Math.round(h.score * 1000) / 1000,
+            linked: linked.has(h.path),
           })),
         });
+      }),
+    );
+
+    server.registerTool(
+      'vault_graph',
+      {
+        title: 'Graph um eine Notiz',
+        description:
+          'Liefert den Graphen rund um eine Notiz: verlinkte Notizen (Kante "link", gerichtet), inhaltlich ähnliche, aber nicht verlinkte ' +
+          'Notizen (Kante "semantic" mit Ähnlichkeit), Zunder-Aufgaben aus Links in der Notiz und ihren Nachbarn (Kante "task", mit Status) ' +
+          'und bei Tagesnotizen die Termine des Tages (Kante "event"). Für Fragen wie „womit hängt das zusammen?“.',
+        inputSchema: {
+          path: z.string().describe('Pfad der Notiz relativ zur Vault-Wurzel.'),
+          depth: z.number().int().min(1).max(2).optional().describe('Wie viele Link-Schritte vom Zentrum aus, Standard 1.'),
+          similar: z.number().int().min(0).max(20).optional().describe('Höchstzahl semantischer Kanten, Standard 8, 0 schaltet sie ab.'),
+          include_sensitive: z.boolean().optional().describe('Vertrauliche Ordner einbeziehen. Standard: false.'),
+        },
+        annotations: READ_ONLY,
+      },
+      read(async (args) => {
+        if (!graph) return fail('Der Graph ist auf dem Server nicht eingerichtet.');
+        const g = await graph.around(args.path, {
+          depth: args.depth ?? 1,
+          similar: args.similar ?? 8,
+          includeSensitive: args.include_sensitive === true,
+        });
+        if (!g) return fail(`Notiz "${args.path}" wurde nicht gefunden.`);
+        return ok(g);
       }),
     );
 
@@ -159,7 +246,7 @@ export function createVaultMcpHandler({
         title: 'Vault-Überblick',
         description:
           'Kennzahlen des Vaults: Anzahl Notizen je Klasse, Tags, Verlinkungsgrad. Gut zur ersten Orientierung. ' +
-          'Dazu der Zustand des Syncs (läuft, letzter Abgleich, letzter Fehler) und wann der Index zuletzt aktualisiert wurde.',
+          'Dazu der Zustand des Syncs (läuft, letzter Abgleich, letzter Fehler), wann der Index zuletzt aktualisiert wurde und der Stand der Embeddings.',
         inputSchema: {},
         annotations: READ_ONLY,
       },
@@ -169,6 +256,7 @@ export function createVaultMcpHandler({
           ...index.stats(),
           index: { lastBuiltAt: iso(index.lastBuiltAt?.()), lastChangedAt: iso(index.lastChangedAt?.()) },
           sync: sync?.status() ?? { adapter: 'none', state: 'disabled' },
+          semantic: semantic?.status() ?? { state: 'disabled' },
         });
       }),
     );

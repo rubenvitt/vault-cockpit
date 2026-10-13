@@ -75,10 +75,28 @@ const cockpit = {
   },
 };
 
+const graph = {
+  async around(path) {
+    if (path !== 'wiki/a.md') return null;
+    return {
+      center: 'note:wiki/a.md',
+      nodes: [
+        { id: 'note:wiki/a.md', kind: 'note', path: 'wiki/a.md', level: 0, label: 'A' },
+        { id: 'note:wiki/b.md', kind: 'note', path: 'wiki/b.md', level: 1, label: 'B' },
+      ],
+      edges: [{ from: 'note:wiki/a.md', to: 'note:wiki/b.md', kind: 'semantic', score: 0.71 }],
+      problems: [],
+    };
+  },
+};
+const search = async (q) => ({ results: [{ path: 'wiki/a.md', title: 'A', snippet: `zu ${q}`, streams: ['text', 'semantic'] }], total: 1, degraded: null });
+
 async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSubjects = ['ruben'] } = {}) {
   const idp = fakeIdp(idpOptions);
   const webHttp = createWebHttp({
     cockpit,
+    graph,
+    search,
     oidc: createOidcLogin({ issuer: ISSUER, clientId: CLIENT, clientSecret, redirectUri: 'https://vault.test/auth/callback', allowedSubjects, fetch: idp.fetch }),
     sessionSecret: SECRET,
     publicUrl: 'https://vault.test',
@@ -244,5 +262,31 @@ test('Stylesheet ist ohne Sitzung abrufbar, MCP-Routen bleiben unberührt', asyn
     assert.match(css.headers.get('content-type'), /text\/css/);
     assert.equal((await call('/mcp', { method: 'POST' })).status, 401);
     assert.equal((await call('/nicht-da')).status, 404);
+  });
+});
+
+test('Suche und Graph: nur mit Sitzung, Treffer verlinken auf den Graphen, JSON unter /api/graph', async () => {
+  await withServer(async ({ call, login }) => {
+    assert.equal((await call('/graph?q=hund')).status, 303);
+    assert.equal((await call('/api/graph?pfad=wiki/a.md')).status, 401);
+    await login('/graph');
+
+    const found = await call('/graph?q=hund');
+    assert.equal(found.status, 200);
+    const html = await found.text();
+    assert.match(html, /href="\/graph\?pfad=wiki%2Fa\.md"/);
+    assert.match(html, /Volltext \+ Bedeutung/);
+
+    const g = await call('/graph?pfad=wiki%2Fa.md');
+    assert.equal(g.status, 200);
+    assert.match(await g.text(), /class="edge semantic"/);
+    assert.equal((await call('/graph?pfad=nix.md')).status, 404);
+
+    const api = await call('/api/graph?pfad=wiki%2Fa.md');
+    assert.equal((await api.json()).edges[0].kind, 'semantic');
+    assert.equal((await call('/api/graph?pfad=nix.md')).status, 404);
+
+    const css = await (await call('/static/cockpit.css')).text();
+    assert.match(css, /\.graph \.edge\.semantic/);
   });
 });
