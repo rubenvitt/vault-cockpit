@@ -90,6 +90,8 @@ export function createTokenVerifier({ issuer, resource, loadJwks, allowedSubject
         aud: resource,
         expiresAt: claims.exp,
         token,
+        // Für ID-Tokens des Web-Logins (nonce), siehe web/oidc.js.
+        claims,
       };
     },
   };

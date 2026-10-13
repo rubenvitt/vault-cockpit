@@ -302,6 +302,18 @@ export function openIndex(dbOrPath, { vaultPath = process.env.VAULT_PATH ?? '/va
         .map((r) => r.path);
     },
 
+    /** Eigene, nicht vertrauliche Notizen mit diesem Frontmatter-`type`, samt Frontmatter. */
+    notesOfType(type) {
+      return db
+        .prepare(
+          `SELECT path, title, status, frontmatter FROM notes
+            WHERE type = ? AND class = 'core' AND sensitivity IS NULL
+            ORDER BY path`,
+        )
+        .all(type)
+        .map((r) => ({ ...r, frontmatter: JSON.parse(r.frontmatter) }));
+    },
+
     stats() {
       const byClass = {};
       for (const r of db.prepare('SELECT class, COUNT(*) c FROM notes GROUP BY class').all()) {
