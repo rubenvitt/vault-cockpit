@@ -1,0 +1,9 @@
+node_modules
+.git
+.github
+.env
+policy.json
+data
+test
+docs
+*.log

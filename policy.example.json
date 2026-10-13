@@ -1,0 +1,13 @@
+{
+  "exclude": [
+    "^privat/nachlass/",
+    "^wiki/log\\.md$"
+  ],
+  "sensitive": {
+    "bereiche/Gesundheit": "gesundheit",
+    "bereiche/Finanzen": "finanzen",
+    "ressourcen/personen": "personen"
+  },
+  "readwise": "ressourcen/readwise",
+  "layoutHint": "Die Struktur folgt PARA: inbox, projekte, bereiche, ressourcen, archiv."
+}
