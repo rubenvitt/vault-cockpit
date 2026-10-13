@@ -8,6 +8,7 @@ import { createCaptureRouter, deriveTitle, cleanTitle } from '../src/capture/rou
 import { createStateStore } from '../src/capture/state.js';
 import { createZunderClient } from '../src/capture/zunder.js';
 import { createCaptureHttp } from '../src/capture/http.js';
+import { createTokenStore } from '../src/cockpit/tokens.js';
 import { createApp } from '../src/http/app.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
@@ -163,7 +164,7 @@ test('Zunder-Client meldet Ablehnungen mit der Begründung', async () => {
 
 // --- HTTP ---
 
-async function withServer(run, { zunder = fakeZunder(), zunderEnabled = true } = {}) {
+async function withServer(run, { zunder = fakeZunder(), zunderEnabled = true, token = 'capture-geheim', tokens = null } = {}) {
   const r = createCaptureRouter({ capture, zunder, state, logger: quiet });
   const app = createApp({
     config: { publicUrl: 'https://vault.test', resource: 'https://vault.test/mcp', issuer: 'https://id.test', supportedScopes: [], allowedHosts: ['vault.test'], trustProxy: true },
@@ -171,7 +172,7 @@ async function withServer(run, { zunder = fakeZunder(), zunderEnabled = true } =
       throw new Error('nicht benutzt');
     },
     mcpHandler: async () => {},
-    captureHttp: createCaptureHttp({ token: 'capture-geheim', router: r, zunderEnabled }),
+    captureHttp: createCaptureHttp({ token, tokens, router: r, zunderEnabled }),
     logger: quiet,
   });
   app.listen(0, '127.0.0.1');
@@ -200,6 +201,32 @@ test('/capture verlangt den Capture-Token', async () => {
     assert.match(deniedBody.message, /Token abgelehnt/);
     assert.equal((await call('/capture', { method: 'GET' })).status, 200);
   });
+});
+
+test('/capture nimmt API-Tokens mit dem Recht Capture an, auch ohne CAPTURE_TOKEN', async () => {
+  const tokens = createTokenStore({ logger: quiet });
+  const cap = tokens.create('iPhone', 'capture');
+  const search = tokens.create('Raycast', 'search');
+  await withServer(
+    async (call) => {
+      assert.equal((await call('/capture', { method: 'GET', auth: `Bearer ${cap.token}` })).status, 200);
+      assert.equal((await call('/funke/health', { method: 'GET', auth: `Bearer ${cap.token}` })).status, 200);
+      assert.equal((await call('/capture', { method: 'GET', auth: `Bearer ${search.token}` })).status, 401, 'Such-Token darf nicht anlegen');
+      assert.equal((await call('/capture', { method: 'GET' })).status, 401, 'ohne CAPTURE_TOKEN gilt der alte Token nicht');
+      tokens.revoke(cap.id);
+      assert.equal((await call('/capture', { method: 'GET', auth: `Bearer ${cap.token}` })).status, 401);
+    },
+    { token: null, tokens },
+  );
+  // Übergang: CAPTURE_TOKEN und angelegte Tokens gelten nebeneinander.
+  const next = tokens.create('iPad', 'capture');
+  await withServer(
+    async (call) => {
+      assert.equal((await call('/capture', { method: 'GET' })).status, 200);
+      assert.equal((await call('/capture', { method: 'GET', auth: `Bearer ${next.token}` })).status, 200);
+    },
+    { tokens },
+  );
 });
 
 test('/capture meldet den aktuellen Zunder-Stand', async () => {

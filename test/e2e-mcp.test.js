@@ -130,7 +130,7 @@ test('vault_search findet die Notiz', async () => {
 test('vault_search: ohne Embeddings hybrid mit Hinweis, mode text bleibt UND-Suche', async () => {
   const hybrid = (await rpc('tools/call', { name: 'vault_search', arguments: { query: 'Vertrag Unsinnswort' } })).body.result.structuredContent;
   assert.equal(hybrid.mode, 'hybrid');
-  assert.match(hybrid.degraded, /EMBED_URL/);
+  assert.match(hybrid.degraded, /Embeddings/);
   assert.equal(hybrid.results[0].path, 'wiki/concepts/contract-first.md');
   assert.deepEqual(hybrid.results[0].streams, ['text']);
   const text = (await rpc('tools/call', { name: 'vault_search', arguments: { query: 'Vertrag Unsinnswort', mode: 'text' } })).body.result.structuredContent;
@@ -145,7 +145,7 @@ test('vault_graph liefert den Graphen, vault_similar meldet fehlende Embeddings'
   assert.equal(missing.body.result.isError, true);
   const sim = await rpc('tools/call', { name: 'vault_similar', arguments: { path: 'wiki/concepts/contract-first.md' } });
   assert.equal(sim.body.result.isError, true);
-  assert.match(sim.body.result.content[0].text, /EMBED_URL/);
+  assert.match(sim.body.result.content[0].text, /Embeddings/);
   const stats = (await rpc('tools/call', { name: 'vault_stats', arguments: {} })).body.result.structuredContent;
   assert.equal(stats.semantic.state, 'disabled');
   assert.equal(stats.zunder.state, 'disabled');

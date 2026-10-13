@@ -7,12 +7,13 @@ import { randomBytes, randomUUID } from 'node:crypto';
  * als JSON unter `/data` abgelegt (Datei nur für den Dienst lesbar, weil sie
  * Kalender-Passwörter und den Zunder-Token enthält).
  *
- * Leere Felder bedeuten „Standard“: Zeitzone, Vault-Name, Inbox-Ordner und
- * Zunder-Zugang fallen dann auf die Umgebungsvariablen zurück, die der Dienst
- * ohnehin kennt (`COCKPIT_TZ`, `OBSIDIAN_VAULT_NAME`, `CAPTURE_FOLDER`,
- * `ZUNDER_URL`/`ZUNDER_TOKEN`). Im Deployment muss dafür nichts stehen.
- * Der Zunder-Zugang gilt für das ganze Cockpit: Wochenansicht, `!`-Capture,
- * Brücke und Graph lesen ihn bei jedem Aufruf neu.
+ * Leere Felder bedeuten „Standard“: Sie fallen auf die Umgebungsvariablen
+ * zurück, mit denen ältere Deployments eingerichtet wurden (`COCKPIT_TZ`,
+ * `OBSIDIAN_VAULT_NAME`, `CAPTURE_FOLDER`, `ZUNDER_*`, `MAIL_*`, `EMBED_*`),
+ * sonst auf feste Standardwerte. Im Deployment muss dafür nichts stehen.
+ * Alles hier wirkt ohne Neustart: Wochenansicht, `!`-Capture, Brücke, Mail,
+ * Embeddings und Graph lesen den Stand bei jedem Aufruf bzw. bauen sich nach
+ * dem Speichern neu auf (`onChange`).
  */
 
 export class SettingsError extends Error {}
@@ -23,7 +24,20 @@ const KINDS = ['ical', 'caldav'];
 /** Termine mit diesen Titeln blendet das Cockpit aus, solange nichts anderes eingestellt ist. */
 export const DEFAULT_HIDDEN_EVENTS = ['Blockiert'];
 
-const EMPTY = { tz: null, vaultName: null, inboxFolder: null, zunder: { url: null, token: null }, calendars: [], hiddenEvents: null };
+const EMPTY = {
+  tz: null,
+  vaultName: null,
+  inboxFolder: null,
+  zunder: { url: null, token: null },
+  bridge: { enabled: null, tag: null },
+  mail: { token: null, senders: [], mailbox: null, doneMailbox: null, pollMinutes: null },
+  embed: { url: null, model: null },
+  calendars: [],
+  hiddenEvents: null,
+};
+
+const SENDER = /^(?:[^@\s]+@|@)[^@\s]+\.[^@\s]+$/;
+const TAG = /^[\p{L}\p{N}_/-]{1,50}$/u;
 
 function validZone(tz) {
   try {
@@ -66,6 +80,31 @@ export function validateSettings(input) {
   const zunderUrl = httpUrl(input.zunder?.url, 'Zunder-Adresse');
   const zunderToken = text(input.zunder?.token, 500, 'Zunder-Token');
 
+  // `null` heißt jeweils „Standard“ (Umgebung oder fester Wert).
+  const enabled = input.bridge?.enabled;
+  const bridgeTag = text(input.bridge?.tag, 60, 'Brücken-Tag')?.replace(/^#/, '') || null;
+  if (bridgeTag && !TAG.test(bridgeTag)) throw new SettingsError(`Brücken-Tag „${bridgeTag}“: nur Buchstaben, Ziffern, _, - und /`);
+  const bridge = { enabled: typeof enabled === 'boolean' ? enabled : null, tag: bridgeTag };
+
+  const senders = [...new Set((input.mail?.senders ?? []).map((s) => text(s, 200, 'Absender')?.toLowerCase()).filter(Boolean))].slice(0, 50);
+  for (const s of senders) {
+    if (!SENDER.test(s)) throw new SettingsError(`Absender „${s}“: Adresse oder @domain erwartet`);
+  }
+  const poll = input.mail?.pollMinutes;
+  const pollMinutes = poll === null || poll === undefined || poll === '' ? null : Number(poll);
+  if (pollMinutes !== null && !(Number.isInteger(pollMinutes) && pollMinutes >= 1 && pollMinutes <= 1440)) {
+    throw new SettingsError('Mail-Abruf: Abstand in ganzen Minuten zwischen 1 und 1440');
+  }
+  const mail = {
+    token: text(input.mail?.token, 500, 'Mail-Token'),
+    senders,
+    mailbox: text(input.mail?.mailbox, 100, 'Mail-Ordner'),
+    doneMailbox: text(input.mail?.doneMailbox, 100, 'Ablage-Ordner'),
+    pollMinutes,
+  };
+
+  const embed = { url: httpUrl(input.embed?.url, 'Embedding-Server'), model: text(input.embed?.model, 100, 'Embedding-Modell') };
+
   const calendars = (input.calendars ?? []).map((c, i) => {
     const label = `Kalender ${i + 1}`;
     const name = text(c.name, 80, `Name von ${label}`);
@@ -91,7 +130,7 @@ export function validateSettings(input) {
     ? [...new Set(input.hiddenEvents.map((t) => text(t, 200, 'Ausgeblendeter Termin')).filter(Boolean))].slice(0, 50)
     : null;
 
-  return { tz, vaultName: text(input.vaultName, 200, 'Vault-Name'), inboxFolder, zunder: { url: zunderUrl, token: zunderToken }, calendars, hiddenEvents };
+  return { tz, vaultName: text(input.vaultName, 200, 'Vault-Name'), inboxFolder, zunder: { url: zunderUrl, token: zunderToken }, bridge, mail, embed, calendars, hiddenEvents };
 }
 
 export function writePrivate(file, content) {
@@ -117,7 +156,23 @@ export function createSettingsStore({ file = null, defaults = {}, logger = conso
   let version = 0;
   const listeners = new Set();
 
-  const d = { tz: 'Europe/Berlin', vaultName: null, inboxFolder: 'inbox', zunderUrl: null, zunderToken: null, ...defaults };
+  const d = {
+    tz: 'Europe/Berlin',
+    vaultName: null,
+    inboxFolder: 'inbox',
+    zunderUrl: null,
+    zunderToken: null,
+    bridgeEnabled: true,
+    bridgeTag: 'zunder',
+    mailToken: null,
+    mailSenders: [],
+    mailbox: 'Vault',
+    doneMailbox: 'Archive',
+    mailPollMinutes: 5,
+    embedUrl: null,
+    embedModel: 'bge-m3',
+    ...defaults,
+  };
 
   return {
     /** Gespeicherter Stand, wie die Einstellungsseite ihn bearbeitet. */
@@ -129,11 +184,29 @@ export function createSettingsStore({ file = null, defaults = {}, logger = conso
     /** Wirksame Einstellungen: gespeichert, sonst Standard. */
     get() {
       const ownZunder = stored.zunder.url && stored.zunder.token;
+      const mailToken = stored.mail.token ?? d.mailToken;
+      const senders = stored.mail.senders.length ? stored.mail.senders : d.mailSenders;
+      const embedUrl = stored.embed.url ?? d.embedUrl;
       return {
         tz: stored.tz ?? d.tz,
         vaultName: stored.vaultName ?? d.vaultName,
         inboxFolder: stored.inboxFolder ?? d.inboxFolder,
         zunder: ownZunder ? { ...stored.zunder, source: 'einstellungen' } : d.zunderUrl && d.zunderToken ? { url: d.zunderUrl, token: d.zunderToken, source: 'umgebung' } : null,
+        // Ohne Zunder-Zugang ruht die Brücke trotzdem; `enabled` sagt nur, ob sie darf.
+        bridge: { enabled: stored.bridge.enabled ?? d.bridgeEnabled, tag: stored.bridge.tag ?? d.bridgeTag },
+        // Mail-Abruf nur mit Token und freigegebenen Absendern, damit eine fremde Mail nichts anlegt.
+        mail:
+          mailToken && senders.length
+            ? {
+                token: mailToken,
+                senders,
+                mailbox: stored.mail.mailbox ?? d.mailbox,
+                doneMailbox: stored.mail.doneMailbox ?? d.doneMailbox,
+                pollMinutes: stored.mail.pollMinutes ?? d.mailPollMinutes,
+                source: stored.mail.token ? 'einstellungen' : 'umgebung',
+              }
+            : null,
+        embed: embedUrl ? { url: embedUrl, model: stored.embed.model ?? d.embedModel, source: stored.embed.url ? 'einstellungen' : 'umgebung' } : null,
         calendars: stored.calendars,
         hiddenEvents: stored.hiddenEvents ?? DEFAULT_HIDDEN_EVENTS,
         version,

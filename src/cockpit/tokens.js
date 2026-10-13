@@ -3,7 +3,10 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypt
 import { SettingsError, writePrivate } from './settings.js';
 
 /**
- * API-Tokens für `GET /api/search`, erzeugt auf der Seite `/einstellungen`.
+ * API-Tokens, erzeugt auf der Seite `/einstellungen`. Jeder Token hat genau ein
+ * Recht (`scope`): `search` für `GET /api/search`, `capture` für `/capture` und
+ * `/funke` (iOS-Kurzbefehle, Funke). Tokens aus der Zeit vor den Rechten gelten
+ * als `search`.
  *
  * Gespeichert wird nur der SHA-256 eines Tokens, nie der Klartext; den sieht
  * man genau einmal direkt nach dem Anlegen. Eigene Datei neben den
@@ -11,6 +14,7 @@ import { SettingsError, writePrivate } from './settings.js';
  */
 
 export const MAX_TOKENS = 20;
+export const SCOPES = ['search', 'capture'];
 const PREFIX = 'vct_';
 
 const sha256 = (s) => createHash('sha256').update(s).digest();
@@ -20,7 +24,9 @@ export function createTokenStore({ file = null, logger = console, now = () => Da
   let tokens = [];
   if (file && existsSync(file)) {
     try {
-      tokens = JSON.parse(readFileSync(file, 'utf8')).filter((t) => t && typeof t.id === 'string' && /^[0-9a-f]{64}$/.test(t.hash));
+      tokens = JSON.parse(readFileSync(file, 'utf8'))
+        .filter((t) => t && typeof t.id === 'string' && /^[0-9a-f]{64}$/.test(t.hash))
+        .map((t) => ({ ...t, scope: SCOPES.includes(t.scope) ? t.scope : 'search' }));
     } catch (err) {
       logger.warn?.(`API-Tokens in ${file} nicht lesbar, starte ohne: ${err.message}`);
     }
@@ -32,18 +38,22 @@ export function createTokenStore({ file = null, logger = console, now = () => Da
 
   return {
     /** Gespeicherte Tokens ohne Hash, für die Einstellungsseite. */
-    list: () => tokens.map(({ id, name, createdAt }) => ({ id, name, createdAt })),
+    list: () => tokens.map(({ id, name, scope, createdAt }) => ({ id, name, scope, createdAt })),
+
+    /** Ob es mindestens einen Token mit diesem Recht gibt. */
+    has: (scope) => tokens.some((t) => t.scope === scope),
 
     /** Legt einen Token an und gibt den Klartext zurück — das einzige Mal. */
-    create(name) {
+    create(name, scope = 'search') {
       const n = String(name ?? '').trim();
       if (!n) throw new SettingsError('Der Token braucht einen Namen');
       if (n.length > 80) throw new SettingsError('Name ist zu lang (höchstens 80 Zeichen)');
+      if (!SCOPES.includes(scope)) throw new SettingsError(`Unbekanntes Recht „${scope}“`);
       if (tokens.length >= MAX_TOKENS) throw new SettingsError(`Höchstens ${MAX_TOKENS} Tokens`);
       const token = PREFIX + randomBytes(32).toString('base64url');
-      const entry = { id: randomUUID(), name: n, hash: sha256(token).toString('hex'), createdAt: new Date(now()).toISOString() };
+      const entry = { id: randomUUID(), name: n, scope, hash: sha256(token).toString('hex'), createdAt: new Date(now()).toISOString() };
       persist([...tokens, entry]);
-      return { token, id: entry.id, name: n };
+      return { token, id: entry.id, name: n, scope };
     },
 
     /** `true`, wenn es den Token gab. */
@@ -54,12 +64,12 @@ export function createTokenStore({ file = null, logger = console, now = () => Da
       return true;
     },
 
-    /** Prüft einen vorgelegten Token gegen alle Hashes, ohne früh abzubrechen. */
-    verify(presented) {
+    /** Prüft einen vorgelegten Token mit diesem Recht gegen alle Hashes, ohne früh abzubrechen. */
+    verify(presented, scope = 'search') {
       if (typeof presented !== 'string' || !presented.startsWith(PREFIX)) return false;
       const h = sha256(presented);
       let ok = false;
-      for (const t of tokens) ok = timingSafeEqual(h, Buffer.from(t.hash, 'hex')) || ok;
+      for (const t of tokens) ok = (timingSafeEqual(h, Buffer.from(t.hash, 'hex')) && t.scope === scope) || ok;
       return ok;
     },
   };

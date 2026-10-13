@@ -17,7 +17,9 @@ const STREAM_DEPTH = 50;
  * `mode: 'semantic'` nutzt nur die Embeddings. Ist der Embedding-Server nicht
  * erreichbar, fällt die Suche auf Volltext zurück und sagt das in `degraded`.
  */
-export async function hybridSearch({ index, semantic = null, query, mode = 'hybrid', include = ['core'], includeSensitive = false, tag = null, folder = null, type = null, limit = 10, offset = 0 }) {
+export async function hybridSearch({ index, semantic: semanticOrGetter = null, query, mode = 'hybrid', include = ['core'], includeSensitive = false, tag = null, folder = null, type = null, limit = 10, offset = 0 }) {
+  // Index oder Funktion, die den aktuellen liefert (Einstellungen → Embeddings).
+  const semantic = typeof semanticOrGetter === 'function' ? semanticOrGetter() : semanticOrGetter;
   const filters = { include, includeSensitive, tag, folder, type };
   const allowed = index.filterPaths(filters);
   const streams = {};
@@ -36,7 +38,7 @@ export async function hybridSearch({ index, semantic = null, query, mode = 'hybr
       if (mode === 'semantic') streams.text = index.search(query, { ...filters, any: true, limit: STREAM_DEPTH, offset: 0 }).results;
     }
   } else {
-    degraded = 'Semantische Suche ist nicht eingerichtet (EMBED_URL), nur Volltext';
+    degraded = 'Semantische Suche ist nicht eingerichtet (Einstellungen → Embeddings), nur Volltext';
     if (mode === 'semantic') streams.text = index.search(query, { ...filters, any: true, limit: STREAM_DEPTH, offset: 0 }).results;
   }
 

@@ -82,21 +82,6 @@ const index = createIndexManager({
   intervalMinutes: Number(process.env.REINDEX_INTERVAL_MIN ?? 15),
 });
 
-// Semantische Suche (Schritt 4): Embeddings über einen Ollama-Server, eigener
-// Vektorspeicher neben dem Index. Aus, bis EMBED_URL gesetzt ist.
-const semantic = process.env.EMBED_URL
-  ? createSemanticIndex({
-      dbPath: process.env.VECTOR_DB ?? '/data/vectors.db',
-      vaultPath: VAULT_PATH,
-      index,
-      embedder: createOllamaEmbedder({ url: process.env.EMBED_URL, model: process.env.EMBED_MODEL || 'bge-m3' }),
-    })
-  : null;
-if (semantic) {
-  index.onChange(({ full, paths }) => semantic.schedule(full ? null : paths));
-  semantic.schedule();
-}
-
 const SYNC_ADAPTER = process.env.SYNC_ADAPTER ?? 'obsidian-headless';
 const sync = createSyncAdapter({
   kind: SYNC_ADAPTER,
@@ -121,8 +106,43 @@ const cockpitSettings = createSettingsStore({
     inboxFolder: CAPTURE_FOLDER,
     zunderUrl: process.env.ZUNDER_URL || null,
     zunderToken: process.env.ZUNDER_TOKEN || null,
+    bridgeEnabled: process.env.ZUNDER_BRIDGE !== 'off',
+    bridgeTag: process.env.ZUNDER_BRIDGE_TAG || 'zunder',
+    mailToken: process.env.MAIL_JMAP_TOKEN || null,
+    mailSenders: (process.env.MAIL_ALLOWED_SENDERS ?? '').split(',').map((x) => x.trim()).filter(Boolean),
+    mailbox: process.env.MAIL_MAILBOX || 'Vault',
+    doneMailbox: process.env.MAIL_DONE_MAILBOX || 'Archive',
+    mailPollMinutes: Number(process.env.MAIL_POLL_MIN) || 5,
+    embedUrl: process.env.EMBED_URL || null,
+    embedModel: process.env.EMBED_MODEL || 'bge-m3',
   },
 });
+
+// Semantische Suche: Embeddings über einen Ollama-Server, eigener Vektorspeicher
+// neben dem Index. Aus, bis in den Einstellungen ein Embedding-Server steht;
+// eine neue Adresse oder ein neues Modell baut den Index ohne Neustart neu auf.
+const VECTOR_DB = process.env.VECTOR_DB ?? '/data/vectors.db';
+let semantic = null;
+let semanticKey = null;
+function applyEmbed() {
+  const e = cockpitSettings.get().embed;
+  const key = e ? `${e.url}\n${e.model}` : null;
+  if (key === semanticKey) return;
+  semantic?.close();
+  semantic = null;
+  semanticKey = key;
+  if (!e) return console.log('Semantik: aus (Einstellungen → Embeddings)');
+  semantic = createSemanticIndex({
+    dbPath: VECTOR_DB,
+    vaultPath: VAULT_PATH,
+    index,
+    embedder: createOllamaEmbedder({ url: e.url, model: e.model }),
+  });
+  semantic.schedule();
+  console.log(`Semantik: ${e.model} über ${e.url}`);
+}
+const currentSemantic = () => semantic;
+index.onChange(({ full, paths }) => semantic?.schedule(full ? null : paths));
 const calendars = createCalendarSources({ settings: cockpitSettings });
 const cockpit = createCockpit({
   index,
@@ -137,74 +157,92 @@ const zunderSource = () => {
 };
 
 // Capture von außen (Schritt 2): Weiterleitung an Zunder, Capture-Endpunkte,
-// Mail-Abruf und Zunder-Brücke. Alles optional, je nach gesetzten Variablen.
+// Mail-Abruf und Zunder-Brücke. Eingerichtet wird alles in den Einstellungen.
 const captureState = createStateStore(process.env.CAPTURE_STATE_FILE ?? '/data/capture-state.json');
 const captureRouter = createCaptureRouter({ capture, zunder, state: captureState });
 
-const captureHttp = process.env.CAPTURE_TOKEN
-  ? createCaptureHttp({ token: process.env.CAPTURE_TOKEN, router: captureRouter, zunderEnabled: () => Boolean(zunder()) })
-  : null;
-
-// Lesende Suche für Clients ohne OAuth. Die Tokens werden im Web-Cockpit unter
-// Einstellungen → API-Tokens angelegt und liegen neben den Einstellungen.
+// API-Tokens werden im Web-Cockpit unter Einstellungen → API-Tokens angelegt und
+// liegen neben den Einstellungen: Recht „Suche“ für /api/search, „Capture“ für
+// /capture und /funke. CAPTURE_TOKEN aus älteren Deployments gilt daneben weiter.
 const apiTokens = createTokenStore({ file: join(dirname(COCKPIT_SETTINGS_FILE), 'api-tokens.json') });
-const searchHttp = createSearchHttp({ tokens: apiTokens, index, semantic });
+const LEGACY_CAPTURE_TOKEN = process.env.CAPTURE_TOKEN || null;
+const captureHttp = createCaptureHttp({ token: LEGACY_CAPTURE_TOKEN, tokens: apiTokens, router: captureRouter, zunderEnabled: () => Boolean(zunder()) });
+const captureEnabled = () => Boolean(LEGACY_CAPTURE_TOKEN) || apiTokens.has('capture');
+const searchHttp = createSearchHttp({ tokens: apiTokens, index, semantic: currentSemantic });
 
+// Mail-Abruf: läuft, sobald Token und Absender in den Einstellungen stehen;
+// jede Änderung dort startet ihn mit dem neuen Stand neu.
 let mail = null;
-if (process.env.MAIL_JMAP_TOKEN) {
-  mail = createMailCapture({
-    token: process.env.MAIL_JMAP_TOKEN,
-    sessionUrl: process.env.MAIL_JMAP_SESSION_URL || undefined,
-    mailbox: process.env.MAIL_MAILBOX || 'Vault',
-    doneMailbox: process.env.MAIL_DONE_MAILBOX || 'Archive',
-    // Pflicht, damit eine fremde Mail an die Adresse nichts anlegt.
-    allowedSenders: required('MAIL_ALLOWED_SENDERS').split(','),
-    router: captureRouter,
-  });
-  mail.start(Number(process.env.MAIL_POLL_MIN ?? 5));
+let mailKey = null;
+function applyMail() {
+  const m = cockpitSettings.get().mail;
+  const key = m ? JSON.stringify([m.token, m.senders, m.mailbox, m.doneMailbox, m.pollMinutes]) : null;
+  if (key === mailKey) return;
+  mail?.stop();
+  mail = null;
+  mailKey = key;
+  if (!m) return;
+  try {
+    mail = createMailCapture({
+      token: m.token,
+      sessionUrl: process.env.MAIL_JMAP_SESSION_URL || undefined,
+      mailbox: m.mailbox,
+      doneMailbox: m.doneMailbox,
+      allowedSenders: m.senders,
+      router: captureRouter,
+    });
+    mail.start(m.pollMinutes);
+    console.log(`Mail-Capture: „${m.mailbox}“ alle ${m.pollMinutes} Minuten`);
+  } catch (err) {
+    console.error(`Mail-Capture aus: ${err.message}`);
+  }
 }
 
-// Die Brücke ruht, solange kein Zunder-Zugang da ist, und legt los, sobald
-// einer in den Einstellungen steht.
-const bridge =
-  process.env.ZUNDER_BRIDGE !== 'off'
-    ? createZunderBridge({
-        index,
-        editor,
-        zunder,
-        state: captureState,
-        tag: process.env.ZUNDER_BRIDGE_TAG || 'zunder',
-        vaultName: process.env.OBSIDIAN_VAULT_NAME || null,
-      })
-    : null;
-if (bridge) {
-  const bridgeRound = () => {
-    if (!bridge.active()) return;
-    bridge.scanAll();
-    bridge.syncBack();
-  };
+// Die Brücke ruht, solange sie in den Einstellungen aus ist oder kein
+// Zunder-Zugang da ist, und legt los, sobald beides passt. Tag und Vault-Name
+// liest sie bei jedem Durchlauf neu.
+const bridge = createZunderBridge({
+  index,
+  editor,
+  zunder,
+  state: captureState,
+  tag: () => cockpitSettings.get().bridge.tag,
+  vaultName: () => cockpitSettings.get().vaultName,
+  enabled: () => cockpitSettings.get().bridge.enabled,
+});
+const bridgeRound = () => {
+  if (!bridge.active()) return;
+  bridge.scanAll();
+  bridge.syncBack();
+};
+const bridgeState = () => (bridge.enabled() ? `#${bridge.tag}${bridge.active() ? '' : ' ruht'}` : 'aus');
+setInterval(bridgeRound, Number(process.env.REINDEX_INTERVAL_MIN ?? 15) * 60_000).unref();
+
+// Neuer Stand in den Einstellungen: Embeddings und Mail neu aufbauen, bei
+// geändertem Zugang, Schalter oder Tag gleich eine Brückenrunde.
+let lastBridge = `${zunderSource()} ${bridgeState()}`;
+cockpitSettings.onChange(() => {
+  applyEmbed();
+  applyMail();
+  const now = `${zunderSource()} ${bridgeState()}`;
+  if (now === lastBridge) return;
+  lastBridge = now;
+  console.log(`Zunder-Brücke: ${bridge.active() ? `#${bridge.tag}, Zugang ${zunderSource()}` : bridge.enabled() ? 'ruht (kein Zunder-Zugang)' : 'aus'}`);
   bridgeRound();
-  setInterval(bridgeRound, Number(process.env.REINDEX_INTERVAL_MIN ?? 15) * 60_000).unref();
-  // Neuer oder geänderter Zugang in den Einstellungen: gleich eine Runde, nicht erst beim nächsten Takt.
-  let lastZunder = zunderSource();
-  cockpitSettings.onChange(() => {
-    const now = zunderSource();
-    if (now === lastZunder) return;
-    console.log(`Zunder-Brücke: ${now ? `Zugang ${now}` : 'ruht (kein Zunder-Zugang)'}`);
-    lastZunder = now;
-    bridgeRound();
-  });
-}
+});
+applyEmbed();
+applyMail();
+bridgeRound();
 
 sync.start({
   onChanges({ paths, full }) {
     if (full) index.rebuild();
     else index.applyChanges(paths);
-    if (bridge?.active()) (full ? bridge.scanAll() : bridge.scan(paths));
+    if (bridge.active()) (full ? bridge.scanAll() : bridge.scan(paths));
   },
 });
 
-const graph = createGraph({ index, semantic, zunder, calendar: calendarForGraph(calendars), tz: () => cockpitSettings.get().tz });
+const graph = createGraph({ index, semantic: currentSemantic, zunder, calendar: calendarForGraph(calendars), tz: () => cockpitSettings.get().tz });
 
 // Web-Cockpit (Schritt 3): Wochenansicht mit eigenem Browser-Login. Aus, bis
 // WEB_CLIENT_ID gesetzt ist.
@@ -225,10 +263,10 @@ const webHttp = process.env.WEB_CLIENT_ID
       settings: cockpitSettings,
       tokens: apiTokens,
       shortcuts: loadShortcuts(),
-      captureEnabled: Boolean(captureHttp),
+      captureEnabled,
       calendars,
       graph,
-      search: (query) => hybridSearch({ index, semantic, query, limit: 30 }),
+      search: (query) => hybridSearch({ index, semantic: currentSemantic, query, limit: 30 }),
       oidc: createOidcLogin({
         issuer: ISSUER,
         clientId: process.env.WEB_CLIENT_ID,
@@ -248,13 +286,12 @@ const mcpHttp = createVaultMcpHandler({
   capture,
   editor,
   sync,
-  semantic,
+  semantic: currentSemantic,
   graph,
   zunderStatus: () => {
     const z = cockpitSettings.get().zunder;
-    return z
-      ? { state: 'enabled', source: z.source, url: z.url, bridge: bridge ? `#${bridge.tag}` : 'off' }
-      : { state: 'disabled', bridge: bridge ? `#${bridge.tag} (ruht)` : 'off' };
+    const b = bridge.enabled() ? `#${bridge.tag}${z ? '' : ' (ruht)'}` : 'off';
+    return z ? { state: 'enabled', source: z.source, url: z.url, bridge: b } : { state: 'disabled', bridge: b };
   },
   captureFolder: CAPTURE_FOLDER,
   layoutHint: POLICY.layoutHint,
@@ -286,11 +323,13 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`  Scopes      : ${config.supportedScopes.join(', ')}`);
   console.log(`  Reindex     : alle ${process.env.REINDEX_INTERVAL_MIN ?? 15} Minuten${sync.name === 'none' ? '' : ', dazu bei jeder Dateiänderung'}`);
   console.log(`  Sync        : ${SYNC_ADAPTER} (${sync.status().state})`);
-  console.log(`  Capture     : ${captureHttp ? '/capture, /funke' : 'Endpunkte aus (CAPTURE_TOKEN)'}${mail ? `, Mail aus „${mail.status().mailbox}“` : ''}`);
-  console.log(`  Suche       : /api/search (${apiTokens.list().length} API-Tokens)`);
+  const tokenCount = (scope) => apiTokens.list().filter((t) => t.scope === scope).length;
+  console.log(`  Capture     : /capture, /funke (${tokenCount('capture')} Capture-Tokens${LEGACY_CAPTURE_TOKEN ? ' + CAPTURE_TOKEN' : ''})${mail ? `, Mail aus „${mail.status().mailbox}“` : ''}`);
+  console.log(`  Suche       : /api/search (${tokenCount('search')} Such-Tokens)`);
   const z = zunderSource();
-  console.log(`  Zunder      : ${z ? `${z} (! → Inbox${bridge ? `, Brücke #${bridge.tag}` : ''})` : `aus (Einstellungen → Zunder)${bridge ? `, Brücke #${bridge.tag} ruht` : ''}`}`);
-  console.log(`  Semantik    : ${semantic ? `${semantic.model} über ${process.env.EMBED_URL}` : 'aus (EMBED_URL)'}`);
+  console.log(`  Zunder      : ${z ? `${z} (! → Inbox, Brücke ${bridgeState()})` : `aus (Einstellungen → Zunder), Brücke ${bridgeState()}`}`);
+  const e = cockpitSettings.get().embed;
+  console.log(`  Semantik    : ${e ? `${e.model} über ${e.url}` : 'aus (Einstellungen → Embeddings)'}`);
   console.log(`  Cockpit     : ${webHttp ? `${PUBLIC_URL}/ (${cockpitSettings.get().calendars.length} Kalender, Einstellungen unter /einstellungen)` : 'aus (WEB_CLIENT_ID)'}`);
 });
 

@@ -95,6 +95,23 @@ test('ohne Zunder-Zugang ruht die Brücke und legt los, sobald einer da ist', as
   assert.equal(calls[0].title, 'Angebot schreiben');
 });
 
+test('Tag, Schalter und Vault-Name kommen aus den Einstellungen und wirken ohne Neubau', async () => {
+  let enabled = false;
+  let tag = 'anders';
+  const bridge = createZunderBridge({ index: idx, editor, zunder, state, tag: () => tag, enabled: () => enabled, vaultName: () => 'r-notes', logger: quiet });
+  assert.equal(bridge.active(), false, 'ausgeschaltet ruht sie trotz Zugang');
+  assert.equal(await bridge.scanAll(), 0);
+  assert.deepEqual(await bridge.syncBack(), { closed: 0, reported: 0 });
+
+  enabled = true;
+  assert.equal(bridge.active(), true);
+  assert.equal(await bridge.scanAll(), 0, 'mit fremdem Tag nichts markiert');
+  tag = '#Zunder';
+  assert.equal(bridge.tag, 'zunder');
+  assert.equal(await bridge.scanAll(), 1);
+  assert.match(calls[0].description, /vault=r-notes/);
+});
+
 test('scheitert das Zurückschreiben, entsteht beim nächsten Mal keine zweite Aufgabe', async () => {
   let fail = true;
   const flaky = {

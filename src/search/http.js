@@ -7,8 +7,8 @@ const MAX_LIMIT = 50;
  * Lesender Such-Endpunkt für Clients ohne OAuth.
  *
  * Geschützt mit API-Tokens, die unter Einstellungen → API-Tokens im
- * Web-Cockpit angelegt werden (`tokens`, siehe `cockpit/tokens.js`), getrennt
- * vom Capture-Token. Ein Token kann nur suchen, und zwar nur in eigenen Notizen
+ * Web-Cockpit angelegt werden (`tokens`, siehe `cockpit/tokens.js`), mit dem
+ * Recht „Suche“; ein Capture-Token kommt hier nicht durch. Ein Token kann nur suchen, und zwar nur in eigenen Notizen
  * (`core`) ohne vertrauliche Ordner. Notizen lesen oder ändern geht damit nicht.
  *
  * - `GET /api/search?q=…` — `mode` (`hybrid` Standard oder `semantic`),
@@ -18,7 +18,7 @@ const MAX_LIMIT = 50;
 export function createSearchHttp({ tokens, index, semantic = null }) {
   const authorized = (req) => {
     const m = /^Bearer (\S+)$/.exec(String(req.headers.authorization ?? ''));
-    return Boolean(m) && tokens.verify(m[1]);
+    return Boolean(m) && tokens.verify(m[1], 'search');
   };
 
   const json = (res, status, body) => {
