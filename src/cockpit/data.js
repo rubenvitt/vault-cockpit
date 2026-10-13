@@ -149,6 +149,10 @@ export function createCockpit({ index, settings, zunderFor, calendars = null, no
 
       const feuer = await settle('Feuer-Notiz', () => findFeuer(index, week, { current }));
 
+      // Bereiche und Projekte, einmal je Aufruf: für die Dev-Projekte (VCP-41)
+      // und die Ziele von „Zuordnen“. Fehlt sie, bleibt die Aufgabenliste ungefiltert.
+      const areas = zunder ? settle('Zunder (Bereiche)', () => zunder.listStructure()) : null;
+
       const [phoenix, due, open, zInbox, events, inbox, burning] = await Promise.all([
         zunder
           ? settle('Zunder (Phönix)', () => zunder.filterTasks({ phoenix_fire: week.id, include_closed: true, limit: 200 }))
@@ -164,7 +168,10 @@ export function createCockpit({ index, settings, zunderFor, calendars = null, no
                 zunder.filterTasks({ status: ['in_progress'], limit: 100 }),
                 zunder.filterTasks({ status: OPEN, due_before: addDays(today, -1), limit: 100 }),
               ]);
-              return [...running, ...overdue];
+              // Dev-Aufgaben laufen über Branch und PR, nicht über die Woche (VCP-41).
+              const s = await areas;
+              const dev = new Set(s.ok ? s.data.flatMap((a) => (a.projects ?? []).filter((p) => p.kind === 'dev').map((p) => p.id)) : []);
+              return [...running, ...overdue].filter((t) => !(t.location?.kind === 'project' && dev.has(t.location.id)));
             })
           : notConfigured('Zunder'),
         zunder
@@ -233,15 +240,20 @@ export function createCockpit({ index, settings, zunderFor, calendars = null, no
       // Ziele für „Zuordnen“ in der Zunder-Inbox; nur nötig, wenn dort etwas liegt.
       const structure =
         zunder && zInbox.ok && zInbox.data.length
-          ? await settle('Zunder (Bereiche)', async () =>
-              (await zunder.listStructure())
-                .filter((a) => a.state !== 'archived')
-                .map((a) => ({
-                  id: a.id,
-                  name: a.name,
-                  projects: (a.projects ?? []).filter((p) => !p.status || p.status === 'active').map((p) => ({ id: p.id, name: p.name })),
-                }))
-                .sort((a, b) => a.name.localeCompare(b.name, 'de')),
+          ? await areas.then((s) =>
+              s.ok
+                ? {
+                    ok: true,
+                    data: s.data
+                      .filter((a) => a.state !== 'archived')
+                      .map((a) => ({
+                        id: a.id,
+                        name: a.name,
+                        projects: (a.projects ?? []).filter((p) => !p.status || p.status === 'active').map((p) => ({ id: p.id, name: p.name })),
+                      }))
+                      .sort((a, b) => a.name.localeCompare(b.name, 'de')),
+                  }
+                : s,
             )
           : { ok: true, data: [] };
 
