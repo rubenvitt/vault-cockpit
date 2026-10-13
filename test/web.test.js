@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { generateKeyPairSync, createSign, createHash } from 'node:crypto';
 import { createApp } from '../src/http/app.js';
 import { createWebHttp } from '../src/web/http.js';
+import { loadShortcuts } from '../src/web/shortcuts.js';
 import { createOidcLogin } from '../src/web/oidc.js';
 import { createCookieSigner, parseCookies } from '../src/web/session.js';
 import { createSettingsStore } from '../src/cockpit/settings.js';
@@ -117,7 +118,7 @@ const graph = {
 };
 const search = async (q) => ({ results: [{ path: 'wiki/a.md', title: 'A', snippet: `zu ${q}`, streams: ['text', 'semantic'] }], total: 1, degraded: null });
 
-async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSubjects = ['ruben'], calendars = null, actions = null, notes = null } = {}) {
+async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSubjects = ['ruben'], calendars = null, actions = null, notes = null, shortcuts = [] } = {}) {
   const idp = fakeIdp(idpOptions);
   const settings = createSettingsStore({ defaults: { tz: 'Europe/Berlin', inboxFolder: 'inbox', zunderUrl: 'https://zunder.env', zunderToken: 'zt_env' }, logger: quiet });
   const tokens = createTokenStore({ logger: quiet });
@@ -127,6 +128,7 @@ async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSu
     actions,
     notes,
     tokens,
+    shortcuts,
     calendars,
     graph,
     search,
@@ -316,13 +318,14 @@ test('Einstellungen: nur angemeldet, Kalender anlegen, Geheimnisse bleiben verbo
       const html = await page.text();
       assert.match(html, /aus der Umgebung \(https:\/\/zunder\.env\)/);
       assert.match(html, /Neuer Kalender/);
+      assert.match(html, /name="hiddenEvents" value="Blockiert"/);
 
       const saved = await call('/einstellungen', {
         method: 'POST',
         form: {
           'cal.0.name': 'Privat', 'cal.0.kind': 'ical', 'cal.0.url': 'webcal://cal.example/geheim-123.ics',
           'cal.1.name': '', 'cal.1.url': '',
-          'zunder.url': '', 'zunder.token': '', tz: '', vaultName: 'RNotes', inboxFolder: '00-inbox',
+          'zunder.url': '', 'zunder.token': '', tz: '', vaultName: 'RNotes', inboxFolder: '00-inbox', hiddenEvents: 'Blockiert, Fokus',
         },
       });
       assert.equal(saved.status, 303);
@@ -330,6 +333,7 @@ test('Einstellungen: nur angemeldet, Kalender anlegen, Geheimnisse bleiben verbo
       const [privat] = settings.stored().calendars;
       assert.equal(privat.url, 'https://cal.example/geheim-123.ics');
       assert.equal(settings.get().inboxFolder, '00-inbox');
+      assert.deepEqual(settings.get().hiddenEvents, ['Blockiert', 'Fokus']);
 
       // Zweiter Kalender mit Passwort, erster unverändert (Adresse leer gelassen).
       await call('/einstellungen', {
@@ -904,4 +908,25 @@ test('Rückblick: Kennzahlen, Balken als SVG ohne Inline-Styles, Navigation', as
     assert.equal((await call('/rueckblick?woche=kaputt')).status, 400);
     assert.match(await (await call('/')).text(), /href="\/rueckblick\?woche=2026-W42">Rückblick/);
   });
+});
+
+test('Kurzbefehle: in den Einstellungen verlinkt, nur angemeldet zu laden', async () => {
+  const shortcuts = loadShortcuts();
+  assert.deepEqual(shortcuts.map((s) => s.slug), ['notiz', 'sprachmemo'], 'beide signierten Dateien liegen im Repo');
+  await withServer(
+    async ({ call, login }) => {
+      const anon = await call('/kurzbefehle/notiz.shortcut');
+      assert.equal(anon.status, 303);
+      await login();
+      const page = await (await call('/einstellungen')).text();
+      assert.match(page, /href="\/kurzbefehle\/notiz\.shortcut"/);
+      assert.match(page, /href="\/kurzbefehle\/sprachmemo\.shortcut"/);
+      const file = await call('/kurzbefehle/sprachmemo.shortcut');
+      assert.equal(file.status, 200);
+      assert.match(file.headers.get('content-disposition'), /attachment;.*Sprachmemo%20ins%20Cockpit\.shortcut/);
+      assert.deepEqual(Buffer.from(await file.arrayBuffer()), shortcuts[1].data);
+    },
+    {},
+    { shortcuts },
+  );
 });

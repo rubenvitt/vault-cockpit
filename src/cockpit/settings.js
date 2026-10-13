@@ -18,7 +18,10 @@ export class SettingsError extends Error {}
 export const MAX_CALENDARS = 20;
 const KINDS = ['ical', 'caldav'];
 
-const EMPTY = { tz: null, vaultName: null, inboxFolder: null, zunder: { url: null, token: null }, calendars: [] };
+/** Termine mit diesen Titeln blendet das Cockpit aus, solange nichts anderes eingestellt ist. */
+export const DEFAULT_HIDDEN_EVENTS = ['Blockiert'];
+
+const EMPTY = { tz: null, vaultName: null, inboxFolder: null, zunder: { url: null, token: null }, calendars: [], hiddenEvents: null };
 
 function validZone(tz) {
   try {
@@ -81,7 +84,12 @@ export function validateSettings(input) {
     names.add(c.name.toLowerCase());
   }
 
-  return { tz, vaultName: text(input.vaultName, 200, 'Vault-Name'), inboxFolder, zunder: { url: zunderUrl, token: zunderToken }, calendars };
+  // `null` heißt „Standard“, eine leere Liste blendet nichts aus.
+  const hiddenEvents = Array.isArray(input.hiddenEvents)
+    ? [...new Set(input.hiddenEvents.map((t) => text(t, 200, 'Ausgeblendeter Termin')).filter(Boolean))].slice(0, 50)
+    : null;
+
+  return { tz, vaultName: text(input.vaultName, 200, 'Vault-Name'), inboxFolder, zunder: { url: zunderUrl, token: zunderToken }, calendars, hiddenEvents };
 }
 
 export function writePrivate(file, content) {
@@ -124,6 +132,7 @@ export function createSettingsStore({ file = null, defaults = {}, logger = conso
         inboxFolder: stored.inboxFolder ?? d.inboxFolder,
         zunder: ownZunder ? { ...stored.zunder, source: 'einstellungen' } : d.zunderUrl && d.zunderToken ? { url: d.zunderUrl, token: d.zunderToken, source: 'umgebung' } : null,
         calendars: stored.calendars,
+        hiddenEvents: stored.hiddenEvents ?? DEFAULT_HIDDEN_EVENTS,
         version,
       };
     },

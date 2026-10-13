@@ -29,6 +29,8 @@ export function createIcsClient({ url, username = null, password = null, tz = 'E
   };
 }
 
+const titleKey = (t) => String(t ?? '').trim().toLowerCase();
+
 /**
  * Alle eingestellten Kalender zusammen. Die Liste kommt bei jedem Abruf frisch
  * aus den Einstellungen; Clients (und ihr Cache) bleiben erhalten, solange sich
@@ -62,9 +64,14 @@ export function createCalendarSources({ settings, fetch = globalThis.fetch, now 
       );
     },
 
-    /** `{ events, errors }`: Termine aller Kalender im Intervall, Fehler je Kalender. */
+    /**
+     * `{ events, errors }`: Termine aller Kalender im Intervall, Fehler je
+     * Kalender. Termine, deren Titel auf der Ausblendliste steht (z. B.
+     * „Blockiert“), fehlen.
+     */
     async events(start, end) {
-      const { calendars, tz } = settings.get();
+      const { calendars, tz, hiddenEvents = [] } = settings.get();
+      const hidden = new Set(hiddenEvents.map(titleKey));
       const live = new Set(calendars.map((c) => JSON.stringify([c, tz])));
       for (const key of clients.keys()) if (!live.has(key)) clients.delete(key);
 
@@ -73,7 +80,7 @@ export function createCalendarSources({ settings, fetch = globalThis.fetch, now 
       const errors = [];
       results.forEach((r, i) => {
         const name = calendars[i].name;
-        if (r.status === 'fulfilled') events.push(...r.value.map((e) => ({ ...e, calendar: name })));
+        if (r.status === 'fulfilled') events.push(...r.value.filter((e) => !hidden.has(titleKey(e.title))).map((e) => ({ ...e, calendar: name })));
         else errors.push({ calendar: name, error: r.reason?.message ?? String(r.reason) });
       });
       events.sort((a, b) => a.start - b.start || Number(b.allDay) - Number(a.allDay));

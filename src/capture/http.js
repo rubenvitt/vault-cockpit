@@ -23,6 +23,18 @@ const sha256 = (s) => createHash('sha256').update(s).digest();
  *   genügt `<PUBLIC_URL>/funke`. Der Ordner aus der App wird ignoriert, die Notiz
  *   landet immer im Capture-Ordner.
  */
+function successMessage(result) {
+  if (result.kind === 'task') return `Aufgabe ${result.ref ?? result.id} liegt in der Zunder-Inbox.`;
+  return `Notiz angelegt: ${result.path}`;
+}
+
+function errorMessage(status, error) {
+  if (status === 401) return 'Token abgelehnt. Den Capture-Token im Kurzbefehl prüfen.';
+  if (status === 503) return 'Aufgaben mit ! gehen erst, wenn das Cockpit mit Zunder verbunden ist. Ohne ! vorne wird es eine Notiz.';
+  if (status === 502) return `Zunder lehnt ab: ${error}`;
+  return `Fehler: ${error}`;
+}
+
 export function createCaptureHttp({ token, router, zunderEnabled = false }) {
   const expected = sha256(`Bearer ${token}`);
   const authorized = (req) => timingSafeEqual(sha256(String(req.headers.authorization ?? '')), expected);
@@ -31,6 +43,9 @@ export function createCaptureHttp({ token, router, zunderEnabled = false }) {
     res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify(body));
   };
+  // Jede Antwort trägt einen fertigen Satz (`message`) und Fehler ihren Status: Ein
+  // iOS-Kurzbefehl sieht den HTTP-Status nicht und zeigt nur `message` als Mitteilung.
+  const fail = (res, status, error) => json(res, status, { error, status, message: errorMessage(status, error) });
 
   function parseCapture(req, url, body) {
     const type = String(req.headers['content-type'] ?? '');
@@ -89,21 +104,21 @@ export function createCaptureHttp({ token, router, zunderEnabled = false }) {
     matches: (path) => path === '/capture' || path === '/funke/notes' || path === '/funke/health',
 
     async handle(req, res, url, body) {
-      if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
+      if (!authorized(req)) return fail(res, 401, 'unauthorized');
       const path = url.pathname;
 
       if (req.method === 'GET' && (path === '/capture' || path === '/funke/health')) {
         return json(res, 200, { ok: true, zunder: zunderEnabled });
       }
-      if (req.method !== 'POST' || path === '/funke/health') return json(res, 405, { error: 'method not allowed' });
+      if (req.method !== 'POST' || path === '/funke/health') return fail(res, 405, 'method not allowed');
 
       try {
         const input = path === '/funke/notes' ? parseFunke(body) : parseCapture(req, url, body);
         const result = await router.route(input);
-        return json(res, result.duplicate ? 200 : 201, { ok: true, ...result });
+        return json(res, result.duplicate ? 200 : 201, { ok: true, ...result, message: successMessage(result) });
       } catch (err) {
-        if (err instanceof CaptureError) return json(res, err.status, { error: err.message });
-        return json(res, 502, { error: err.message });
+        if (err instanceof CaptureError) return fail(res, err.status, err.message);
+        return fail(res, 502, err.message);
       }
     },
   };
