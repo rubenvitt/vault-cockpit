@@ -214,7 +214,11 @@ Feld behält den gespeicherten Wert. Das Secret für das Sitzungs-Cookie liegt i
 
 **Handeln statt nur schauen:** Aufgaben in Flammen, Big Rocks, Aufgaben und
 Zunder-Inbox hakt man direkt ab (Zunder-Status `done`, ein zweiter Klick öffnet
-sie wieder, die Meldung bietet „Rückgängig“). Oben auf der Seite liegt eine
+sie wieder, die Meldung bietet „Rückgängig“). Das Menü `⋯` an jeder Aufgabe
+setzt den Status (in Arbeit, blockiert, offen) und verschiebt die Fälligkeit
+(heute, morgen, nächste Woche = Montag, ein Datum oder ohne); die Ansicht ordnet
+die Aufgabe danach neu ein. Auf dem iPhone öffnet es sich als Leiste von unten.
+Oben auf der Seite liegt eine
 **Schnelleingabe** mit derselben Logik wie `/capture`: Text wird eine Notiz im
 Inbox-Ordner, mit `!` vorne eine Aufgabe in der Zunder-Inbox. `/` oder `n` springt
 hinein, Enter legt an, Shift+Enter macht eine neue Zeile. Beides läuft ohne

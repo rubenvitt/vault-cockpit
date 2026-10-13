@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { timingSafeEqual, randomUUID } from 'node:crypto';
 import { createCookieSigner, parseCookies, cookie } from './session.js';
-import { renderWeek, renderMessage, renderSettings, CSS } from './render.js';
+import { renderWeek, renderMessage, renderSettings, dueLabel, CSS } from './render.js';
 import { renderGraph, renderSearch, GRAPH_CSS } from './graph-render.js';
 import { SettingsError, MAX_CALENDARS } from '../cockpit/settings.js';
 import { describeWeek, weekOf } from '../cockpit/week.js';
@@ -52,9 +52,10 @@ const HTML_HEADERS = {
  * - `GET /login` → Pocket ID → `GET /auth/callback` setzt die Sitzung (12 h).
  * - `POST /logout` löscht sie. SameSite=Lax hält fremde Seiten davon ab.
  * - `GET`/`POST /einstellungen` — Kalender, Zunder-Zugang und Anzeige pflegen.
- * - `POST /aktion/status` setzt den Status einer Zunder-Aufgabe (abhaken und
- *   zurück), `POST /aktion/erfassen` ist die Schnelleingabe (Notiz, mit `!` eine
- *   Zunder-Aufgabe). Beide brauchen Sitzung, gleiche Herkunft und das CSRF-Token
+ * - `POST /aktion/status` setzt den Status einer Zunder-Aufgabe (abhaken, in
+ *   Arbeit, blockiert, offen), `POST /aktion/faellig` verschiebt die Fälligkeit,
+ *   `POST /aktion/erfassen` ist die Schnelleingabe (Notiz, mit `!` eine
+ *   Zunder-Aufgabe). Alle brauchen Sitzung, gleiche Herkunft und das CSRF-Token
  *   der Sitzung. Mit `Accept: application/json` antworten sie mit JSON (für
  *   `/static/cockpit.js`), sonst mit einer Weiterleitung und einer Meldung.
  * - `POST /einstellungen/tokens` legt einen API-Token für `/api/search` an und
@@ -146,22 +147,53 @@ export function createWebHttp({ cockpit, settings, actions = null, tokens = null
     return send(res, status, renderWeek(model, { user: session.name ?? session.sub, write: writeContext(req), back, flash: flash ?? takeFlash(req, res), draft }));
   }
 
+  const taskName = (t) => (t.ref ? `${t.ref} ${t.title}` : t.title);
   const statusMessage = (t) => {
-    const name = t.ref ? `${t.ref} ${t.title}` : t.title;
-    if (t.status === 'done') return `Erledigt: ${name}`;
-    if (t.status === 'in_progress') return `In Arbeit: ${name}`;
-    if (t.status === 'blocked') return `Blockiert: ${name}`;
-    return `Wieder offen: ${name}`;
+    if (t.status === 'done') return `Erledigt: ${taskName(t)}`;
+    if (t.status === 'in_progress') return `In Arbeit: ${taskName(t)}`;
+    if (t.status === 'blocked') return `Blockiert: ${taskName(t)}`;
+    return `Wieder offen: ${taskName(t)}`;
   };
+  const dueMessage = (t) => (t.due ? `Fällig ${dueLabel(t.due, settings.get().tz)}: ${taskName(t)}` : `Ohne Fälligkeit: ${taskName(t)}`);
   const captureMessage = (r) => {
     if (r.kind === 'task') return `${r.duplicate ? 'Schon erfasst' : 'Aufgabe angelegt'}: ${r.ref ?? 'neue Aufgabe'} liegt in der Zunder-Inbox`;
     return `${r.duplicate ? 'Schon erfasst' : 'Notiz angelegt'}: ${r.path}`;
   };
 
   /**
-   * Abhaken und Schnelleingabe. Mit JavaScript als JSON, ohne als Formular mit
+   * Die schreibenden Aktionen. Jede liefert `{ message, …, undo }`; `undo` ist
+   * `{ action, fields }`, also genau das Formular, das den alten Stand
+   * wiederherstellt (ohne JavaScript als Knopf in der Meldung).
+   */
+  const ACTIONS = actions
+    ? {
+        async '/aktion/status'(form, session) {
+          const prev = form.get('prev');
+          const task = await actions.setStatus(form.get('id'), form.get('status'));
+          const undo = SETTABLE.includes(prev) && prev !== task.status ? { action: '/aktion/status', fields: { id: task.id, status: prev } } : null;
+          logger.info?.(`Cockpit: ${task.ref ?? task.id} → ${task.status} (${session.sub})`);
+          return { message: statusMessage(task), task, undo };
+        },
+        async '/aktion/faellig'(form, session) {
+          const due = form.get('due') === 'datum' ? form.get('date') : form.get('due');
+          const prev = (form.get('prev') ?? '').slice(0, 10);
+          const task = await actions.setDue(form.get('id'), due);
+          const undo = form.has('prev') && prev !== (task.due ?? '').slice(0, 10) ? { action: '/aktion/faellig', fields: { id: task.id, due: prev || 'keine' } } : null;
+          logger.info?.(`Cockpit: ${task.ref ?? task.id} fällig ${task.due ?? '–'} (${session.sub})`);
+          return { message: dueMessage(task), task, undo };
+        },
+        async '/aktion/erfassen'(form) {
+          const result = await actions.capture({ text: form.get('text') ?? '', captureId: form.get('cid') });
+          return { message: captureMessage(result), result };
+        },
+      }
+    : {};
+
+  /**
+   * Alle Aktionen. Mit JavaScript als JSON, ohne als Formular mit
    * Weiterleitung; schlägt es ohne JavaScript fehl, kommt die Seite direkt mit
-   * Fehlermeldung und dem eingegebenen Text zurück, damit nichts verloren geht.
+   * Fehlermeldung (und bei der Schnelleingabe dem eingegebenen Text) zurück,
+   * damit nichts verloren geht.
    */
   async function action(req, res, path, session) {
     const wantsJson = String(req.headers.accept ?? '').includes('application/json');
@@ -174,16 +206,7 @@ export function createWebHttp({ cockpit, settings, actions = null, tokens = null
     }
     let body;
     try {
-      if (path === '/aktion/status') {
-        const prev = form.get('prev');
-        const task = await actions.setStatus(form.get('id'), form.get('status'));
-        const undo = SETTABLE.includes(prev) && prev !== task.status ? { id: task.id, status: prev } : null;
-        logger.info?.(`Cockpit: ${task.ref ?? task.id} → ${task.status} (${session.sub})`);
-        body = { ok: true, message: statusMessage(task), task, undo };
-      } else {
-        const result = await actions.capture({ text: form.get('text') ?? '', captureId: form.get('cid') });
-        body = { ok: true, message: captureMessage(result), result };
-      }
+      body = { ok: true, ...(await ACTIONS[path](form, session)) };
     } catch (err) {
       if (!(err instanceof ActionError)) throw err;
       logger.warn?.(`Cockpit-Aktion ${path} fehlgeschlagen: ${err.message}`);
@@ -334,7 +357,7 @@ export function createWebHttp({ cockpit, settings, actions = null, tokens = null
   }
 
   const TOKEN_ROUTES = { '/einstellungen/tokens': createToken, '/einstellungen/tokens/widerrufen': revokeToken };
-  const ACTION_ROUTES = new Set(actions ? ['/aktion/status', '/aktion/erfassen'] : []);
+  const ACTION_ROUTES = new Set(Object.keys(ACTIONS));
   const ROUTES = new Set([...ACTION_ROUTES, '/static/cockpit.js', '/', '/api/woche', '/graph', '/api/graph', '/einstellungen', ...(tokens ? Object.keys(TOKEN_ROUTES) : []), '/login', '/auth/callback', '/logout', '/static/cockpit.css']);
 
   return {

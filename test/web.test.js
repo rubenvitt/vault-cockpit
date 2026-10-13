@@ -439,6 +439,15 @@ function fakeActions() {
       }
       return { id, ref: 'VCP-1', title: 'Steuer', status };
     },
+    async setDue(id, due) {
+      calls.push(['due', id, due]);
+      if (fail) {
+        const e = fail;
+        fail = null;
+        throw e;
+      }
+      return { id, ref: 'VCP-1', title: 'Steuer', status: 'open', due: due === 'keine' ? null : due === 'morgen' ? '2026-10-15' : due };
+    },
     async capture({ text, captureId }) {
       calls.push(['capture', text, captureId]);
       if (fail) {
@@ -526,7 +535,7 @@ test('Abhaken mit JavaScript: JSON mit Meldung und Rückgängig', async () => {
       assert.equal(res.status, 200);
       const body = await res.json();
       assert.equal(body.message, 'Erledigt: VCP-1 Steuer');
-      assert.deepEqual(body.undo, { id: 't1', status: 'in_progress' });
+      assert.deepEqual(body.undo, { action: '/aktion/status', fields: { id: 't1', status: 'in_progress' } });
       assert.deepEqual(actions.calls, [['status', 't1', 'done']]);
 
       actions.failNext(new ActionError('Zunder antwortet mit HTTP 500', 502));
@@ -550,7 +559,7 @@ test('Abhaken ohne JavaScript: Weiterleitung zurück, Meldung mit Rückgängig e
       assert.equal(res.headers.get('location'), '/?woche=2026-W42');
       const html = await (await call('/?woche=2026-W42')).text();
       assert.match(html, /class="toast ok"[^>]*><span class="toast-text">Erledigt: VCP-1 Steuer/);
-      assert.match(html, /name="status" value="open">\s*<button type="submit" class="toast-action">Rückgängig/);
+      assert.match(html, /<form method="post" action="\/aktion\/status" class="act">[^]*?name="status" value="open"><button type="submit" class="toast-action">Rückgängig/);
       assert.ok(!(await (await call('/')).text()).includes('toast-text'));
 
       // Kein offener Redirect über back.
@@ -587,6 +596,57 @@ test('Schnelleingabe: Notiz und Aufgabe; ohne JavaScript bleibt der Text bei Feh
       assert.match(page, /fehlt der Zunder-Zugang/);
       assert.match(page, /<textarea[^>]*>! Wichtig &lt;b&gt;<\/textarea>/);
       assert.match(page, /data-mode="task"/);
+    },
+    {},
+    { actions },
+  );
+});
+
+test('Menü an Aufgaben: Status und Fälligkeit als Formulare', async () => {
+  await withServer(
+    async ({ call, login }) => {
+      await login();
+      const html = await (await call('/')).text();
+      assert.match(html, /<details class="menu">\s*<summary class="menu-button" aria-label="Mehr zu: Steuer &lt;abgeben&gt;"/);
+      assert.match(html, /action="\/aktion\/status" class="act">[^]*?name="prev" value="open"[^]*?value="in_progress" class="chip">In Arbeit[^]*?value="open" class="chip" aria-current="true" disabled>Offen/);
+      assert.match(html, /action="\/aktion\/faellig" class="act">[^]*?name="id" value="t1"[^]*?name="prev" value=""[^]*?type="date" name="date"[^]*?value="naechste-woche" class="chip">Nächste Woche/);
+    },
+    {},
+    { actions: fakeActions() },
+  );
+});
+
+test('Fälligkeit verschieben: JSON mit Rückgängig, ohne JavaScript per Weiterleitung', async () => {
+  const actions = fakeActions();
+  await withServer(
+    async ({ call, login }) => {
+      await login();
+      const csrf = csrfFrom(await (await call('/')).text());
+      const res = await call('/aktion/faellig', { method: 'POST', form: { id: 't1', due: 'morgen', prev: '2026-10-01', csrf }, accept: 'application/json' });
+      const body = await res.json();
+      assert.equal(body.message, 'Fällig Do 15.10.: VCP-1 Steuer');
+      assert.deepEqual(body.undo, { action: '/aktion/faellig', fields: { id: 't1', due: '2026-10-01' } });
+
+      // Datum aus dem Feld; vorher ohne Fälligkeit → Rückgängig entfernt sie wieder.
+      const picked = await (await call('/aktion/faellig', { method: 'POST', form: { id: 't1', due: 'datum', date: '2026-11-03', prev: '', csrf }, accept: 'application/json' })).json();
+      assert.deepEqual(picked.undo, { action: '/aktion/faellig', fields: { id: 't1', due: 'keine' } });
+      const cleared = await (await call('/aktion/faellig', { method: 'POST', form: { id: 't1', due: 'keine', prev: '2026-11-03', csrf }, accept: 'application/json' })).json();
+      assert.equal(cleared.message, 'Ohne Fälligkeit: VCP-1 Steuer');
+      assert.deepEqual(actions.calls, [['due', 't1', 'morgen'], ['due', 't1', '2026-11-03'], ['due', 't1', 'keine']]);
+
+      const plain = await call('/aktion/faellig', { method: 'POST', form: { id: 't1', due: 'morgen', prev: '', csrf, back: '/' } });
+      assert.equal(plain.status, 303);
+      const page = await (await call('/')).text();
+      assert.match(page, /Fällig Do 15\.10\.: VCP-1 Steuer/);
+      assert.match(page, /action="\/aktion\/faellig" class="act">[^]*?name="due" value="keine"><button type="submit" class="toast-action">Rückgängig/);
+
+      actions.failNext(new ActionError('„x“ ist kein Datum', 400));
+      const bad = await call('/aktion/faellig', { method: 'POST', form: { id: 't1', due: 'x', csrf }, accept: 'application/json' });
+      assert.equal(bad.status, 400);
+      assert.equal((await bad.json()).message, '„x“ ist kein Datum');
+
+      const noCsrf = await call('/aktion/faellig', { method: 'POST', form: { id: 't1', due: 'morgen' }, accept: 'application/json' });
+      assert.equal(noCsrf.status, 403);
     },
     {},
     { actions },

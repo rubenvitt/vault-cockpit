@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readdirSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createCockpitActions, ActionError } from '../src/cockpit/actions.js';
+import { createCockpitActions, ActionError, resolveDue } from '../src/cockpit/actions.js';
 import { createSettingsStore } from '../src/cockpit/settings.js';
 import { createStateStore } from '../src/capture/state.js';
 import { compilePolicy } from '../src/vault/policy.js';
@@ -17,6 +17,11 @@ function fakeZunder({ fail = false } = {}) {
       calls.push(['setStatus', id, status]);
       if (fail) throw new Error('Zunder antwortet mit HTTP 500');
       return { id, ref: 'VCP-1', title: 'Steuer', status };
+    },
+    async updateTask(id, fields) {
+      calls.push(['updateTask', id, fields]);
+      if (fail) throw new Error('Zunder antwortet mit HTTP 500');
+      return { id, ref: 'VCP-1', title: 'Steuer', status: 'open', ...fields };
     },
     async createTask(args) {
       calls.push(['createTask', args]);
@@ -48,7 +53,7 @@ afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 test('setStatus: setzt den Status über Zunder und meldet die Aufgabe zurück', async () => {
   const t = await actions().setStatus('abc123', 'done');
-  assert.deepEqual(t, { id: 'abc123', ref: 'VCP-1', title: 'Steuer', status: 'done' });
+  assert.deepEqual(t, { id: 'abc123', ref: 'VCP-1', title: 'Steuer', status: 'done', due: null });
   assert.deepEqual(calls, [['setStatus', 'abc123', 'done']]);
 });
 
@@ -65,6 +70,39 @@ test('setStatus: Zunder-Fehler wird 502, fehlender Zugang 503', async () => {
   await assert.rejects(actions().setStatus('abc', 'done'), (e) => e.status === 502 && /HTTP 500/.test(e.message));
   zunder = null;
   await assert.rejects(actions().setStatus('abc', 'done'), (e) => e.status === 503 && /Einstellungen/.test(e.message));
+});
+
+test('resolveDue: Kurzwahl relativ zu heute, Datum geprüft', () => {
+  const today = '2026-10-14'; // Mittwoch
+  assert.equal(resolveDue('heute', today), '2026-10-14');
+  assert.equal(resolveDue('morgen', today), '2026-10-15');
+  assert.equal(resolveDue('naechste-woche', today), '2026-10-19');
+  assert.equal(resolveDue('naechste-woche', '2026-10-18'), '2026-10-19'); // Sonntag → morgen ist Montag
+  assert.equal(resolveDue('naechste-woche', '2026-10-19'), '2026-10-26');
+  assert.equal(resolveDue('morgen', '2026-12-31'), '2027-01-01');
+  assert.equal(resolveDue('keine', today), null);
+  assert.equal(resolveDue('', today), null);
+  assert.equal(resolveDue('2026-11-03', today), '2026-11-03');
+  assert.equal(resolveDue('2026-02-30', today), undefined);
+  assert.equal(resolveDue('übermorgen', today), undefined);
+});
+
+test('setDue: Kurzwahl gilt in der Zeitzone der Einstellungen', async () => {
+  // 23:30 UTC am 13.10. ist in Berlin schon der 14.10.
+  const a = actions({ now: () => new Date('2026-10-13T23:30:00Z') });
+  const t = await a.setDue('abc', 'morgen');
+  assert.equal(t.due, '2026-10-15');
+  assert.deepEqual(calls, [['updateTask', 'abc', { due: '2026-10-15' }]]);
+  await a.setDue('abc', 'keine');
+  assert.deepEqual(calls[1], ['updateTask', 'abc', { due: null }]);
+});
+
+test('setDue: ungültiges Datum vor Zunder abgewiesen, Zunder-Fehler 502', async () => {
+  await assert.rejects(actions().setDue('abc', 'irgendwann'), (e) => e.status === 400 && /kein Datum/.test(e.message));
+  await assert.rejects(actions().setDue('../x', 'morgen'), (e) => e.status === 400);
+  assert.equal(calls.length, 0);
+  zunder = fakeZunder({ fail: true });
+  await assert.rejects(actions().setDue('abc', 'morgen'), (e) => e.status === 502);
 });
 
 test('capture: Notiz landet im Inbox-Ordner aus den Einstellungen und sofort im Index', async () => {

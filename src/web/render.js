@@ -22,7 +22,7 @@ export function inline(md) {
     .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>');
 }
 
-function dueLabel(due, tz) {
+export function dueLabel(due, tz) {
   if (!due) return '';
   if (/^\d{4}-\d{2}-\d{2}$/.test(due)) {
     const [y, m, d] = due.split('-').map(Number);
@@ -65,14 +65,65 @@ function tickForm(t, ctx) {
     </form>`;
 }
 
+/** Felder, die jedes Aktionsformular braucht. */
+const hidden = (fields) =>
+  Object.entries(fields)
+    .filter(([, v]) => v != null)
+    .map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`)
+    .join('');
+const formHead = (ctx, action, fields = {}) =>
+  `<form method="post" action="${action}" class="act">${hidden({ csrf: ctx.write.csrf, back: ctx.back, ...fields })}`;
+
+const STATUS_CHOICES = [
+  ['in_progress', 'In Arbeit'],
+  ['blocked', 'Blockiert'],
+  ['open', 'Offen'],
+];
+const DUE_CHOICES = [
+  ['heute', 'Heute'],
+  ['morgen', 'Morgen'],
+  ['naechste-woche', 'Nächste Woche'],
+];
+
+/**
+ * Menü an einer Aufgabe: `<details>` klappt ohne JavaScript auf, jede Gruppe
+ * ist ein eigenes Formular. Mit JavaScript bleibt die Seite stehen.
+ */
+function taskMenu(t, ctx) {
+  const status = STATUS_CHOICES.map(
+    ([value, label]) =>
+      `<button type="submit" name="status" value="${value}" class="chip"${t.status === value ? ' aria-current="true" disabled' : ''}>${label}</button>`,
+  ).join('');
+  const due = DUE_CHOICES.map(([value, label]) => `<button type="submit" name="due" value="${value}" class="chip">${label}</button>`).join('');
+  const date = t.due ? String(t.due).slice(0, 10) : '';
+  // Das Datumsfeld steht im Formular vor den Kurzwahl-Knöpfen, damit Enter darin
+  // „Setzen“ auslöst; per CSS steht es unter ihnen.
+  return `<details class="menu">
+      <summary class="menu-button" aria-label="${esc(`Mehr zu: ${t.title}`)}" title="Status, Fälligkeit"><span aria-hidden="true">⋯</span></summary>
+      <div class="menu-panel">
+        <p class="menu-title">${esc(t.title)}</p>
+        ${formHead(ctx, '/aktion/status', { id: t.id, prev: t.status })}
+          <p class="menu-label">Status</p><div class="chips">${status}</div>
+        </form>
+        ${formHead(ctx, '/aktion/faellig', { id: t.id, prev: date })}
+          <p class="menu-label">Fällig${t.due ? ` <span class="hint">jetzt ${esc(dueLabel(t.due, ctx.tz))}</span>` : ''}</p>
+          <div class="date-row"><label><span class="sr-only">Datum</span><input type="date" name="date" value="${esc(date)}"></label><button type="submit" name="due" value="datum" class="chip">Setzen</button></div>
+          <div class="chips">${due}${t.due ? '<button type="submit" name="due" value="keine" class="chip quiet">Ohne</button>' : ''}</div>
+        </form>
+      </div>
+    </details>`;
+}
+
 function taskItem(t, tz, ctx = {}, { area = false, mark = null, live = false } = {}) {
   const meta = [t.ref, area ? t.area : t.project, dueLabel(t.due, tz), ...(t.extra ? [t.extra] : [])].filter(Boolean).map(esc).join(' · ');
-  const lead = ctx.write && t.id
+  const writable = ctx.write && t.id;
+  const lead = writable
     ? tickForm(t, ctx)
     : `<span class="mark" aria-label="${esc(t.status)}">${mark ?? STATUS_MARK[t.status] ?? '○'}</span>`;
   return `<li class="task status-${esc(t.status)}${t.overdue ? ' overdue' : ''}" data-id="${esc(t.id ?? '')}" data-status="${esc(t.status)}" data-title="${esc(t.title)}">
     ${lead}
     <span class="body"><a href="${esc(t.url)}">${esc(t.title)}</a>${meta || live ? `<span class="meta">${meta}${live ? `${meta ? ' · ' : ''}<span class="live">läuft</span>` : ''}</span>` : ''}</span>
+    ${writable ? taskMenu(t, { ...ctx, tz }) : ''}
   </li>`;
 }
 
@@ -224,14 +275,8 @@ function captureBar(ctx, draft) {
 function flashToast(flash, ctx) {
   if (!flash?.message) return '';
   const undo =
-    flash.undo && ctx.write
-      ? `<form method="post" action="/aktion/status">
-      <input type="hidden" name="csrf" value="${esc(ctx.write.csrf)}">
-      <input type="hidden" name="back" value="${esc(ctx.back)}">
-      <input type="hidden" name="id" value="${esc(flash.undo.id)}">
-      <input type="hidden" name="status" value="${esc(flash.undo.status)}">
-      <button type="submit" class="toast-action">Rückgängig</button>
-    </form>`
+    flash.undo?.action?.startsWith('/aktion/') && ctx.write
+      ? `<form method="post" action="${esc(flash.undo.action)}" class="act">${hidden({ csrf: ctx.write.csrf, back: ctx.back, ...flash.undo.fields })}<button type="submit" class="toast-action">Rückgängig</button></form>`
       : '';
   const kind = flash.kind === 'error' ? 'error' : 'ok';
   return `<div class="toast ${kind}" role="${kind === 'error' ? 'alert' : 'status'}"><span class="toast-text">${esc(flash.message)}</span>${undo}<button type="button" class="toast-close" aria-label="Schließen">×</button></div>`;
@@ -425,6 +470,7 @@ export function renderMessage(title, text, { link = null } = {}) {
 export const CSS = `:root {
   --bg: #f6f5f2; --surface: #ffffff; --text: #1f1d1a; --muted: #6b665e; --line: #e4e0d8;
   --accent: #c2410c; --accent-soft: #fff1e8; --ok: #15803d; --warn: #b45309; --today: #fff7ed;
+  --r-sm: 6px; --r-md: 8px; --r-lg: 12px; --shadow-pop: 0 10px 30px rgb(0 0 0 / .16);
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
@@ -567,10 +613,51 @@ code { font-size: 13px; background: var(--line); padding: 1px 4px; border-radius
 .toast-action:hover { background: rgb(127 127 127 / .2); }
 .toast-close { font-size: 20px; line-height: 1; padding: 0 6px; opacity: .7; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(10px); } }
+/* --- Menü an Aufgaben: Bausteine .menu, .chip --- */
+.task { position: relative; }
+.task .body { flex: 1; }
+.menu { flex: none; }
+.menu-button { list-style: none; cursor: pointer; display: grid; place-items: center; width: 30px; height: 26px;
+  border-radius: var(--r-sm); color: var(--muted); font-size: 18px; line-height: 1; user-select: none; }
+.menu-button::-webkit-details-marker { display: none; }
+.menu-button:hover, .menu[open] > .menu-button { background: var(--line); color: var(--text); }
+.menu-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.menu-panel { position: absolute; right: 0; top: calc(100% - 2px); z-index: 6; width: min(310px, calc(100vw - 32px));
+  display: grid; gap: 12px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-lg); box-shadow: var(--shadow-pop); animation: pop-in .14s ease-out; }
+.menu-panel form { margin: 0; }
+.menu-title { display: none; margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.menu-label { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.menu-label .hint { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font: inherit; font-size: 13px; color: var(--text); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 999px; padding: 4px 12px; min-height: 32px; cursor: pointer; transition: border-color .15s, background .15s; }
+.chip:hover { border-color: var(--accent); }
+.chip:active { transform: scale(.97); }
+.chip[aria-current=true] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); cursor: default; }
+.chip.quiet { color: var(--muted); }
+.chip.danger { color: var(--warn); }
+.menu-panel form { display: flex; flex-direction: column; }
+.date-row { order: 2; display: flex; gap: 6px; margin-top: 8px; align-items: center; }
+.date-row label { flex: 1; display: flex; }
+.date-row input { flex: 1; min-width: 0; font: inherit; font-size: 14px; color: var(--text); background: var(--bg);
+  border: 1px solid var(--line); border-radius: var(--r-sm); padding: 4px 8px; min-height: 32px; }
+form.act.busy { opacity: .6; pointer-events: none; }
+@keyframes pop-in { from { opacity: 0; transform: translateY(-4px); } }
+@keyframes sheet-in { from { opacity: 0; transform: translateY(16px); } }
+main.refreshing { transition: opacity .2s; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 @media (max-width: 600px) {
+  .menu-panel { position: fixed; left: 8px; right: 8px; top: auto; bottom: max(8px, env(safe-area-inset-bottom)); width: auto;
+    z-index: 20; padding: 16px; animation-name: sheet-in; }
+  .menu-title { display: block; }
+  /* Abdunkeln dahinter; ein Tipp darauf trifft die Zusammenfassung und schließt, auch ohne JavaScript. */
+  .menu[open] > .menu-button::before { content: ''; position: fixed; inset: 0; z-index: 19; background: rgb(0 0 0 / .35); cursor: default; }
+  .chip { min-height: 40px; padding: 6px 14px; font-size: 15px; }
+  .date-row input { min-height: 40px; font-size: 16px; }
+  .menu-button { width: 36px; height: 32px; }
   .capture button.primary { padding: 8px 12px; }
   .capture-key { display: none; }
   .check { --size: 24px; }

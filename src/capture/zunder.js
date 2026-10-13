@@ -58,6 +58,12 @@ export function createZunderClient({ url, token, fetch = globalThis.fetch, timeo
       return out?.task ?? null;
     },
 
+    /** Ändert Felder einer Aufgabe (`update_task`, z. B. `due`); null entfernt einen Wert. */
+    async updateTask(id, fields) {
+      const out = await callTool('update_task', { task_id: id, ...fields });
+      return out?.task ?? null;
+    },
+
     /** Legt eine Aufgabe in der Zunder-Inbox an und liefert `{ id, ref, url }`. */
     async createTask({ title, description, vaultLinks }) {
       const args = { title: clampTitle(title) };

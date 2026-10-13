@@ -1,17 +1,22 @@
 // Progressive Enhancement für das Web-Cockpit. Ohne dieses Script funktioniert
-// alles über normale Formulare mit Weiterleitung; mit ihm passiert Abhaken und
-// Erfassen ohne Seitenwechsel, mit Rückmeldung und Rückgängig.
+// alles über normale Formulare mit Weiterleitung; mit ihm passieren Abhaken,
+// Erfassen und die Aktionen in den Menüs ohne Seitenwechsel, mit Rückmeldung
+// und Rückgängig.
 (() => {
   'use strict';
 
   const toasts = document.querySelector('.toasts');
 
-  async function post(form, extra = {}) {
+  function post(form, extra = {}) {
     const body = new URLSearchParams(new FormData(form));
     for (const [k, v] of Object.entries(extra)) body.set(k, v);
+    return send(form.action, body);
+  }
+
+  async function send(url, body) {
     let res;
     try {
-      res = await fetch(form.action, {
+      res = await fetch(url, {
         method: 'POST',
         headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' },
         body,
@@ -116,7 +121,7 @@
       const data = await post(form, { status, prev: before });
       show(li, data.task.status);
       const undo = data.undo;
-      toast(data.message, undo ? { action: { label: 'Rückgängig', run: () => setStatus(li, undo.status) } } : {});
+      toast(data.message, undo ? { action: { label: 'Rückgängig', run: () => (li.isConnected ? setStatus(li, undo.fields.status) : replay(undo)) } } : {});
     } catch (err) {
       show(li, before);
       toast(err.message, { kind: 'error' });
@@ -131,6 +136,79 @@
     if (!(form instanceof HTMLFormElement) || !form.classList.contains('tick')) return;
     e.preventDefault();
     setStatus(form.closest('li'), form.elements.status.value);
+  });
+
+  // --- Menüs: Status, Fälligkeit und weitere Aktionen ----------------------
+
+  const csrf = () => document.querySelector('input[name=csrf]')?.value ?? '';
+
+  function closeMenus(except = null) {
+    for (const d of document.querySelectorAll('details.menu[open]')) if (d !== except) d.open = false;
+  }
+
+  // Immer nur ein Menü offen; Klick daneben oder Escape schließt.
+  document.addEventListener('toggle', (e) => {
+    if (e.target instanceof HTMLDetailsElement && e.target.classList.contains('menu') && e.target.open) closeMenus(e.target);
+  }, true);
+  document.addEventListener('click', (e) => {
+    if (!(e.target instanceof Element) || !e.target.closest('details.menu')) closeMenus();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    const open = document.querySelector('details.menu[open]');
+    if (!open) return;
+    open.open = false;
+    open.querySelector('summary')?.focus();
+  });
+
+  /**
+   * Holt die Seite neu und tauscht `main` aus, damit eine geänderte Aufgabe
+   * dort steht, wo sie jetzt hingehört (z. B. nicht mehr überfällig).
+   */
+  async function refresh() {
+    try {
+      const res = await fetch(location.href, { headers: { accept: 'text/html' }, credentials: 'same-origin' });
+      if (!res.ok) return;
+      const fresh = new DOMParser().parseFromString(await res.text(), 'text/html').querySelector('main');
+      const current = document.querySelector('main');
+      if (fresh && current) current.replaceWith(document.adoptNode(fresh));
+    } catch {
+      /* Die Meldung ist schon da; die Ansicht holt beim nächsten Laden auf. */
+    }
+  }
+
+  /** Rückgängig: schickt das Formular, das den alten Stand wiederherstellt. */
+  async function replay(undo) {
+    try {
+      const data = await send(undo.action, new URLSearchParams({ ...undo.fields, csrf: csrf() }));
+      toast(data.message);
+      await refresh();
+    } catch (err) {
+      toast(err.message, { kind: 'error' });
+    }
+  }
+
+  document.addEventListener('submit', async (e) => {
+    const form = e.target;
+    if (!(form instanceof HTMLFormElement) || !form.classList.contains('act')) return;
+    e.preventDefault();
+    if (form.classList.contains('busy')) return;
+    const extra = {};
+    if (e.submitter?.name) extra[e.submitter.name] = e.submitter.value;
+    if (form.dataset.confirm && !window.confirm(form.dataset.confirm)) return;
+    form.classList.add('busy');
+    const fromToast = form.closest('.toast');
+    try {
+      const data = await post(form, extra);
+      if (fromToast) dismiss(fromToast);
+      closeMenus();
+      toast(data.message, data.undo ? { action: { label: 'Rückgängig', run: () => replay(data.undo) } } : {});
+      await refresh();
+    } catch (err) {
+      toast(err.message, { kind: 'error' });
+    } finally {
+      form.classList.remove('busy');
+    }
   });
 
   // --- Schnelleingabe -------------------------------------------------------
