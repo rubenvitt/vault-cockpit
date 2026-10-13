@@ -1,10 +1,11 @@
-import { esc } from './render.js';
-import { head, appHeader } from './layout.js';
+import { esc, formHead, flashToast } from './render.js';
+import { head, appHeader, assets } from './layout.js';
 
 /**
- * Graph- und Suchseite des Web-Cockpits, serverseitig als SVG gerendert. Wie
- * die Wochenansicht ohne JavaScript: Knoten sind Links, Klick auf eine Notiz
- * zentriert den Graphen neu.
+ * Graph- und Suchseite des Web-Cockpits, serverseitig als SVG gerendert. Ohne
+ * JavaScript sind Knoten Links, Klick auf eine Notiz zentriert den Graphen neu.
+ * Mit JavaScript ersetzt `/static/graph.js` das Bild durch einen interaktiven
+ * Graphen (sigma, Physik mit ForceAtlas2) und macht die Suche live.
  *
  * Layout radial: die Notiz in der Mitte, direkte Nachbarn (Links, ähnliche
  * Notizen, Aufgaben, Termine) auf dem inneren Ring, nach Art gruppiert, die
@@ -95,7 +96,7 @@ function svg(graph) {
   return `<svg class="graph" viewBox="0 0 ${W} ${H}" role="img" aria-label="Graph um ${esc(graph.nodes.find((n) => n.id === graph.center)?.label ?? '')}">${lines}${nodes}</svg>`;
 }
 
-function lists(graph, tz) {
+function lists(graph, tz, ctx = {}) {
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
   const c = graph.center;
   const neighbour = (e) => byId.get(e.from === c ? e.to : e.from);
@@ -114,43 +115,66 @@ function lists(graph, tz) {
   return `<section class="graph-lists">
     ${block('Verlinkt von hier', outgoing.map((n) => noteLi(n)), 'Keine ausgehenden Links.')}
     ${block('Verweist hierher', incoming.map((n) => noteLi(n)), 'Keine Backlinks.')}
-    ${block('Ähnlich, nicht verlinkt', similar.map(({ n, score }) => noteLi(n, ` <span class="score">${Math.round(score * 100)} %</span>`)), 'Keine Vorschläge.')}
+    ${block('Ähnlich, nicht verlinkt', similar.map(({ n, score }) => noteLi(n, ` <span class="score">${Math.round(score * 100)} %</span>${linkForm(ctx, byId.get(c), n)}`)), 'Keine Vorschläge.')}
     ${block('Aufgaben', tasks.map(({ n, from }) => `<li class="task status-${esc(n.status ?? 'open')}"><span class="mark">${STATUS_MARK[n.status] ?? '○'}</span><span class="body"><a href="${esc(n.url)}">${esc(n.label)}</a><span class="meta">${[n.ref, from.id === c ? null : `aus ${from.label}`].filter(Boolean).map(esc).join(' · ')}</span></span></li>`), 'Keine Zunder-Links.')}
     ${events.length ? block('Termine', events.map((e) => `<li class="event${e.allDay ? ' all-day' : ''}">${e.allDay ? '' : `<span class="time">${time(e.start)}</span>`}<span class="title">${esc(e.label)}</span></li>`), '') : ''}
   </section>`;
 }
 
-function page({ title, query = '', body, user }) {
+/** „Verlinken“: hängt `[[Ziel]]` an die Notiz in der Mitte (ohne JS als Formular). */
+function linkForm(ctx, center, target) {
+  if (!ctx.write?.notes || !center?.path || !target?.path) return '';
+  return `${formHead(ctx, '/aktion/verlinken', { pfad: center.path, ziel: target.path }).replace('class="act"', 'class="link-similar"')}<button type="submit" class="chip quiet" title="[[…]] an ${esc(center.label ?? center.path)} anhängen">Verlinken</button></form>`;
+}
+
+function page({ title, query = '', body, user, write = null, graph = false, flash = null, back = '/graph' }) {
   return `<!doctype html>
 <html lang="de">
-${head(title)}
+${head(title, { script: Boolean(write), scripts: [...(graph ? [assets.graphLib] : []), assets.graph] })}
 <body class="page-graph">
 ${appHeader({ current: 'graph', user })}
 <div class="page-head">
   <h1>${esc(title)}</h1>
-  <form method="get" action="/graph" class="search" role="search"><input type="search" name="q" value="${esc(query)}" placeholder="Vault durchsuchen" aria-label="Vault durchsuchen" enterkeyhint="search"><button type="submit" class="btn">Suchen</button></form>
+  <form method="get" action="/graph" class="search" role="search"><input type="search" name="q" value="${esc(query)}" placeholder="Vault durchsuchen" aria-label="Vault durchsuchen" enterkeyhint="search" autocomplete="off" spellcheck="false"><button type="submit" class="btn">Suchen</button></form>
 </div>
 <main>
 ${body}
 </main>
+<div class="toasts" aria-live="polite">${flashToast(flash, { write, back })}</div>
 </body>
 </html>`;
 }
 
-export function renderGraph(graph, { vaultName = null, user = null, tz = 'Europe/Berlin' } = {}) {
+/**
+ * @param {object} [opts.write]  `{ csrf, notes }`, wenn die Seite schreiben darf (Verlinken)
+ * @param {string} [opts.back]   Rücksprung nach einer Aktion ohne JavaScript
+ * @param {object} [opts.flash]  Meldung aus der letzten Aktion
+ */
+export function renderGraph(graph, { vaultName = null, user = null, tz = 'Europe/Berlin', write = null, back = '/graph', flash = null } = {}) {
   const center = graph.nodes.find((n) => n.id === graph.center);
   const link = obsidianLink(center.path, vaultName);
   const problems = graph.problems.length ? graph.problems.map((p) => `<p class="problem">${esc(p)}</p>`).join('') : '';
+  const ctx = { write, back };
+  const attrs = [`data-center="${esc(center.path)}"`, write?.notes ? 'data-notes="1"' : '', write ? `data-csrf="${esc(write.csrf)}"` : ''].filter(Boolean).join(' ');
   return page({
     title: center.label,
     user,
-    body: `<section>
-      <p class="meta">${esc(center.path)}${link ? ` · <a href="${esc(link)}">In Obsidian öffnen</a>` : ''}</p>
-      ${svg(graph)}
-      <p class="legend"><span class="key link">Link</span><span class="key semantic">ähnlich, nicht verlinkt</span><span class="key task">Aufgabe</span><span class="key event">Termin</span></p>
+    write,
+    graph: true,
+    flash,
+    back,
+    body: `<section class="graph-panel">
+      <p class="meta">${esc(center.path)}${write?.notes ? ` · <a href="/notiz?pfad=${esc(encodeURIComponent(center.path))}">Notiz ansehen</a>` : ''}${link ? ` · <a href="${esc(link)}">In Obsidian öffnen</a>` : ''}</p>
+      <div class="graph-stage" ${attrs}>${svg(graph)}</div>
+      <div class="legend" data-filters>
+        <label class="key k-link"><input type="checkbox" name="link" checked hidden>Link</label>
+        <label class="key k-semantic"><input type="checkbox" name="semantic" checked hidden>ähnlich, nicht verlinkt</label>
+        <label class="key k-task"><input type="checkbox" name="task" checked hidden>Aufgabe</label>
+        <label class="key k-event"><input type="checkbox" name="event" checked hidden>Termin</label>
+      </div>
       ${problems}
     </section>
-    ${lists(graph, tz)}`,
+    ${lists(graph, tz, ctx)}`,
   });
 }
 
@@ -191,9 +215,9 @@ export const GRAPH_CSS = `
 .graph .node.center text { font-weight: 600; font-size: 15px; }
 .legend { display: flex; flex-wrap: wrap; gap: 16px; color: var(--muted); font-size: 13px; margin: 8px 0 0; }
 .legend .key::before { content: ""; display: inline-block; width: 22px; margin-right: 6px; vertical-align: middle; border-top: 2px solid var(--muted); }
-.legend .key.semantic::before { border-top: 2px dashed var(--accent); }
-.legend .key.task::before { border-color: var(--ok); }
-.legend .key.event::before { border-color: var(--warn); }
+.legend .k-semantic::before { border-top: 2px dashed var(--accent); }
+.legend .k-task::before { border-color: var(--ok); }
+.legend .k-event::before { border-color: var(--warn); }
 .graph-lists { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px 24px; }
 .graph-lists h3 { margin-top: 0; }
 .graph-lists li { padding: 3px 0; }
@@ -201,4 +225,56 @@ export const GRAPH_CSS = `
 .results li { padding: 8px 0; border-top: 1px solid var(--line); }
 .results li:first-child { border-top: 0; }
 .snippet { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+.graph-lists li form { display: inline; margin: 0 0 0 6px; }
+.graph-lists .chip { min-height: 26px; padding: 2px 10px; font-size: 12px; }
+
+/* --- Interaktiver Graph (/static/graph.js) --- */
+.graph-panel > .meta { margin: 0 0 12px; }
+.graph-stage { position: relative; }
+.graph-stage.interactive { height: min(72vh, 780px); min-height: 420px; margin: 0 calc(-1 * var(--s-6)); border-block: 1px solid var(--line);
+  background: radial-gradient(circle at 50% 45%, var(--surface), var(--bg)); overflow: hidden; touch-action: none; }
+.graph-stage.interactive > svg { display: none; }
+.graph-stage.interactive.loading::after { content: 'Graph wird aufgebaut …'; position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); }
+.graph-stage canvas { outline: none; }
+.graph-stage.dragging, .graph-stage.dragging canvas { cursor: grabbing; }
+.graph-stage.over-node canvas { cursor: pointer; }
+.graph-zoom { position: absolute; z-index: 2; right: 12px; top: 12px; display: grid; gap: 4px; }
+.graph-zoom button { width: 34px; height: 34px; display: grid; place-items: center; font: inherit; font-size: 18px; line-height: 1; cursor: pointer;
+  color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); box-shadow: 0 1px 2px rgb(0 0 0 / .06); }
+.graph-zoom button:hover { border-color: var(--accent); }
+.graph-zoom svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.graph-card { position: absolute; z-index: 3; left: 12px; bottom: 12px; width: min(340px, calc(100% - 24px)); display: grid; gap: 8px;
+  padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-pop);
+  animation: pop-in .14s ease-out; }
+.graph-card[hidden] { display: none; }
+.graph-card h3 { margin: 0; font-size: 15px; overflow-wrap: anywhere; padding-right: 24px; }
+.graph-card .meta { overflow-wrap: anywhere; }
+.graph-card .chips { margin-top: 2px; }
+.graph-card .chip { text-decoration: none; display: inline-flex; align-items: center; }
+.graph-card .close { position: absolute; top: 6px; right: 6px; width: 28px; height: 28px; border: 0; background: none; color: var(--muted);
+  font-size: 18px; cursor: pointer; border-radius: var(--r-sm); }
+.graph-card .close:hover { background: var(--line); color: var(--text); }
+.legend label { cursor: pointer; user-select: none; transition: opacity .15s; }
+.legend.interactive label { padding: 2px 8px 2px 4px; border-radius: 999px; border: 1px solid transparent; }
+.legend.interactive label:hover { border-color: var(--line); }
+.legend label.off { opacity: .4; text-decoration: line-through; }
+.legend .hint { margin-left: auto; }
+
+/* Live-Suche */
+.page-head .search { position: relative; }
+.live-results { position: absolute; z-index: 8; top: calc(100% + 6px); right: 0; width: min(440px, calc(100vw - 24px)); max-height: 70vh; overflow-y: auto;
+  padding: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-pop);
+  animation: pop-in .12s ease-out; }
+.live-results[hidden] { display: none; }
+.live-results a { display: block; padding: 8px 10px; border-radius: var(--r-md); text-decoration: none; }
+.live-results a[aria-selected=true], .live-results a:hover { background: var(--accent-soft); }
+.live-results .title { display: block; font-weight: 600; overflow-wrap: anywhere; }
+.live-results .snippet { margin: 2px 0 0; font-size: 13px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.live-results .empty { padding: 8px 10px; }
+.live-results .all { color: var(--muted); font-size: 13px; }
+@media (max-width: 700px) {
+  .graph-stage.interactive { height: 60vh; min-height: 340px; margin: 0 calc(-1 * var(--s-4)); }
+  .live-results { left: 0; right: auto; }
+  .graph-card { left: 8px; right: 8px; bottom: 8px; width: auto; }
+}
 `;

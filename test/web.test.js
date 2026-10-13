@@ -869,6 +869,11 @@ function fakeNotes() {
       calls.push(['feuer', p, field, text]);
       return { path: p, changed: true, previous: 'Altes Ziel', heading: field === 'ziel' ? 'Feuer-Ziel' : 'Erster Zug' };
     },
+    link(p, target) {
+      calls.push(['link', p, target]);
+      if (target === 'privat/geheim.md') throw new ActionError('Das Ziel gibt es nicht oder das Cockpit darf es nicht verlinken', 404);
+      return { path: p, target, title: 'B', changed: target !== 'wiki/c.md' };
+    },
     createFeuer(week, goal, firstMove) {
       calls.push(['feuer-anlegen', week, goal, firstMove]);
       if (week === '2026-W42' && goal === 'doppelt') throw new ActionError('Für diese Woche gibt es schon „Feuer W3 - 2026-Q4“', 409);
@@ -974,6 +979,67 @@ test('Feuer-Ziel bearbeiten: Formular an der Feuer-Notiz, Speichern mit Rückgä
     {},
     { actions: fakeActions() },
   );
+});
+
+test('Interaktiver Graph: Skripte ausgeliefert, Live-Suche als JSON, Verlinken mit und ohne JavaScript', async () => {
+  const notes = fakeNotes();
+  await withServer(
+    async ({ call, login }) => {
+      assert.equal((await call('/api/suche?q=hund')).status, 401);
+      await login('/graph');
+
+      const lib = await call('/static/vendor/graph-lib.js');
+      assert.equal(lib.status, 200);
+      assert.match(lib.headers.get('content-type'), /text\/javascript/);
+      assert.match(await lib.text(), /var GraphLib=/);
+      const js = await call('/static/graph.js');
+      assert.equal(js.status, 200);
+      assert.match(await js.text(), /\/api\/suche/);
+
+      const found = await (await call('/api/suche?q=hund')).json();
+      assert.deepEqual(found.results, [{ path: 'wiki/a.md', title: 'A', snippet: 'zu hund', streams: ['text', 'semantic'] }]);
+      assert.deepEqual((await (await call('/api/suche?q=')).json()).results, []);
+
+      const page = await call('/graph?pfad=wiki%2Fa.md');
+      assert.match(page.headers.get('content-security-policy'), /script-src 'self';/);
+      const html = await page.text();
+      // Mit Versions-Parameter, damit nach einem Deploy keine alte Fassung aus dem Cache kommt.
+      const libSrc = html.match(/<script src="(\/static\/vendor\/graph-lib\.js\?v=[\w-]+)" defer><\/script>/)?.[1];
+      assert.ok(libSrc, 'graph-lib.js mit Version');
+      assert.match((await call(libSrc)).headers.get('cache-control'), /immutable/);
+      assert.match(html, /data-center="wiki\/a\.md" data-notes="1" data-csrf="/);
+      assert.match(html, /action="\/aktion\/verlinken" class="link-similar">[^]*?name="pfad" value="wiki\/a\.md"[^]*?name="ziel" value="wiki\/b\.md"/);
+      const csrf = csrfFrom(html);
+      const back = '/graph?pfad=wiki%2Fa.md';
+
+      const linked = await (await call('/aktion/verlinken', { method: 'POST', form: { pfad: 'wiki/a.md', ziel: 'wiki/b.md', csrf, back }, accept: 'application/json' })).json();
+      assert.equal(linked.message, 'Verlinkt: B');
+      assert.equal(linked.target, 'wiki/b.md');
+      const again = await (await call('/aktion/verlinken', { method: 'POST', form: { pfad: 'wiki/a.md', ziel: 'wiki/c.md', csrf }, accept: 'application/json' })).json();
+      assert.equal(again.message, 'Schon verlinkt: B');
+
+      // Ohne JavaScript: zurück zum Graphen, Meldung per Cookie; auch bei Fehlern.
+      const plain = await call('/aktion/verlinken', { method: 'POST', form: { pfad: 'wiki/a.md', ziel: 'wiki/b.md', csrf, back } });
+      assert.equal(plain.status, 303);
+      assert.equal(plain.headers.get('location'), back);
+      const denied = await call('/aktion/verlinken', { method: 'POST', form: { pfad: 'wiki/a.md', ziel: 'privat/geheim.md', csrf, back } });
+      assert.equal(denied.status, 303);
+      assert.equal(denied.headers.get('location'), back);
+      assert.match(denied.headers.get('set-cookie'), /vc_flash=/);
+
+      assert.equal((await call('/aktion/verlinken', { method: 'POST', form: { pfad: 'wiki/a.md', ziel: 'wiki/b.md', csrf: 'falsch' }, accept: 'application/json' })).status, 403);
+      assert.deepEqual(notes.calls.map((c) => c[2]), ['wiki/b.md', 'wiki/c.md', 'wiki/b.md', 'privat/geheim.md']);
+    },
+    {},
+    { actions: fakeActions(), notes },
+  );
+  // Ohne Notiz-Schreibtisch keine Verlinken-Knöpfe, der Graph bleibt interaktiv.
+  await withServer(async ({ call, login }) => {
+    await login('/graph');
+    const html = await (await call('/graph?pfad=wiki%2Fa.md')).text();
+    assert.ok(!html.includes('/aktion/verlinken'));
+    assert.match(html, /<script src="\/static\/graph\.js\?v=[\w-]+" defer>/);
+  });
 });
 
 test('Feuer anlegen: Formular nur ohne Feuer-Notiz und nicht für vergangene Wochen', async () => {

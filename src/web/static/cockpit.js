@@ -334,6 +334,9 @@
     });
   }
 
+  // Für `/static/graph.js`: Meldungen und Aktionen im gleichen Stil.
+  window.cockpit = { toast, send, csrf };
+
   function prepend(result, sent) {
     if (!result || result.duplicate) return;
     const list = document.querySelector(`ul[data-list="${result.kind === 'task' ? 'zunder-inbox' : 'vault-inbox'}"]`);

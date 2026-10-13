@@ -360,6 +360,12 @@ export function openIndex(dbOrPath, { vaultPath = process.env.VAULT_PATH ?? '/va
       return db.prepare("SELECT path FROM notes WHERE class = 'core' ORDER BY path").all().map((r) => r.path);
     },
 
+    /** Wie viele Notizen diesen Basename tragen (ohne `.md`, Groß-/Kleinschreibung egal), wie bei der Link-Auflösung. */
+    basenameCount(basename) {
+      const key = String(basename ?? '').toLowerCase();
+      return db.prepare('SELECT basename FROM notes').all().filter((r) => r.basename.toLowerCase() === key).length;
+    },
+
     /** Metadaten mehrerer Notizen ohne Inhalt, als Map path → Zeile. */
     describe(paths) {
       const out = new Map();

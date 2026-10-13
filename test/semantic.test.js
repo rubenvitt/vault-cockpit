@@ -299,7 +299,7 @@ test('Graph: Links, semantische Kanten, Aufgaben mit Zunder-Status und Termine d
   s.close();
 });
 
-test('Graph-Seite: SVG mit Knoten als Links, gestrichelte semantische Kanten, kein Skript', async () => {
+test('Graph-Seite: SVG mit Knoten als Links als Fallback, Skripte nur als eigene Dateien', async () => {
   const s = await semanticIndex();
   const g = await createGraph({ index, semantic: s, logger: quiet }).around('wiki/hund.md', { minSimilarity: 0, depth: 2 });
   const html = renderGraph(g, { vaultName: 'r-notes', user: 'ruben' });
@@ -308,7 +308,15 @@ test('Graph-Seite: SVG mit Knoten als Links, gestrichelte semantische Kanten, ke
   assert.match(html, /href="\/graph\?pfad=wiki%2Fbewegung\.md"/);
   assert.match(html, /obsidian:\/\/open\?vault=r-notes&amp;file=wiki%2Fhund/);
   assert.match(html, /Ähnlich, nicht verlinkt/);
-  assert.doesNotMatch(html, /<script/i);
+  // Kein Inline-Skript (CSP `script-src 'self'`), nur die eigenen Dateien.
+  assert.deepEqual([...html.matchAll(/<script[^>]*>/g)].map((m) => m[0]), ['<script src="/static/vendor/graph-lib.js" defer>', '<script src="/static/graph.js" defer>']);
+  assert.match(html, /class="graph-stage" data-center="wiki\/hund\.md"/);
+  assert.doesNotMatch(html, /Verlinken/, 'ohne Schreibrecht keine Knöpfe');
+  const writable = renderGraph(g, { user: 'ruben', write: { csrf: 'tok', notes: true }, back: '/graph?pfad=wiki%2Fhund.md' });
+  assert.match(writable, /<form method="post" action="\/aktion\/verlinken" class="link-similar"><input type="hidden" name="csrf" value="tok">/);
+  assert.match(writable, /name="pfad" value="wiki\/hund\.md"/);
+  assert.match(writable, /data-csrf="tok"/);
+  assert.match(writable, /<script src="\/static\/cockpit\.js" defer>/);
   const pos = layout(g);
   for (const n of g.nodes) assert.ok(pos.has(n.id), `Position für ${n.id}`);
 

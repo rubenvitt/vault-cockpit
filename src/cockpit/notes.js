@@ -112,6 +112,23 @@ export function createNoteDesk({ index, editor, policy, settings }) {
       return edit(() => editor.append({ path, text: String(text).slice(0, 20_000) }));
     },
 
+    /**
+     * Wikilink von `path` nach `target` am Ende der Notiz anhängen („ähnlich,
+     * aber nicht verlinkt“ im Graphen). Über den Basename, wenn er eindeutig
+     * ist, sonst über den Pfad, damit der Link genau dieses Ziel trifft.
+     */
+    link(path, target) {
+      mustSee(path);
+      const to = visible(target);
+      if (!to) throw new ActionError('Das Ziel gibt es nicht oder das Cockpit darf es nicht verlinken', 404);
+      if (to.path === path) throw new ActionError('Eine Notiz verlinkt sich nicht selbst');
+      const title = to.title ?? to.path.split('/').pop().replace(/\.md$/i, '');
+      if (index.outgoingLinks(path).some((l) => l.path === to.path)) return { path, target: to.path, title, changed: false };
+      const base = to.path.split('/').pop().replace(/\.md$/i, '');
+      const name = index.basenameCount(base) === 1 ? base : to.path.replace(/\.md$/i, '');
+      return { ...edit(() => editor.append({ path, text: `- [[${name}]]` })), target: to.path, title, changed: true };
+    },
+
     /** Feuer-Ziel (`ziel`) oder Ersten Zug (`zug`) in der Feuer-Notiz der Woche ersetzen. */
     setFeuer(path, field, text) {
       const row = mustSee(path);

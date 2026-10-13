@@ -12,10 +12,13 @@ import { ActionError, SETTABLE } from '../cockpit/actions.js';
 
 const staticFile = (name, enc) => readFileSync(new URL(`./static/${name}`, import.meta.url), enc);
 const CLIENT_JS = staticFile('cockpit.js', 'utf8');
+const GRAPH_JS = staticFile('graph.js', 'utf8');
+// sigma + graphology + ForceAtlas2, gebündelt mit `npm run vendor` und eingecheckt.
+const GRAPH_LIB = staticFile('vendor/graph-lib.js', 'utf8');
 // Design-System (Tokens, Bausteine, Wochenansicht) plus die Teile der übrigen Seiten.
 const CSS = staticFile('cockpit.css', 'utf8') + GRAPH_CSS + NOTE_CSS + REVIEW_CSS;
 const hash = (s) => createHash('sha256').update(s).digest('base64url').slice(0, 10);
-const VERSION = { css: hash(CSS), js: hash(CLIENT_JS) };
+const VERSION = { css: hash(CSS), js: hash(CLIENT_JS), graph: hash(GRAPH_JS), graphLib: hash(GRAPH_LIB) };
 versionAssets(VERSION);
 
 /** Web-App-Manifest: Das Cockpit startet auf dem iPhone und unter Android wie eine App. */
@@ -45,6 +48,8 @@ const MANIFEST = JSON.stringify({
 const PUBLIC = new Map([
   ['/static/cockpit.css', { type: 'text/css; charset=utf-8', body: CSS, version: VERSION.css }],
   ['/static/cockpit.js', { type: 'text/javascript; charset=utf-8', body: CLIENT_JS, version: VERSION.js }],
+  ['/static/graph.js', { type: 'text/javascript; charset=utf-8', body: GRAPH_JS, version: VERSION.graph }],
+  ['/static/vendor/graph-lib.js', { type: 'text/javascript; charset=utf-8', body: GRAPH_LIB, version: VERSION.graphLib }],
   ['/manifest.webmanifest', { type: 'application/manifest+json; charset=utf-8', body: MANIFEST }],
   ['/static/icon.svg', { type: 'image/svg+xml', body: staticFile('icon.svg') }],
   ...['apple-touch-icon', 'icon-192', 'icon-512', 'icon-maskable-512'].map((n) => [`/static/icons/${n}.png`, { type: 'image/png', body: staticFile(`icons/${n}.png`) }]),
@@ -90,7 +95,10 @@ const HTML_HEADERS = {
  * - `GET /` und `GET /api/woche` — `?woche=2026-W42`, ohne Angabe die laufende Woche.
  * - `GET /rueckblick?woche=…` — Wochenrückblick (erledigt gegen geplant, Flammen-Zeit).
  * - `GET /graph?q=…` sucht (hybrid), `GET /graph?pfad=…` zeigt den Graphen um
- *   eine Notiz; `GET /api/graph?pfad=…` liefert ihn als JSON.
+ *   eine Notiz; `GET /api/graph?pfad=…` liefert ihn als JSON, `GET /api/suche?q=…`
+ *   die besten Treffer für die Live-Suche. Mit JavaScript wird der Graph
+ *   interaktiv (`/static/graph.js` mit sigma aus `/static/vendor/graph-lib.js`),
+ *   ohne bleibt das SVG.
  * - `GET /login` → Pocket ID → `GET /auth/callback` setzt die Sitzung (12 h).
  * - `POST /logout` löscht sie. SameSite=Lax hält fremde Seiten davon ab.
  * - `GET`/`POST /einstellungen` — Kalender, Zunder-Zugang und -Brücke, Mail-Abruf,
@@ -102,6 +110,7 @@ const HTML_HEADERS = {
  *   `POST /aktion/flamme` startet (`an=1`) oder stoppt eine Flamme,
  *   `POST /aktion/notiz/…` legt eine Notiz ab, setzt Tags, hängt Text an oder
  *   hakt eine Checkbox ab (Vorschau unter `GET /notiz?pfad=…`),
+ *   `POST /aktion/verlinken` hängt einen Wikilink zu einer ähnlichen Notiz an,
  *   `POST /aktion/erfassen` ist die Schnelleingabe (Notiz, mit `!` eine
  *   Zunder-Aufgabe). Alle brauchen Sitzung, gleiche Herkunft und das CSRF-Token
  *   der Sitzung. Mit `Accept: application/json` antworten sie mit JSON (für
@@ -229,6 +238,8 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   /** Seite hinter `back` mit Meldung (Weg ohne JavaScript, wenn eine Aktion scheitert). */
   const backPage = (req, res, back, session, opts) => {
     const url = new URL(back, publicUrl);
+    // Die Graphseite rendert sich aus der Meldung im Cookie neu.
+    if (url.pathname === '/graph') return redirect(res, back, [flashCookie(opts.flash)]);
     return url.pathname === '/notiz' && notes ? notePage(req, res, url, session, opts) : page(req, res, url, session, opts);
   };
   /** Nach dem Verschieben gibt es die alte Notizseite nicht mehr. */
@@ -330,6 +341,11 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
                 logger.info?.(`Cockpit: ${r.heading} in ${r.path} (${session.sub})`);
                 const undo = r.changed && r.previous ? { action: '/aktion/feuer', fields: { pfad: r.path, feld: form.get('feld'), text: r.previous } } : null;
                 return { message: r.changed ? `${r.heading} gespeichert` : `${r.heading} unverändert`, path: r.path, undo };
+              },
+              async '/aktion/verlinken'(form, session) {
+                const r = notes.link(form.get('pfad'), form.get('ziel'));
+                if (r.changed) logger.info?.(`Cockpit: ${r.path} → [[${r.target}]] (${session.sub})`);
+                return { message: r.changed ? `Verlinkt: ${r.title}` : `Schon verlinkt: ${r.title}`, path: r.path, target: r.target };
               },
               async '/aktion/feuer/anlegen'(form, session) {
                 const r = notes.createFeuer(form.get('woche'), form.get('ziel'), form.get('zug'));
@@ -540,7 +556,16 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     const g = graph ? await graph.around(path) : null;
     if (!g) return send(res, 404, renderMessage('Notiz nicht gefunden', `„${path}“ gibt es nicht im Index.`, { link: { href: '/graph', label: 'Zur Suche' } }));
     const { vaultName, tz } = settings.get();
-    return send(res, 200, renderGraph(g, { vaultName, user, tz }));
+    return send(res, 200, renderGraph(g, { vaultName, user, tz, write: writeContext(req), back: url.pathname + url.search, flash: takeFlash(req, res) }));
+  }
+
+  /** Live-Suche: die besten Treffer, knapp. */
+  async function searchApi(req, res, url) {
+    const q = (url.searchParams.get('q') ?? '').trim().slice(0, 500);
+    if (!q || !search) return json(res, 200, { query: q, results: [], total: 0 });
+    const r = await search(q);
+    const results = r.results.slice(0, 8).map((x) => ({ path: x.path, title: x.title ?? x.path, snippet: x.snippet ?? null, streams: x.streams ?? [] }));
+    return json(res, 200, { query: q, results, total: r.total, degraded: r.degraded ?? null });
   }
 
   async function graphApi(req, res, url) {
@@ -552,7 +577,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   const TOKEN_ROUTES = { '/einstellungen/tokens': createToken, '/einstellungen/tokens/widerrufen': revokeToken };
   const ACTION_ROUTES = new Set(Object.keys(ACTIONS));
   const SHORTCUT_ROUTES = new Map(shortcuts.map((s) => [`/kurzbefehle/${s.slug}.shortcut`, s]));
-  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...PUBLIC.keys(), '/', '/api/woche', '/rueckblick', ...(notes ? ['/notiz'] : []), '/graph', '/api/graph', '/einstellungen', ...(tokens ? Object.keys(TOKEN_ROUTES) : []), '/login', '/auth/callback', '/logout']);
+  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...PUBLIC.keys(), '/', '/api/woche', '/api/suche', '/rueckblick', ...(notes ? ['/notiz'] : []), '/graph', '/api/graph', '/einstellungen', ...(tokens ? Object.keys(TOKEN_ROUTES) : []), '/login', '/auth/callback', '/logout']);
 
   return {
     matches: (path) => ROUTES.has(path),
@@ -621,6 +646,10 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       if (path === '/api/graph') {
         if (!session) return json(res, 401, { error: 'unauthorized', error_description: 'Anmeldung unter /login nötig' });
         return graphApi(req, res, url);
+      }
+      if (path === '/api/suche') {
+        if (!session) return json(res, 401, { error: 'unauthorized', error_description: 'Anmeldung unter /login nötig' });
+        return searchApi(req, res, url);
       }
       if (!session) return redirect(res, `/login?next=${encodeURIComponent(url.pathname + url.search)}`);
       if (path === '/graph') return graphPage(req, res, url, session);

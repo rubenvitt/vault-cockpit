@@ -128,6 +128,31 @@ test('setTags, append, toggle schreiben in die Notiz', () => {
   assert.throws(() => desk.toggle('00-inbox/Idee.md', '0', '- [ ] anders', true), (e) => e.status === 400);
 });
 
+test('link: hängt einen Wikilink an, eindeutig über Basename oder Pfad, nie zu vertraulichen Notizen', () => {
+  put('wiki/Hund.md', '# Hund\n\nText\n');
+  put('wiki/Plan.md', '# Anderer Plan\n');
+  put('wiki/Bewegung.md', '# Bewegung\n');
+  idx.close();
+  buildIndex({ vaultPath: root, dbPath: ':memory:', policy, persist: (db, vp) => (idx = openIndex(db, { vaultPath: vp, policy })) });
+  desk = createNoteDesk({ index: idx, editor: createEditor({ vaultPath: root, index: idx }), policy, settings: createSettingsStore({ defaults: { inboxFolder: '00-inbox' }, logger: quiet }) });
+
+  const r = desk.link('wiki/Hund.md', 'wiki/Bewegung.md');
+  assert.equal(r.changed, true);
+  assert.equal(r.title, 'Bewegung');
+  assert.equal(read('wiki/Hund.md'), '# Hund\n\nText\n- [[Bewegung]]\n');
+  assert.ok(idx.outgoingLinks('wiki/Hund.md').some((l) => l.path === 'wiki/Bewegung.md'), 'Index kennt den neuen Link');
+  assert.equal(desk.link('wiki/Hund.md', 'wiki/Bewegung.md').changed, false, 'schon verlinkt');
+
+  // „Plan“ gibt es zweimal: dann über den Pfad, damit der Link eindeutig trifft.
+  desk.link('wiki/Hund.md', '10-projekte/Hund/Plan.md');
+  assert.match(read('wiki/Hund.md'), /- \[\[10-projekte\/Hund\/Plan\]\]\n$/);
+  assert.ok(idx.outgoingLinks('wiki/Hund.md').some((l) => l.path === '10-projekte/Hund/Plan.md'));
+
+  assert.throws(() => desk.link('wiki/Hund.md', '20-bereiche/Gesundheit/Werte.md'), /darf es nicht verlinken/);
+  assert.throws(() => desk.link('20-bereiche/Gesundheit/Werte.md', 'wiki/Hund.md'), /nicht bearbeiten/);
+  assert.throws(() => desk.link('wiki/Hund.md', 'wiki/Hund.md'), /nicht selbst/);
+});
+
 test('renderMarkdown: maskiert alles, Links nur mit http(s), Checkboxen gezählt', () => {
   const html = renderMarkdown(
     '# Titel\n\nText mit **fett**, *kursiv*, `<code>` und <script>alert(1)</script>\n\n- [ ] eins\n- [x] zwei\n\n```\n- [ ] kein Kasten\n```\n\n[gut](https://a.test/x) [böse](javascript:alert(1)) [[Seite|Anzeige]] #tag\n\n> Zitat',
