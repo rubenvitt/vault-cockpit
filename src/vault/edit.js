@@ -1,5 +1,5 @@
-import { readFileSync, writeFileSync, realpathSync } from 'node:fs';
-import { join, sep } from 'node:path';
+import { readFileSync, writeFileSync, realpathSync, renameSync, mkdirSync, existsSync } from 'node:fs';
+import { join, sep, dirname } from 'node:path';
 import { KEY_ALIASES } from './markdown.js';
 
 // Tabulator ist erlaubt, Zeilenumbrüche und andere Steuerzeichen nicht.
@@ -7,6 +7,7 @@ const CTRL_OR_NEWLINE = /[\u0000-\u0008\u000a-\u001f]/;
 const KEY = /^[A-Za-zÄÖÜäöüß0-9_-]+$/;
 const HEADING = /^(#{1,6})\s+(.+?)(?:\s+#+)?\s*$/;
 const FENCE = /^\s*(```|~~~)/;
+const CHECKBOX = /^(\s*[-*+]\s+\[)([ xX])(\]\s?.*)$/;
 
 /**
  * Bearbeiten bestehender Notizen.
@@ -61,7 +62,107 @@ export function createEditor({ vaultPath, index }) {
     return { path: relPath, changed: true, chars_before: before.length, chars_after: content.length, ...details };
   }
 
+  /** Nach dem Verschieben beide Pfade neu einlesen (der Manager löst Links dann neu auf). */
+  function reindex(paths) {
+    try {
+      if (index.applyChanges) index.applyChanges(paths);
+      else {
+        for (const p of paths) index.refresh?.(p);
+        index.relinkAll?.();
+      }
+    } catch {
+      /* der nächste Komplettaufbau holt es nach */
+    }
+  }
+
   return {
+    /**
+     * Verschiebt eine Notiz in einen anderen Ordner (gleicher Dateiname). Ob
+     * der Zielordner erlaubt ist (Policy), prüft der Aufrufer; hier geht es um
+     * Pfad-Sicherheit: kein `..`, nichts außerhalb des Vaults, nichts
+     * überschreiben.
+     */
+    move({ path, folder }) {
+      const { relPath, absolute } = resolveTarget(path);
+      const target = String(folder ?? '').replace(/^\/+|\/+$/g, '');
+      if (!target || target.split('/').some((p) => !p.trim() || p === '.' || p === '..' || p.startsWith('.')) || CTRL_OR_NEWLINE.test(target) || target.includes('\\')) {
+        throw new Error(`„${folder}“ ist kein gültiger Ordner`);
+      }
+      const name = relPath.split('/').pop();
+      const to = `${target}/${name}`;
+      if (to === relPath) return { path: relPath, from: relPath, changed: false };
+      const destination = join(vaultPath, to);
+      if (existsSync(destination)) throw new Error(`In „${target}“ gibt es schon eine Notiz „${name}“`);
+      // Auch der Zielordner darf nicht per Symlink aus dem Vault herausführen:
+      // den tiefsten vorhandenen Ordner prüfen, bevor etwas angelegt wird.
+      let existing = dirname(destination);
+      while (!existsSync(existing)) existing = dirname(existing);
+      const real = realpathSync(existing);
+      if (real !== vaultReal && !real.startsWith(vaultReal + sep)) throw new Error(`„${target}“ zeigt aus dem Vault heraus`);
+      mkdirSync(dirname(destination), { recursive: true });
+      renameSync(absolute, destination);
+      reindex([relPath, to]);
+      return { path: to, from: relPath, changed: true };
+    },
+
+    /**
+     * Hakt die `n`-te Checkbox (ab 0, Codeblöcke zählen nicht) ab oder wieder
+     * auf. `line` ist der erwartete Zeilentext: Hat sich die Notiz seit dem
+     * Anzeigen verschoben, wird nichts geändert.
+     */
+    toggleTask({ path, n, line, done }) {
+      return modify(path, (content) => {
+        const eol = content.includes('\r\n') ? '\r\n' : '\n';
+        const lines = content.split(/\r?\n/);
+        let seen = -1;
+        let fence = null;
+        for (let i = frontmatterEnd(lines); i < lines.length; i += 1) {
+          const f = lines[i].match(FENCE);
+          if (f) {
+            if (fence === null) fence = f[1];
+            else if (fence === f[1]) fence = null;
+            continue;
+          }
+          if (fence) continue;
+          const m = lines[i].match(CHECKBOX);
+          if (!m || ++seen !== Number(n)) continue;
+          if (line != null && lines[i].trim() !== String(line).trim()) break;
+          lines[i] = `${m[1]}${done ? 'x' : ' '}${m[3]}`;
+          return { content: lines.join(eol), line: lines[i].trim() };
+        }
+        throw new Error('Die Checkbox steht nicht mehr an dieser Stelle. Bitte neu laden.');
+      });
+    },
+
+    /**
+     * Ersetzt den ersten Absatz unter `## <heading>` (wie ihn das Cockpit
+     * anzeigt). Fehlt der Abschnitt, kommt er ans Ende; ist er leer, kommt der
+     * Text direkt unter die Überschrift. Der Rest der Notiz bleibt unberührt.
+     */
+    setSectionParagraph({ path, heading, text }) {
+      const paragraph = String(text ?? '').replace(/\s*\n\s*/g, ' ').trim();
+      if (!paragraph) throw new Error('Text darf nicht leer sein');
+      const wanted = String(heading ?? '').trim().toLowerCase();
+      return modify(path, (content) => {
+        const eol = content.includes('\r\n') ? '\r\n' : '\n';
+        const lines = content.split(/\r?\n/);
+        const h = findHeadings(lines, frontmatterEnd(lines)).find((x) => x.level === 2 && x.text.toLowerCase() === wanted);
+        if (!h) {
+          while (lines.length && lines.at(-1).trim() === '') lines.pop();
+          lines.push('', `## ${heading}`, '', paragraph, '');
+          return { content: lines.join(eol), previous: null };
+        }
+        let i = h.line + 1;
+        while (i < lines.length && lines[i].trim() === '') i += 1;
+        let end = i;
+        while (end < lines.length && lines[end].trim() !== '' && !/^#{1,6}\s/.test(lines[end])) end += 1;
+        const previous = end > i ? lines.slice(i, end).map((l) => l.trim()).join(' ') : null;
+        if (end > i) lines.splice(i, end - i, paragraph);
+        else lines.splice(h.line + 1, i - h.line - 1, '', paragraph, '');
+        return { content: lines.join(eol), previous };
+      });
+    },
+
     replace({ path, oldText, newText, replaceAll = false }) {
       const search = String(oldText ?? '');
       const replacement = String(newText ?? '');

@@ -291,6 +291,14 @@ export function openIndex(dbOrPath, { vaultPath = process.env.VAULT_PATH ?? '/va
         .all(prefix, prefix, `${prefix}/%`, limit);
     },
 
+    /** Ordner mit eigenen, nicht vertraulichen Notizen (für „Ablegen“). */
+    folders() {
+      return db
+        .prepare(`SELECT DISTINCT folder FROM notes WHERE folder != '' AND class = 'core' AND sensitivity IS NULL ORDER BY folder`)
+        .all()
+        .map((r) => r.folder);
+    },
+
     /** Pfade eigener, nicht vertraulicher Notizen mit diesem Tag (auch inline). */
     pathsWithTag(tag) {
       return db

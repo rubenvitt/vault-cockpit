@@ -23,7 +23,7 @@ export function inline(md) {
     .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>');
 }
 
-function dueLabel(due, tz) {
+export function dueLabel(due, tz) {
   if (!due) return '';
   if (/^\d{4}-\d{2}-\d{2}$/.test(due)) {
     const [y, m, d] = due.split('-').map(Number);
@@ -66,21 +66,142 @@ function tickForm(t, ctx) {
     </form>`;
 }
 
-function taskItem(t, tz, ctx = {}, { area = false, mark = null, live = false } = {}) {
+/** Felder, die jedes Aktionsformular braucht. */
+export const hidden = (fields) =>
+  Object.entries(fields)
+    .filter(([, v]) => v != null)
+    .map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`)
+    .join('');
+export const formHead = (ctx, action, fields = {}) =>
+  `<form method="post" action="${action}" class="act">${hidden({ csrf: ctx.write.csrf, back: ctx.back, ...fields })}`;
+
+const STATUS_CHOICES = [
+  ['in_progress', 'In Arbeit'],
+  ['blocked', 'Blockiert'],
+  ['open', 'Offen'],
+];
+const DUE_CHOICES = [
+  ['heute', 'Heute'],
+  ['morgen', 'Morgen'],
+  ['naechste-woche', 'Nächste Woche'],
+];
+
+/**
+ * Menü an einer Aufgabe: `<details>` klappt ohne JavaScript auf, jede Gruppe
+ * ist ein eigenes Formular. Mit JavaScript bleibt die Seite stehen.
+ */
+function taskMenu(t, ctx, { inbox = false } = {}) {
+  const status = STATUS_CHOICES.map(
+    ([value, label]) =>
+      `<button type="submit" name="status" value="${value}" class="chip"${t.status === value ? ' aria-current="true" disabled' : ''}>${label}</button>`,
+  ).join('');
+  const due = DUE_CHOICES.map(([value, label]) => `<button type="submit" name="due" value="${value}" class="chip">${label}</button>`).join('');
+  const date = t.due ? String(t.due).slice(0, 10) : '';
+  // Phönix-Schritt der angezeigten Woche; Flammen haben ihre eigene Rolle.
+  const step = t.phoenix === 'feuer_schritt' ? t.fire : '';
+  const week = ctx.week;
+  const phoenix =
+    t.phoenix === 'flamme' || !week
+      ? ''
+      : `${formHead(ctx, '/aktion/phoenix', { id: t.id, prev: step })}
+          <p class="menu-label">Phönix${step ? ` <span class="hint">Schritt KW ${Number(step.slice(6))}</span>` : ''}</p>
+          <div class="chips">${
+            step === week.id
+              ? '<button type="submit" name="fire" value="" class="chip quiet">Kein Phönix-Schritt</button>'
+              : `<button type="submit" name="fire" value="${esc(week.id)}" class="chip">Schritt für KW ${week.week}</button>`
+          }</div>
+        </form>`;
+  return `<details class="menu">
+      <summary class="menu-button" aria-label="${esc(`Mehr zu: ${t.title}`)}" title="${inbox ? 'Zuordnen, Status, Fälligkeit' : 'Status, Fälligkeit'}"><span aria-hidden="true">⋯</span></summary>
+      <div class="menu-panel">
+        <p class="menu-title">${esc(t.title)}</p>
+        ${inbox ? assignForm(t, ctx) : ''}
+        ${formHead(ctx, '/aktion/status', { id: t.id, prev: t.status })}
+          <p class="menu-label">Status</p><div class="chips">${status}${
+            inbox ? '<button type="submit" name="status" value="dropped" class="chip danger">Verwerfen</button>' : ''
+          }</div>
+        </form>
+        ${formHead(ctx, '/aktion/faellig', { id: t.id, prev: date })}
+          <p class="menu-label">Fällig${t.due ? ` <span class="hint">jetzt ${esc(dueLabel(t.due, ctx.tz))}</span>` : ''}</p>
+          <div class="date-row"><label><span class="sr-only">Datum</span><input type="date" name="date" value="${esc(date)}"></label><button type="submit" name="due" value="datum" class="chip">Setzen</button></div>
+          <div class="chips">${due}${t.due ? '<button type="submit" name="due" value="keine" class="chip quiet">Ohne</button>' : ''}</div>
+        </form>
+        ${phoenix}
+      </div>
+    </details>`;
+}
+
+/** „Zuordnen“ für Aufgaben in der Zunder-Inbox: Bereich oder Projekt wählen. */
+function assignForm(t, ctx) {
+  if (!ctx.targets) return '<p class="problem">Bereiche und Projekte aus Zunder sind gerade nicht abrufbar.</p>';
+  const options = ctx.targets
+    .map(
+      (a) => `<optgroup label="${esc(a.name)}"><option value="area:${esc(a.id)}">${esc(a.name)}</option>${a.projects
+        .map((p) => `<option value="project:${esc(p.id)}">${esc(a.name)} / ${esc(p.name)}</option>`)
+        .join('')}</optgroup>`,
+    )
+    .join('');
+  return `${formHead(ctx, '/aktion/zuordnen', { id: t.id, prev: 'inbox' })}
+          <p class="menu-label">Zuordnen</p>
+          <div class="assign-row"><label><span class="sr-only">Bereich oder Projekt</span><select name="ziel" required>
+            <option value="">Bereich oder Projekt …</option>${options}<option value="loose">Lose (ohne Bereich)</option>
+          </select></label><button type="submit" class="chip">Zuordnen</button></div>
+        </form>`;
+}
+
+const FLAME_SVG = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5c.4 2.2 3.5 3.6 3.5 7.2A3.5 3.5 0 0 1 8 14.5a3.5 3.5 0 0 1-3.5-3.8c0-1.6.9-2.6 1.6-3.3.2 1 .7 1.7 1.4 2 .1-2.6-.4-4.6.5-7.9z"/></svg>';
+const STOP_SVG = '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.5"/></svg>';
+
+/** Knopf „Flamme starten/stoppen“ an Flammen und Big Rocks. */
+function flameButton(t, ctx) {
+  const label = `${t.running ? 'Flamme stoppen' : 'Flamme starten'}: ${t.title}`;
+  return `${formHead(ctx, '/aktion/flamme', { id: t.id, an: t.running ? '0' : '1' }).replace('class="act"', 'class="act flame-form"')}
+      <button type="submit" class="flame-btn${t.running ? ' running' : ''}" aria-label="${esc(label)}" title="${esc(label)}">${t.running ? STOP_SVG : FLAME_SVG}</button>
+    </form>`;
+}
+
+/** Leiste oben, solange irgendwo eine Flamme brennt: Timer und Stopp mit einem Klick. */
+function burningBar(model, tz, ctx) {
+  const t = model.burning;
+  if (!t || !ctx.write) return '';
+  const since = t.startedAt ? `seit ${localTime(new Date(t.startedAt), tz)}` : 'läuft';
+  return `<div class="burning" role="status">
+    <span class="ember" aria-hidden="true">${FLAME_SVG}</span>
+    <span class="burning-text">Flamme läuft: <a href="${esc(t.url)}">${esc(t.ref ? `${t.ref} ${t.title}` : t.title)}</a></span>
+    <span class="timer"${t.startedAt ? ` data-since="${esc(t.startedAt)}"` : ''}>${esc(since)}</span>
+    ${formHead(ctx, '/aktion/flamme', { id: t.id, an: '0' })}<button type="submit" class="chip stop">${STOP_SVG} Stopp</button></form>
+  </div>`;
+}
+
+function taskItem(t, tz, ctx = {}, { area = false, mark = null, live = false, inbox = false, flame = false } = {}) {
   const meta = [t.ref, area ? t.area : t.project, dueLabel(t.due, tz), ...(t.extra ? [t.extra] : [])].filter(Boolean).map(esc).join(' · ');
-  const lead = ctx.write && t.id
+  const writable = ctx.write && t.id;
+  const lead = writable
     ? tickForm(t, ctx)
     : `<span class="mark" aria-label="${esc(t.status)}">${mark ?? STATUS_MARK[t.status] ?? '○'}</span>`;
   return `<li class="task status-${esc(t.status)}${t.overdue ? ' overdue' : ''}" data-id="${esc(t.id ?? '')}" data-status="${esc(t.status)}" data-title="${esc(t.title)}">
     ${lead}
     <span class="body"><a href="${esc(t.url)}">${esc(t.title)}</a>${meta || live ? `<span class="meta">${meta}${live ? `${meta ? ' · ' : ''}<span class="live">läuft</span>` : ''}</span>` : ''}</span>
+    ${writable && flame && t.status !== 'done' && t.status !== 'dropped' ? flameButton(t, ctx) : ''}
+    ${writable ? taskMenu(t, { ...ctx, tz }, { inbox }) : ''}
   </li>`;
 }
 
 const problem = (s) =>
   `<p class="problem${s.unconfigured ? ' unconfigured' : ''}">${esc(s.error)}${s.unconfigured ? ' · <a href="/einstellungen">Einstellungen</a>' : ''}</p>`;
 
-function obsidianLink(path, vaultName) {
+/** Bearbeiten eines Feuer-Abschnitts: klappt ohne JavaScript auf, speichert in die Feuer-Notiz. */
+function feuerEdit(ctx, path, field, label, value) {
+  return `<details class="inline-edit">
+      <summary aria-label="${esc(`${label} bearbeiten`)}" title="${esc(`${label} bearbeiten`)}"><span aria-hidden="true">✎</span> <span class="summary-text">bearbeiten</span></summary>
+      ${formHead(ctx, '/aktion/feuer', { pfad: path, feld: field })}
+        <label><span class="sr-only">${esc(label)}</span><textarea name="text" rows="${field === 'ziel' ? 3 : 2}" maxlength="2000" required>${esc(value ?? '')}</textarea></label>
+        <p><button type="submit" class="chip">Speichern</button></p>
+      </form>
+    </details>`;
+}
+
+export function obsidianLink(path, vaultName) {
   if (!vaultName) return null;
   const file = path.replace(/\.md$/i, '');
   return `obsidian://open?vault=${encodeURIComponent(vaultName)}&file=${encodeURIComponent(file)}`;
@@ -93,9 +214,12 @@ function feuerSection(model, tz, vaultName, ctx) {
   else if (!f.data) goal = '<p class="empty">Für diese Woche gibt es keine Feuer-Notiz.</p>';
   else {
     const link = obsidianLink(f.data.path, vaultName);
+    const editable = Boolean(ctx.write?.notes);
     goal = `<p class="goal">${f.data.goal ? inline(f.data.goal) : '<span class="empty">Die Notiz hat keinen Abschnitt „Feuer-Ziel“.</span>'}</p>
+      ${editable ? feuerEdit(ctx, f.data.path, 'ziel', 'Feuer-Ziel', f.data.goal) : ''}
       ${f.data.alignment ? `<p class="meta">Alignment: ${esc(f.data.alignment)}</p>` : ''}
-      ${f.data.firstMove ? `<p class="first-move"><span class="label">Erster Zug</span> ${inline(f.data.firstMove)}</p>` : ''}
+      ${f.data.firstMove || editable ? `<p class="first-move"><span class="label">Erster Zug</span> ${f.data.firstMove ? inline(f.data.firstMove) : '<span class="empty">noch keiner</span>'}</p>` : ''}
+      ${editable ? feuerEdit(ctx, f.data.path, 'zug', 'Erster Zug', f.data.firstMove) : ''}
       <p class="meta">${link ? `<a href="${esc(link)}">${esc(f.data.title)}</a>` : esc(f.data.title)}</p>`;
   }
 
@@ -107,7 +231,7 @@ function feuerSection(model, tz, vaultName, ctx) {
     flames = `<ul class="flames">${fl.data
       .map((t) => {
         const extra = t.running ? null : t.minutes != null ? `${t.minutes} min` : null;
-        return taskItem({ ...t, ref: null, project: null, extra }, tz, ctx, { mark: t.status === 'done' ? '✓' : '🕯️', live: t.running });
+        return taskItem({ ...t, ref: null, project: null, extra }, tz, ctx, { mark: t.status === 'done' ? '✓' : '🕯️', live: t.running, flame: true });
       })
       .join('')}</ul>`;
   }
@@ -128,7 +252,7 @@ function rocksSection(model, tz, ctx) {
       .map(
         (g) => `<article class="rock${g.tasks.length && g.done === g.tasks.length ? ' all-done' : ''}">
           <h3>${esc(g.area)} <span class="count" data-count>${g.done}/${g.tasks.length}</span></h3>
-          <ul>${g.tasks.map((t) => taskItem(t, tz, ctx)).join('')}</ul>
+          <ul>${g.tasks.map((t) => taskItem(t, tz, ctx, { flame: true, live: t.running })).join('')}</ul>
         </article>`,
       )
       .join('')}</div>`;
@@ -188,12 +312,16 @@ function inboxSection(model, tz, vaultName, ctx) {
       .map((n) => {
         const link = obsidianLink(n.path, vaultName);
         const title = esc(n.title ?? n.path.split('/').pop().replace(/\.md$/i, ''));
+        // Mit Notiz-Vorschau öffnet der Titel die Notiz im Cockpit, Obsidian bleibt daneben.
+        if (ctx.write?.notes) {
+          return `<li class="note"><a href="/notiz?pfad=${encodeURIComponent(n.path)}">${title}</a><span class="meta">${esc(n.path)}${link ? ` · <a href="${esc(link)}">Obsidian</a>` : ''}</span></li>`;
+        }
         return `<li class="note">${link ? `<a href="${esc(link)}">${title}</a>` : title}<span class="meta">${esc(n.path)}</span></li>`;
       }));
   }
   let tasks;
   if (!zunder.ok) tasks = problem(zunder);
-  else tasks = inboxList('zunder-inbox', zunder.data.map((x) => taskItem(x, tz, ctx)));
+  else tasks = inboxList('zunder-inbox', zunder.data.map((x) => taskItem(x, tz, { ...ctx, targets: model.inbox.targets }, { inbox: true })));
   return `<section><h2>Inbox</h2>
     <h3>Vault <span class="hint">${esc(folder)}/</span></h3>${notes}
     <h3>Zunder</h3>${tasks}
@@ -222,17 +350,11 @@ function captureBar(ctx, draft) {
 }
 
 /** Meldung nach einer Aktion ohne JavaScript, mit Rückgängig als Formular. */
-function flashToast(flash, ctx) {
+export function flashToast(flash, ctx) {
   if (!flash?.message) return '';
   const undo =
-    flash.undo && ctx.write
-      ? `<form method="post" action="/aktion/status">
-      <input type="hidden" name="csrf" value="${esc(ctx.write.csrf)}">
-      <input type="hidden" name="back" value="${esc(ctx.back)}">
-      <input type="hidden" name="id" value="${esc(flash.undo.id)}">
-      <input type="hidden" name="status" value="${esc(flash.undo.status)}">
-      <button type="submit" class="toast-action">Rückgängig</button>
-    </form>`
+    flash.undo?.action?.startsWith('/aktion/') && ctx.write
+      ? `<form method="post" action="${esc(flash.undo.action)}" class="act">${hidden({ csrf: ctx.write.csrf, back: ctx.back, ...flash.undo.fields })}<button type="submit" class="toast-action">Rückgängig</button></form>`
       : '';
   const kind = flash.kind === 'error' ? 'error' : 'ok';
   return `<div class="toast ${kind}" role="${kind === 'error' ? 'alert' : 'status'}"><span class="toast-text">${esc(flash.message)}</span>${undo}<button type="button" class="toast-close" aria-label="Schließen">×</button></div>`;
@@ -248,7 +370,7 @@ export function renderWeek(model, { user = null, write = null, back = '/', flash
   const { tz, vaultName } = model;
   const w = model.week;
   const title = weekTitle(w);
-  const ctx = { write, back };
+  const ctx = { write, back, week: w };
   return `<!doctype html>
 <html lang="de">
 <head>
@@ -269,6 +391,7 @@ ${write ? '<script src="/static/cockpit.js" defer></script>' : ''}
     <a href="/?woche=${esc(w.prev)}" rel="prev">← KW ${Number(w.prev.slice(6))}</a>
     ${w.current ? '' : '<a href="/">Diese Woche</a>'}
     <a href="/?woche=${esc(w.next)}" rel="next">KW ${Number(w.next.slice(6))} →</a>
+    <a href="/rueckblick?woche=${esc(w.id)}">Rückblick</a>
     <a href="/graph">Suche &amp; Graph</a>
     <a href="/einstellungen" class="quiet">Einstellungen</a>
     <form method="post" action="/logout"><button type="submit" title="${esc(user ?? '')}">Abmelden</button></form>
@@ -276,6 +399,7 @@ ${write ? '<script src="/static/cockpit.js" defer></script>' : ''}
 </header>
 ${write ? `<div class="capture-wrap">${captureBar(ctx, draft)}</div>` : ''}
 <main>
+${burningBar(model, tz, ctx)}
 ${feuerSection(model, tz, vaultName, ctx)}
 ${rocksSection(model, tz, ctx)}
 ${calendarSection(model, tz)}
@@ -440,6 +564,7 @@ export function renderMessage(title, text, { link = null } = {}) {
 export const CSS = `:root {
   --bg: #f6f5f2; --surface: #ffffff; --text: #1f1d1a; --muted: #6b665e; --line: #e4e0d8;
   --accent: #c2410c; --accent-soft: #fff1e8; --ok: #15803d; --warn: #b45309; --today: #fff7ed;
+  --r-sm: 6px; --r-md: 8px; --r-lg: 12px; --shadow-pop: 0 10px 30px rgb(0 0 0 / .16);
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
@@ -584,10 +709,86 @@ code { font-size: 13px; background: var(--line); padding: 1px 4px; border-radius
 .toast-action:hover { background: rgb(127 127 127 / .2); }
 .toast-close { font-size: 20px; line-height: 1; padding: 0 6px; opacity: .7; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(10px); } }
+/* --- Flammen: Knopf an Aufgaben, Leiste oben --- */
+.flame-form { margin: 0; flex: none; display: flex; }
+.flame-btn { width: 30px; height: 26px; display: grid; place-items: center; padding: 0; cursor: pointer; border: 0;
+  border-radius: var(--r-sm); background: none; color: var(--muted); }
+.flame-btn svg { width: 15px; height: 15px; fill: currentColor; }
+.flame-btn:hover { background: var(--accent-soft); color: var(--accent); }
+.flame-btn.running { color: var(--accent); }
+.flame-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.burning { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 14px 10px 12px;
+  border-radius: var(--r-lg); background: var(--accent); color: #fff; box-shadow: 0 4px 16px rgb(194 65 12 / .25); }
+.burning a { color: inherit; text-decoration-color: rgb(255 255 255 / .5); }
+.burning .ember svg { width: 20px; height: 20px; fill: currentColor; display: block; animation: flicker 1.6s ease-in-out infinite; }
+.burning-text { flex: 1; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.burning .timer { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 17px; }
+.burning form { margin: 0; }
+.burning .chip.stop { background: rgb(255 255 255 / .18); color: #fff; border-color: rgb(255 255 255 / .45); display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.burning .chip.stop svg { width: 12px; height: 12px; fill: currentColor; }
+.burning .chip.stop:hover { background: rgb(255 255 255 / .3); }
+@keyframes flicker { 50% { transform: scale(1.12) rotate(-4deg); opacity: .85; } }
+@media (prefers-color-scheme: dark) { .burning { color: #1b1009; } .burning .chip.stop { color: #1b1009; border-color: rgb(0 0 0 / .3); background: rgb(0 0 0 / .1); } }
+
+/* --- Feuer-Ziel bearbeiten --- */
+.inline-edit { margin: -4px 0 10px; }
+.inline-edit > summary { list-style: none; display: inline-flex; gap: 4px; align-items: center; cursor: pointer; font-size: 13px;
+  color: var(--muted); border-radius: var(--r-sm); padding: 2px 6px; margin-left: -6px; }
+.inline-edit > summary::-webkit-details-marker { display: none; }
+.inline-edit > summary:hover, .inline-edit[open] > summary { color: var(--accent); background: var(--surface); }
+.inline-edit form { margin: 6px 0 0; }
+.inline-edit textarea { width: 100%; font: inherit; font-size: 16px; line-height: 1.45; color: var(--text); background: var(--surface);
+  border: 1px solid var(--accent); border-radius: var(--r-md); padding: 8px 10px; resize: vertical; }
+.inline-edit p { margin: 6px 0 0; }
+
+/* --- Menü an Aufgaben: Bausteine .menu, .chip --- */
+.task { position: relative; }
+.task .body { flex: 1; }
+.menu { flex: none; }
+.menu-button { list-style: none; cursor: pointer; display: grid; place-items: center; width: 30px; height: 26px;
+  border-radius: var(--r-sm); color: var(--muted); font-size: 18px; line-height: 1; user-select: none; }
+.menu-button::-webkit-details-marker { display: none; }
+.menu-button:hover, .menu[open] > .menu-button { background: var(--line); color: var(--text); }
+.menu-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.menu-panel { position: absolute; right: 0; top: calc(100% - 2px); z-index: 6; width: min(310px, calc(100vw - 32px));
+  display: grid; gap: 12px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-lg); box-shadow: var(--shadow-pop); animation: pop-in .14s ease-out; }
+.menu-panel form { margin: 0; }
+.menu-title { display: none; margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.menu-label { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.menu-label .hint { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font: inherit; font-size: 13px; color: var(--text); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 999px; padding: 4px 12px; min-height: 32px; cursor: pointer; transition: border-color .15s, background .15s; }
+.chip:hover { border-color: var(--accent); }
+.chip:active { transform: scale(.97); }
+.chip[aria-current=true] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); cursor: default; }
+.chip.quiet { color: var(--muted); }
+.chip.danger { color: var(--warn); }
+.menu-panel form { display: flex; flex-direction: column; }
+.date-row { order: 2; display: flex; gap: 6px; margin-top: 8px; align-items: center; }
+.date-row label, .assign-row label { flex: 1; display: flex; min-width: 0; }
+.assign-row { display: flex; gap: 6px; align-items: center; }
+.assign-row select { flex: 1; min-width: 0; font: inherit; font-size: 14px; color: var(--text); background: var(--bg);
+  border: 1px solid var(--line); border-radius: var(--r-sm); padding: 4px 8px; min-height: 32px; }
+.date-row input { flex: 1; min-width: 0; font: inherit; font-size: 14px; color: var(--text); background: var(--bg);
+  border: 1px solid var(--line); border-radius: var(--r-sm); padding: 4px 8px; min-height: 32px; }
+form.act.busy { opacity: .6; pointer-events: none; }
+@keyframes pop-in { from { opacity: 0; transform: translateY(-4px); } }
+@keyframes sheet-in { from { opacity: 0; transform: translateY(16px); } }
+main.refreshing { transition: opacity .2s; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 @media (max-width: 600px) {
+  .menu-panel { position: fixed; left: 8px; right: 8px; top: auto; bottom: max(8px, env(safe-area-inset-bottom)); width: auto;
+    z-index: 20; padding: 16px; animation-name: sheet-in; }
+  .menu-title { display: block; }
+  /* Abdunkeln dahinter; ein Tipp darauf trifft die Zusammenfassung und schließt, auch ohne JavaScript. */
+  .menu[open] > .menu-button::before { content: ''; position: fixed; inset: 0; z-index: 19; background: rgb(0 0 0 / .35); cursor: default; }
+  .chip { min-height: 40px; padding: 6px 14px; font-size: 15px; }
+  .date-row input, .assign-row select { min-height: 40px; font-size: 16px; }
+  .menu-button { width: 36px; height: 32px; }
   .capture button.primary { padding: 8px 12px; }
   .capture-key { display: none; }
   .check { --size: 24px; }

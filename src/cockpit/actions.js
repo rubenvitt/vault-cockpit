@@ -1,10 +1,37 @@
 import { createCapture } from '../vault/capture.js';
 import { createCaptureRouter, CaptureError } from '../capture/router.js';
+import { localDate, addDays, parseWeekId } from './week.js';
 
-/** Status, die das Cockpit setzen darf: abhaken, zurücknehmen, anfangen, parken. */
-export const SETTABLE = ['open', 'in_progress', 'blocked', 'done'];
+/** Status, die das Cockpit setzen darf: abhaken, zurücknehmen, anfangen, parken, verwerfen. */
+export const SETTABLE = ['open', 'in_progress', 'blocked', 'done', 'dropped'];
+
+/** Ziel für „Zuordnen“: `area:<id>`, `project:<id>`, `loose` oder `inbox`. */
+const TARGET = /^(?:(area|project):([A-Za-z0-9_-]{1,64})|(loose|inbox))$/;
 
 const TASK_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** Kurzwahl für die Fälligkeit; alles andere muss ein Datum JJJJ-MM-TT sein. */
+export const DUE_PRESETS = ['heute', 'morgen', 'naechste-woche', 'keine'];
+
+/**
+ * Fälligkeit aus dem Formular → Datum JJJJ-MM-TT oder null (keine).
+ * „nächste Woche“ ist der Montag der Folgewoche. Ungültig → undefined.
+ */
+export function resolveDue(value, today) {
+  const v = String(value ?? '').trim();
+  if (v === '' || v === 'keine') return null;
+  if (v === 'heute') return today;
+  if (v === 'morgen') return addDays(today, 1);
+  if (v === 'naechste-woche') {
+    const [y, m, d] = today.split('-').map(Number);
+    const dow = (new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7; // Mo = 0
+    return addDays(today, 7 - dow);
+  }
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+  if (!m) return undefined;
+  const date = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return date.toISOString().slice(0, 10) === v ? v : undefined;
+}
 
 export class ActionError extends Error {
   constructor(message, status = 400) {
@@ -22,27 +49,95 @@ export class ActionError extends Error {
  * Zunder-Zugang und Inbox-Ordner werden bei jedem Aufruf frisch gelesen, damit
  * eine Änderung unter `/einstellungen` sofort gilt.
  */
-export function createCockpitActions({ vaultPath, settings, policy, state, zunder, index = null, logger = console }) {
+export function createCockpitActions({ vaultPath, settings, policy, state, zunder, index = null, now = () => new Date(), logger = console }) {
   const zunderOrFail = () => {
     const z = zunder();
     if (!z) throw new ActionError('Zunder ist nicht eingerichtet (Einstellungen → Zunder)', 503);
     return z;
   };
+  const checkId = (id) => {
+    if (!TASK_ID.test(String(id ?? ''))) throw new ActionError('Unbekannte Aufgabe');
+  };
+  /** Zunder-Aufruf; Fehler dort werden 502, eine leere Antwort auch. */
+  const call = async (fn) => {
+    let task;
+    try {
+      task = await fn(zunderOrFail());
+    } catch (err) {
+      if (err instanceof ActionError) throw err;
+      throw new ActionError(err.message, 502);
+    }
+    if (!task) throw new ActionError('Zunder hat die Aufgabe nicht zurückgegeben', 502);
+    return task;
+  };
+  const summary = (task) => ({
+    id: task.id,
+    ref: task.ref ?? null,
+    title: task.title,
+    status: task.status,
+    due: task.due ?? null,
+    phoenix: task.phoenix ?? null,
+    location: task.location ?? null,
+  });
 
   return {
     /** Setzt den Status einer Zunder-Aufgabe und liefert `{ id, ref, title, status }`. */
     async setStatus(id, status) {
-      if (!TASK_ID.test(String(id ?? ''))) throw new ActionError('Unbekannte Aufgabe');
+      checkId(id);
       if (!SETTABLE.includes(status)) throw new ActionError(`Status „${status}“ ist hier nicht vorgesehen`);
-      const z = zunderOrFail();
-      let task;
-      try {
-        task = await z.setStatus(id, status);
-      } catch (err) {
-        throw new ActionError(err.message, 502);
-      }
-      if (!task) throw new ActionError('Zunder hat die Aufgabe nicht zurückgegeben', 502);
-      return { id: task.id, ref: task.ref ?? null, title: task.title, status: task.status };
+      return summary(await call((z) => z.setStatus(id, status)));
+    },
+
+    /**
+     * Verschiebt die Fälligkeit: Datum JJJJ-MM-TT, `heute`, `morgen`,
+     * `naechste-woche` (Montag) oder `keine`. „Heute“ gilt in der Zeitzone
+     * aus den Einstellungen, zum Zeitpunkt des Klicks.
+     */
+    async setDue(id, value) {
+      checkId(id);
+      const due = resolveDue(value, localDate(now(), settings.get().tz));
+      if (due === undefined) throw new ActionError(`„${value}“ ist kein Datum`);
+      return summary(await call((z) => z.updateTask(id, { due })));
+    },
+
+    /** Legt eine Aufgabe an eine andere Stelle (aus der Inbox in einen Bereich oder ein Projekt). */
+    async move(id, target) {
+      checkId(id);
+      const m = TARGET.exec(String(target ?? ''));
+      if (!m) throw new ActionError('Bitte einen Bereich oder ein Projekt wählen');
+      const location = m[3] ? { kind: m[3] } : { kind: m[1], id: m[2] };
+      return summary(await call((z) => z.moveTask(id, location)));
+    },
+
+    /**
+     * Startet (`on`) oder stoppt eine Flamme. Liefert die Aufgabe mit
+     * Start/Ende und ob Timing mitgemessen hat (`timing`: true, false oder
+     * eine Fehlermeldung).
+     */
+    async flame(id, on) {
+      checkId(id);
+      let out;
+      const task = await call(async (z) => {
+        out = await (on ? z.startFlame(id) : z.stopFlame(id));
+        return out?.task;
+      });
+      const t = out.timing ?? {};
+      return {
+        ...summary(task),
+        running: Boolean(out.running),
+        startedAt: task.flame_started_at ?? null,
+        endedAt: task.flame_ended_at ?? null,
+        timing: t.error ? String(t.error) : Boolean(t.used),
+      };
+    },
+
+    /** Markiert eine Aufgabe als Phönix-Schritt einer Woche (`2026-W42`); leer entfernt die Markierung. */
+    async setPhoenix(id, fire) {
+      checkId(id);
+      const week = String(fire ?? '').trim();
+      if (week && !parseWeekId(week)) throw new ActionError(`„${week}“ ist keine Kalenderwoche`);
+      const phoenix = week ? { role: 'feuer_schritt', fire: week } : null;
+      return summary(await call((z) => z.updateTask(id, { phoenix })));
     },
 
     /**

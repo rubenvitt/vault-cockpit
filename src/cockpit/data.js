@@ -41,6 +41,8 @@ export function createCockpit({ index, settings, zunderFor, calendars = null, no
     area: areaOf(t),
     project: t.location?.kind === 'project' ? (t.location.name ?? null) : null,
     phoenix: t.phoenix?.role ?? null,
+    fire: t.phoenix?.fire ?? null,
+    running: Boolean(t.flame_running),
     url: zunder.taskUrl(t.id),
   });
 
@@ -55,7 +57,78 @@ export function createCockpit({ index, settings, zunderFor, calendars = null, no
 
   const notConfigured = (what) => ({ ok: false, error: `${what} ist nicht eingerichtet`, unconfigured: true });
 
+  const minutesOf = (t) =>
+    t.flame_started_at && t.flame_ended_at ? Math.max(0, Math.round((Date.parse(t.flame_ended_at) - Date.parse(t.flame_started_at)) / 60_000)) : 0;
+
   return {
+    /**
+     * Wochenrückblick: je Lebensbereich erledigt gegen geplant (Big Rocks und
+     * Flammen der Woche), was außerdem erledigt wurde, und die Flammen-Zeit je
+     * Bereich. Geplant heißt wie in der Wochenansicht: in der Woche fällig oder
+     * Phönix-Markierung der Woche. Ungültige Kennung → null.
+     */
+    async review(id) {
+      const config = settings.get();
+      const { tz } = config;
+      const zunder = zunderOf(config.zunder);
+      const parsed = id ? parseWeekId(id) : weekOf(now(), tz);
+      if (!parsed) return null;
+      const week = describeWeek(parsed, tz);
+      const today = localDate(now(), tz);
+      const head = {
+        tz,
+        week: { id: week.id, year: week.year, week: week.week, monday: week.monday, sunday: week.sunday, prev: week.prev, next: week.next, current: week.monday <= today && today <= week.sunday },
+      };
+      if (!zunder) return { ...head, ok: false, error: 'Zunder ist nicht eingerichtet', unconfigured: true };
+      const task = make(zunder);
+      let phoenix, due, closed;
+      try {
+        [phoenix, due, closed] = await Promise.all([
+          zunder.filterTasks({ phoenix_fire: week.id, include_closed: true, limit: 300 }),
+          zunder.filterTasks({ due_after: week.monday, due_before: week.sunday, include_closed: true, limit: 500 }),
+          zunder.filterTasks({ status: ['done'], closed_after: week.monday, closed_before: week.sunday, limit: 500 }),
+        ]);
+      } catch (err) {
+        logger.warn?.(`Cockpit: Rückblick nicht verfügbar — ${err.message}`);
+        return { ...head, ok: false, error: err.message };
+      }
+
+      const planned = new Map();
+      for (const t of [...phoenix, ...due]) if (t.status !== 'dropped') planned.set(t.id, t);
+      const extra = closed.filter((t) => !planned.has(t.id));
+      // Flammen-Zeit: jeder Block, der in dieser Woche begonnen hat.
+      const flamed = new Map();
+      for (const t of [...planned.values(), ...closed]) {
+        const start = t.flame_started_at ? localDate(new Date(t.flame_started_at), tz) : null;
+        if (start && start >= week.monday && start <= week.sunday && minutesOf(t)) flamed.set(t.id, t);
+      }
+
+      const areas = new Map();
+      const area = (name) => {
+        if (!areas.has(name)) areas.set(name, { area: name, planned: 0, done: 0, extra: 0, minutes: 0, open: [] });
+        return areas.get(name);
+      };
+      for (const t of planned.values()) {
+        const a = area(areaOf(t));
+        a.planned += 1;
+        if (t.status === 'done') a.done += 1;
+        else a.open.push(task(t));
+      }
+      for (const t of extra) area(areaOf(t)).extra += 1;
+      for (const t of flamed.values()) area(areaOf(t)).minutes += minutesOf(t);
+
+      const list = [...areas.values()].sort((a, b) => b.planned - a.planned || b.minutes - a.minutes || a.area.localeCompare(b.area, 'de'));
+      for (const a of list) a.open.sort(byDue);
+      const sum = (k) => list.reduce((n, a) => n + a[k], 0);
+      return {
+        ...head,
+        ok: true,
+        areas: list,
+        totals: { planned: sum('planned'), done: sum('done'), extra: sum('extra'), minutes: sum('minutes') },
+        flames: [...flamed.values()].filter((t) => t.phoenix?.role === 'flamme').map((t) => ({ ...task(t), minutes: minutesOf(t) })),
+      };
+    },
+
     /** Zunder-Client für den aktuellen Zugang aus den Einstellungen, sonst null. */
     zunder: () => zunderOf(settings.get().zunder),
 
@@ -76,7 +149,7 @@ export function createCockpit({ index, settings, zunderFor, calendars = null, no
 
       const feuer = await settle('Feuer-Notiz', () => findFeuer(index, week, { current }));
 
-      const [phoenix, due, open, zInbox, events, inbox] = await Promise.all([
+      const [phoenix, due, open, zInbox, events, inbox, burning] = await Promise.all([
         zunder
           ? settle('Zunder (Phönix)', () => zunder.filterTasks({ phoenix_fire: week.id, include_closed: true, limit: 200 }))
           : notConfigured('Zunder'),
@@ -99,6 +172,8 @@ export function createCockpit({ index, settings, zunderFor, calendars = null, no
           : notConfigured('Zunder'),
         calendars?.configured() ? settle('Kalender', () => calendars.events(week.start, week.end)) : notConfigured('Kalender'),
         settle('Vault-Inbox', () => index.listFolder(captureFolder, { limit: 50 })),
+        // Die gerade laufende Flamme, egal in welcher Woche sie geplant war.
+        zunder ? settle('Zunder (Flamme)', () => zunder.filterTasks({ flame_running: true, limit: 5 })) : notConfigured('Zunder'),
       ]);
 
       // Flammen: Deep-Work-Blöcke der Woche. Geplant ist `due`, gemessen haben
@@ -155,6 +230,28 @@ export function createCockpit({ index, settings, zunderFor, calendars = null, no
         events: events.ok ? events.data.events.filter((e) => e.start < d.end && e.end > d.start) : [],
       }));
 
+      // Ziele für „Zuordnen“ in der Zunder-Inbox; nur nötig, wenn dort etwas liegt.
+      const structure =
+        zunder && zInbox.ok && zInbox.data.length
+          ? await settle('Zunder (Bereiche)', async () =>
+              (await zunder.listStructure())
+                .filter((a) => a.state !== 'archived')
+                .map((a) => ({
+                  id: a.id,
+                  name: a.name,
+                  projects: (a.projects ?? []).filter((p) => !p.status || p.status === 'active').map((p) => ({ id: p.id, name: p.name })),
+                }))
+                .sort((a, b) => a.name.localeCompare(b.name, 'de')),
+            )
+          : { ok: true, data: [] };
+
+      const live = burning.ok
+        ? (burning.data
+            .filter((t) => t.flame_running)
+            .sort((a, b) => String(b.flame_started_at).localeCompare(String(a.flame_started_at)))
+            .map((t) => ({ ...task(t), startedAt: t.flame_started_at ?? null }))[0] ?? null)
+        : null;
+
       const section = (r, data) => (r.ok ? { ok: true, data } : { ok: false, error: r.error, unconfigured: Boolean(r.unconfigured) });
 
       return {
@@ -163,6 +260,7 @@ export function createCockpit({ index, settings, zunderFor, calendars = null, no
         week: { id: week.id, year: week.year, week: week.week, monday: week.monday, sunday: week.sunday, prev: week.prev, next: week.next, current },
         today,
         feuer: section(feuer, feuer.data),
+        burning: live,
         flames: section(phoenix, flames),
         rocks: phoenix.ok || due.ok ? { ok: true, data: rocks, partial: !(phoenix.ok && due.ok) } : section(phoenix),
         calendar: events.ok ? { ok: true, data: days, errors: events.data.errors } : section(events),
@@ -170,6 +268,7 @@ export function createCockpit({ index, settings, zunderFor, calendars = null, no
         inbox: {
           vault: section(inbox, inbox.data),
           zunder: section(zInbox, zInbox.ok ? zInbox.data.map(task).sort(byDue) : null),
+          targets: structure.ok ? structure.data : null,
           folder: captureFolder,
         },
       };

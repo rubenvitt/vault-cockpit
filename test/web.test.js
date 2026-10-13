@@ -65,13 +65,14 @@ function fakeIdp({ sub = 'ruben', aud = CLIENT, nonceOverride = null } = {}) {
 
 const cockpit = {
   async week(id) {
-    if (id === 'kaputt') return null;
+    if (id === 'kaputt' || id === 'unbekannt') return null;
     return {
       tz: 'Europe/Berlin',
       vaultName: null,
       week: { id: '2026-W42', year: 2026, week: 42, monday: '2026-10-12', sunday: '2026-10-18', prev: '2026-W41', next: '2026-W43', current: true },
       today: '2026-10-14',
-      feuer: { ok: true, data: null },
+      feuer: { ok: true, data: id === 'feuer' ? { path: 'feuer/KW42.md', title: 'KW42', goal: 'Ziel <b>', firstMove: null, alignment: null } : null },
+      burning: id === 'brennt' ? { id: 'f9', ref: null, title: 'Deep Work', startedAt: '2026-10-14T07:00:00Z', url: 'https://zunder.test/#/aufgabe/f9' } : null,
       flames: { ok: true, data: [] },
       rocks: {
         ok: true,
@@ -79,10 +80,27 @@ const cockpit = {
       },
       calendar: { ok: true, data: [] },
       tasks: { ok: true, data: [] },
-      inbox: { vault: { ok: true, data: [] }, zunder: { ok: true, data: [] }, folder: 'inbox' },
+      inbox: {
+        vault: { ok: true, data: [] },
+        zunder: { ok: true, data: [{ id: 'z1', ref: null, title: 'Zahnarzt anrufen', status: 'open', due: null, phoenix: null, url: 'https://zunder.test/#/aufgabe/z1' }] },
+        targets: [{ id: 'a1', name: 'Gesundheit', projects: [{ id: 'p1', name: 'Zähne & Co' }] }],
+        folder: 'inbox',
+      },
     };
   },
 };
+
+cockpit.review = async (id) =>
+  id === 'kaputt'
+    ? null
+    : {
+        tz: 'Europe/Berlin',
+        week: { id: '2026-W42', week: 42, monday: '2026-10-12', sunday: '2026-10-18', prev: '2026-W41', next: '2026-W43' },
+        ok: true,
+        areas: [{ area: 'Finanzen <A>', planned: 4, done: 3, extra: 1, minutes: 95, open: [{ id: 't1', title: 'Steuer', due: '2026-10-16', url: 'https://zunder.test/#/aufgabe/t1' }] }],
+        totals: { planned: 4, done: 3, extra: 1, minutes: 95 },
+        flames: [],
+      };
 
 const graph = {
   async around(path) {
@@ -100,7 +118,7 @@ const graph = {
 };
 const search = async (q) => ({ results: [{ path: 'wiki/a.md', title: 'A', snippet: `zu ${q}`, streams: ['text', 'semantic'] }], total: 1, degraded: null });
 
-async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSubjects = ['ruben'], calendars = null, actions = null, shortcuts = [] } = {}) {
+async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSubjects = ['ruben'], calendars = null, actions = null, notes = null, shortcuts = [] } = {}) {
   const idp = fakeIdp(idpOptions);
   const settings = createSettingsStore({ defaults: { tz: 'Europe/Berlin', inboxFolder: 'inbox', zunderUrl: 'https://zunder.env', zunderToken: 'zt_env' }, logger: quiet });
   const tokens = createTokenStore({ logger: quiet });
@@ -108,6 +126,7 @@ async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSu
     cockpit,
     settings,
     actions,
+    notes,
     tokens,
     shortcuts,
     calendars,
@@ -443,6 +462,30 @@ function fakeActions() {
       }
       return { id, ref: 'VCP-1', title: 'Steuer', status };
     },
+    async setDue(id, due) {
+      calls.push(['due', id, due]);
+      if (fail) {
+        const e = fail;
+        fail = null;
+        throw e;
+      }
+      return { id, ref: 'VCP-1', title: 'Steuer', status: 'open', due: due === 'keine' ? null : due === 'morgen' ? '2026-10-15' : due };
+    },
+    async move(id, ziel) {
+      calls.push(['move', id, ziel]);
+      const location = ziel === 'inbox' ? { kind: 'inbox' } : { kind: 'project', id: 'p1', name: 'Vault Cockpit', area_name: 'Programmieren' };
+      return { id, ref: null, title: 'Zahnarzt', status: 'open', location };
+    },
+    async setPhoenix(id, fire) {
+      calls.push(['phoenix', id, fire]);
+      return { id, ref: null, title: 'Zahnarzt', status: 'open', phoenix: fire ? { role: 'feuer_schritt', fire } : null };
+    },
+    async flame(id, on) {
+      calls.push(['flame', id, on]);
+      return on
+        ? { id, ref: 'VCP-1', title: 'Steuer', status: 'in_progress', running: true, startedAt: '2026-10-14T07:00:00Z', endedAt: null, timing: true }
+        : { id, ref: 'VCP-1', title: 'Steuer', status: 'in_progress', running: false, startedAt: '2026-10-14T07:00:00Z', endedAt: '2026-10-14T07:42:00Z', timing: false };
+    },
     async capture({ text, captureId }) {
       calls.push(['capture', text, captureId]);
       if (fail) {
@@ -530,7 +573,7 @@ test('Abhaken mit JavaScript: JSON mit Meldung und Rückgängig', async () => {
       assert.equal(res.status, 200);
       const body = await res.json();
       assert.equal(body.message, 'Erledigt: VCP-1 Steuer');
-      assert.deepEqual(body.undo, { id: 't1', status: 'in_progress' });
+      assert.deepEqual(body.undo, { action: '/aktion/status', fields: { id: 't1', status: 'in_progress' } });
       assert.deepEqual(actions.calls, [['status', 't1', 'done']]);
 
       actions.failNext(new ActionError('Zunder antwortet mit HTTP 500', 502));
@@ -554,7 +597,7 @@ test('Abhaken ohne JavaScript: Weiterleitung zurück, Meldung mit Rückgängig e
       assert.equal(res.headers.get('location'), '/?woche=2026-W42');
       const html = await (await call('/?woche=2026-W42')).text();
       assert.match(html, /class="toast ok"[^>]*><span class="toast-text">Erledigt: VCP-1 Steuer/);
-      assert.match(html, /name="status" value="open">\s*<button type="submit" class="toast-action">Rückgängig/);
+      assert.match(html, /<form method="post" action="\/aktion\/status" class="act">[^]*?name="status" value="open"><button type="submit" class="toast-action">Rückgängig/);
       assert.ok(!(await (await call('/')).text()).includes('toast-text'));
 
       // Kein offener Redirect über back.
@@ -595,6 +638,276 @@ test('Schnelleingabe: Notiz und Aufgabe; ohne JavaScript bleibt der Text bei Feh
     {},
     { actions },
   );
+});
+
+test('Menü an Aufgaben: Status und Fälligkeit als Formulare', async () => {
+  await withServer(
+    async ({ call, login }) => {
+      await login();
+      const html = await (await call('/')).text();
+      assert.match(html, /<details class="menu">\s*<summary class="menu-button" aria-label="Mehr zu: Steuer &lt;abgeben&gt;"/);
+      assert.match(html, /action="\/aktion\/status" class="act">[^]*?name="prev" value="open"[^]*?value="in_progress" class="chip">In Arbeit[^]*?value="open" class="chip" aria-current="true" disabled>Offen/);
+      assert.match(html, /action="\/aktion\/faellig" class="act">[^]*?name="id" value="t1"[^]*?name="prev" value=""[^]*?type="date" name="date"[^]*?value="naechste-woche" class="chip">Nächste Woche/);
+    },
+    {},
+    { actions: fakeActions() },
+  );
+});
+
+test('Fälligkeit verschieben: JSON mit Rückgängig, ohne JavaScript per Weiterleitung', async () => {
+  const actions = fakeActions();
+  await withServer(
+    async ({ call, login }) => {
+      await login();
+      const csrf = csrfFrom(await (await call('/')).text());
+      const res = await call('/aktion/faellig', { method: 'POST', form: { id: 't1', due: 'morgen', prev: '2026-10-01', csrf }, accept: 'application/json' });
+      const body = await res.json();
+      assert.equal(body.message, 'Fällig Do 15.10.: VCP-1 Steuer');
+      assert.deepEqual(body.undo, { action: '/aktion/faellig', fields: { id: 't1', due: '2026-10-01' } });
+
+      // Datum aus dem Feld; vorher ohne Fälligkeit → Rückgängig entfernt sie wieder.
+      const picked = await (await call('/aktion/faellig', { method: 'POST', form: { id: 't1', due: 'datum', date: '2026-11-03', prev: '', csrf }, accept: 'application/json' })).json();
+      assert.deepEqual(picked.undo, { action: '/aktion/faellig', fields: { id: 't1', due: 'keine' } });
+      const cleared = await (await call('/aktion/faellig', { method: 'POST', form: { id: 't1', due: 'keine', prev: '2026-11-03', csrf }, accept: 'application/json' })).json();
+      assert.equal(cleared.message, 'Ohne Fälligkeit: VCP-1 Steuer');
+      assert.deepEqual(actions.calls, [['due', 't1', 'morgen'], ['due', 't1', '2026-11-03'], ['due', 't1', 'keine']]);
+
+      const plain = await call('/aktion/faellig', { method: 'POST', form: { id: 't1', due: 'morgen', prev: '', csrf, back: '/' } });
+      assert.equal(plain.status, 303);
+      const page = await (await call('/')).text();
+      assert.match(page, /Fällig Do 15\.10\.: VCP-1 Steuer/);
+      assert.match(page, /action="\/aktion\/faellig" class="act">[^]*?name="due" value="keine"><button type="submit" class="toast-action">Rückgängig/);
+
+      actions.failNext(new ActionError('„x“ ist kein Datum', 400));
+      const bad = await call('/aktion/faellig', { method: 'POST', form: { id: 't1', due: 'x', csrf }, accept: 'application/json' });
+      assert.equal(bad.status, 400);
+      assert.equal((await bad.json()).message, '„x“ ist kein Datum');
+
+      const noCsrf = await call('/aktion/faellig', { method: 'POST', form: { id: 't1', due: 'morgen' }, accept: 'application/json' });
+      assert.equal(noCsrf.status, 403);
+    },
+    {},
+    { actions },
+  );
+});
+
+test('Zunder-Inbox: Zuordnen, Phönix-Schritt und Verwerfen im Menü', async () => {
+  await withServer(
+    async ({ call, login }) => {
+      await login();
+      const html = await (await call('/')).text();
+      const inbox = html.slice(html.indexOf('data-list="zunder-inbox"'));
+      assert.match(inbox, /action="\/aktion\/zuordnen" class="act">[^]*?name="id" value="z1"[^]*?name="prev" value="inbox"/);
+      assert.match(inbox, /<optgroup label="Gesundheit"><option value="area:a1">Gesundheit<\/option><option value="project:p1">Gesundheit \/ Zähne &amp; Co<\/option>/);
+      assert.match(inbox, /<option value="loose">/);
+      assert.match(inbox, /name="status" value="dropped" class="chip danger">Verwerfen/);
+      assert.match(inbox, /action="\/aktion\/phoenix" class="act">[^]*?name="fire" value="2026-W42" class="chip">Schritt für KW 42/);
+      // Big Rocks (nicht Inbox) haben kein Zuordnen und kein Verwerfen.
+      const rocks = html.slice(0, html.indexOf('data-list="zunder-inbox"'));
+      assert.ok(!rocks.includes('/aktion/zuordnen'));
+      assert.ok(!rocks.includes('Verwerfen'));
+    },
+    {},
+    { actions: fakeActions() },
+  );
+});
+
+test('Zuordnen und Phönix: Meldung mit Rückgängig', async () => {
+  const actions = fakeActions();
+  await withServer(
+    async ({ call, login }) => {
+      await login();
+      const csrf = csrfFrom(await (await call('/')).text());
+      const moved = await (await call('/aktion/zuordnen', { method: 'POST', form: { id: 'z1', ziel: 'project:p1', prev: 'inbox', csrf }, accept: 'application/json' })).json();
+      assert.equal(moved.message, 'Programmieren / Vault Cockpit: Zahnarzt');
+      assert.deepEqual(moved.undo, { action: '/aktion/zuordnen', fields: { id: 'z1', ziel: 'inbox' } });
+      const back = await (await call('/aktion/zuordnen', { method: 'POST', form: { id: 'z1', ziel: 'inbox', csrf }, accept: 'application/json' })).json();
+      assert.equal(back.message, 'Inbox: Zahnarzt');
+      assert.equal(back.undo, null);
+
+      const step = await (await call('/aktion/phoenix', { method: 'POST', form: { id: 'z1', fire: '2026-W42', prev: '', csrf }, accept: 'application/json' })).json();
+      assert.equal(step.message, 'Phönix-Schritt KW 42: Zahnarzt');
+      assert.deepEqual(step.undo, { action: '/aktion/phoenix', fields: { id: 'z1', fire: '' } });
+      const none = await (await call('/aktion/phoenix', { method: 'POST', form: { id: 'z1', fire: '', prev: '2026-W42', csrf }, accept: 'application/json' })).json();
+      assert.equal(none.message, 'Kein Phönix-Schritt mehr: Zahnarzt');
+
+      const dropped = await (await call('/aktion/status', { method: 'POST', form: { id: 'z1', status: 'dropped', prev: 'open', csrf }, accept: 'application/json' })).json();
+      assert.equal(dropped.message, 'Verworfen: VCP-1 Steuer');
+      assert.deepEqual(dropped.undo, { action: '/aktion/status', fields: { id: 'z1', status: 'open' } });
+    },
+    {},
+    { actions },
+  );
+});
+
+test('Flammen: Knopf an Big Rocks, Leiste mit Timer und Stopp, Meldungen', async () => {
+  const actions = fakeActions();
+  await withServer(
+    async ({ call, login }) => {
+      await login();
+      const html = await (await call('/')).text();
+      assert.match(html, /action="\/aktion\/flamme" class="act flame-form">[^]*?name="id" value="t1"[^]*?name="an" value="1"[^]*?aria-label="Flamme starten: Steuer &lt;abgeben&gt;"/);
+      assert.ok(!html.includes('class="burning"'));
+      const burning = await (await call('/?woche=brennt')).text();
+      assert.match(burning, /<div class="burning" role="status">[^]*?Flamme läuft: <a href="https:\/\/zunder\.test\/#\/aufgabe\/f9">Deep Work<\/a>[^]*?data-since="2026-10-14T07:00:00Z">seit 09:00<[^]*?name="an" value="0"/);
+
+      const csrf = csrfFrom(html);
+      const on = await (await call('/aktion/flamme', { method: 'POST', form: { id: 't1', an: '1', csrf }, accept: 'application/json' })).json();
+      assert.equal(on.message, 'Flamme läuft: VCP-1 Steuer · Timing misst mit');
+      const off = await (await call('/aktion/flamme', { method: 'POST', form: { id: 't1', an: '0', csrf }, accept: 'application/json' })).json();
+      assert.equal(off.message, 'Flamme gestoppt: VCP-1 Steuer · 42 min');
+      assert.deepEqual(actions.calls, [['flame', 't1', true], ['flame', 't1', false]]);
+    },
+    {},
+    { actions },
+  );
+});
+
+/** Notiz-Attrappe für die Notizseite. */
+function fakeNotes() {
+  const calls = [];
+  const note = { path: '00-inbox/Idee.md', folder: '00-inbox', title: 'Idee <Hund>', frontmatter: { source: 'cockpit' }, tags: ['alt'], body: '- [ ] Preise\n- [x] Termin\n', inInbox: true };
+  return {
+    calls,
+    get: (p) => (p === note.path ? note : null),
+    targets: () => ['10-projekte/Hund', '40-archiv'],
+    archiveFolder: () => '40-archiv',
+    move(p, folder) {
+      calls.push(['move', p, folder]);
+      if (folder === 'privat') throw new ActionError('„privat“ ist vertraulich oder ausgeschlossen; dorthin legt das Cockpit nichts ab', 403);
+      return { path: `${folder}/Idee.md`, from: p, changed: true };
+    },
+    setTags(p, raw) {
+      calls.push(['tags', p, raw]);
+      return { path: p, tags: raw.split(',').map((t) => t.trim()).filter(Boolean) };
+    },
+    append(p, text) {
+      calls.push(['append', p, text]);
+      if (text === 'kaputt') throw new ActionError('„00-inbox/Idee.md“ wurde gerade anderweitig geändert.', 400);
+      return { path: p };
+    },
+    setFeuer(p, field, text) {
+      calls.push(['feuer', p, field, text]);
+      return { path: p, changed: true, previous: 'Altes Ziel', heading: field === 'ziel' ? 'Feuer-Ziel' : 'Erster Zug' };
+    },
+    toggle(p, n, line, done) {
+      calls.push(['toggle', p, n, line, done]);
+      return { path: p, line: done ? '- [x] Preise' : '- [ ] Preise' };
+    },
+  };
+}
+
+test('Notizseite: Vorschau mit Checkbox-Knöpfen und Verarbeiten; unbekannte Notiz 404', async () => {
+  const notes = fakeNotes();
+  await withServer(
+    async ({ call, login }) => {
+      assert.equal((await call('/notiz?pfad=00-inbox%2FIdee.md')).status, 303);
+      await login();
+      const res = await call('/notiz?pfad=00-inbox%2FIdee.md');
+      assert.equal(res.status, 200);
+      const html = await res.text();
+      assert.match(html, /<h1>Idee &lt;Hund&gt;<\/h1>/);
+      assert.match(html, /action="\/aktion\/notiz\/checkbox" class="act box-form">[^]*?name="n" value="0"[^]*?name="line" value="- \[ \] Preise"[^]*?name="erledigt" value="1"/);
+      assert.match(html, /<option value="10-projekte\/Hund">/);
+      assert.match(html, /name="ordner" value="40-archiv"[^]*?Ins Archiv/);
+      assert.match(html, /name="tags" value="alt"/);
+      assert.equal((await call('/notiz?pfad=privat%2Fgeheim.md')).status, 404);
+
+      // Die Wochenansicht verlinkt Inbox-Notizen auf die Vorschau.
+      assert.ok((await (await call('/')).text()).includes('/static/cockpit.js'));
+    },
+    {},
+    { actions: fakeActions(), notes },
+  );
+});
+
+test('Notiz ablegen: JSON führt zur neuen Adresse, Meldung kommt per Cookie mit; Fehler bleiben auf der Seite', async () => {
+  const notes = fakeNotes();
+  await withServer(
+    async ({ call, login }) => {
+      await login();
+      const csrf = csrfFrom(await (await call('/notiz?pfad=00-inbox%2FIdee.md')).text());
+      const back = '/notiz?pfad=00-inbox%2FIdee.md';
+      const res = await call('/aktion/notiz/ablegen', { method: 'POST', form: { pfad: '00-inbox/Idee.md', ordner: '40-archiv', back, csrf }, accept: 'application/json' });
+      const body = await res.json();
+      assert.equal(body.message, 'Abgelegt in 40-archiv/');
+      assert.equal(body.redirect, '/notiz?pfad=40-archiv%2FIdee.md');
+      assert.deepEqual(body.undo, { action: '/aktion/notiz/ablegen', fields: { pfad: '40-archiv/Idee.md', ordner: '00-inbox', back } });
+      assert.match(res.headers.get('set-cookie'), /vc_flash=/);
+
+      // Ohne JavaScript: Weiterleitung zur neuen Adresse.
+      const plain = await call('/aktion/notiz/ablegen', { method: 'POST', form: { pfad: '00-inbox/Idee.md', ordner: '10-projekte/Hund', back, csrf } });
+      assert.equal(plain.headers.get('location'), '/notiz?pfad=10-projekte%2FHund%2FIdee.md');
+      // Aus der Woche abgelegt: zurück zur Woche.
+      const fromWeek = await call('/aktion/notiz/ablegen', { method: 'POST', form: { pfad: '00-inbox/Idee.md', ordner: '40-archiv', back: '/', csrf } });
+      assert.equal(fromWeek.headers.get('location'), '/');
+
+      const denied = await call('/aktion/notiz/ablegen', { method: 'POST', form: { pfad: '00-inbox/Idee.md', ordner: 'privat', csrf }, accept: 'application/json' });
+      assert.equal(denied.status, 403);
+
+      const tags = await (await call('/aktion/notiz/tags', { method: 'POST', form: { pfad: '00-inbox/Idee.md', tags: 'hund, idee', csrf }, accept: 'application/json' })).json();
+      assert.equal(tags.message, 'Tags: #hund #idee');
+      const box = await (await call('/aktion/notiz/checkbox', { method: 'POST', form: { pfad: '00-inbox/Idee.md', n: '0', line: '- [ ] Preise', erledigt: '1', csrf }, accept: 'application/json' })).json();
+      assert.equal(box.message, 'Abgehakt');
+      assert.deepEqual(box.undo.fields, { pfad: '00-inbox/Idee.md', n: '0', line: '- [x] Preise', erledigt: '0' });
+
+      // Anhängen scheitert ohne JavaScript: Notizseite mit Fehler, Text bleibt im Feld.
+      const failed = await call('/aktion/notiz/anhaengen', { method: 'POST', form: { pfad: '00-inbox/Idee.md', text: 'kaputt', back, csrf } });
+      assert.equal(failed.status, 400);
+      const page = await failed.text();
+      assert.match(page, /<h1>Idee &lt;Hund&gt;<\/h1>/);
+      assert.match(page, /anderweitig geändert/);
+      assert.match(page, /<textarea name="text"[^>]*>kaputt<\/textarea>/);
+    },
+    {},
+    { actions: fakeActions(), notes },
+  );
+});
+
+test('Feuer-Ziel bearbeiten: Formular an der Feuer-Notiz, Speichern mit Rückgängig', async () => {
+  const notes = fakeNotes();
+  await withServer(
+    async ({ call, login }) => {
+      await login();
+      const html = await (await call('/?woche=feuer')).text();
+      assert.match(html, /<details class="inline-edit">[^]*?action="\/aktion\/feuer" class="act">[^]*?name="pfad" value="feuer\/KW42\.md"[^]*?name="feld" value="ziel"[^]*?<textarea name="text"[^>]*>Ziel &lt;b&gt;<\/textarea>/);
+      assert.match(html, /name="feld" value="zug"/);
+      const csrf = csrfFrom(html);
+      const r = await (await call('/aktion/feuer', { method: 'POST', form: { pfad: 'feuer/KW42.md', feld: 'ziel', text: 'Neu', csrf }, accept: 'application/json' })).json();
+      assert.equal(r.message, 'Feuer-Ziel gespeichert');
+      assert.deepEqual(r.undo, { action: '/aktion/feuer', fields: { pfad: 'feuer/KW42.md', feld: 'ziel', text: 'Altes Ziel' } });
+      assert.deepEqual(notes.calls, [['feuer', 'feuer/KW42.md', 'ziel', 'Neu']]);
+    },
+    {},
+    { actions: fakeActions(), notes },
+  );
+  // Ohne Notiz-Schreibtisch kein Bearbeiten.
+  await withServer(
+    async ({ call, login }) => {
+      await login();
+      assert.ok(!(await (await call('/?woche=feuer')).text()).includes('/aktion/feuer'));
+    },
+    {},
+    { actions: fakeActions() },
+  );
+});
+
+test('Rückblick: Kennzahlen, Balken als SVG ohne Inline-Styles, Navigation', async () => {
+  await withServer(async ({ call, login }) => {
+    assert.equal((await call('/rueckblick')).status, 303);
+    await login();
+    const html = await (await call('/rueckblick?woche=2026-W42')).text();
+    assert.match(html, /<span class="stat-value">3<span class="stat-of">\/4<\/span>/);
+    assert.match(html, /geplant erledigt · 75 %/);
+    assert.match(html, /1 h 35 min/);
+    assert.match(html, /Finanzen &lt;A&gt;/);
+    assert.match(html, /<rect class="fill" width="75" height="8"\/>/);
+    assert.ok(!html.includes('style='));
+    assert.match(html, /href="\/rueckblick\?woche=2026-W43"/);
+    assert.match(html, /1 offen geblieben/);
+    assert.equal((await call('/rueckblick?woche=kaputt')).status, 400);
+    assert.match(await (await call('/')).text(), /href="\/rueckblick\?woche=2026-W42">Rückblick/);
+  });
 });
 
 test('Kurzbefehle: in den Einstellungen verlinkt, nur angemeldet zu laden', async () => {

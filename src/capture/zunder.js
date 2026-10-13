@@ -58,6 +58,36 @@ export function createZunderClient({ url, token, fetch = globalThis.fetch, timeo
       return out?.task ?? null;
     },
 
+    /** Ändert Felder einer Aufgabe (`update_task`, z. B. `due`); null entfernt einen Wert. */
+    async updateTask(id, fields) {
+      const out = await callTool('update_task', { task_id: id, ...fields });
+      return out?.task ?? null;
+    },
+
+    /** Legt eine Aufgabe an eine Stelle (`move_task`): `{kind: 'area'|'project'|'loose'|'inbox', id?}`. */
+    async moveTask(id, location) {
+      const out = await callTool('move_task', { task_id: id, location });
+      return out?.task ?? null;
+    },
+
+    /** Bereiche mit ihren Projekten (`list_structure`), für „Zuordnen“. */
+    async listStructure() {
+      const out = await callTool('list_structure', {});
+      return out?.areas ?? [];
+    },
+
+    /**
+     * Startet bzw. stoppt die Flamme (Deep-Work-Block) einer Aufgabe. Liefert
+     * `{ task, running, timing: { configured, used, error } }`; eine laufende
+     * Flamme an einer anderen Aufgabe endet beim Start.
+     */
+    async startFlame(id) {
+      return callTool('start_flame', { task_id: id });
+    },
+    async stopFlame(id) {
+      return callTool('stop_flame', { task_id: id });
+    },
+
     /** Legt eine Aufgabe in der Zunder-Inbox an und liefert `{ id, ref, url }`. */
     async createTask({ title, description, vaultLinks }) {
       const args = { title: clampTitle(title) };

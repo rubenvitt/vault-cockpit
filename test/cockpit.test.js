@@ -244,6 +244,8 @@ function fakeZunder(tasks, { fail = null } = {}) {
       calls.push(f);
       if (fail && fail(f)) throw new Error('Zunder antwortet mit HTTP 502');
       return tasks.filter((t) => {
+        if (f.flame_running) return Boolean(t.flame_running);
+        if (f.closed_after) return f.status.includes(t.status) && t.closed && t.closed >= f.closed_after && t.closed <= f.closed_before;
         if (f.phoenix_fire) return t.phoenix?.fire === f.phoenix_fire;
         if (f.location === 'inbox') return t.location.kind === 'inbox' && f.status.includes(t.status);
         if (f.due_after) return t.due && t.due.slice(0, 10) >= f.due_after && t.due.slice(0, 10) <= f.due_before;
@@ -251,6 +253,13 @@ function fakeZunder(tasks, { fail = null } = {}) {
         if (f.status) return f.status.includes(t.status);
         return true;
       });
+    },
+    async listStructure() {
+      return [
+        { id: 'a2', name: 'Zuhause', state: 'active', projects: [{ id: 'p9', name: 'Alt', status: 'done' }] },
+        { id: 'a1', name: 'Arbeitnehmer', state: 'active', projects: [{ id: 'p1', name: 'Odoo', status: 'active' }] },
+        { id: 'a3', name: 'Weg', state: 'archived', projects: [] },
+      ];
     },
   };
 }
@@ -306,6 +315,11 @@ test('Wochenmodell: Big Rocks je Bereich, Flammen mit gemessener Zeit, Aufgaben 
 
   assert.deepEqual(m.tasks.data.map((t) => [t.id, t.overdue]), [['o1', true], ['p1', false]]);
   assert.deepEqual(m.inbox.zunder.data.map((t) => t.id), ['i1']);
+  // Ziele für „Zuordnen“: sortiert, ohne archivierte Bereiche und abgeschlossene Projekte.
+  assert.deepEqual(m.inbox.targets, [
+    { id: 'a1', name: 'Arbeitnehmer', projects: [{ id: 'p1', name: 'Odoo' }] },
+    { id: 'a2', name: 'Zuhause', projects: [] },
+  ]);
   assert.deepEqual(m.inbox.vault.data, [{ path: 'inbox/a.md', title: 'A' }]);
 
   const wed = m.calendar.data.find((d) => d.date === '2026-10-14');
@@ -364,4 +378,41 @@ test('renderWeek: escaped Inhalte, Feuer-Ziel mit Markdown, Navigation', async (
 test('inline: Wikilinks, Code, Betonung, Escaping', () => {
   assert.equal(inline('[[Ziel|Sichtbar]] und [[Notiz]]'), 'Sichtbar und Notiz');
   assert.equal(inline('*kursiv* **fett** `x<y`'), '<em>kursiv</em> <strong>fett</strong> <code>x&lt;y</code>');
+});
+
+test('Wochenmodell: laufende Flamme kommt oben an, auch aus einer anderen Woche', async () => {
+  const tasks = [
+    ...TASKS,
+    { id: 'b1', title: 'Alt', status: 'in_progress', due: null, location: loc('Programmieren'), flame_running: true, flame_started_at: '2026-10-13T06:00:00Z' },
+    { id: 'b2', title: 'Neu', status: 'in_progress', due: null, location: loc('Programmieren'), flame_running: true, flame_started_at: '2026-10-13T08:00:00Z' },
+  ];
+  const cockpit = createCockpit({ index: fakeIndex([]), settings: settingsWith(), zunderFor: () => fakeZunder(tasks), now: fixedNow, logger: quiet });
+  const m = await cockpit.week('2026-W40');
+  assert.equal(m.burning.id, 'b2');
+  assert.equal(m.burning.startedAt, '2026-10-13T08:00:00Z');
+  assert.equal(m.burning.running, true);
+  const none = await createCockpit({ index: fakeIndex([]), settings: settingsWith(), zunderFor: () => fakeZunder(TASKS), now: fixedNow, logger: quiet }).week();
+  assert.equal(none.burning, null);
+});
+
+test('Rückblick: je Bereich erledigt gegen geplant, außerdem Erledigtes und Flammen-Zeit', async () => {
+  const tasks = [
+    ...TASKS,
+    { id: 'e1', title: 'Nebenbei', status: 'done', due: null, closed: '2026-10-13', location: loc('Arbeitnehmer'), flame_started_at: '2026-10-13T08:00:00Z', flame_ended_at: '2026-10-13T08:45:00Z' },
+    { id: 'e2', title: 'Odoo W3', status: 'done', due: '2026-10-16', closed: '2026-10-14', location: loc('Arbeitnehmer') },
+  ].map((t) => (t.id === 'd2' ? { ...t, closed: '2026-10-14' } : t));
+  const cockpit = createCockpit({ index: fakeIndex([]), settings: settingsWith(), zunderFor: () => fakeZunder(tasks), now: fixedNow, logger: quiet });
+  const r = await cockpit.review('2026-W42');
+  assert.equal(r.ok, true);
+  const by = Object.fromEntries(r.areas.map((a) => [a.area, a]));
+  // Arbeitnehmer: d2 + e2 geplant und erledigt, x1 verworfen zählt nicht; e1 außerdem erledigt, 45 min Flamme.
+  assert.deepEqual([by.Arbeitnehmer.planned, by.Arbeitnehmer.done, by.Arbeitnehmer.extra, by.Arbeitnehmer.minutes], [2, 2, 1, 45]);
+  assert.deepEqual([by['Phönix-Progression'].planned, by['Phönix-Progression'].done, by['Phönix-Progression'].minutes], [1, 1, 90]);
+  assert.deepEqual(by['Ehrenamt (DRK Bereitschaft)'].open.map((t) => t.id), ['d1']);
+  assert.deepEqual(r.totals, { planned: 5, done: 3, extra: 1, minutes: 135 });
+  assert.deepEqual(r.flames.map((f) => [f.id, f.minutes]), [['f1', 90]]);
+  assert.equal(await cockpit.review('2026-W99'), null);
+
+  const off = createCockpit({ index: fakeIndex([]), settings: settingsWith({ zunder: false }), zunderFor: () => assert.fail(), now: fixedNow, logger: quiet });
+  assert.equal((await off.review()).unconfigured, true);
 });

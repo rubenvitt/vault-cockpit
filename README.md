@@ -224,7 +224,28 @@ Feld behält den gespeicherten Wert. Das Secret für das Sitzungs-Cookie liegt i
 
 **Handeln statt nur schauen:** Aufgaben in Flammen, Big Rocks, Aufgaben und
 Zunder-Inbox hakt man direkt ab (Zunder-Status `done`, ein zweiter Klick öffnet
-sie wieder, die Meldung bietet „Rückgängig“). Oben auf der Seite liegt eine
+sie wieder, die Meldung bietet „Rückgängig“). Das Menü `⋯` an jeder Aufgabe
+setzt den Status (in Arbeit, blockiert, offen) und verschiebt die Fälligkeit
+(heute, morgen, nächste Woche = Montag, ein Datum oder ohne); die Ansicht ordnet
+die Aufgabe danach neu ein. Dort markiert man auch einen Phönix-Schritt der
+angezeigten Woche. In der Zunder-Inbox kommt **Zuordnen** (Bereich, Projekt oder
+„Lose“) und **Verwerfen** dazu, sodass sich die Inbox im Cockpit auf null bringen
+lässt. Auf dem iPhone öffnet sich das Menü als Leiste von unten. Flammen und
+Big Rocks haben einen **Flammen-Knopf**: Er startet einen Deep-Work-Block in
+Zunder (und Timing, falls dort angebunden); solange eine Flamme brennt, steht
+oben eine Leiste mit Timer und „Stopp“. Notizen der Vault-Inbox öffnen sich als
+**Vorschau** im Cockpit (`/notiz?pfad=…`, Obsidian-Link daneben): Checkboxen
+abhaken, Tags setzen, Text anhängen und in einen Ordner **ablegen** (Vorschläge
+aus dem Index, Eingabe frei) oder mit einem Klick ins Archiv (der oberste Ordner
+namens `archiv`, auch `40-archiv`). Vertrauliche und ausgeschlossene Ordner der
+Policy zeigt das Cockpit weder an noch nimmt es sie als Ziel. Feuer-Ziel und
+Ersten Zug der Feuer-Notiz bearbeitet man direkt im Wochenblick (✎ neben dem
+Text, ersetzt den ersten Absatz unter der Überschrift). Der **Wochenrückblick**
+unter `/rueckblick` (in der Navigation, `?woche=` für frühere Wochen) zeigt je
+Bereich, was erledigt war und was geplant war (Phönix-Schritte und in der Woche
+Fälliges), was außerdem erledigt wurde, die Flammen-Zeit der Woche und was offen
+blieb.
+Oben auf der Seite liegt eine
 **Schnelleingabe** mit derselben Logik wie `/capture`: Text wird eine Notiz im
 Inbox-Ordner, mit `!` vorne eine Aufgabe in der Zunder-Inbox. `/` oder `n` springt
 hinein, Enter legt an, Shift+Enter macht eine neue Zeile. Beides läuft ohne

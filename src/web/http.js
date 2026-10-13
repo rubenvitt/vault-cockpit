@@ -1,8 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { timingSafeEqual, randomUUID } from 'node:crypto';
 import { createCookieSigner, parseCookies, cookie } from './session.js';
-import { renderWeek, renderMessage, renderSettings, CSS } from './render.js';
+import { renderWeek, renderMessage, renderSettings, dueLabel, CSS } from './render.js';
 import { renderGraph, renderSearch, GRAPH_CSS } from './graph-render.js';
+import { renderNote, NOTE_CSS } from './note-render.js';
+import { renderReview, REVIEW_CSS } from './review-render.js';
 import { SettingsError, MAX_CALENDARS } from '../cockpit/settings.js';
 import { describeWeek, weekOf } from '../cockpit/week.js';
 import { ActionError, SETTABLE } from '../cockpit/actions.js';
@@ -47,14 +49,21 @@ const HTML_HEADERS = {
  * `/api/woche`, Login über Pocket ID.
  *
  * - `GET /` und `GET /api/woche` — `?woche=2026-W42`, ohne Angabe die laufende Woche.
+ * - `GET /rueckblick?woche=…` — Wochenrückblick (erledigt gegen geplant, Flammen-Zeit).
  * - `GET /graph?q=…` sucht (hybrid), `GET /graph?pfad=…` zeigt den Graphen um
  *   eine Notiz; `GET /api/graph?pfad=…` liefert ihn als JSON.
  * - `GET /login` → Pocket ID → `GET /auth/callback` setzt die Sitzung (12 h).
  * - `POST /logout` löscht sie. SameSite=Lax hält fremde Seiten davon ab.
  * - `GET`/`POST /einstellungen` — Kalender, Zunder-Zugang und Anzeige pflegen.
- * - `POST /aktion/status` setzt den Status einer Zunder-Aufgabe (abhaken und
- *   zurück), `POST /aktion/erfassen` ist die Schnelleingabe (Notiz, mit `!` eine
- *   Zunder-Aufgabe). Beide brauchen Sitzung, gleiche Herkunft und das CSRF-Token
+ * - `POST /aktion/status` setzt den Status einer Zunder-Aufgabe (abhaken, in
+ *   Arbeit, blockiert, offen, verworfen), `POST /aktion/faellig` verschiebt die
+ *   Fälligkeit, `POST /aktion/zuordnen` legt eine Aufgabe aus der Inbox in einen
+ *   Bereich oder ein Projekt, `POST /aktion/phoenix` markiert einen Phönix-Schritt,
+ *   `POST /aktion/flamme` startet (`an=1`) oder stoppt eine Flamme,
+ *   `POST /aktion/notiz/…` legt eine Notiz ab, setzt Tags, hängt Text an oder
+ *   hakt eine Checkbox ab (Vorschau unter `GET /notiz?pfad=…`),
+ *   `POST /aktion/erfassen` ist die Schnelleingabe (Notiz, mit `!` eine
+ *   Zunder-Aufgabe). Alle brauchen Sitzung, gleiche Herkunft und das CSRF-Token
  *   der Sitzung. Mit `Accept: application/json` antworten sie mit JSON (für
  *   `/static/cockpit.js`), sonst mit einer Weiterleitung und einer Meldung.
  * - `POST /einstellungen/tokens` legt einen API-Token für `/api/search` an und
@@ -65,7 +74,7 @@ const HTML_HEADERS = {
  * Die Sitzung ist ein signiertes Cookie und nur für diese Routen gültig; die
  * MCP-Schnittstelle prüft weiter ausschließlich Bearer-Tokens.
  */
-export function createWebHttp({ cockpit, settings, actions = null, tokens = null, shortcuts = [], captureEnabled = false, calendars = null, graph = null, search = null, oidc, sessionSecret, publicUrl, allowedSubjects = [], sessionHours = 12, logger = console, now = () => Date.now() }) {
+export function createWebHttp({ cockpit, settings, actions = null, notes = null, tokens = null, shortcuts = [], captureEnabled = false, calendars = null, graph = null, search = null, oidc, sessionSecret, publicUrl, allowedSubjects = [], sessionHours = 12, logger = console, now = () => Date.now() }) {
   const signer = createCookieSigner(sessionSecret);
   const secure = publicUrl.startsWith('https://');
 
@@ -138,7 +147,7 @@ export function createWebHttp({ cockpit, settings, actions = null, tokens = null
   }
 
   /** Was die Seite zum Schreiben braucht; ohne `actions` bleibt sie lesend. */
-  const writeContext = (req) => (actions ? { csrf: csrfOf(req), captureId: randomUUID() } : null);
+  const writeContext = (req) => (actions ? { csrf: csrfOf(req), captureId: randomUUID(), notes: Boolean(notes) } : null);
 
   async function page(req, res, url, session, { status = 200, flash = null, draft = null } = {}) {
     const id = url.searchParams.get('woche');
@@ -148,12 +157,63 @@ export function createWebHttp({ cockpit, settings, actions = null, tokens = null
     return send(res, status, renderWeek(model, { user: session.name ?? session.sub, write: writeContext(req), back, flash: flash ?? takeFlash(req, res), draft }));
   }
 
+  /** Notizseite `/notiz?pfad=…`: Vorschau und Verarbeiten. */
+  async function notePage(req, res, url, session, { status = 200, flash = null, draft = null } = {}) {
+    const path = url.searchParams.get('pfad') ?? '';
+    const note = notes?.get(path);
+    if (!note) {
+      return send(res, 404, renderMessage('Notiz nicht verfügbar', `„${path}“ gibt es nicht, oder sie liegt in einem vertraulichen oder ausgeschlossenen Ordner.`, { link: { href: '/', label: 'Zur Woche' } }));
+    }
+    const { vaultName } = settings.get();
+    const html = renderNote(note, {
+      user: session.name ?? session.sub,
+      write: actions ? writeContext(req) : null,
+      back: url.pathname + url.search,
+      flash: flash ?? takeFlash(req, res),
+      draft,
+      targets: notes.targets(note.path),
+      archive: notes.archiveFolder(),
+      vaultName,
+    });
+    return send(res, status, html);
+  }
+
+  /** Wochenrückblick `/rueckblick?woche=…`: erledigt gegen geplant, Flammen-Zeit je Bereich. */
+  async function reviewPage(req, res, url, session) {
+    const id = url.searchParams.get('woche');
+    const model = cockpit.review ? await cockpit.review(id || null) : null;
+    if (!model) return send(res, 400, renderMessage('Unbekannte Woche', `„${id}“ ist keine Kalenderwoche wie 2026-W42.`, { link: { href: '/rueckblick', label: 'Zur laufenden Woche' } }));
+    return send(res, 200, renderReview(model, { user: session.name ?? session.sub }));
+  }
+
+  /** Seite hinter `back` mit Meldung (Weg ohne JavaScript, wenn eine Aktion scheitert). */
+  const backPage = (req, res, back, session, opts) => {
+    const url = new URL(back, publicUrl);
+    return url.pathname === '/notiz' && notes ? notePage(req, res, url, session, opts) : page(req, res, url, session, opts);
+  };
+  /** Nach dem Verschieben gibt es die alte Notizseite nicht mehr. */
+  const notePageOf = (path) => `/notiz?pfad=${encodeURIComponent(path)}`;
+
+  const taskName = (t) => (t.ref ? `${t.ref} ${t.title}` : t.title);
   const statusMessage = (t) => {
-    const name = t.ref ? `${t.ref} ${t.title}` : t.title;
-    if (t.status === 'done') return `Erledigt: ${name}`;
-    if (t.status === 'in_progress') return `In Arbeit: ${name}`;
-    if (t.status === 'blocked') return `Blockiert: ${name}`;
-    return `Wieder offen: ${name}`;
+    if (t.status === 'done') return `Erledigt: ${taskName(t)}`;
+    if (t.status === 'in_progress') return `In Arbeit: ${taskName(t)}`;
+    if (t.status === 'blocked') return `Blockiert: ${taskName(t)}`;
+    if (t.status === 'dropped') return `Verworfen: ${taskName(t)}`;
+    return `Wieder offen: ${taskName(t)}`;
+  };
+  const dueMessage = (t) => (t.due ? `Fällig ${dueLabel(t.due, settings.get().tz)}: ${taskName(t)}` : `Ohne Fälligkeit: ${taskName(t)}`);
+  const placeName = (loc) => {
+    if (!loc || loc.kind === 'inbox') return 'Inbox';
+    if (loc.kind === 'loose') return 'Lose';
+    if (loc.kind === 'project') return loc.area_name ? `${loc.area_name} / ${loc.name}` : (loc.name ?? 'Projekt');
+    return loc.name ?? loc.area_name ?? 'Bereich';
+  };
+  const flameMessage = (t, on) => {
+    const failed = typeof t.timing === 'string' ? ` · Timing: ${t.timing}` : '';
+    if (on) return `Flamme läuft: ${taskName(t)}${t.timing === true ? ' · Timing misst mit' : failed}`;
+    const minutes = t.startedAt && t.endedAt ? Math.round((Date.parse(t.endedAt) - Date.parse(t.startedAt)) / 60_000) : null;
+    return `Flamme gestoppt: ${taskName(t)}${minutes != null ? ` · ${minutes} min` : ''}${failed}`;
   };
   const captureMessage = (r) => {
     if (r.kind === 'task') return `${r.duplicate ? 'Schon erfasst' : 'Aufgabe angelegt'}: ${r.ref ?? 'neue Aufgabe'} liegt in der Zunder-Inbox`;
@@ -161,9 +221,96 @@ export function createWebHttp({ cockpit, settings, actions = null, tokens = null
   };
 
   /**
-   * Abhaken und Schnelleingabe. Mit JavaScript als JSON, ohne als Formular mit
+   * Die schreibenden Aktionen. Jede liefert `{ message, …, undo }`; `undo` ist
+   * `{ action, fields }`, also genau das Formular, das den alten Stand
+   * wiederherstellt (ohne JavaScript als Knopf in der Meldung).
+   */
+  const ACTIONS = actions
+    ? {
+        async '/aktion/status'(form, session) {
+          const prev = form.get('prev');
+          const task = await actions.setStatus(form.get('id'), form.get('status'));
+          const undo = SETTABLE.includes(prev) && prev !== task.status ? { action: '/aktion/status', fields: { id: task.id, status: prev } } : null;
+          logger.info?.(`Cockpit: ${task.ref ?? task.id} → ${task.status} (${session.sub})`);
+          return { message: statusMessage(task), task, undo };
+        },
+        async '/aktion/faellig'(form, session) {
+          const due = form.get('due') === 'datum' ? form.get('date') : form.get('due');
+          const prev = (form.get('prev') ?? '').slice(0, 10);
+          const task = await actions.setDue(form.get('id'), due);
+          const undo = form.has('prev') && prev !== (task.due ?? '').slice(0, 10) ? { action: '/aktion/faellig', fields: { id: task.id, due: prev || 'keine' } } : null;
+          logger.info?.(`Cockpit: ${task.ref ?? task.id} fällig ${task.due ?? '–'} (${session.sub})`);
+          return { message: dueMessage(task), task, undo };
+        },
+        async '/aktion/zuordnen'(form, session) {
+          const prev = form.get('prev');
+          const task = await actions.move(form.get('id'), form.get('ziel'));
+          const undo = prev === 'inbox' && task.location?.kind !== 'inbox' ? { action: '/aktion/zuordnen', fields: { id: task.id, ziel: 'inbox' } } : null;
+          logger.info?.(`Cockpit: ${task.ref ?? task.id} → ${placeName(task.location)} (${session.sub})`);
+          return { message: `${placeName(task.location)}: ${taskName(task)}`, task, undo };
+        },
+        async '/aktion/phoenix'(form, session) {
+          const prev = form.get('prev') ?? '';
+          const task = await actions.setPhoenix(form.get('id'), form.get('fire'));
+          const now = task.phoenix?.role === 'feuer_schritt' ? task.phoenix.fire : '';
+          const undo = form.has('prev') && prev !== now ? { action: '/aktion/phoenix', fields: { id: task.id, fire: prev } } : null;
+          logger.info?.(`Cockpit: ${task.ref ?? task.id} Phönix ${now || '–'} (${session.sub})`);
+          const message = now ? `Phönix-Schritt KW ${Number(now.slice(6))}: ${taskName(task)}` : `Kein Phönix-Schritt mehr: ${taskName(task)}`;
+          return { message, task, undo };
+        },
+        async '/aktion/flamme'(form, session) {
+          const on = form.get('an') === '1';
+          const task = await actions.flame(form.get('id'), on);
+          logger.info?.(`Cockpit: Flamme ${on ? 'an' : 'aus'} ${task.ref ?? task.id} (${session.sub})`);
+          return { message: flameMessage(task, on), task };
+        },
+        ...(notes
+          ? {
+              async '/aktion/notiz/ablegen'(form, session) {
+                const back = safeNext(form.get('back'));
+                const r = notes.move(form.get('pfad'), form.get('ordner'));
+                const folder = r.path.slice(0, r.path.lastIndexOf('/'));
+                const from = r.from.includes('/') ? r.from.slice(0, r.from.lastIndexOf('/')) : '';
+                logger.info?.(`Cockpit: ${r.from} → ${r.path} (${session.sub})`);
+                // Von der Notizseite aus geht es zur neuen Adresse der Notiz.
+                const redirect = back.startsWith('/notiz') ? notePageOf(r.path) : null;
+                const undo = r.changed && from ? { action: '/aktion/notiz/ablegen', fields: { pfad: r.path, ordner: from, back: redirect ? notePageOf(r.from) : back } } : null;
+                return { message: r.changed ? `Abgelegt in ${folder}/` : `Liegt schon in ${folder}/`, path: r.path, redirect, undo };
+              },
+              async '/aktion/notiz/tags'(form) {
+                const r = notes.setTags(form.get('pfad'), form.get('tags'));
+                return { message: r.tags.length ? `Tags: ${r.tags.map((t) => `#${t}`).join(' ')}` : 'Tags entfernt', path: r.path };
+              },
+              async '/aktion/notiz/anhaengen'(form) {
+                const r = notes.append(form.get('pfad'), form.get('text'));
+                return { message: 'Angehängt', path: r.path };
+              },
+              async '/aktion/feuer'(form, session) {
+                const r = notes.setFeuer(form.get('pfad'), form.get('feld'), form.get('text'));
+                logger.info?.(`Cockpit: ${r.heading} in ${r.path} (${session.sub})`);
+                const undo = r.changed && r.previous ? { action: '/aktion/feuer', fields: { pfad: r.path, feld: form.get('feld'), text: r.previous } } : null;
+                return { message: r.changed ? `${r.heading} gespeichert` : `${r.heading} unverändert`, path: r.path, undo };
+              },
+              async '/aktion/notiz/checkbox'(form) {
+                const done = form.get('erledigt') === '1';
+                const r = notes.toggle(form.get('pfad'), form.get('n'), form.get('line'), done);
+                const undo = { action: '/aktion/notiz/checkbox', fields: { pfad: r.path, n: form.get('n'), line: r.line, erledigt: done ? '0' : '1' } };
+                return { message: done ? 'Abgehakt' : 'Wieder offen', path: r.path, undo };
+              },
+            }
+          : {}),
+        async '/aktion/erfassen'(form) {
+          const result = await actions.capture({ text: form.get('text') ?? '', captureId: form.get('cid') });
+          return { message: captureMessage(result), result };
+        },
+      }
+    : {};
+
+  /**
+   * Alle Aktionen. Mit JavaScript als JSON, ohne als Formular mit
    * Weiterleitung; schlägt es ohne JavaScript fehl, kommt die Seite direkt mit
-   * Fehlermeldung und dem eingegebenen Text zurück, damit nichts verloren geht.
+   * Fehlermeldung (und bei der Schnelleingabe dem eingegebenen Text) zurück,
+   * damit nichts verloren geht.
    */
   async function action(req, res, path, session) {
     const wantsJson = String(req.headers.accept ?? '').includes('application/json');
@@ -176,25 +323,21 @@ export function createWebHttp({ cockpit, settings, actions = null, tokens = null
     }
     let body;
     try {
-      if (path === '/aktion/status') {
-        const prev = form.get('prev');
-        const task = await actions.setStatus(form.get('id'), form.get('status'));
-        const undo = SETTABLE.includes(prev) && prev !== task.status ? { id: task.id, status: prev } : null;
-        logger.info?.(`Cockpit: ${task.ref ?? task.id} → ${task.status} (${session.sub})`);
-        body = { ok: true, message: statusMessage(task), task, undo };
-      } else {
-        const result = await actions.capture({ text: form.get('text') ?? '', captureId: form.get('cid') });
-        body = { ok: true, message: captureMessage(result), result };
-      }
+      body = { ok: true, ...(await ACTIONS[path](form, session)) };
     } catch (err) {
       if (!(err instanceof ActionError)) throw err;
       logger.warn?.(`Cockpit-Aktion ${path} fehlgeschlagen: ${err.message}`);
       if (wantsJson) return json(res, err.status, { error: 'action_failed', message: err.message });
-      const draft = path === '/aktion/erfassen' ? form.get('text') : null;
-      return page(req, res, new URL(back, publicUrl), session, { status: err.status, flash: { kind: 'error', message: err.message }, draft });
+      const draft = path === '/aktion/erfassen' || path === '/aktion/notiz/anhaengen' ? form.get('text') : null;
+      return backPage(req, res, back, session, { status: err.status, flash: { kind: 'error', message: err.message }, draft });
     }
-    if (wantsJson) return json(res, 200, body);
-    return redirect(res, back, [flashCookie({ kind: 'ok', message: body.message, undo: body.undo ?? null })]);
+    const flash = flashCookie({ kind: 'ok', message: body.message, undo: body.undo ?? null });
+    // Muss die Seite wechseln (Notiz verschoben), kommt die Meldung per Cookie mit.
+    if (wantsJson) {
+      if (body.redirect) res.setHeader('set-cookie', [flash]);
+      return json(res, 200, body);
+    }
+    return redirect(res, body.redirect ?? back, [flash]);
   }
 
   async function api(req, res, url) {
@@ -339,9 +482,9 @@ export function createWebHttp({ cockpit, settings, actions = null, tokens = null
   }
 
   const TOKEN_ROUTES = { '/einstellungen/tokens': createToken, '/einstellungen/tokens/widerrufen': revokeToken };
-  const ACTION_ROUTES = new Set(actions ? ['/aktion/status', '/aktion/erfassen'] : []);
+  const ACTION_ROUTES = new Set(Object.keys(ACTIONS));
   const SHORTCUT_ROUTES = new Map(shortcuts.map((s) => [`/kurzbefehle/${s.slug}.shortcut`, s]));
-  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), '/static/cockpit.js', '/', '/api/woche', '/graph', '/api/graph', '/einstellungen', ...(tokens ? Object.keys(TOKEN_ROUTES) : []), '/login', '/auth/callback', '/logout', '/static/cockpit.css']);
+  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), '/static/cockpit.js', '/', '/api/woche', '/rueckblick', ...(notes ? ['/notiz'] : []), '/graph', '/api/graph', '/einstellungen', ...(tokens ? Object.keys(TOKEN_ROUTES) : []), '/login', '/auth/callback', '/logout', '/static/cockpit.css']);
 
   return {
     matches: (path) => ROUTES.has(path),
@@ -352,7 +495,7 @@ export function createWebHttp({ cockpit, settings, actions = null, tokens = null
 
       if (path === '/static/cockpit.css' && method === 'GET') {
         res.writeHead(200, { 'content-type': 'text/css; charset=utf-8', 'cache-control': 'public, max-age=3600' });
-        return res.end(CSS + GRAPH_CSS);
+        return res.end(CSS + GRAPH_CSS + NOTE_CSS + REVIEW_CSS);
       }
       if (path === '/static/cockpit.js' && method === 'GET') {
         res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache', 'x-content-type-options': 'nosniff' });
@@ -410,6 +553,8 @@ export function createWebHttp({ cockpit, settings, actions = null, tokens = null
       }
       if (!session) return redirect(res, `/login?next=${encodeURIComponent(url.pathname + url.search)}`);
       if (path === '/graph') return graphPage(req, res, url, session);
+      if (path === '/notiz') return notePage(req, res, url, session);
+      if (path === '/rueckblick') return reviewPage(req, res, url, session);
       return page(req, res, url, session);
     },
   };
