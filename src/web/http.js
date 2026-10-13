@@ -448,11 +448,13 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       const name = field(`cal.${i}.name`);
       const url = field(`cal.${i}.url`);
       if (!prev && !name && !url) continue;
-      const username = field(`cal.${i}.username`);
+      // Die Seite schickt `cal.auth` mit: Ein iCal-Abo ohne Haken bei „Mit Anmeldung“ verliert dann Benutzer und Passwort.
+      const kind = field(`cal.${i}.kind`) || 'ical';
+      const username = kind === 'ical' && form.get('cal.auth') && !form.get(`cal.${i}.auth`) ? '' : field(`cal.${i}.username`);
       calendarsIn.push({
         id: prev?.id,
         name,
-        kind: field(`cal.${i}.kind`) || 'ical',
+        kind,
         url: url || prev?.url,
         username,
         password: username ? field(`cal.${i}.password`) || prev?.password : null,

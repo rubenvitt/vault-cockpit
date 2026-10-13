@@ -343,6 +343,8 @@
     if (!list) return;
     list.parentElement.querySelector(`[data-empty="${list.dataset.list}"]`)?.remove();
     list.hidden = false;
+    const count = document.querySelector('[data-inbox-count]');
+    if (count) count.textContent = String(Number(count.textContent) + 1);
     const li = document.createElement('li');
     li.className = result.kind === 'task' ? 'task status-open fresh' : 'note fresh';
     const firstLine = sent.trim().replace(/^!\s*/, '').split(/\r?\n/)[0].trim();

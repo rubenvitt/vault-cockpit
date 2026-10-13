@@ -36,8 +36,8 @@ export function renderReview(model, { user = null } = {}) {
           const flame = Math.round((a.minutes / maxMin) * 100);
           return `<li>
           <span class="review-area">${esc(a.area)}${a.extra ? ` <span class="hint">+${a.extra} außerdem</span>` : ''}</span>
-          <span class="meter" title="${a.done} von ${a.planned} geplanten erledigt">${bar(pct, a.planned && a.done === a.planned ? 'full' : '')}<span class="meter-text">${a.planned ? `${a.done}/${a.planned}` : '–'}</span></span>
-          <span class="meter flame" title="${esc(hours(a.minutes))} Flammen-Zeit">${bar(flame)}<span class="meter-text">${a.minutes ? esc(hours(a.minutes)) : '–'}</span></span>
+          <span class="meter" data-label="erledigt" title="${a.done} von ${a.planned} geplanten erledigt">${bar(pct, a.planned && a.done === a.planned ? 'full' : '')}<span class="meter-text">${a.planned ? `${a.done}/${a.planned}` : '–'}</span></span>
+          <span class="meter flame" data-label="Flammen" title="${esc(hours(a.minutes))} Flammen-Zeit">${bar(flame)}<span class="meter-text">${a.minutes ? esc(hours(a.minutes)) : '–'}</span></span>
           ${a.open.length ? `<details class="review-open"><summary>${a.open.length} offen geblieben</summary><ul>${a.open
             .map((x) => `<li><a href="${esc(x.url)}">${esc(x.title)}</a>${x.due ? ` <span class="meta">${esc(dueLabel(x.due, model.tz))}</span>` : ''}</li>`)
             .join('')}</ul></details>` : ''}
@@ -96,9 +96,15 @@ export const REVIEW_CSS = `
 .review-flames li:first-child { border-top: 0; }
 .review-flames .meta { display: inline; text-align: right; }
 @media (max-width: 600px) {
-  .stats { grid-template-columns: 1fr 1fr; }
-  .stat-value { font-size: 24px; }
+  .stats { gap: 8px; }
+  .stat { padding: 10px 12px; }
+  .stat-value { font-size: 22px; }
+  .stat-of { font-size: 15px; }
+  .stat-label { font-size: 12px; line-height: 1.3; }
   .review-head { display: none; }
   .review > li { grid-template-columns: 1fr; }
+  /* Ohne Spaltenköpfe sagt jede Zeile selbst, was sie misst. */
+  .meter::before { content: attr(data-label); flex: none; width: 64px; font-size: 12px; color: var(--muted); }
+  .meter-text { width: 72px; }
 }
 `;

@@ -380,6 +380,23 @@ test('renderWeek: escaped Inhalte, Feuer-Ziel mit Markdown, Navigation', async (
   assert.match(html, /90 min/);
 });
 
+test('renderWeek: vergangene Tage treten zurück, heute steht im Kopf der Termine', async () => {
+  const cockpit = createCockpit({ index: fakeIndex([feuerNote()]), settings: settingsWith(), zunderFor: () => fakeZunder(TASKS), now: fixedNow, logger: quiet });
+  const m = await cockpit.week();
+  m.calendar = {
+    ok: true,
+    data: [
+      { label: 'Mo 12.10.', today: false, events: [{ title: 'A', start: new Date('2026-10-12T08:00:00Z'), allDay: false }] },
+      { label: 'Di 13.10.', today: true, events: [] },
+      { label: 'Mi 14.10.', today: false, events: [] },
+    ],
+  };
+  const html = renderWeek(m);
+  assert.match(html, /<div class="day past">\s*<h3>Mo 12\.10\. <span class="day-count">1 Termin<\/span><\/h3>/);
+  assert.match(html, /<div class="day today">/);
+  assert.match(html, /<h2>Termine <span class="hint">heute frei<\/span><\/h2>/);
+});
+
 test('inline: Wikilinks, Code, Betonung, Escaping', () => {
   assert.equal(inline('[[Ziel|Sichtbar]] und [[Notiz]]'), 'Sichtbar und Notiz');
   assert.equal(inline('*kursiv* **fett** `x<y`'), '<em>kursiv</em> <strong>fett</strong> <code>x&lt;y</code>');

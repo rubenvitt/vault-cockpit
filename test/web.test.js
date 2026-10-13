@@ -399,6 +399,55 @@ test('Einstellungen: nur angemeldet, Kalender anlegen, Geheimnisse bleiben verbo
   );
 });
 
+test('Einstellungen: Kalender als kompakte Liste, Felder je Art, Entfernen als Knopf', async () => {
+  const calendars = { check: async () => ({}) };
+  await withServer(
+    async ({ call, login, settings }) => {
+      await login();
+      const csrf = csrfFrom(await (await call('/einstellungen')).text());
+      await call('/einstellungen', {
+        method: 'POST',
+        form: {
+          'cal.0.name': 'Abo', 'cal.0.kind': 'ical', 'cal.0.url': 'https://cal.example/a.ics', 'cal.0.auth': '1', 'cal.0.username': 'u', 'cal.0.password': 'pw',
+          'cal.1.name': 'Dav', 'cal.1.kind': 'caldav', 'cal.1.url': 'https://dav.example/', 'cal.1.username': 'r', 'cal.1.password': 'pw2',
+          'cal.auth': '1', csrf,
+        },
+      });
+      const [abo, dav] = settings.stored().calendars;
+      assert.equal(abo.username, 'u');
+
+      const html = await (await call('/einstellungen')).text();
+      // Jeder Kalender ist eine zugeklappte Zeile mit Art und Host, die Felder liegen darunter.
+      assert.match(html, /<details class="cal">\s*<summary class="cal-row">\s*<span class="cal-name">Abo<\/span>\s*<span class="cal-meta">iCal-Abo · cal\.example<\/span>/);
+      assert.match(html, /<input type="checkbox" name="cal\.0\.auth" value="1" checked>/);
+      assert.match(html, /<button type="submit" name="cal\.1\.remove" value="1" class="btn quiet danger">Kalender entfernen<\/button>/);
+      // Enter in einem Feld speichert, statt den ersten Entfernen-Knopf auszulösen.
+      assert.ok(html.indexOf('class="sr-only" tabindex="-1" aria-hidden="true">Speichern</button>') < html.indexOf('Kalender entfernen'));
+      assert.match(html, /<nav class="settings-nav"/);
+
+      // iCal ohne Haken bei „Mit Anmeldung“ verliert Benutzer und Passwort; CalDAV behält sie.
+      await call('/einstellungen', {
+        method: 'POST',
+        form: {
+          'cal.0.id': abo.id, 'cal.0.name': 'Abo', 'cal.0.kind': 'ical', 'cal.0.username': 'u',
+          'cal.1.id': dav.id, 'cal.1.name': 'Dav', 'cal.1.kind': 'caldav', 'cal.1.username': 'r',
+          'cal.auth': '1', csrf,
+        },
+      });
+      assert.deepEqual(settings.stored().calendars.map((c) => [c.name, c.username, c.password]), [['Abo', null, null], ['Dav', 'r', 'pw2']]);
+
+      // „Kalender entfernen“ schickt das Formular mit dem Namen des Knopfs.
+      await call('/einstellungen', {
+        method: 'POST',
+        form: { 'cal.0.id': abo.id, 'cal.0.name': 'Abo', 'cal.0.kind': 'ical', 'cal.0.remove': '1', 'cal.1.id': dav.id, 'cal.1.name': 'Dav', 'cal.1.kind': 'caldav', 'cal.1.username': 'r', 'cal.auth': '1', csrf },
+      });
+      assert.deepEqual(settings.stored().calendars.map((c) => c.name), ['Dav']);
+    },
+    {},
+    { calendars },
+  );
+});
+
 test('Einstellungen: Brücke, Mail und Embeddings speichern, Mail-Token bleibt verborgen', async () => {
   await withServer(async ({ call, login, settings, tokens }) => {
     await login();
