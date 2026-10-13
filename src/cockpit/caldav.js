@@ -1,11 +1,11 @@
-import { zonedToUtc } from './week.js';
+import { eventsInRange } from './ics.js';
 
 /**
  * Liest Termine per CalDAV (Fastmail, aber nicht darauf beschränkt).
  *
  * `url` ist das Kalender-Home des Kontos, bei Fastmail
- * `https://caldav.fastmail.com/dav/calendars/user/<adresse>/`. Die Kalender
- * darunter werden per PROPFIND gefunden; Termine einer Woche holt ein
+ * `https://caldav.fastmail.com/dav/calendars/user/<adresse>/`, oder ein
+ * einzelner Kalender. Die Kalender darunter werden per PROPFIND gefunden; Termine einer Woche holt ein
  * `calendar-query` mit `expand`, damit der Server Serientermine selbst auflöst.
  * Nur lesend; geschrieben wird nie.
  */
@@ -21,7 +21,7 @@ export function createCalDavClient({
   now = () => Date.now(),
 }) {
   const home = String(url).endsWith('/') ? String(url) : `${url}/`;
-  const auth = `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`;
+  const auth = username ? `Basic ${Buffer.from(`${username}:${password ?? ''}`).toString('base64')}` : null;
   const wanted = only.map((s) => s.trim().toLowerCase()).filter(Boolean);
   let calendarList = null;
   const cache = new Map();
@@ -29,7 +29,7 @@ export function createCalDavClient({
   async function dav(method, target, depth, body) {
     const res = await fetch(target, {
       method,
-      headers: { authorization: auth, depth: String(depth), 'content-type': 'application/xml; charset=utf-8' },
+      headers: { ...(auth ? { authorization: auth } : {}), depth: String(depth), 'content-type': 'application/xml; charset=utf-8' },
       body,
       signal: AbortSignal.timeout(timeoutMs),
     });
@@ -68,8 +68,7 @@ export function createCalDavClient({
 </c:calendar-query>`,
     );
     return calendarData(xml)
-      .flatMap((ics) => parseEvents(ics, tz))
-      .filter((e) => e.start < end && e.end > start)
+      .flatMap((ics) => eventsInRange(ics, start, end, tz))
       .map((e) => ({ ...e, calendar: calendar.name }));
   }
 
@@ -124,96 +123,4 @@ export function parseCalendars(xml, base) {
 /** Die iCalendar-Texte einer REPORT-Antwort. */
 export function calendarData(xml) {
   return [...xml.matchAll(tag('calendar-data'))].map((m) => decodeXml((m[1] ?? '').trim())).filter(Boolean);
-}
-
-const unescapeText = (v) => v.replace(/\\n/gi, '\n').replace(/\\([,;\\])/g, '$1');
-
-function parseLine(line) {
-  const colon = line.search(/:(?=(?:[^"]*"[^"]*")*[^"]*$)/);
-  if (colon === -1) return null;
-  const [name, ...params] = line.slice(0, colon).split(';');
-  const p = {};
-  for (const kv of params) {
-    const i = kv.indexOf('=');
-    if (i > 0) p[kv.slice(0, i).toUpperCase()] = kv.slice(i + 1).replace(/^"|"$/g, '');
-  }
-  return { name: name.toUpperCase(), params: p, value: line.slice(colon + 1) };
-}
-
-function validZone(tz) {
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function parseDate(prop, tz) {
-  const v = prop.value.trim();
-  const m = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})(Z)?)?$/.exec(v);
-  if (!m) return null;
-  const [, y, mo, d, h, mi, s, z] = m;
-  const parts = { year: +y, month: +mo, day: +d, hour: +(h ?? 0), minute: +(mi ?? 0), second: +(s ?? 0) };
-  if (prop.params.VALUE === 'DATE' || h === undefined) {
-    return { date: zonedToUtc(parts, tz), allDay: true };
-  }
-  if (z) return { date: new Date(Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second)), allDay: false };
-  const zone = prop.params.TZID && validZone(prop.params.TZID) ? prop.params.TZID : tz;
-  return { date: zonedToUtc(parts, zone), allDay: false };
-}
-
-function parseDuration(v) {
-  const m = /^([+-])?P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/.exec(String(v ?? '').trim());
-  if (!m) return 0;
-  const [, sign, w, d, h, mi, s] = m;
-  const ms = ((+(w ?? 0) * 7 + +(d ?? 0)) * 86_400 + +(h ?? 0) * 3600 + +(mi ?? 0) * 60 + +(s ?? 0)) * 1000;
-  return sign === '-' ? -ms : ms;
-}
-
-/** VEVENTs eines iCalendar-Texts; abgesagte Termine fallen weg. */
-export function parseEvents(ics, tz = 'Europe/Berlin') {
-  const lines = String(ics).replace(/\r?\n[ \t]/g, '').split(/\r?\n/);
-  const events = [];
-  let depth = 0;
-  let current = null;
-  for (const raw of lines) {
-    const line = raw.trimEnd();
-    if (line === 'BEGIN:VEVENT') {
-      current = {};
-      depth = 0;
-      continue;
-    }
-    if (!current) continue;
-    if (line.startsWith('BEGIN:')) depth += 1;
-    else if (line.startsWith('END:') && depth > 0) depth -= 1;
-    else if (line === 'END:VEVENT') {
-      const ev = toEvent(current, tz);
-      if (ev) events.push(ev);
-      current = null;
-    } else if (depth === 0) {
-      const prop = parseLine(line);
-      if (prop && !(prop.name in current)) current[prop.name] = prop;
-    }
-  }
-  return events;
-}
-
-function toEvent(props, tz) {
-  if (props.STATUS?.value.trim().toUpperCase() === 'CANCELLED') return null;
-  const start = props.DTSTART && parseDate(props.DTSTART, tz);
-  if (!start) return null;
-  let end = props.DTEND && parseDate(props.DTEND, tz);
-  let endDate = end?.date;
-  if (!endDate) {
-    const dur = props.DURATION ? parseDuration(props.DURATION.value) : 0;
-    endDate = new Date(start.date.getTime() + (dur || (start.allDay ? 86_400_000 : 0)));
-  }
-  return {
-    title: props.SUMMARY ? unescapeText(props.SUMMARY.value).trim() || '(ohne Titel)' : '(ohne Titel)',
-    start: start.date,
-    end: endDate,
-    allDay: start.allDay,
-    location: props.LOCATION ? unescapeText(props.LOCATION.value).trim() || null : null,
-  };
 }

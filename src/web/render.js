@@ -54,7 +54,8 @@ function taskItem(t, tz, { area = false } = {}) {
   </li>`;
 }
 
-const problem = (s) => `<p class="problem${s.unconfigured ? ' unconfigured' : ''}">${esc(s.error)}</p>`;
+const problem = (s) =>
+  `<p class="problem${s.unconfigured ? ' unconfigured' : ''}">${esc(s.error)}${s.unconfigured ? ' · <a href="/einstellungen">Einstellungen</a>' : ''}</p>`;
 
 function obsidianLink(path, vaultName) {
   if (!vaultName) return null;
@@ -140,7 +141,10 @@ function calendarSection(model, tz) {
       </div>`,
     )
     .join('');
-  return `<section><h2>Termine</h2><div class="week">${days}</div></section>`;
+  const failed = (c.errors ?? [])
+    .map((e) => `<p class="problem">${esc(e.calendar)}: ${esc(e.error)}</p>`)
+    .join('');
+  return `<section><h2>Termine</h2>${failed}<div class="week">${days}</div></section>`;
 }
 
 function tasksSection(model, tz) {
@@ -176,7 +180,8 @@ function inboxSection(model, tz, vaultName) {
   </section>`;
 }
 
-export function renderWeek(model, { tz = 'Europe/Berlin', vaultName = null, user = null } = {}) {
+export function renderWeek(model, { user = null } = {}) {
+  const { tz, vaultName } = model;
   const w = model.week;
   const title = weekTitle(w);
   return `<!doctype html>
@@ -197,6 +202,7 @@ export function renderWeek(model, { tz = 'Europe/Berlin', vaultName = null, user
     ${w.current ? '' : '<a href="/">Diese Woche</a>'}
     <a href="/?woche=${esc(w.next)}" rel="next">KW ${Number(w.next.slice(6))} →</a>
     <a href="/graph">Suche &amp; Graph</a>
+    <a href="/einstellungen" class="quiet">Einstellungen</a>
     <form method="post" action="/logout"><button type="submit" title="${esc(user ?? '')}">Abmelden</button></form>
   </nav>
 </header>
@@ -208,6 +214,109 @@ ${calendarSection(model, tz)}
 ${tasksSection(model, tz)}
 ${inboxSection(model, tz, vaultName)}
 </div>
+</main>
+</body>
+</html>`;
+}
+
+const KIND_LABEL = { ical: 'iCal-Abo', caldav: 'CalDAV' };
+
+/** Adresse ohne Pfad und Abfrage: iCal-Adressen enthalten oft ein Geheimnis. */
+const maskUrl = (url) => {
+  try {
+    const u = new URL(url);
+    return `${u.origin}/…`;
+  } catch {
+    return '…';
+  }
+};
+
+function calendarRow(c, i, check) {
+  const isNew = !c;
+  const v = (k) => (c ? esc(c[k] ?? '') : '');
+  const kind = c?.kind ?? 'ical';
+  const status = check
+    ? check.ok
+      ? `<span class="ok">✓ erreichbar, ${check.count} Termine diese Woche</span>`
+      : `<span class="problem">${esc(check.error)}</span>`
+    : '';
+  return `<fieldset class="calendar">
+    <legend>${isNew ? 'Neuer Kalender' : esc(c.name)} ${status}</legend>
+    ${isNew ? '' : `<input type="hidden" name="cal.${i}.id" value="${v('id')}">`}
+    <div class="grid">
+      <label>Name<input name="cal.${i}.name" value="${v('name')}" maxlength="80" placeholder="z. B. Privat"></label>
+      <label>Art<select name="cal.${i}.kind">
+        ${Object.entries(KIND_LABEL).map(([k, l]) => `<option value="${k}"${k === kind ? ' selected' : ''}>${l}</option>`).join('')}
+      </select></label>
+      <label class="wide">Adresse<input name="cal.${i}.url" type="text" inputmode="url" autocomplete="off"
+        placeholder="${isNew ? 'https://… oder webcal://…' : `${esc(maskUrl(c.url))} (leer lassen = unverändert)`}"></label>
+      <label><span>Benutzer <span class="hint">optional</span></span><input name="cal.${i}.username" value="${v('username')}" autocomplete="off"></label>
+      <label><span>Passwort <span class="hint">optional</span></span><input name="cal.${i}.password" type="password" autocomplete="new-password"
+        placeholder="${c?.password ? 'gesetzt (leer lassen = unverändert)' : ''}"></label>
+      <label class="wide"><span>Nur diese Kalender <span class="hint">CalDAV, Anzeigenamen mit Komma; leer = alle</span></span><input name="cal.${i}.filter" value="${c ? esc((c.filter ?? []).join(', ')) : ''}"></label>
+    </div>
+    ${isNew ? '' : `<label class="check"><input type="checkbox" name="cal.${i}.remove" value="1"> entfernen</label>`}
+  </fieldset>`;
+}
+
+/**
+ * Einstellungsseite. Passwörter, Tokens und Kalenderadressen werden nie
+ * zurückgegeben: Ein leeres Feld behält den gespeicherten Wert.
+ */
+export function renderSettings({ stored, defaults, checks = {}, notice = null, error = null, user = null }) {
+  const d = defaults;
+  const zunderStatus = stored.zunder.url && stored.zunder.token
+    ? 'eigener Zugang gespeichert'
+    : d.zunderUrl && d.zunderToken
+      ? `aus der Umgebung (${esc(d.zunderUrl)})`
+      : 'nicht eingerichtet';
+  const rows = stored.calendars.map((c, i) => calendarRow(c, i, checks[c.id])).join('');
+  return `<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Einstellungen · Cockpit</title>
+<link rel="stylesheet" href="/static/cockpit.css">
+</head>
+<body>
+<header>
+  <h1>Einstellungen</h1>
+  <nav>
+    <a href="/">← Zur Woche</a>
+    <form method="post" action="/logout"><button type="submit" title="${esc(user ?? '')}">Abmelden</button></form>
+  </nav>
+</header>
+<main class="settings">
+${notice ? `<p class="notice">${esc(notice)}</p>` : ''}
+${error ? `<p class="problem">${esc(error)}</p>` : ''}
+<form method="post" action="/einstellungen">
+<section>
+  <h2>Kalender</h2>
+  <p class="meta">iCal-Abo: die geheime .ics-Adresse eines Kalenders, wie Kalender-Apps sie zum Teilen anbieten. CalDAV: das Kalender-Home oder ein einzelner Kalender, mit Benutzer und App-Passwort.</p>
+  ${rows}
+  ${calendarRow(null, stored.calendars.length)}
+</section>
+<section>
+  <h2>Zunder</h2>
+  <p class="meta">Stand: ${zunderStatus}. Leer lassen, um den Zugang aus der Umgebung zu nutzen.</p>
+  <div class="grid">
+    <label>Adresse<input name="zunder.url" value="${esc(stored.zunder.url ?? '')}" placeholder="${esc(d.zunderUrl ?? 'https://zunder.example')}"></label>
+    <label><span>API-Token <span class="hint">zt_…</span></span><input name="zunder.token" type="password" autocomplete="new-password"
+      placeholder="${stored.zunder.token ? 'gesetzt (leer lassen = unverändert)' : ''}"></label>
+  </div>
+  ${stored.zunder.token ? '<label class="check"><input type="checkbox" name="zunder.clear" value="1"> eigenen Zugang löschen</label>' : ''}
+</section>
+<section>
+  <h2>Anzeige</h2>
+  <div class="grid">
+    <label>Zeitzone<input name="tz" value="${esc(stored.tz ?? '')}" placeholder="${esc(d.tz)}"></label>
+    <label><span>Vault-Name in Obsidian <span class="hint">für „In Obsidian öffnen“</span></span><input name="vaultName" value="${esc(stored.vaultName ?? '')}" placeholder="${esc(d.vaultName ?? '')}"></label>
+    <label>Inbox-Ordner im Vault<input name="inboxFolder" value="${esc(stored.inboxFolder ?? '')}" placeholder="${esc(d.inboxFolder)}"></label>
+  </div>
+</section>
+<p><button type="submit" class="primary">Speichern</button></p>
+</form>
 </main>
 </body>
 </html>`;
@@ -277,6 +386,21 @@ ul { list-style: none; margin: 0; padding: 0; }
 .event.all-day .title { font-weight: 600; }
 .columns { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
 .note { padding: 4px 0; }
+nav a.quiet { border: 0; color: var(--muted); }
+.settings form { display: grid; gap: 20px; }
+.settings .hint { color: var(--muted); }
+.settings fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px 12px; margin: 0 0 14px; }
+.settings legend { font-weight: 600; padding: 0 6px; }
+.settings legend .ok, .settings legend .problem { font-weight: 400; font-size: 13px; margin-left: 8px; }
+.ok { color: var(--ok); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px 16px; }
+.grid .wide { grid-column: 1 / -1; }
+.settings label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
+.settings label.check { flex-direction: row; align-items: center; gap: 6px; margin-top: 8px; color: var(--muted); }
+.settings input:not([type=checkbox]), .settings select { font: inherit; color: var(--text); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; min-width: 0; }
+button.primary { font: inherit; font-weight: 600; color: #fff; background: var(--accent); border: 0; border-radius: 6px; padding: 8px 18px; cursor: pointer; }
+.notice { color: var(--ok); margin: 0; }
 code { font-size: 13px; background: var(--line); padding: 1px 4px; border-radius: 4px; }
 .message { max-width: 520px; }
 @media (max-width: 900px) {

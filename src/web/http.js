@@ -1,6 +1,28 @@
 import { createCookieSigner, parseCookies, cookie } from './session.js';
-import { renderWeek, renderMessage, CSS } from './render.js';
+import { renderWeek, renderMessage, renderSettings, CSS } from './render.js';
 import { renderGraph, renderSearch, GRAPH_CSS } from './graph-render.js';
+import { SettingsError, MAX_CALENDARS } from '../cockpit/settings.js';
+import { describeWeek, weekOf } from '../cockpit/week.js';
+
+const MAX_FORM = 64 * 1024;
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > MAX_FORM) {
+        reject(new Error('Formular zu groß'));
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    req.on('error', reject);
+  });
+}
 
 const SESSION = 'vc_session';
 const LOGIN = 'vc_login';
@@ -23,11 +45,12 @@ const HTML_HEADERS = {
  *   eine Notiz; `GET /api/graph?pfad=…` liefert ihn als JSON.
  * - `GET /login` → Pocket ID → `GET /auth/callback` setzt die Sitzung (12 h).
  * - `POST /logout` löscht sie. SameSite=Lax hält fremde Seiten davon ab.
+ * - `GET`/`POST /einstellungen` — Kalender, Zunder-Zugang und Anzeige pflegen.
  *
  * Die Sitzung ist ein signiertes Cookie und nur für diese Routen gültig; die
  * MCP-Schnittstelle prüft weiter ausschließlich Bearer-Tokens.
  */
-export function createWebHttp({ cockpit, graph = null, search = null, oidc, sessionSecret, publicUrl, allowedSubjects = [], tz = 'Europe/Berlin', vaultName = null, sessionHours = 12, logger = console, now = () => Date.now() }) {
+export function createWebHttp({ cockpit, settings, calendars = null, graph = null, search = null, oidc, sessionSecret, publicUrl, allowedSubjects = [], sessionHours = 12, logger = console, now = () => Date.now() }) {
   const signer = createCookieSigner(sessionSecret);
   const secure = publicUrl.startsWith('https://');
 
@@ -83,7 +106,7 @@ export function createWebHttp({ cockpit, graph = null, search = null, oidc, sess
     const id = url.searchParams.get('woche');
     const model = await cockpit.week(id || null);
     if (!model) return send(res, 400, renderMessage('Unbekannte Woche', `„${id}“ ist keine Kalenderwoche wie 2026-W42.`, { link: { href: '/', label: 'Zur laufenden Woche' } }));
-    return send(res, 200, renderWeek(model, { tz, vaultName, user: session.name ?? session.sub }));
+    return send(res, 200, renderWeek(model, { user: session.name ?? session.sub }));
   }
 
   async function api(req, res, url) {
@@ -92,6 +115,75 @@ export function createWebHttp({ cockpit, graph = null, search = null, oidc, sess
     if (!model) return json(res, 400, { error: 'invalid_week', error_description: 'Kalenderwoche wie 2026-W42 erwartet' });
     return json(res, 200, model);
   }
+
+  async function settingsPage(req, res, session, { status = 200, notice = null, error = null } = {}) {
+    let checks = {};
+    if (calendars && settings.get().calendars.length) {
+      const tz = settings.get().tz;
+      const week = describeWeek(weekOf(new Date(now()), tz), tz);
+      checks = await calendars.check(week.start, week.end);
+    }
+    const html = renderSettings({ stored: settings.stored(), defaults: settings.defaults(), checks, notice, error, user: session.name ?? session.sub });
+    return send(res, status, html);
+  }
+
+  /**
+   * Formular → vollständiger Einstellungsstand. Leere Geheimnisfelder
+   * (Kalenderadresse, Passwort, Token) behalten den gespeicherten Wert.
+   */
+  function fromForm(form) {
+    const stored = settings.stored();
+    const field = (k) => (form.get(k) ?? '').trim();
+    const calendarsIn = [];
+    for (let i = 0; i <= MAX_CALENDARS; i++) {
+      const id = field(`cal.${i}.id`);
+      const prev = id ? stored.calendars.find((c) => c.id === id) : null;
+      if (id && !prev) continue;
+      if (form.get(`cal.${i}.remove`)) continue;
+      const name = field(`cal.${i}.name`);
+      const url = field(`cal.${i}.url`);
+      if (!prev && !name && !url) continue;
+      const username = field(`cal.${i}.username`);
+      calendarsIn.push({
+        id: prev?.id,
+        name,
+        kind: field(`cal.${i}.kind`) || 'ical',
+        url: url || prev?.url,
+        username,
+        password: username ? field(`cal.${i}.password`) || prev?.password : null,
+        filter: field(`cal.${i}.filter`).split(','),
+      });
+    }
+    const clear = Boolean(form.get('zunder.clear'));
+    return {
+      tz: field('tz'),
+      vaultName: field('vaultName'),
+      inboxFolder: field('inboxFolder'),
+      zunder: clear ? { url: null, token: null } : { url: field('zunder.url'), token: field('zunder.token') || stored.zunder.token },
+      calendars: calendarsIn,
+    };
+  }
+
+  async function saveSettings(req, res, session) {
+    // Zusätzlich zu SameSite=Lax: Formulare nur von dieser Seite annehmen.
+    const origin = req.headers.origin;
+    if (origin && origin !== new URL(publicUrl).origin) return json(res, 403, { error: 'forbidden', error_description: 'fremde Herkunft' });
+    let form;
+    try {
+      form = new URLSearchParams(await readBody(req));
+    } catch {
+      return json(res, 413, { error: 'too_large' });
+    }
+    try {
+      settings.save(fromForm(form));
+    } catch (err) {
+      if (err instanceof SettingsError) return settingsPage(req, res, session, { status: 400, error: err.message });
+      throw err;
+    }
+    logger.info?.(`Cockpit-Einstellungen gespeichert von ${session.sub}`);
+    return redirect(res, '/einstellungen?gespeichert=1');
+  }
+
 
   async function graphPage(req, res, url, session) {
     const path = url.searchParams.get('pfad');
@@ -103,6 +195,7 @@ export function createWebHttp({ cockpit, graph = null, search = null, oidc, sess
     }
     const g = graph ? await graph.around(path) : null;
     if (!g) return send(res, 404, renderMessage('Notiz nicht gefunden', `„${path}“ gibt es nicht im Index.`, { link: { href: '/graph', label: 'Zur Suche' } }));
+    const { vaultName, tz } = settings.get();
     return send(res, 200, renderGraph(g, { vaultName, user, tz }));
   }
 
@@ -112,7 +205,7 @@ export function createWebHttp({ cockpit, graph = null, search = null, oidc, sess
     return json(res, 200, g);
   }
 
-  const ROUTES = new Set(['/', '/api/woche', '/graph', '/api/graph', '/login', '/auth/callback', '/logout', '/static/cockpit.css']);
+  const ROUTES = new Set(['/', '/api/woche', '/graph', '/api/graph', '/einstellungen', '/login', '/auth/callback', '/logout', '/static/cockpit.css']);
 
   return {
     matches: (path) => ROUTES.has(path),
@@ -130,9 +223,16 @@ export function createWebHttp({ cockpit, graph = null, search = null, oidc, sess
       if (path === '/logout' && method === 'POST') {
         return redirect(res, '/login', [cookie(SESSION, '', { secure, maxAge: 0 })]);
       }
+      const session = sessionOf(req);
+      if (path === '/einstellungen') {
+        if (!session) return redirect(res, '/login?next=%2Feinstellungen');
+        if (method === 'POST') return saveSettings(req, res, session);
+        if (method === 'GET') {
+          return settingsPage(req, res, session, { notice: url.searchParams.get('gespeichert') ? 'Gespeichert.' : null });
+        }
+      }
       if (method !== 'GET') return json(res, 405, { error: 'method_not_allowed' });
 
-      const session = sessionOf(req);
       if (path === '/api/woche') {
         if (!session) return json(res, 401, { error: 'unauthorized', error_description: 'Anmeldung unter /login nötig' });
         return api(req, res, url);

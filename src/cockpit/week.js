@@ -12,9 +12,18 @@ const DAY_MS = 86_400_000;
 const pad = (n) => String(n).padStart(2, '0');
 const isoDate = (ms) => new Date(ms).toISOString().slice(0, 10);
 
+const formatters = new Map();
+
 /** Kalenderdatum und Uhrzeit eines Zeitpunkts in der Zeitzone. */
 export function zonedParts(date, tz) {
-  const parts = new Intl.DateTimeFormat('en-US', {
+  if (!formatters.has(tz)) formatters.set(tz, makeFormatter(tz));
+  const parts = formatters.get(tz).formatToParts(date);
+  const get = (t) => Number(parts.find((p) => p.type === t).value);
+  return { year: get('year'), month: get('month'), day: get('day'), hour: get('hour'), minute: get('minute'), second: get('second') };
+}
+
+function makeFormatter(tz) {
+  return new Intl.DateTimeFormat('en-US', {
     timeZone: tz,
     hourCycle: 'h23',
     year: 'numeric',
@@ -23,9 +32,7 @@ export function zonedParts(date, tz) {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
-  }).formatToParts(date);
-  const get = (t) => Number(parts.find((p) => p.type === t).value);
-  return { year: get('year'), month: get('month'), day: get('day'), hour: get('hour'), minute: get('minute'), second: get('second') };
+  });
 }
 
 /** Versatz der Zeitzone gegenüber UTC zu einem Zeitpunkt, in Millisekunden. */

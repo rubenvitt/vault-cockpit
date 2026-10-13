@@ -145,11 +145,13 @@ export function createGraph({ index, semantic = null, zunder = null, calendar = 
     // Termine des Tages, wenn die Notiz eine Tagesnotiz ist.
     const center = index.getNote(path);
     const day = center ? dailyDate({ path, frontmatter: center.frontmatter }) : null;
-    if (day && calendar) {
+    const hasCalendar = Boolean(calendar) && (calendar.configured?.() ?? true);
+    if (day && hasCalendar) {
       try {
         const [y, m, d] = day.split('-').map(Number);
-        const start = zonedToUtc({ year: y, month: m, day: d }, tz);
-        const end = zonedToUtc({ year: y, month: m, day: d + 1 }, tz);
+        const zone = typeof tz === 'function' ? tz() : tz;
+        const start = zonedToUtc({ year: y, month: m, day: d }, zone);
+        const end = zonedToUtc({ year: y, month: m, day: d + 1 }, zone);
         for (const e of await calendar.events(start, end)) {
           const id = `event:${e.start.toISOString()}:${e.title}`;
           addNode({ id, kind: 'event', label: e.title, start: e.start.toISOString(), end: e.end.toISOString(), allDay: e.allDay, calendar: e.calendar ?? null, level: 1 });
@@ -159,8 +161,8 @@ export function createGraph({ index, semantic = null, zunder = null, calendar = 
         logger.warn?.(`Graph: Termine nicht verfügbar — ${err.message}`);
         problems.push(`Kalender: ${err.message}`);
       }
-    } else if (day && !calendar) {
-      problems.push('Termine sind nicht eingerichtet (CALDAV_URL)');
+    } else if (day) {
+      problems.push('Termine sind nicht eingerichtet (Einstellungen → Kalender)');
     }
 
     for (const n of nodes.values()) {

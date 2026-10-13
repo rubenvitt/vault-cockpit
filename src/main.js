@@ -15,7 +15,8 @@ import { createCaptureHttp } from './capture/http.js';
 import { createMailCapture } from './capture/mail.js';
 import { createZunderBridge } from './capture/bridge.js';
 import { createCockpit } from './cockpit/data.js';
-import { createCalDavClient } from './cockpit/caldav.js';
+import { createCalendarSources, calendarForGraph } from './cockpit/calendars.js';
+import { createSettingsStore, loadOrCreateSecret } from './cockpit/settings.js';
 import { createOidcLogin } from './web/oidc.js';
 import { createWebHttp } from './web/http.js';
 import { createOllamaEmbedder } from './semantic/embedder.js';
@@ -152,22 +153,34 @@ sync.start({
   },
 });
 
+// Cockpit-Einstellungen (Kalender, Zunder-Zugang, Anzeige) liegen unter /data
+// und werden im Browser gepflegt; leere Felder fallen auf die Umgebung zurück.
+// Der Graph nutzt dieselben Kalender und dieselbe Zeitzone.
+const cockpitSettings = createSettingsStore({
+  file: process.env.COCKPIT_SETTINGS_FILE ?? '/data/cockpit-settings.json',
+  defaults: {
+    tz: process.env.COCKPIT_TZ || 'Europe/Berlin',
+    vaultName: process.env.OBSIDIAN_VAULT_NAME || null,
+    inboxFolder: CAPTURE_FOLDER,
+    zunderUrl: process.env.ZUNDER_URL || null,
+    zunderToken: process.env.ZUNDER_TOKEN || null,
+  },
+});
+const calendars = createCalendarSources({ settings: cockpitSettings });
+const graph = createGraph({ index, semantic, zunder, calendar: calendarForGraph(calendars), tz: () => cockpitSettings.get().tz });
+
 // Web-Cockpit (Schritt 3): Wochenansicht mit eigenem Browser-Login. Aus, bis
-// WEB_CLIENT_ID gesetzt ist; Termine nur mit CALDAV_URL.
-const TZ = process.env.COCKPIT_TZ || 'Europe/Berlin';
-const calendar = process.env.CALDAV_URL
-  ? createCalDavClient({
-      url: process.env.CALDAV_URL,
-      username: required('CALDAV_USERNAME'),
-      password: required('CALDAV_PASSWORD'),
-      calendars: (process.env.CALDAV_CALENDARS ?? '').split(','),
-      tz: TZ,
-    })
-  : null;
-const graph = createGraph({ index, semantic, zunder, calendar, tz: TZ });
+// WEB_CLIENT_ID gesetzt ist.
 const webHttp = process.env.WEB_CLIENT_ID
   ? createWebHttp({
-      cockpit: createCockpit({ index, zunder, calendar, captureFolder: CAPTURE_FOLDER, tz: TZ }),
+      cockpit: createCockpit({
+        index,
+        settings: cockpitSettings,
+        calendars,
+        zunderFor: ({ url, token }) => createZunderClient({ url, token }),
+      }),
+      settings: cockpitSettings,
+      calendars,
       graph,
       search: (query) => hybridSearch({ index, semantic, query, limit: 30 }),
       oidc: createOidcLogin({
@@ -177,11 +190,10 @@ const webHttp = process.env.WEB_CLIENT_ID
         redirectUri: `${PUBLIC_URL}/auth/callback`,
         allowedSubjects: ALLOWED_SUBJECTS,
       }),
-      sessionSecret: required('SESSION_SECRET'),
+      // Ohne SESSION_SECRET erzeugt der Dienst eins und legt es unter /data ab.
+      sessionSecret: loadOrCreateSecret(process.env.SESSION_SECRET_FILE ?? '/data/session-secret', process.env.SESSION_SECRET || null),
       publicUrl: PUBLIC_URL,
       allowedSubjects: ALLOWED_SUBJECTS,
-      tz: TZ,
-      vaultName: process.env.OBSIDIAN_VAULT_NAME || null,
     })
   : null;
 
@@ -224,7 +236,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`  Capture     : ${captureHttp ? '/capture, /funke' : 'Endpunkte aus (CAPTURE_TOKEN)'}${mail ? `, Mail aus „${mail.status().mailbox}“` : ''}`);
   console.log(`  Zunder      : ${zunder ? `${process.env.ZUNDER_URL} (! → Inbox${bridge ? `, Brücke #${bridge.tag}` : ''})` : 'aus (ZUNDER_URL, ZUNDER_TOKEN)'}`);
   console.log(`  Semantik    : ${semantic ? `${semantic.model} über ${process.env.EMBED_URL}` : 'aus (EMBED_URL)'}`);
-  console.log(`  Cockpit     : ${webHttp ? `${PUBLIC_URL}/ (Termine ${calendar ? 'per CalDAV' : 'aus'})` : 'aus (WEB_CLIENT_ID)'}`);
+  console.log(`  Cockpit     : ${webHttp ? `${PUBLIC_URL}/ (${cockpitSettings.get().calendars.length} Kalender, Einstellungen unter /einstellungen)` : 'aus (WEB_CLIENT_ID)'}`);
 });
 
 for (const sig of ['SIGTERM', 'SIGINT']) {

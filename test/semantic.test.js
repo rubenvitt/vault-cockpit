@@ -295,7 +295,7 @@ test('Graph: Links, semantische Kanten, Aufgaben mit Zunder-Status und Termine d
   const bare = await createGraph({ index, logger: quiet }).around('journal/2026-10-12.md');
   assert.ok(bare.nodes.some((n) => n.kind === 'task' && n.status === 'open'));
   assert.ok(bare.problems.some((p) => /EMBED_URL/.test(p)));
-  assert.ok(bare.problems.some((p) => /CALDAV_URL/.test(p)));
+  assert.ok(bare.problems.some((p) => /Einstellungen → Kalender/.test(p)));
   s.close();
 });
 
