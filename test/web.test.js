@@ -5,6 +5,7 @@ import { createApp } from '../src/http/app.js';
 import { createWebHttp } from '../src/web/http.js';
 import { createOidcLogin } from '../src/web/oidc.js';
 import { createCookieSigner, parseCookies } from '../src/web/session.js';
+import { createSettingsStore } from '../src/cockpit/settings.js';
 
 const ISSUER = 'https://id.test';
 const CLIENT = 'cockpit-web';
@@ -63,6 +64,8 @@ const cockpit = {
   async week(id) {
     if (id === 'kaputt') return null;
     return {
+      tz: 'Europe/Berlin',
+      vaultName: null,
       week: { id: '2026-W42', year: 2026, week: 42, monday: '2026-10-12', sunday: '2026-10-18', prev: '2026-W41', next: '2026-W43', current: true },
       today: '2026-10-14',
       feuer: { ok: true, data: null },
@@ -75,10 +78,13 @@ const cockpit = {
   },
 };
 
-async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSubjects = ['ruben'] } = {}) {
+async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSubjects = ['ruben'], calendars = null } = {}) {
   const idp = fakeIdp(idpOptions);
+  const settings = createSettingsStore({ defaults: { tz: 'Europe/Berlin', inboxFolder: 'inbox', zunderUrl: 'https://zunder.env', zunderToken: 'zt_env' }, logger: quiet });
   const webHttp = createWebHttp({
     cockpit,
+    settings,
+    calendars,
     oidc: createOidcLogin({ issuer: ISSUER, clientId: CLIENT, clientSecret, redirectUri: 'https://vault.test/auth/callback', allowedSubjects, fetch: idp.fetch }),
     sessionSecret: SECRET,
     publicUrl: 'https://vault.test',
@@ -98,9 +104,11 @@ async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSu
   await new Promise((res) => app.once('listening', res));
   const base = `http://127.0.0.1:${app.address().port}`;
   const jar = {};
-  const call = async (path, { method = 'GET', cookies = true } = {}) => {
+  const call = async (path, { method = 'GET', cookies = true, form = null, origin = null } = {}) => {
     const cookie = cookies ? Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ') : '';
-    const res = await fetch(base + path, { method, redirect: 'manual', headers: { 'x-forwarded-host': 'vault.test', ...(cookie ? { cookie } : {}) } });
+    const headers = { 'x-forwarded-host': 'vault.test', ...(cookie ? { cookie } : {}), ...(origin ? { origin } : {}) };
+    if (form) headers['content-type'] = 'application/x-www-form-urlencoded';
+    const res = await fetch(base + path, { method, redirect: 'manual', headers, body: form ? new URLSearchParams(form).toString() : undefined });
     for (const c of res.headers.getSetCookie()) {
       const [pair, ...attrs] = c.split('; ');
       const [k, v] = pair.split('=');
@@ -117,7 +125,7 @@ async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSu
     return call(`/auth/callback?code=${code}&state=${state}`);
   };
   try {
-    await run({ call, login, idp, jar });
+    await run({ call, login, idp, jar, settings });
   } finally {
     app.close();
   }
@@ -244,5 +252,84 @@ test('Stylesheet ist ohne Sitzung abrufbar, MCP-Routen bleiben unberührt', asyn
     assert.match(css.headers.get('content-type'), /text\/css/);
     assert.equal((await call('/mcp', { method: 'POST' })).status, 401);
     assert.equal((await call('/nicht-da')).status, 404);
+  });
+});
+
+test('Einstellungen: nur angemeldet, Kalender anlegen, Geheimnisse bleiben verborgen', async () => {
+  const calendars = { check: async () => ({}) };
+  await withServer(
+    async ({ call, login, settings }) => {
+      const anon = await call('/einstellungen');
+      assert.equal(anon.status, 303);
+      assert.equal(anon.headers.get('location'), '/login?next=%2Feinstellungen');
+      assert.equal((await call('/einstellungen', { method: 'POST', form: { tz: 'UTC' } })).status, 303);
+      assert.equal(settings.stored().tz, null);
+
+      await login();
+      const page = await call('/einstellungen');
+      assert.equal(page.status, 200);
+      const html = await page.text();
+      assert.match(html, /aus der Umgebung \(https:\/\/zunder\.env\)/);
+      assert.match(html, /Neuer Kalender/);
+
+      const saved = await call('/einstellungen', {
+        method: 'POST',
+        form: {
+          'cal.0.name': 'Privat', 'cal.0.kind': 'ical', 'cal.0.url': 'webcal://cal.example/geheim-123.ics',
+          'cal.1.name': '', 'cal.1.url': '',
+          'zunder.url': '', 'zunder.token': '', tz: '', vaultName: 'RNotes', inboxFolder: '00-inbox',
+        },
+      });
+      assert.equal(saved.status, 303);
+      assert.equal(saved.headers.get('location'), '/einstellungen?gespeichert=1');
+      const [privat] = settings.stored().calendars;
+      assert.equal(privat.url, 'https://cal.example/geheim-123.ics');
+      assert.equal(settings.get().inboxFolder, '00-inbox');
+
+      // Zweiter Kalender mit Passwort, erster unverändert (Adresse leer gelassen).
+      await call('/einstellungen', {
+        method: 'POST',
+        form: {
+          'cal.0.id': privat.id, 'cal.0.name': 'Privat', 'cal.0.kind': 'ical', 'cal.0.url': '',
+          'cal.1.name': 'Arbeit', 'cal.1.kind': 'caldav', 'cal.1.url': 'https://dav.example/', 'cal.1.username': 'r', 'cal.1.password': 'pw-geheim', 'cal.1.filter': 'Team, Urlaub',
+        },
+      });
+      const [p2, arbeit] = settings.stored().calendars;
+      assert.equal(p2.url, 'https://cal.example/geheim-123.ics');
+      assert.deepEqual([arbeit.kind, arbeit.password, arbeit.filter], ['caldav', 'pw-geheim', ['Team', 'Urlaub']]);
+
+      const again = await (await call('/einstellungen?gespeichert=1')).text();
+      assert.match(again, /Gespeichert\./);
+      assert.ok(!again.includes('geheim-123'));
+      assert.ok(!again.includes('pw-geheim'));
+      assert.match(again, /https:\/\/cal\.example\/…/);
+
+      // Passwort leer lassen behält es; entfernen löscht den Kalender.
+      await call('/einstellungen', {
+        method: 'POST',
+        form: {
+          'cal.0.id': p2.id, 'cal.0.name': 'Privat', 'cal.0.kind': 'ical', 'cal.0.remove': '1',
+          'cal.1.id': arbeit.id, 'cal.1.name': 'Arbeit', 'cal.1.kind': 'caldav', 'cal.1.username': 'r', 'cal.1.password': '',
+        },
+      });
+      assert.deepEqual(settings.stored().calendars.map((c) => [c.name, c.password]), [['Arbeit', 'pw-geheim']]);
+    },
+    {},
+    { calendars },
+  );
+});
+
+test('Einstellungen: Fehler zeigt die Meldung, fremde Herkunft wird abgewiesen', async () => {
+  await withServer(async ({ call, login, settings }) => {
+    await login();
+    const bad = await call('/einstellungen', { method: 'POST', form: { tz: 'Mars/Olympus' } });
+    assert.equal(bad.status, 400);
+    assert.match(await bad.text(), /Unbekannte Zeitzone/);
+    const foreign = await call('/einstellungen', { method: 'POST', form: { tz: 'UTC' }, origin: 'https://evil.test' });
+    assert.equal(foreign.status, 403);
+    assert.equal(settings.stored().tz, null);
+    const same = await call('/einstellungen', { method: 'POST', form: { tz: 'UTC' }, origin: 'https://vault.test' });
+    assert.equal(same.status, 303);
+    assert.equal(settings.get().tz, 'UTC');
   });
 });

@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { describeWeek, parseWeekId, weekOf, zonedToUtc, localDate } from '../src/cockpit/week.js';
-import { parseCalendars, calendarData, parseEvents, createCalDavClient } from '../src/cockpit/caldav.js';
+import { parseCalendars, calendarData, createCalDavClient } from '../src/cockpit/caldav.js';
+import { parseEvents } from '../src/cockpit/ics.js';
+import { createSettingsStore } from '../src/cockpit/settings.js';
 import { findFeuer, sectionParagraph } from '../src/cockpit/feuer.js';
 import { createCockpit, areaOf } from '../src/cockpit/data.js';
 import { renderWeek, inline } from '../src/web/render.js';
@@ -110,7 +112,7 @@ test('parseCalendars: nur Kalender mit VEVENT, Namen dekodiert, URLs absolut', (
 test('parseEvents: Zeitzonen, ganztägig, Faltung, Escapes, Absagen, DURATION', () => {
   const evs = parseEvents(ICS, TZ);
   assert.equal(evs.length, 3);
-  const [ws, frei, daily] = evs;
+  const [ws, daily, frei] = evs;
   assert.equal(ws.title, 'SAS-Workshop, Berlin');
   assert.equal(ws.location, 'Maritim; Raum 2');
   assert.equal(ws.start.toISOString(), '2026-10-14T12:00:00.000Z');
@@ -266,6 +268,14 @@ const TASKS = [
 
 const fixedNow = () => new Date('2026-10-14T10:00:00Z');
 
+/** Einstellungen wie im Betrieb: Zunder aus der Umgebung, sonst Standard. */
+const settingsWith = ({ zunder = true, vaultName = null } = {}) =>
+  createSettingsStore({
+    defaults: { tz: TZ, inboxFolder: 'inbox', vaultName, ...(zunder ? { zunderUrl: 'https://zunder.test', zunderToken: 'zt_x' } : {}) },
+    logger: quiet,
+  });
+const calendarsFrom = (fn) => ({ configured: () => true, events: fn });
+
 test('areaOf: Bereich direkt, über das Projekt oder Inbox', () => {
   assert.equal(areaOf({ location: loc('Sport') }), 'Sport');
   assert.equal(areaOf({ location: loc('Ehrenamt', 'IDA') }), 'Ehrenamt');
@@ -275,8 +285,8 @@ test('areaOf: Bereich direkt, über das Projekt oder Inbox', () => {
 
 test('Wochenmodell: Big Rocks je Bereich, Flammen mit gemessener Zeit, Aufgaben ohne Dopplung', async () => {
   const zunder = fakeZunder(TASKS);
-  const calendar = { events: async () => parseEvents(ICS, TZ) };
-  const cockpit = createCockpit({ index: fakeIndex([feuerNote()], [{ path: 'inbox/a.md', title: 'A' }]), zunder, calendar, tz: TZ, now: fixedNow, logger: quiet });
+  const calendars = calendarsFrom(async () => ({ events: parseEvents(ICS, TZ), errors: [] }));
+  const cockpit = createCockpit({ index: fakeIndex([feuerNote()], [{ path: 'inbox/a.md', title: 'A' }]), settings: settingsWith(), zunderFor: () => zunder, calendars, now: fixedNow, logger: quiet });
   const m = await cockpit.week();
   assert.equal(m.week.id, '2026-W42');
   assert.equal(m.week.current, true);
@@ -314,8 +324,8 @@ test('Wochenmodell: Big Rocks je Bereich, Flammen mit gemessener Zeit, Aufgaben 
 
 test('Wochenmodell: eine ausgefallene Quelle trifft nur ihren Abschnitt', async () => {
   const zunder = fakeZunder(TASKS, { fail: (f) => Boolean(f.phoenix_fire) });
-  const calendar = { events: async () => { throw new Error('CalDAV PROPFIND antwortet mit HTTP 401'); } };
-  const cockpit = createCockpit({ index: fakeIndex([]), zunder, calendar, tz: TZ, now: fixedNow, logger: quiet });
+  const calendars = calendarsFrom(async () => { throw new Error('CalDAV PROPFIND antwortet mit HTTP 401'); });
+  const cockpit = createCockpit({ index: fakeIndex([]), settings: settingsWith(), zunderFor: () => zunder, calendars, now: fixedNow, logger: quiet });
   const m = await cockpit.week('2026-W42');
   assert.equal(m.flames.ok, false);
   assert.equal(m.rocks.ok, true);
@@ -327,7 +337,7 @@ test('Wochenmodell: eine ausgefallene Quelle trifft nur ihren Abschnitt', async 
 });
 
 test('Wochenmodell: ohne Zunder und Kalender als „nicht eingerichtet“, ungültige Woche → null', async () => {
-  const cockpit = createCockpit({ index: fakeIndex([]), tz: TZ, now: fixedNow, logger: quiet });
+  const cockpit = createCockpit({ index: fakeIndex([]), settings: settingsWith({ zunder: false }), zunderFor: () => assert.fail('kein Zunder'), now: fixedNow, logger: quiet });
   const m = await cockpit.week('2026-W44');
   assert.equal(m.week.current, false);
   assert.equal(m.rocks.ok, false);
@@ -340,14 +350,14 @@ test('Wochenmodell: ohne Zunder und Kalender als „nicht eingerichtet“, ungü
 
 test('renderWeek: escaped Inhalte, Feuer-Ziel mit Markdown, Navigation', async () => {
   const zunder = fakeZunder([...TASKS, { id: 'evil', title: '<script>alert(1)</script>', status: 'open', due: '2026-10-15', location: loc('Sport') }]);
-  const cockpit = createCockpit({ index: fakeIndex([feuerNote()]), zunder, tz: TZ, now: fixedNow, logger: quiet });
-  const html = renderWeek(await cockpit.week(), { tz: TZ, vaultName: 'RNotes' });
+  const cockpit = createCockpit({ index: fakeIndex([feuerNote()]), settings: settingsWith({ vaultName: 'RNotes' }), zunderFor: () => zunder, now: fixedNow, logger: quiet });
+  const html = renderWeek(await cockpit.week());
   assert.ok(!html.includes('<script>'));
   assert.match(html, /&lt;script&gt;/);
   assert.match(html, /<strong>Am Mi 14\.10\. um 14:00 hältst du den Workshop<\/strong>/);
   assert.match(html, /href="\/\?woche=2026-W41"/);
   assert.match(html, /obsidian:\/\/open\?vault=RNotes&amp;file=phoenix%2FFeuer%20W3/);
-  assert.match(html, /Kalender \(CalDAV\) ist nicht eingerichtet/);
+  assert.match(html, /Kalender ist nicht eingerichtet · <a href="\/einstellungen">/);
   assert.match(html, /90 min/);
 });
 

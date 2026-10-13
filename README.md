@@ -154,25 +154,37 @@ Unter `<PUBLIC_URL>/` liegt die Wochenansicht, gebaut um die Woche statt um
 **Flammen** der Woche aus Zunder, mit den dort gemessenen Zeiten. Darunter die
 **Big Rocks** je Lebensbereich: Zunder-Aufgaben, die in der Woche fällig oder als
 Phönix-Schritt der Woche markiert sind, gruppiert nach Zunder-Bereich. Es folgen
-die **Termine** der Woche (CalDAV), **Aufgaben** in Arbeit oder überfällig und
-die **Inbox** (Capture-Ordner im Vault und Zunder-Inbox). Mit `?woche=2026-W43`
-blättert man; dieselben Daten gibt es als JSON unter `/api/woche`.
+die **Termine** der Woche aus allen eingestellten Kalendern, **Aufgaben** in
+Arbeit oder überfällig und die **Inbox** (Ordner im Vault und Zunder-Inbox). Mit
+`?woche=2026-W43` blättert man; dieselben Daten gibt es als JSON unter `/api/woche`.
 
 Einrichtung:
 
 1. In Pocket ID einen OIDC-Client anlegen, Callback `<PUBLIC_URL>/auth/callback`,
-   als öffentlichen Client (PKCE) oder mit Secret (`WEB_CLIENT_SECRET`). Wie beim
-   CIMD-Client auf die eigene Gruppe beschränken.
-2. `WEB_CLIENT_ID` und `SESSION_SECRET` setzen. Zugang haben dieselben
+   und wie beim CIMD-Client auf die eigene Gruppe beschränken.
+2. Im Deployment `WEB_CLIENT_ID` und `WEB_CLIENT_SECRET` setzen (bei einem
+   öffentlichen Client mit PKCE bleibt das Secret leer). Zugang haben dieselben
    `ALLOWED_SUBJECTS` wie bei MCP.
-3. Für Termine `CALDAV_URL`, `CALDAV_USERNAME` und `CALDAV_PASSWORD` setzen. Bei
-   Fastmail ein App-Passwort nur für „Kalender (CalDAV)“ anlegen.
-4. Für Zunder-Abschnitte dient der `ZUNDER_TOKEN` aus dem Capture.
-5. Mit `OBSIDIAN_VAULT_NAME` führen Feuer-Notiz und Inbox-Einträge direkt nach Obsidian.
+3. Anmelden und unter **Einstellungen** (`/einstellungen`) die Kalender eintragen.
+   Beliebig viele, je als **iCal-Abo** (die geheime `.ics`-Adresse eines
+   Kalenders, `webcal://` geht auch; Serientermine löst das Cockpit selbst auf)
+   oder als **CalDAV** (Kalender-Home oder einzelner Kalender, mit Benutzer und
+   App-Passwort; optional nur bestimmte Kalender). Daneben Zeitzone, Vault-Name
+   für „In Obsidian öffnen“ und der Inbox-Ordner.
 
-Fällt eine Quelle aus (Zunder nicht erreichbar, falsches CalDAV-Passwort), zeigt
-nur ihr Abschnitt den Fehler. Die Sitzung ist ein signiertes Cookie (12 Stunden)
-und gilt nur für das Web-Cockpit; `/mcp` nimmt weiter ausschließlich Bearer-Tokens.
+Der Zunder-Zugang kommt aus `ZUNDER_URL`/`ZUNDER_TOKEN` (Capture), lässt sich in
+den Einstellungen aber durch einen eigenen ersetzen. Leere Felder gelten als
+Standard aus der Umgebung (`COCKPIT_TZ`, `OBSIDIAN_VAULT_NAME`, `CAPTURE_FOLDER`).
+
+Gespeichert wird in `/data/cockpit-settings.json` (nur für den Dienst lesbar).
+Passwörter, Tokens und Kalenderadressen zeigt die Seite nie wieder an; ein leeres
+Feld behält den gespeicherten Wert. Das Secret für das Sitzungs-Cookie liegt in
+`/data/session-secret` und entsteht beim ersten Start (alternativ `SESSION_SECRET`).
+
+Fällt eine Quelle aus (Zunder nicht erreichbar, ein Kalender antwortet nicht),
+zeigt nur ihr Abschnitt bzw. nur dieser Kalender den Fehler; die Einstellungsseite
+zeigt je Kalender, ob er erreichbar ist. Die Sitzung gilt 12 Stunden und nur für
+das Web-Cockpit; `/mcp` nimmt weiter ausschließlich Bearer-Tokens.
 
 Tests, ohne laufenden Container:
 ```bash
@@ -187,7 +199,7 @@ npm ci && npm test
 - `src/http/` — HTTP-Schicht, Protected Resource Metadata, Host-Prüfung
 - `src/sync/` — Sync-Adapter: Dateibeobachtung, inkrementeller Reindex, Sync-Status
 - `src/capture/` — Capture von außen: Endpunkte, Mail-Abruf, Zunder-Weiterleitung und -Brücke
-- `src/cockpit/` — Wochenmodell: ISO-Wochen, Feuer-Notiz, CalDAV-Client, Zusammenstellung aus Zunder
+- `src/cockpit/` — Wochenmodell: ISO-Wochen, Feuer-Notiz, Kalender (iCal mit Serienauflösung, CalDAV), Einstellungen, Zusammenstellung aus Zunder
 - `src/web/` — Web-Cockpit: OIDC-Login mit PKCE, signiertes Sitzungs-Cookie, HTML der Wochenansicht
 - `sync/` — Image des Sidecars `vault-sync` (Obsidian Headless mit Status-Wrapper)
 

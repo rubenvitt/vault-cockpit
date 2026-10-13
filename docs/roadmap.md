@@ -80,7 +80,7 @@ Der Service liefert nur Werkzeuge und Zustand. Intelligenz kommt von außen per 
 0. Übernahme des bestehenden Vault-MCP (Index, Link-Graph, Capture, Bearbeiten, OAuth) — erledigt
 1. Headless-Sync als Sidecar mit Adapter (umgesetzt: `sync/`, `src/sync/`), Host-Unit ablösen, Deployment vom alten Vault-MCP übernehmen
 2. Capture mit Zunder-Weiterleitung (umgesetzt: `src/capture/`, Endpunkte `/capture` und `/funke`, Mail über JMAP, Zunder-Brücke)
-3. Cockpit-Web-UI (umgesetzt: `src/web/`, `src/cockpit/`, Wochenansicht unter `/` mit OIDC-Login, Termine per CalDAV, Big Rocks aus Zunder je Bereich)
+3. Cockpit-Web-UI (umgesetzt: `src/web/`, `src/cockpit/`, Wochenansicht unter `/` mit OIDC-Login, Kalender per iCal/CalDAV und Einstellungen im Browser, Big Rocks aus Zunder je Bereich)
 4. Graph + semantische Suche
 5. Eigener Sync (eigenes Projekt: Konflikte, mobile Clients, E2E)
 

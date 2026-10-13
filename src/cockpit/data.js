@@ -21,8 +21,18 @@ const byDue = (a, b) => String(a.due ?? '9999').localeCompare(String(b.due ?? '9
  * Jede Quelle wird für sich geholt. Fällt eine aus (Zunder nicht erreichbar,
  * CalDAV-Passwort falsch), zeigt ihr Abschnitt den Fehler, der Rest bleibt.
  */
-export function createCockpit({ index, zunder = null, calendar = null, captureFolder = 'inbox', tz = 'Europe/Berlin', now = () => new Date(), logger = console }) {
-  const task = (t) => ({
+export function createCockpit({ index, settings, zunderFor, calendars = null, now = () => new Date(), logger = console }) {
+  // Zunder-Client je Zugang wiederverwenden; ändert sich der Zugang in den
+  // Einstellungen, entsteht ein neuer.
+  let zunderCache = { key: null, client: null };
+  const zunderOf = (cfg) => {
+    if (!cfg) return null;
+    const key = `${cfg.url}\n${cfg.token}`;
+    if (zunderCache.key !== key) zunderCache = { key, client: zunderFor(cfg) };
+    return zunderCache.client;
+  };
+
+  const make = (zunder) => (t) => ({
     id: t.id,
     ref: t.ref ?? null,
     title: t.title,
@@ -47,10 +57,14 @@ export function createCockpit({ index, zunder = null, calendar = null, captureFo
 
   return {
     /** Kennung der laufenden Woche. */
-    currentWeekId: () => weekId(weekOf(now(), tz)),
+    currentWeekId: () => weekId(weekOf(now(), settings.get().tz)),
 
     /** Daten einer Woche (`2026-W42`, Standard: die laufende). Ungültige Kennung → null. */
     async week(id) {
+      const config = settings.get();
+      const { tz, inboxFolder: captureFolder } = config;
+      const zunder = zunderOf(config.zunder);
+      const task = zunder ? make(zunder) : null;
       const parsed = id ? parseWeekId(id) : weekOf(now(), tz);
       if (!parsed) return null;
       const week = describeWeek(parsed, tz);
@@ -80,7 +94,7 @@ export function createCockpit({ index, zunder = null, calendar = null, captureFo
         zunder
           ? settle('Zunder (Inbox)', () => zunder.filterTasks({ location: 'inbox', status: OPEN, limit: 50 }))
           : notConfigured('Zunder'),
-        calendar ? settle('Kalender', () => calendar.events(week.start, week.end)) : notConfigured('Kalender (CalDAV)'),
+        calendars?.configured() ? settle('Kalender', () => calendars.events(week.start, week.end)) : notConfigured('Kalender'),
         settle('Vault-Inbox', () => index.listFolder(captureFolder, { limit: 50 })),
       ]);
 
@@ -135,18 +149,20 @@ export function createCockpit({ index, zunder = null, calendar = null, captureFo
         date: d.date,
         label: d.label,
         today: d.date === today,
-        events: events.ok ? events.data.filter((e) => e.start < d.end && e.end > d.start) : [],
+        events: events.ok ? events.data.events.filter((e) => e.start < d.end && e.end > d.start) : [],
       }));
 
       const section = (r, data) => (r.ok ? { ok: true, data } : { ok: false, error: r.error, unconfigured: Boolean(r.unconfigured) });
 
       return {
+        tz,
+        vaultName: config.vaultName,
         week: { id: week.id, year: week.year, week: week.week, monday: week.monday, sunday: week.sunday, prev: week.prev, next: week.next, current },
         today,
         feuer: section(feuer, feuer.data),
         flames: section(phoenix, flames),
         rocks: phoenix.ok || due.ok ? { ok: true, data: rocks, partial: !(phoenix.ok && due.ok) } : section(phoenix),
-        calendar: section(events, days),
+        calendar: events.ok ? { ok: true, data: days, errors: events.data.errors } : section(events),
         tasks: section(open, openTasks),
         inbox: {
           vault: section(inbox, inbox.data),
