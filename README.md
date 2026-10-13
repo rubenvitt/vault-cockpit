@@ -118,8 +118,8 @@ schreiben nur in ein festes Projekt.
 
 | Weg | So geht's |
 |---|---|
-| iOS-Kurzbefehl | [Notiz ins Cockpit](docs/kurzbefehle/Notiz%20ins%20Cockpit.shortcut) laden und importieren, beim Import den Capture-Token eintragen (heute der Wert von `CAPTURE_TOKEN`). Läuft aus dem Share-Sheet oder fragt den Text ab. Von Hand: `POST <PUBLIC_URL>/capture?source=ios-kurzbefehl` mit dem Text als Body, Header `Authorization: Bearer <CAPTURE_TOKEN>` |
-| Sprachmemo | [Sprachmemo ins Cockpit](docs/kurzbefehle/Sprachmemo%20ins%20Cockpit.shortcut) importieren: „Audio aufnehmen“, „Audio transkribieren“, dann wie oben mit `source=sprachmemo`. Transkribiert wird auf dem Gerät, das Cockpit bekommt nur Text. |
+| iOS-Kurzbefehl | „Notiz ins Cockpit“ im Web-Cockpit unter **Einstellungen → Kurzbefehle** laden und importieren, beim Import den Capture-Token eintragen (heute der Wert von `CAPTURE_TOKEN`). Läuft aus dem Share-Sheet oder fragt den Text ab. Von Hand: `POST <PUBLIC_URL>/capture?source=ios-kurzbefehl` mit dem Text als Body, Header `Authorization: Bearer <CAPTURE_TOKEN>` |
+| Sprachmemo | „Sprachmemo ins Cockpit“ ebenso aus den Einstellungen importieren: „Audio aufnehmen“, „Audio transkribieren“, dann wie oben mit `source=sprachmemo`. Transkribiert wird auf dem Gerät, das Cockpit bekommt nur Text. |
 | Funke | Als Relay-URL `<PUBLIC_URL>/funke` und als Relay-Token den `CAPTURE_TOKEN` eintragen. Notizen landen im Capture-Ordner (der Ordner aus der App wird ignoriert), Aufgaben schickt Funke weiter direkt an Zunder. |
 | Mail | Eine Adresse (Alias) anlegen und per Regel in den Ordner `MAIL_MAILBOX` sortieren. Betreff = Titel, `!` im Betreff = Aufgabe. Verarbeitete Mails wandern nach `MAIL_DONE_MAILBOX`. |
 
@@ -145,10 +145,10 @@ ist nur sein Hash (`api-tokens.json` neben den Cockpit-Einstellungen). Widerrufe
 `GET /capture` ist ein Verbindungstest.
 
 **Kurzbefehle neu bauen:** `node scripts/kurzbefehle/build.js [--url <PUBLIC_URL>]`
-schreibt die unsignierten Dateien nach `docs/kurzbefehle/unsigniert/`. iOS
+schreibt die unsignierten Dateien nach `assets/kurzbefehle/unsigniert/`. iOS
 importiert nur signierte Kurzbefehle, deshalb danach auf einem Mac
 `scripts/kurzbefehle/sign.sh` laufen lassen (`shortcuts sign --mode anyone`); die
-signierten Dateien landen in `docs/kurzbefehle/`. Der Token steht in keiner der
+signierten Dateien landen in `assets/kurzbefehle/`, von dort liefert das Cockpit sie unter `/kurzbefehle/<name>.shortcut` aus. Der Token steht in keiner der
 Dateien, iOS fragt ihn beim Import ab.
 
 Mail-Abruf: Nur Absender aus `MAIL_ALLOWED_SENDERS` werden verarbeitet, alle

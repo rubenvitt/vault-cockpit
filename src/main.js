@@ -22,6 +22,7 @@ import { createSettingsStore, loadOrCreateSecret } from './cockpit/settings.js';
 import { createTokenStore } from './cockpit/tokens.js';
 import { createOidcLogin } from './web/oidc.js';
 import { createWebHttp } from './web/http.js';
+import { loadShortcuts } from './web/shortcuts.js';
 import { createCockpitActions } from './cockpit/actions.js';
 import { createOllamaEmbedder } from './semantic/embedder.js';
 import { createSemanticIndex } from './semantic/index.js';
@@ -205,6 +206,8 @@ const webHttp = process.env.WEB_CLIENT_ID
       }),
       settings: cockpitSettings,
       tokens: apiTokens,
+      shortcuts: loadShortcuts(),
+      captureEnabled: Boolean(captureHttp),
       calendars,
       graph,
       search: (query) => hybridSearch({ index, semantic, query, limit: 30 }),

@@ -353,7 +353,19 @@ function tokenSection(tokens, created, tz) {
 </section>`;
 }
 
-export function renderSettings({ stored, defaults, checks = {}, notice = null, error = null, tokens = null, created = null, tz = 'Europe/Berlin', user = null }) {
+/** Abschnitt „Kurzbefehle“: die signierten iOS-Kurzbefehle zum Laden. */
+function shortcutSection(shortcuts, captureEnabled) {
+  const items = shortcuts
+    .map((s) => `<li><a href="/kurzbefehle/${esc(s.slug)}.shortcut" download="${esc(s.file)}">${esc(s.title)}</a> <span class="meta">${esc(s.text)}</span></li>`)
+    .join('');
+  return `<section>
+  <h2>Kurzbefehle</h2>
+  <p class="meta">Auf dem iPhone antippen und importieren. Beim Import fragt iOS nach dem Capture-Token${captureEnabled ? '' : ' (Capture ist auf dem Server gerade aus)'}.</p>
+  <ul class="shortcuts">${items}</ul>
+</section>`;
+}
+
+export function renderSettings({ stored, defaults, checks = {}, notice = null, error = null, tokens = null, created = null, shortcuts = [], captureEnabled = false, tz = 'Europe/Berlin', user = null }) {
   const d = defaults;
   const zunderStatus = stored.zunder.url && stored.zunder.token
     ? 'eigener Zugang gespeichert'
@@ -408,6 +420,7 @@ ${error ? `<p class="problem">${esc(error)}</p>` : ''}
 <p><button type="submit" class="primary">Speichern</button></p>
 </form>
 ${tokens ? tokenSection(tokens, created, tz) : ''}
+${shortcuts.length ? shortcutSection(shortcuts, captureEnabled) : ''}
 </main>
 </body>
 </html>`;
@@ -494,6 +507,8 @@ button.primary { font: inherit; font-weight: 600; color: #fff; background: var(-
 .notice { color: var(--ok); margin: 0; }
 .tokens li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px 0; border-top: 1px solid var(--line); }
 .tokens li:first-child { border-top: 0; }
+.shortcuts { padding-left: 1.2em; }
+.shortcuts li { margin: 6px 0; }
 .tokens form, .settings .token-new { margin: 0; display: flex; gap: 12px; align-items: end; flex-wrap: wrap; }
 .created { border: 1px solid var(--ok); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; }
 .created code { word-break: break-all; }

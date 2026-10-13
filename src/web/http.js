@@ -59,11 +59,13 @@ const HTML_HEADERS = {
  *   `/static/cockpit.js`), sonst mit einer Weiterleitung und einer Meldung.
  * - `POST /einstellungen/tokens` legt einen API-Token für `/api/search` an und
  *   zeigt ihn einmal, `POST /einstellungen/tokens/widerrufen` löscht einen.
+ * - `GET /kurzbefehle/<slug>.shortcut` liefert die signierten iOS-Kurzbefehle
+ *   (verlinkt in den Einstellungen).
  *
  * Die Sitzung ist ein signiertes Cookie und nur für diese Routen gültig; die
  * MCP-Schnittstelle prüft weiter ausschließlich Bearer-Tokens.
  */
-export function createWebHttp({ cockpit, settings, actions = null, tokens = null, calendars = null, graph = null, search = null, oidc, sessionSecret, publicUrl, allowedSubjects = [], sessionHours = 12, logger = console, now = () => Date.now() }) {
+export function createWebHttp({ cockpit, settings, actions = null, tokens = null, shortcuts = [], captureEnabled = false, calendars = null, graph = null, search = null, oidc, sessionSecret, publicUrl, allowedSubjects = [], sessionHours = 12, logger = console, now = () => Date.now() }) {
   const signer = createCookieSigner(sessionSecret);
   const secure = publicUrl.startsWith('https://');
 
@@ -217,6 +219,8 @@ export function createWebHttp({ cockpit, settings, actions = null, tokens = null
       error,
       tokens: tokens?.list() ?? null,
       created,
+      shortcuts,
+      captureEnabled,
       tz: settings.get().tz,
       user: session.name ?? session.sub,
     });
@@ -335,7 +339,8 @@ export function createWebHttp({ cockpit, settings, actions = null, tokens = null
 
   const TOKEN_ROUTES = { '/einstellungen/tokens': createToken, '/einstellungen/tokens/widerrufen': revokeToken };
   const ACTION_ROUTES = new Set(actions ? ['/aktion/status', '/aktion/erfassen'] : []);
-  const ROUTES = new Set([...ACTION_ROUTES, '/static/cockpit.js', '/', '/api/woche', '/graph', '/api/graph', '/einstellungen', ...(tokens ? Object.keys(TOKEN_ROUTES) : []), '/login', '/auth/callback', '/logout', '/static/cockpit.css']);
+  const SHORTCUT_ROUTES = new Map(shortcuts.map((s) => [`/kurzbefehle/${s.slug}.shortcut`, s]));
+  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), '/static/cockpit.js', '/', '/api/woche', '/graph', '/api/graph', '/einstellungen', ...(tokens ? Object.keys(TOKEN_ROUTES) : []), '/login', '/auth/callback', '/logout', '/static/cockpit.css']);
 
   return {
     matches: (path) => ROUTES.has(path),
@@ -383,6 +388,17 @@ export function createWebHttp({ cockpit, settings, actions = null, tokens = null
       }
       if (method !== 'GET') return json(res, 405, { error: 'method_not_allowed' });
 
+      if (SHORTCUT_ROUTES.has(path)) {
+        if (!session) return redirect(res, '/login?next=%2Feinstellungen');
+        const s = SHORTCUT_ROUTES.get(path);
+        res.writeHead(200, {
+          'content-type': 'application/octet-stream',
+          'content-disposition': `attachment; filename="${s.slug}.shortcut"; filename*=UTF-8''${encodeURIComponent(s.file)}`,
+          'cache-control': 'no-store',
+          'x-content-type-options': 'nosniff',
+        });
+        return res.end(s.data);
+      }
       if (path === '/api/woche') {
         if (!session) return json(res, 401, { error: 'unauthorized', error_description: 'Anmeldung unter /login nötig' });
         return api(req, res, url);

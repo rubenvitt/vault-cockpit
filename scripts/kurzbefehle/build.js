@@ -2,7 +2,7 @@
 /**
  * Baut die iOS-Kurzbefehle für Capture als unsignierte `.shortcut`-Dateien (XML-Plist).
  *
- *   node scripts/kurzbefehle/build.js [--url https://vault.example] [--out docs/kurzbefehle/unsigniert]
+ *   node scripts/kurzbefehle/build.js [--url https://vault.example] [--out assets/kurzbefehle/unsigniert]
  *
  * iOS importiert nur signierte Kurzbefehle. Signiert wird auf einem Mac mit
  * `scripts/kurzbefehle/sign.sh` (ruft `shortcuts sign` auf).
@@ -208,7 +208,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const { values } = parseArgs({
     options: {
       url: { type: 'string', default: 'https://vault.rubeen.dev' },
-      out: { type: 'string', default: 'docs/kurzbefehle/unsigniert' },
+      out: { type: 'string', default: 'assets/kurzbefehle/unsigniert' },
     },
   });
   const url = values.url.replace(/\/+$/, '');
