@@ -12,6 +12,7 @@ import { createZunderClient } from './capture/zunder.js';
 import { createStateStore } from './capture/state.js';
 import { createCaptureRouter } from './capture/router.js';
 import { createCaptureHttp } from './capture/http.js';
+import { createSearchHttp } from './search/http.js';
 import { createMailCapture } from './capture/mail.js';
 import { createZunderBridge } from './capture/bridge.js';
 import { createCockpit } from './cockpit/data.js';
@@ -114,6 +115,9 @@ const captureRouter = createCaptureRouter({ capture, zunder, state: captureState
 const captureHttp = process.env.CAPTURE_TOKEN
   ? createCaptureHttp({ token: process.env.CAPTURE_TOKEN, router: captureRouter, zunderEnabled: Boolean(zunder) })
   : null;
+
+// Lesende Suche für Clients ohne OAuth. Aus, bis SEARCH_TOKEN gesetzt ist.
+const searchHttp = process.env.SEARCH_TOKEN ? createSearchHttp({ token: process.env.SEARCH_TOKEN, index, semantic }) : null;
 
 let mail = null;
 if (process.env.MAIL_JMAP_TOKEN) {
@@ -222,6 +226,7 @@ const app = createApp({
     return principal;
   },
   captureHttp,
+  searchHttp,
   webHttp,
   mcpHandler: async (req, res, principal, body) => {
     await writeWebResponse(res, await mcpHttp.fetch(toWebRequest(req, body, PUBLIC_URL)));
@@ -238,6 +243,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`  Reindex     : alle ${process.env.REINDEX_INTERVAL_MIN ?? 15} Minuten${sync.name === 'none' ? '' : ', dazu bei jeder Dateiänderung'}`);
   console.log(`  Sync        : ${SYNC_ADAPTER} (${sync.status().state})`);
   console.log(`  Capture     : ${captureHttp ? '/capture, /funke' : 'Endpunkte aus (CAPTURE_TOKEN)'}${mail ? `, Mail aus „${mail.status().mailbox}“` : ''}`);
+  console.log(`  Suche       : ${searchHttp ? '/api/search' : 'Endpunkt aus (SEARCH_TOKEN)'}`);
   console.log(`  Zunder      : ${zunder ? `${process.env.ZUNDER_URL} (! → Inbox${bridge ? `, Brücke #${bridge.tag}` : ''})` : 'aus (ZUNDER_URL, ZUNDER_TOKEN)'}`);
   console.log(`  Semantik    : ${semantic ? `${semantic.model} über ${process.env.EMBED_URL}` : 'aus (EMBED_URL)'}`);
   console.log(`  Cockpit     : ${webHttp ? `${PUBLIC_URL}/ (${cockpitSettings.get().calendars.length} Kalender, Einstellungen unter /einstellungen)` : 'aus (WEB_CLIENT_ID)'}`);
