@@ -470,21 +470,24 @@ function calendarRow(c, i, check) {
  * zurückgegeben: Ein leeres Feld behält den gespeicherten Wert.
  */
 /** Abschnitt „API-Tokens“: eigene Formulare, damit „Speichern“ oben die Tokens nie berührt. */
+const SCOPE_LABEL = { search: 'Suche', capture: 'Capture' };
+
 function tokenSection(tokens, created, tz) {
   const date = (iso) => new Date(iso).toLocaleDateString('de-DE', { timeZone: tz });
   const rows = tokens
     .map(
-      (t) => `<li><span>${esc(t.name)} <span class="meta">angelegt am ${esc(date(t.createdAt))}</span></span>
+      (t) => `<li><span>${esc(t.name)} <span class="meta">${esc(SCOPE_LABEL[t.scope] ?? t.scope)} · angelegt am ${esc(date(t.createdAt))}</span></span>
     <form method="post" action="/einstellungen/tokens/widerrufen"><input type="hidden" name="id" value="${esc(t.id)}"><button type="submit">Widerrufen</button></form></li>`,
     )
     .join('');
   return `<section>
   <h2>API-Tokens</h2>
-  <p class="meta">Für <code>GET /api/search</code> mit <code>Authorization: Bearer vct_…</code>. Ein Token kann nur suchen, nur in eigenen Notizen ohne vertrauliche Ordner.</p>
-  ${created ? `<div class="created"><p class="notice">Token „${esc(created.name)}“ angelegt. Jetzt kopieren, er wird nicht noch einmal angezeigt:</p><p><code>${esc(created.token)}</code></p></div>` : ''}
+  <p class="meta">Mit <code>Authorization: Bearer vct_…</code>. Jeder Token hat ein Recht: <b>Suche</b> für <code>GET /api/search</code> (nur eigene Notizen ohne vertrauliche Ordner), <b>Capture</b> für <code>/capture</code> und <code>/funke</code> (iOS-Kurzbefehle, Funke; kann nur neue Notizen und Zunder-Aufgaben anlegen).</p>
+  ${created ? `<div class="created"><p class="notice">${esc(SCOPE_LABEL[created.scope] ?? '')}-Token „${esc(created.name)}“ angelegt. Jetzt kopieren, er wird nicht noch einmal angezeigt:</p><p><code>${esc(created.token)}</code></p></div>` : ''}
   ${rows ? `<ul class="tokens">${rows}</ul>` : '<p class="empty">Noch keine Tokens.</p>'}
   <form method="post" action="/einstellungen/tokens" class="token-new">
     <label>Name<input name="name" maxlength="80" required placeholder="z. B. Raycast"></label>
+    <label>Recht<select name="scope">${Object.entries(SCOPE_LABEL).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></label>
     <button type="submit" class="primary">Token anlegen</button>
   </form>
 </section>`;
@@ -497,7 +500,7 @@ function shortcutSection(shortcuts, captureEnabled) {
     .join('');
   return `<section>
   <h2>Kurzbefehle</h2>
-  <p class="meta">Auf dem iPhone antippen und importieren. Beim Import fragt iOS nach dem Capture-Token${captureEnabled ? '' : ' (Capture ist auf dem Server gerade aus)'}.</p>
+  <p class="meta">Auf dem iPhone antippen und importieren. Beim Import fragt iOS nach einem Token mit dem Recht „Capture“${captureEnabled ? '' : ' (noch keiner angelegt, siehe API-Tokens)'}.</p>
   <ul class="shortcuts">${items}</ul>
 </section>`;
 }
@@ -509,6 +512,13 @@ export function renderSettings({ stored, defaults, checks = {}, notice = null, e
     : d.zunderUrl && d.zunderToken
       ? `aus der Umgebung (${esc(d.zunderUrl)})`
       : 'nicht eingerichtet';
+  const mailStatus = stored.mail.token
+    ? (stored.mail.senders.length || d.mailSenders.length) ? 'eigener Token gespeichert' : 'eigener Token gespeichert, es fehlen freigegebene Absender'
+    : d.mailToken
+      ? 'Token aus der Umgebung'
+      : 'nicht eingerichtet';
+  const embedStatus = stored.embed.url ? 'eigener Server' : d.embedUrl ? `aus der Umgebung (${esc(d.embedUrl)})` : 'aus, nur Volltextsuche';
+  const bridgeOn = stored.bridge.enabled ?? d.bridgeEnabled;
   const rows = stored.calendars.map((c, i) => calendarRow(c, i, checks[c.id])).join('');
   return `<!doctype html>
 <html lang="de">
@@ -546,6 +556,39 @@ ${error ? `<p class="problem">${esc(error)}</p>` : ''}
       placeholder="${stored.zunder.token ? 'gesetzt (leer lassen = unverändert)' : ''}"></label>
   </div>
   ${stored.zunder.token ? '<label class="check"><input type="checkbox" name="zunder.clear" value="1"> eigenen Zugang löschen</label>' : ''}
+</section>
+<section>
+  <h2>Zunder-Brücke</h2>
+  <p class="meta">Offene Checkboxen mit dem Tag werden Zunder-Aufgaben, Abhaken gleicht sich in beide Richtungen ab. Stand: ${bridgeOn ? 'an' : 'aus'}.</p>
+  <div class="grid">
+    <label>Brücke<select name="bridge.enabled">
+      <option value=""${stored.bridge.enabled === null ? ' selected' : ''}>Standard (${d.bridgeEnabled ? 'an' : 'aus'})</option>
+      <option value="an"${stored.bridge.enabled === true ? ' selected' : ''}>an</option>
+      <option value="aus"${stored.bridge.enabled === false ? ' selected' : ''}>aus</option>
+    </select></label>
+    <label><span>Tag <span class="hint">ohne #</span></span><input name="bridge.tag" value="${esc(stored.bridge.tag ?? '')}" placeholder="${esc(d.bridgeTag)}"></label>
+  </div>
+</section>
+<section>
+  <h2>Mail</h2>
+  <p class="meta">Holt Mails aus einem Fastmail-Ordner ab und macht Notizen daraus, mit <code>!</code> im Betreff Zunder-Aufgaben. Stand: ${mailStatus}.</p>
+  <div class="grid">
+    <label><span>Fastmail-API-Token <span class="hint">nur Mail</span></span><input name="mail.token" type="password" autocomplete="new-password"
+      placeholder="${stored.mail.token ? 'gesetzt (leer lassen = unverändert)' : ''}"></label>
+    <label><span>Freigegebene Absender <span class="hint">Adressen oder @domain, durch Komma getrennt</span></span><input name="mail.senders" value="${esc(stored.mail.senders.join(', '))}" placeholder="${esc(d.mailSenders.join(', '))}"></label>
+    <label>Ordner zum Abholen<input name="mail.mailbox" value="${esc(stored.mail.mailbox ?? '')}" placeholder="${esc(d.mailbox)}"></label>
+    <label>Ablage danach<input name="mail.doneMailbox" value="${esc(stored.mail.doneMailbox ?? '')}" placeholder="${esc(d.doneMailbox)}"></label>
+    <label>Abstand in Minuten<input name="mail.pollMinutes" inputmode="numeric" value="${esc(stored.mail.pollMinutes ?? '')}" placeholder="${esc(d.mailPollMinutes)}"></label>
+  </div>
+  ${stored.mail.token ? '<label class="check"><input type="checkbox" name="mail.clear" value="1"> eigenen Token löschen</label>' : ''}
+</section>
+<section>
+  <h2>Embeddings</h2>
+  <p class="meta">Ollama-Server für die semantische Suche und ähnliche Notizen. Fehlt das Modell, lädt das Cockpit es selbst. Ein neues Modell bettet den Vault neu ein. Stand: ${embedStatus}.</p>
+  <div class="grid">
+    <label>Adresse<input name="embed.url" value="${esc(stored.embed.url ?? '')}" placeholder="${esc(d.embedUrl ?? 'http://ollama:11434')}"></label>
+    <label>Modell<input name="embed.model" value="${esc(stored.embed.model ?? '')}" placeholder="${esc(d.embedModel)}"></label>
+  </div>
 </section>
 <section>
   <h2>Anzeige</h2>

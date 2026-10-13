@@ -368,6 +368,42 @@ test('Einstellungen: nur angemeldet, Kalender anlegen, Geheimnisse bleiben verbo
   );
 });
 
+test('Einstellungen: Brücke, Mail und Embeddings speichern, Mail-Token bleibt verborgen', async () => {
+  await withServer(async ({ call, login, settings, tokens }) => {
+    await login();
+    const page = await (await call('/einstellungen')).text();
+    for (const name of ['bridge.enabled', 'bridge.tag', 'mail.token', 'mail.senders', 'mail.mailbox', 'mail.doneMailbox', 'mail.pollMinutes', 'embed.url', 'embed.model']) {
+      assert.match(page, new RegExp(`name="${name.replace('.', '\\.')}"`), name);
+    }
+    const form = {
+      'bridge.enabled': 'aus', 'bridge.tag': '#todo',
+      'mail.token': 'fm-geheim-42', 'mail.senders': 'r@rubeen.dev, @rubeen.email', 'mail.mailbox': '', 'mail.doneMailbox': '', 'mail.pollMinutes': '15',
+      'embed.url': 'http://ollama:11434', 'embed.model': '',
+    };
+    assert.equal((await call('/einstellungen', { method: 'POST', form })).status, 303);
+    const g = settings.get();
+    assert.deepEqual(g.bridge, { enabled: false, tag: 'todo' });
+    assert.deepEqual([g.mail.token, g.mail.senders, g.mail.mailbox, g.mail.pollMinutes], ['fm-geheim-42', ['r@rubeen.dev', '@rubeen.email'], 'Vault', 15]);
+    assert.equal(g.embed.model, 'bge-m3');
+
+    const again = await (await call('/einstellungen')).text();
+    assert.ok(!again.includes('fm-geheim-42'));
+    assert.match(again, /<option value="aus" selected>/);
+
+    // Token leer lassen behält ihn, „löschen“ entfernt ihn.
+    await call('/einstellungen', { method: 'POST', form: { ...form, 'mail.token': '' } });
+    assert.equal(settings.stored().mail.token, 'fm-geheim-42');
+    await call('/einstellungen', { method: 'POST', form: { ...form, 'mail.token': '', 'mail.clear': '1' } });
+    assert.equal(settings.stored().mail.token, null);
+
+    // Capture-Token anlegen.
+    const created = await call('/einstellungen/tokens', { method: 'POST', form: { name: 'iPhone', scope: 'capture' } });
+    assert.match(await created.text(), /Capture-Token „iPhone“ angelegt/);
+    assert.deepEqual(tokens.list().map((t) => t.scope), ['capture']);
+    assert.equal((await call('/einstellungen/tokens', { method: 'POST', form: { name: 'x', scope: 'admin' } })).status, 400);
+  });
+});
+
 test('Einstellungen: Fehler zeigt die Meldung, fremde Herkunft wird abgewiesen', async () => {
   await withServer(async ({ call, login, settings }) => {
     await login();

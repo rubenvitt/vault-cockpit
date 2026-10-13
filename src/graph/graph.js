@@ -54,7 +54,7 @@ export function dailyDate(note) {
  * Importe immer. Fällt Zunder oder der Kalender aus, steht das in `problems`,
  * der Rest des Graphen bleibt.
  */
-export function createGraph({ index, semantic = null, zunder = null, calendar = null, tz = 'Europe/Berlin', logger = console }) {
+export function createGraph({ index, semantic: semanticOrGetter = null, zunder = null, calendar = null, tz = 'Europe/Berlin', logger = console }) {
   // Client oder Funktion, die den aktuellen Client liefert (Zugang aus den Einstellungen).
   const currentZunder = typeof zunder === 'function' ? zunder : () => zunder;
   const noteId = (path) => `note:${path}`;
@@ -62,6 +62,8 @@ export function createGraph({ index, semantic = null, zunder = null, calendar = 
   async function around(path, { depth = 1, includeSensitive = false, similar = 8, minSimilarity = 0.55, maxNodes = 80 } = {}) {
     const allowed = index.filterPaths({ includeSensitive });
     if (!allowed.has(path)) return null;
+    // Index oder Funktion, die den aktuellen liefert (Einstellungen → Embeddings).
+    const semantic = typeof semanticOrGetter === 'function' ? semanticOrGetter() : semanticOrGetter;
 
     const nodes = new Map();
     const edges = new Map();
@@ -113,7 +115,7 @@ export function createGraph({ index, semantic = null, zunder = null, calendar = 
         addEdge(noteId(path), noteId(hit.path), 'semantic', { score: Math.round(hit.score * 1000) / 1000 });
       }
     } else if (!semantic) {
-      problems.push('Semantische Kanten sind nicht eingerichtet (EMBED_URL)');
+      problems.push('Semantische Kanten sind nicht eingerichtet (Einstellungen → Embeddings)');
     }
 
     // Aufgaben aus Zunder-Links der Notiz und ihrer direkten Nachbarn.
