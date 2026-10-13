@@ -302,6 +302,36 @@ test('Stylesheet ist ohne Sitzung abrufbar, MCP-Routen bleiben unberührt', asyn
   });
 });
 
+test('PWA: Manifest und Icons ohne Sitzung, Stylesheet mit Versions-Parameter', async () => {
+  await withServer(async ({ call, login }) => {
+    const manifest = await call('/manifest.webmanifest', { cookies: false });
+    assert.equal(manifest.status, 200);
+    assert.match(manifest.headers.get('content-type'), /application\/manifest\+json/);
+    const m = await manifest.json();
+    assert.equal(m.display, 'standalone');
+    assert.equal(m.start_url, '/');
+    for (const icon of m.icons) {
+      const res = await call(icon.src, { cookies: false });
+      assert.equal(res.status, 200, icon.src);
+      assert.equal(res.headers.get('content-type'), icon.type);
+    }
+    assert.ok(m.icons.some((i) => i.purpose === 'maskable'));
+    assert.equal((await call('/static/icons/apple-touch-icon.png', { cookies: false })).status, 200);
+
+    await login();
+    const html = await (await call('/')).text();
+    assert.match(html, /<link rel="manifest" href="\/manifest\.webmanifest">/);
+    assert.match(html, /<link rel="apple-touch-icon" href="\/static\/icons\/apple-touch-icon\.png">/);
+    assert.match(html, /viewport-fit=cover/);
+    const href = html.match(/<link rel="stylesheet" href="(\/static\/cockpit\.css\?v=[\w-]{10})">/)[1];
+    const pinned = await call(href, { cookies: false });
+    assert.match(pinned.headers.get('cache-control'), /immutable/);
+    // Ohne oder mit alter Version fragt der Browser jedes Mal nach.
+    assert.equal((await call('/static/cockpit.css?v=alt', { cookies: false })).headers.get('cache-control'), 'no-cache');
+    assert.match(await (await call('/einstellungen')).text(), new RegExp(href.replace(/[.?]/g, '\\$&')));
+  });
+});
+
 test('Einstellungen: nur angemeldet, Kalender anlegen, Geheimnisse bleiben verborgen', async () => {
   const calendars = { check: async () => ({}) };
   await withServer(
@@ -316,6 +346,7 @@ test('Einstellungen: nur angemeldet, Kalender anlegen, Geheimnisse bleiben verbo
       const page = await call('/einstellungen');
       assert.equal(page.status, 200);
       const html = await page.text();
+      const csrf = csrfFrom(html);
       assert.match(html, /aus der Umgebung \(https:\/\/zunder\.env\)/);
       assert.match(html, /Neuer Kalender/);
       assert.match(html, /name="hiddenEvents" value="Blockiert"/);
@@ -325,7 +356,7 @@ test('Einstellungen: nur angemeldet, Kalender anlegen, Geheimnisse bleiben verbo
         form: {
           'cal.0.name': 'Privat', 'cal.0.kind': 'ical', 'cal.0.url': 'webcal://cal.example/geheim-123.ics',
           'cal.1.name': '', 'cal.1.url': '',
-          'zunder.url': '', 'zunder.token': '', tz: '', vaultName: 'RNotes', inboxFolder: '00-inbox', hiddenEvents: 'Blockiert, Fokus',
+          'zunder.url': '', 'zunder.token': '', tz: '', vaultName: 'RNotes', inboxFolder: '00-inbox', hiddenEvents: 'Blockiert, Fokus', csrf,
         },
       });
       assert.equal(saved.status, 303);
@@ -340,7 +371,7 @@ test('Einstellungen: nur angemeldet, Kalender anlegen, Geheimnisse bleiben verbo
         method: 'POST',
         form: {
           'cal.0.id': privat.id, 'cal.0.name': 'Privat', 'cal.0.kind': 'ical', 'cal.0.url': '',
-          'cal.1.name': 'Arbeit', 'cal.1.kind': 'caldav', 'cal.1.url': 'https://dav.example/', 'cal.1.username': 'r', 'cal.1.password': 'pw-geheim', 'cal.1.filter': 'Team, Urlaub',
+          'cal.1.name': 'Arbeit', 'cal.1.kind': 'caldav', 'cal.1.url': 'https://dav.example/', 'cal.1.username': 'r', 'cal.1.password': 'pw-geheim', 'cal.1.filter': 'Team, Urlaub', csrf,
         },
       });
       const [p2, arbeit] = settings.stored().calendars;
@@ -358,7 +389,7 @@ test('Einstellungen: nur angemeldet, Kalender anlegen, Geheimnisse bleiben verbo
         method: 'POST',
         form: {
           'cal.0.id': p2.id, 'cal.0.name': 'Privat', 'cal.0.kind': 'ical', 'cal.0.remove': '1',
-          'cal.1.id': arbeit.id, 'cal.1.name': 'Arbeit', 'cal.1.kind': 'caldav', 'cal.1.username': 'r', 'cal.1.password': '',
+          'cal.1.id': arbeit.id, 'cal.1.name': 'Arbeit', 'cal.1.kind': 'caldav', 'cal.1.username': 'r', 'cal.1.password': '', csrf,
         },
       });
       assert.deepEqual(settings.stored().calendars.map((c) => [c.name, c.password]), [['Arbeit', 'pw-geheim']]);
@@ -371,13 +402,19 @@ test('Einstellungen: nur angemeldet, Kalender anlegen, Geheimnisse bleiben verbo
 test('Einstellungen: Fehler zeigt die Meldung, fremde Herkunft wird abgewiesen', async () => {
   await withServer(async ({ call, login, settings }) => {
     await login();
-    const bad = await call('/einstellungen', { method: 'POST', form: { tz: 'Mars/Olympus' } });
+    const csrf = csrfFrom(await (await call('/einstellungen')).text());
+    const bad = await call('/einstellungen', { method: 'POST', form: { tz: 'Mars/Olympus', csrf } });
     assert.equal(bad.status, 400);
     assert.match(await bad.text(), /Unbekannte Zeitzone/);
-    const foreign = await call('/einstellungen', { method: 'POST', form: { tz: 'UTC' }, origin: 'https://evil.test' });
+    const foreign = await call('/einstellungen', { method: 'POST', form: { tz: 'UTC', csrf }, origin: 'https://evil.test' });
     assert.equal(foreign.status, 403);
+    // Ohne oder mit falschem CSRF-Token wird nichts gespeichert.
+    const noToken = await call('/einstellungen', { method: 'POST', form: { tz: 'UTC' } });
+    assert.equal(noToken.status, 403);
+    assert.match(await noToken.text(), /veraltet/);
+    assert.equal((await call('/einstellungen', { method: 'POST', form: { tz: 'UTC', csrf: `${csrf.slice(0, -1)}x` } })).status, 403);
     assert.equal(settings.stored().tz, null);
-    const same = await call('/einstellungen', { method: 'POST', form: { tz: 'UTC' }, origin: 'https://vault.test' });
+    const same = await call('/einstellungen', { method: 'POST', form: { tz: 'UTC', csrf }, origin: 'https://vault.test' });
     assert.equal(same.status, 303);
     assert.equal(settings.get().tz, 'UTC');
   });
@@ -391,13 +428,16 @@ test('API-Tokens: anlegen zeigt den Klartext einmal, widerrufen, nur angemeldet 
     assert.equal(tokens.list().length, 0);
 
     await login();
-    assert.match(await (await call('/einstellungen')).text(), /Noch keine Tokens/);
-    const foreign = await call('/einstellungen/tokens', { method: 'POST', form: { name: 'Raycast' }, origin: 'https://evil.test' });
+    const first = await (await call('/einstellungen')).text();
+    assert.match(first, /Noch keine Tokens/);
+    const csrf = csrfFrom(first);
+    const foreign = await call('/einstellungen/tokens', { method: 'POST', form: { name: 'Raycast', csrf }, origin: 'https://evil.test' });
     assert.equal(foreign.status, 403);
-    assert.equal((await call('/einstellungen/tokens', { method: 'POST', form: { name: '' } })).status, 400);
+    assert.equal((await call('/einstellungen/tokens', { method: 'POST', form: { name: 'Raycast' } })).status, 403);
+    assert.equal((await call('/einstellungen/tokens', { method: 'POST', form: { name: '', csrf } })).status, 400);
     assert.equal(tokens.list().length, 0);
 
-    const created = await call('/einstellungen/tokens', { method: 'POST', form: { name: 'Raycast' }, origin: 'https://vault.test' });
+    const created = await call('/einstellungen/tokens', { method: 'POST', form: { name: 'Raycast', csrf }, origin: 'https://vault.test' });
     assert.equal(created.status, 200);
     const html = await created.text();
     const plain = html.match(/<code>(vct_[\w-]+)<\/code>/)[1];
@@ -405,14 +445,16 @@ test('API-Tokens: anlegen zeigt den Klartext einmal, widerrufen, nur angemeldet 
     assert.ok(tokens.verify(plain));
 
     // Speichern der übrigen Einstellungen lässt die Tokens stehen.
-    await call('/einstellungen', { method: 'POST', form: { tz: 'UTC' } });
+    await call('/einstellungen', { method: 'POST', form: { tz: 'UTC', csrf } });
     assert.equal(settings.get().tz, 'UTC');
     const page = await (await call('/einstellungen')).text();
     assert.ok(!page.includes(plain));
     assert.match(page, /Raycast/);
 
     const [{ id }] = tokens.list();
-    const revoked = await call('/einstellungen/tokens/widerrufen', { method: 'POST', form: { id } });
+    assert.equal((await call('/einstellungen/tokens/widerrufen', { method: 'POST', form: { id } })).status, 403);
+    assert.equal(tokens.list().length, 1);
+    const revoked = await call('/einstellungen/tokens/widerrufen', { method: 'POST', form: { id, csrf } });
     assert.equal(revoked.headers.get('location'), '/einstellungen?widerrufen=1');
     assert.equal(tokens.list().length, 0);
     assert.ok(!tokens.verify(plain));
@@ -513,7 +555,7 @@ test('Wochenseite: Abhaken-Formulare, Schnelleingabe und Script nur mit Aktionen
       const res = await call('/?woche=2026-W42');
       assert.match(res.headers.get('content-security-policy'), /script-src 'self'; style-src 'self'; connect-src 'self'/);
       const html = await res.text();
-      assert.match(html, /<script src="\/static\/cockpit\.js" defer><\/script>/);
+      assert.match(html, /<script src="\/static\/cockpit\.js\?v=[\w-]{10}" defer><\/script>/);
       assert.match(html, /action="\/aktion\/status" class="tick"/);
       assert.match(html, /aria-label="Abhaken: Steuer &lt;abgeben&gt;"/);
       assert.match(html, /name="back" value="\/\?woche=2026-W42"/);
@@ -936,7 +978,7 @@ test('Rückblick: Kennzahlen, Balken als SVG ohne Inline-Styles, Navigation', as
     assert.match(html, /href="\/rueckblick\?woche=2026-W43"/);
     assert.match(html, /1 offen geblieben/);
     assert.equal((await call('/rueckblick?woche=kaputt')).status, 400);
-    assert.match(await (await call('/')).text(), /href="\/rueckblick\?woche=2026-W42">Rückblick/);
+    assert.match(await (await call('/')).text(), /href="\/rueckblick\?woche=2026-W42" class="nav-link"/);
   });
 });
 
