@@ -14,7 +14,9 @@ Alle Lesewerkzeuge verlangen den Scope `vault:read`.
 
 | Werkzeug | Zweck |
 |---|---|
-| `vault_search` | Volltextsuche (SQLite FTS5) mit Filtern auf Tag, Ordner und Frontmatter-Typ |
+| `vault_search` | Hybride Suche (Volltext + Bedeutung + Link-Graph) oder reine Volltextsuche, mit Filtern auf Tag, Ordner und Frontmatter-Typ |
+| `vault_similar` | Inhaltlich ähnliche Notizen, mit Markierung, ob schon verlinkt |
+| `vault_graph` | Graph um eine Notiz: Links, ähnliche Notizen, Zunder-Aufgaben, Termine |
 | `vault_read` | Notiz vollständig lesen, mit Fortsetzung bei sehr langen Notizen |
 | `vault_list` | Ordner auflisten, zur Orientierung |
 | `vault_links` | Backlinks und ausgehende Links einer Notiz |
@@ -61,6 +63,8 @@ Das Image baut GitHub Actions bei jedem Push auf `main`:
 | `CAPTURE_STATE_FILE` | Merkzettel gegen doppelte Aufgaben, Standard `/data/capture-state.json` |
 | `MAIL_JMAP_TOKEN` | Fastmail-API-Token (nur Mail); ohne Wert kein Mail-Abruf |
 | `MAIL_ALLOWED_SENDERS` | eigene Absenderadressen (Komma-Liste), Pflicht mit `MAIL_JMAP_TOKEN` |
+| `EMBED_URL`, `EMBED_MODEL` | Ollama-Server für Embeddings (z. B. `http://ollama:11434`) und Modell, Standard `bge-m3`; ohne `EMBED_URL` nur Volltext |
+| `VECTOR_DB` | Vektorspeicher, Standard `/data/vectors.db` |
 | `MAIL_MAILBOX`, `MAIL_DONE_MAILBOX`, `MAIL_POLL_MIN` | Ordner zum Abholen (Standard `Vault`), Ablage danach (Standard `Archive`), Abstand in Minuten (Standard 5) |
 
 ### Sync
@@ -186,6 +190,37 @@ zeigt nur ihr Abschnitt bzw. nur dieser Kalender den Fehler; die Einstellungssei
 zeigt je Kalender, ob er erreichbar ist. Die Sitzung gilt 12 Stunden und nur für
 das Web-Cockpit; `/mcp` nimmt weiter ausschließlich Bearer-Tokens.
 
+### Semantische Suche und Graph
+
+Das Cockpit bettet alle eigenen Notizen (ohne Readwise-Importe) abschnittsweise mit
+**bge-m3** ein, einem mehrsprachigen Modell, das lokal in einem eigenen
+Ollama-Container läuft (`ollama` in `docker-compose.example.yml`). Die Vektoren
+liegen in `VECTOR_DB` neben dem Index; neu eingebettet wird nur, was sich geändert
+hat. Der erste Lauf über den ganzen Vault dauert auf der CPU eine Weile, den Stand
+zeigt `vault_stats` unter `semantic`. Bis dahin und wenn Ollama ausfällt, sucht
+`vault_search` per Volltext weiter und sagt das im Feld `degraded`.
+
+- **Hybride Suche** (`vault_search`, Standard): Volltext, Embeddings und
+  Link-Nachbarschaft der besten Treffer, zusammengeführt per Reciprocal Rank
+  Fusion. Findet auch Notizen, die dasselbe mit anderen Worten sagen. `mode: "text"`
+  ist die bisherige UND-Volltextsuche, `mode: "semantic"` nur die Bedeutung.
+- **Ähnliche Notizen** (`vault_similar`): Kandidaten für Querverbindungen, mit
+  `unlinked_only` nur die noch nicht verlinkten.
+- **Graph** (`vault_graph`, Seite `<PUBLIC_URL>/graph`): Wikilinks, semantische Kanten
+  („ähnlich, aber nicht verlinkt“, gestrichelt), Zunder-Aufgaben aus Links in der
+  Notiz (Status aus Zunder) und bei Tagesnotizen die Termine des Tages. Die Seite
+  `/graph` ist zugleich die Suche des Web-Cockpits; ein Klick auf eine Notiz
+  zentriert den Graphen neu. Als JSON unter `/api/graph?pfad=…`.
+
+Einrichtung: Dienst `ollama` und `EMBED_URL` wie im Compose-Beispiel; das Modell
+lädt das Cockpit beim ersten Lauf selbst. Vertrauliche Notizen werden mit
+eingebettet (das Modell läuft lokal), aber wie beim Volltext nur auf ausdrückliche
+Anforderung ausgeliefert.
+
+`mycel.py` (vault-skills) bleibt für Lebenszyklus, Lint und Supersession des
+Mycel-Wikis zuständig; einen zweiten Embedding-Index baut es nicht auf (siehe
+[docs/roadmap.md](docs/roadmap.md)).
+
 Tests, ohne laufenden Container:
 ```bash
 npm ci && npm test
@@ -200,7 +235,9 @@ npm ci && npm test
 - `src/sync/` — Sync-Adapter: Dateibeobachtung, inkrementeller Reindex, Sync-Status
 - `src/capture/` — Capture von außen: Endpunkte, Mail-Abruf, Zunder-Weiterleitung und -Brücke
 - `src/cockpit/` — Wochenmodell: ISO-Wochen, Feuer-Notiz, Kalender (iCal mit Serienauflösung, CalDAV), Einstellungen, Zusammenstellung aus Zunder
-- `src/web/` — Web-Cockpit: OIDC-Login mit PKCE, signiertes Sitzungs-Cookie, HTML der Wochenansicht
+- `src/semantic/` — Embeddings (Ollama), Abschnitte, Vektorspeicher, hybride Suche
+- `src/graph/` — Graph um eine Notiz mit Aufgaben- und Termin-Knoten
+- `src/web/` — Web-Cockpit: OIDC-Login mit PKCE, signiertes Sitzungs-Cookie, HTML der Wochenansicht, Einstellungen, Suche und Graph
 - `sync/` — Image des Sidecars `vault-sync` (Obsidian Headless mit Status-Wrapper)
 
 ## Sicherheitsentscheidungen

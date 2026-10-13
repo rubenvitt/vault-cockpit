@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, readFileSync, statSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createSettingsStore, validateSettings, loadOrCreateSecret, SettingsError } from '../src/cockpit/settings.js';
-import { createIcsClient, createCalendarSources } from '../src/cockpit/calendars.js';
+import { createIcsClient, createCalendarSources, calendarForGraph } from '../src/cockpit/calendars.js';
 import { describeWeek } from '../src/cockpit/week.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
@@ -119,4 +119,17 @@ test('Mehrere Kalender: Termine zusammen, ein Ausfall trifft nur seinen Kalender
   const [privat, arbeit] = settings.get().calendars;
   assert.deepEqual(checks[privat.id], { ok: true, count: 7 });
   assert.equal(checks[arbeit.id].ok, false);
+});
+
+test('Kalender für den Graphen: aus ohne Kalender, Fehler nur wenn alle ausfallen', async () => {
+  const settings = createSettingsStore({ defaults: { tz: TZ }, logger: quiet });
+  let down = false;
+  const fetch = async (url) => (down || String(url).includes('kaputt') ? new Response('', { status: 500 }) : new Response(ICS));
+  const cal = calendarForGraph(createCalendarSources({ settings, fetch, now: () => (down ? 1e12 : 0) }));
+  assert.equal(cal.configured(), false);
+  settings.save({ calendars: [{ name: 'Privat', kind: 'ical', url: 'https://ok.example/a.ics' }, { name: 'Arbeit', kind: 'ical', url: 'https://kaputt.example/b.ics' }] });
+  assert.equal(cal.configured(), true);
+  assert.equal((await cal.events(W42.start, W42.end)).length, 7);
+  down = true;
+  await assert.rejects(cal.events(W42.start, W42.end), /Privat: .*HTTP 500.*Arbeit/);
 });

@@ -1,5 +1,6 @@
 import { createCookieSigner, parseCookies, cookie } from './session.js';
 import { renderWeek, renderMessage, renderSettings, CSS } from './render.js';
+import { renderGraph, renderSearch, GRAPH_CSS } from './graph-render.js';
 import { SettingsError, MAX_CALENDARS } from '../cockpit/settings.js';
 import { describeWeek, weekOf } from '../cockpit/week.js';
 
@@ -40,6 +41,8 @@ const HTML_HEADERS = {
  * `/api/woche`, Login über Pocket ID.
  *
  * - `GET /` und `GET /api/woche` — `?woche=2026-W42`, ohne Angabe die laufende Woche.
+ * - `GET /graph?q=…` sucht (hybrid), `GET /graph?pfad=…` zeigt den Graphen um
+ *   eine Notiz; `GET /api/graph?pfad=…` liefert ihn als JSON.
  * - `GET /login` → Pocket ID → `GET /auth/callback` setzt die Sitzung (12 h).
  * - `POST /logout` löscht sie. SameSite=Lax hält fremde Seiten davon ab.
  * - `GET`/`POST /einstellungen` — Kalender, Zunder-Zugang und Anzeige pflegen.
@@ -47,7 +50,7 @@ const HTML_HEADERS = {
  * Die Sitzung ist ein signiertes Cookie und nur für diese Routen gültig; die
  * MCP-Schnittstelle prüft weiter ausschließlich Bearer-Tokens.
  */
-export function createWebHttp({ cockpit, settings, calendars = null, oidc, sessionSecret, publicUrl, allowedSubjects = [], sessionHours = 12, logger = console, now = () => Date.now() }) {
+export function createWebHttp({ cockpit, settings, calendars = null, graph = null, search = null, oidc, sessionSecret, publicUrl, allowedSubjects = [], sessionHours = 12, logger = console, now = () => Date.now() }) {
   const signer = createCookieSigner(sessionSecret);
   const secure = publicUrl.startsWith('https://');
 
@@ -181,7 +184,28 @@ export function createWebHttp({ cockpit, settings, calendars = null, oidc, sessi
     return redirect(res, '/einstellungen?gespeichert=1');
   }
 
-  const ROUTES = new Set(['/', '/api/woche', '/einstellungen', '/login', '/auth/callback', '/logout', '/static/cockpit.css']);
+
+  async function graphPage(req, res, url, session) {
+    const path = url.searchParams.get('pfad');
+    const user = session.name ?? session.sub;
+    if (!path) {
+      const q = (url.searchParams.get('q') ?? '').trim().slice(0, 500);
+      const result = q && search ? await search(q) : { results: [], total: 0 };
+      return send(res, 200, renderSearch(q, result, { user }));
+    }
+    const g = graph ? await graph.around(path) : null;
+    if (!g) return send(res, 404, renderMessage('Notiz nicht gefunden', `„${path}“ gibt es nicht im Index.`, { link: { href: '/graph', label: 'Zur Suche' } }));
+    const { vaultName, tz } = settings.get();
+    return send(res, 200, renderGraph(g, { vaultName, user, tz }));
+  }
+
+  async function graphApi(req, res, url) {
+    const g = graph ? await graph.around(url.searchParams.get('pfad') ?? '') : null;
+    if (!g) return json(res, 404, { error: 'not_found', error_description: 'Notiz nicht im Index' });
+    return json(res, 200, g);
+  }
+
+  const ROUTES = new Set(['/', '/api/woche', '/graph', '/api/graph', '/einstellungen', '/login', '/auth/callback', '/logout', '/static/cockpit.css']);
 
   return {
     matches: (path) => ROUTES.has(path),
@@ -192,7 +216,7 @@ export function createWebHttp({ cockpit, settings, calendars = null, oidc, sessi
 
       if (path === '/static/cockpit.css' && method === 'GET') {
         res.writeHead(200, { 'content-type': 'text/css; charset=utf-8', 'cache-control': 'public, max-age=3600' });
-        return res.end(CSS);
+        return res.end(CSS + GRAPH_CSS);
       }
       if (path === '/login' && method === 'GET') return login(req, res, url);
       if (path === '/auth/callback' && method === 'GET') return callback(req, res, url);
@@ -213,7 +237,12 @@ export function createWebHttp({ cockpit, settings, calendars = null, oidc, sessi
         if (!session) return json(res, 401, { error: 'unauthorized', error_description: 'Anmeldung unter /login nötig' });
         return api(req, res, url);
       }
+      if (path === '/api/graph') {
+        if (!session) return json(res, 401, { error: 'unauthorized', error_description: 'Anmeldung unter /login nötig' });
+        return graphApi(req, res, url);
+      }
       if (!session) return redirect(res, `/login?next=${encodeURIComponent(url.pathname + url.search)}`);
+      if (path === '/graph') return graphPage(req, res, url, session);
       return page(req, res, url, session);
     },
   };

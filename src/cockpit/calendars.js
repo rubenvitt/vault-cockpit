@@ -81,3 +81,19 @@ export function createCalendarSources({ settings, fetch = globalThis.fetch, now 
     },
   };
 }
+
+/**
+ * Sicht für den Graphen: `null`-artig, solange kein Kalender eingestellt ist,
+ * sonst die Termine aller Kalender. Fallen alle aus, ein Fehler; fällt nur
+ * einer aus, kommen die übrigen Termine.
+ */
+export function calendarForGraph(sources) {
+  return {
+    configured: () => sources.configured(),
+    async events(start, end) {
+      const { events, errors } = await sources.events(start, end);
+      if (errors.length && !events.length) throw new Error(errors.map((e) => `${e.calendar}: ${e.error}`).join('; '));
+      return events;
+    },
+  };
+}

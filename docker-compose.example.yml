@@ -23,6 +23,10 @@ services:
       - REINDEX_INTERVAL_MIN=60
       - SYNC_ADAPTER=obsidian-headless
       - SYNC_STATUS_FILE=/sync-status/sync.json
+      # Semantische Suche und Graph: Embeddings vom Dienst `ollama` unten.
+      - EMBED_URL=http://ollama:11434
+      - EMBED_MODEL=bge-m3
+      - VECTOR_DB=/data/vectors.db
     volumes:
       # Beschreibbar, damit vault_edit, vault_append und vault_set_frontmatter
       # bestehende Notizen ändern können. Der Container läuft als uid 1000 (node)
@@ -39,8 +43,11 @@ services:
       - ./sync-status:/sync-status:ro
     networks:
       - proxy
+      - default
     labels:
       - "traefik.enable=true"
+      # Zwei Netze (Proxy und intern zu Ollama): Traefik muss wissen, über welches.
+      - "traefik.docker.network=proxy"
       - "traefik.http.routers.vault-cockpit.entrypoints=https"
       - "traefik.http.routers.vault-cockpit.rule=Host(`mcp.example.com`)"
       - "traefik.http.routers.vault-cockpit.tls.certresolver=letsencrypt"
@@ -68,3 +75,18 @@ services:
       - ./sync-config:/config
       - ./sync-status:/status
     # Kein Netzwerk zum Proxy nötig: Der Sidecar spricht nur nach außen zu Obsidian.
+
+  # Embeddings für die semantische Suche, nur intern erreichbar. bge-m3 braucht
+  # rund 1,2 GB Platte und 2 GB RAM; ohne GPU läuft es auf der CPU. Das Modell
+  # lädt das Cockpit beim ersten Lauf selbst (`/api/pull`).
+  ollama:
+    image: ollama/ollama:0.12.6
+    container_name: vault-ollama
+    restart: unless-stopped
+    environment:
+      # Das Modell bleibt geladen, statt nach fünf Minuten entladen zu werden.
+      - OLLAMA_KEEP_ALIVE=24h
+    volumes:
+      - ./ollama:/root/.ollama
+    networks:
+      - default

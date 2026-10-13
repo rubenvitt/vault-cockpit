@@ -15,10 +15,14 @@ import { createCaptureHttp } from './capture/http.js';
 import { createMailCapture } from './capture/mail.js';
 import { createZunderBridge } from './capture/bridge.js';
 import { createCockpit } from './cockpit/data.js';
-import { createCalendarSources } from './cockpit/calendars.js';
+import { createCalendarSources, calendarForGraph } from './cockpit/calendars.js';
 import { createSettingsStore, loadOrCreateSecret } from './cockpit/settings.js';
 import { createOidcLogin } from './web/oidc.js';
 import { createWebHttp } from './web/http.js';
+import { createOllamaEmbedder } from './semantic/embedder.js';
+import { createSemanticIndex } from './semantic/index.js';
+import { hybridSearch } from './semantic/search.js';
+import { createGraph } from './graph/graph.js';
 
 function required(name) {
   const v = process.env[name];
@@ -71,6 +75,22 @@ const index = createIndexManager({
   policy: POLICY,
   intervalMinutes: Number(process.env.REINDEX_INTERVAL_MIN ?? 15),
 });
+
+// Semantische Suche (Schritt 4): Embeddings über einen Ollama-Server, eigener
+// Vektorspeicher neben dem Index. Aus, bis EMBED_URL gesetzt ist.
+const semantic = process.env.EMBED_URL
+  ? createSemanticIndex({
+      dbPath: process.env.VECTOR_DB ?? '/data/vectors.db',
+      vaultPath: VAULT_PATH,
+      index,
+      embedder: createOllamaEmbedder({ url: process.env.EMBED_URL, model: process.env.EMBED_MODEL || 'bge-m3' }),
+    })
+  : null;
+if (semantic) {
+  index.onChange(({ full, paths }) => semantic.schedule(full ? null : paths));
+  semantic.schedule();
+}
+
 const SYNC_ADAPTER = process.env.SYNC_ADAPTER ?? 'obsidian-headless';
 const sync = createSyncAdapter({
   kind: SYNC_ADAPTER,
@@ -133,51 +153,57 @@ sync.start({
   },
 });
 
+// Cockpit-Einstellungen (Kalender, Zunder-Zugang, Anzeige) liegen unter /data
+// und werden im Browser gepflegt; leere Felder fallen auf die Umgebung zurück.
+// Der Graph nutzt dieselben Kalender und dieselbe Zeitzone.
+const cockpitSettings = createSettingsStore({
+  file: process.env.COCKPIT_SETTINGS_FILE ?? '/data/cockpit-settings.json',
+  defaults: {
+    tz: process.env.COCKPIT_TZ || 'Europe/Berlin',
+    vaultName: process.env.OBSIDIAN_VAULT_NAME || null,
+    inboxFolder: CAPTURE_FOLDER,
+    zunderUrl: process.env.ZUNDER_URL || null,
+    zunderToken: process.env.ZUNDER_TOKEN || null,
+  },
+});
+const calendars = createCalendarSources({ settings: cockpitSettings });
+const graph = createGraph({ index, semantic, zunder, calendar: calendarForGraph(calendars), tz: () => cockpitSettings.get().tz });
+
 // Web-Cockpit (Schritt 3): Wochenansicht mit eigenem Browser-Login. Aus, bis
-// WEB_CLIENT_ID gesetzt ist. Alles Weitere (Kalender, Zunder-Zugang, Anzeige)
-// steht in den Einstellungen unter /data und wird im Browser gepflegt.
-let webHttp = null;
-let cockpitSettings = null;
-if (process.env.WEB_CLIENT_ID) {
-  cockpitSettings = createSettingsStore({
-    file: process.env.COCKPIT_SETTINGS_FILE ?? '/data/cockpit-settings.json',
-    defaults: {
-      tz: process.env.COCKPIT_TZ || 'Europe/Berlin',
-      vaultName: process.env.OBSIDIAN_VAULT_NAME || null,
-      inboxFolder: CAPTURE_FOLDER,
-      zunderUrl: process.env.ZUNDER_URL || null,
-      zunderToken: process.env.ZUNDER_TOKEN || null,
-    },
-  });
-  const calendars = createCalendarSources({ settings: cockpitSettings });
-  webHttp = createWebHttp({
-    cockpit: createCockpit({
-      index,
+// WEB_CLIENT_ID gesetzt ist.
+const webHttp = process.env.WEB_CLIENT_ID
+  ? createWebHttp({
+      cockpit: createCockpit({
+        index,
+        settings: cockpitSettings,
+        calendars,
+        zunderFor: ({ url, token }) => createZunderClient({ url, token }),
+      }),
       settings: cockpitSettings,
       calendars,
-      zunderFor: ({ url, token }) => createZunderClient({ url, token }),
-    }),
-    settings: cockpitSettings,
-    calendars,
-    oidc: createOidcLogin({
-      issuer: ISSUER,
-      clientId: process.env.WEB_CLIENT_ID,
-      clientSecret: process.env.WEB_CLIENT_SECRET || null,
-      redirectUri: `${PUBLIC_URL}/auth/callback`,
+      graph,
+      search: (query) => hybridSearch({ index, semantic, query, limit: 30 }),
+      oidc: createOidcLogin({
+        issuer: ISSUER,
+        clientId: process.env.WEB_CLIENT_ID,
+        clientSecret: process.env.WEB_CLIENT_SECRET || null,
+        redirectUri: `${PUBLIC_URL}/auth/callback`,
+        allowedSubjects: ALLOWED_SUBJECTS,
+      }),
+      // Ohne SESSION_SECRET erzeugt der Dienst eins und legt es unter /data ab.
+      sessionSecret: loadOrCreateSecret(process.env.SESSION_SECRET_FILE ?? '/data/session-secret', process.env.SESSION_SECRET || null),
+      publicUrl: PUBLIC_URL,
       allowedSubjects: ALLOWED_SUBJECTS,
-    }),
-    // Ohne SESSION_SECRET erzeugt der Dienst eins und legt es unter /data ab.
-    sessionSecret: loadOrCreateSecret(process.env.SESSION_SECRET_FILE ?? '/data/session-secret', process.env.SESSION_SECRET || null),
-    publicUrl: PUBLIC_URL,
-    allowedSubjects: ALLOWED_SUBJECTS,
-  });
-}
+    })
+  : null;
 
 const mcpHttp = createVaultMcpHandler({
   index,
   capture,
   editor,
   sync,
+  semantic,
+  graph,
   captureFolder: CAPTURE_FOLDER,
   layoutHint: POLICY.layoutHint,
   // Synchron: die Prüfung ist in der HTTP-Schicht bereits gelaufen.
@@ -209,6 +235,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`  Sync        : ${SYNC_ADAPTER} (${sync.status().state})`);
   console.log(`  Capture     : ${captureHttp ? '/capture, /funke' : 'Endpunkte aus (CAPTURE_TOKEN)'}${mail ? `, Mail aus „${mail.status().mailbox}“` : ''}`);
   console.log(`  Zunder      : ${zunder ? `${process.env.ZUNDER_URL} (! → Inbox${bridge ? `, Brücke #${bridge.tag}` : ''})` : 'aus (ZUNDER_URL, ZUNDER_TOKEN)'}`);
+  console.log(`  Semantik    : ${semantic ? `${semantic.model} über ${process.env.EMBED_URL}` : 'aus (EMBED_URL)'}`);
   console.log(`  Cockpit     : ${webHttp ? `${PUBLIC_URL}/ (${cockpitSettings.get().calendars.length} Kalender, Einstellungen unter /einstellungen)` : 'aus (WEB_CLIENT_ID)'}`);
 });
 
@@ -218,6 +245,7 @@ for (const sig of ['SIGTERM', 'SIGINT']) {
     sync.stop();
     mail?.stop();
     index.stop();
+    semantic?.close();
     app.close(() => process.exit(0));
   });
 }

@@ -10,6 +10,7 @@ import { createCapture } from '../src/vault/capture.js';
 import { createEditor } from '../src/vault/edit.js';
 import { createVaultMcpHandler } from '../src/mcp/server.js';
 import { toWebRequest, writeWebResponse } from '../src/http/bridge.js';
+import { createGraph } from '../src/graph/graph.js';
 
 const PUBLIC_URL = 'https://mcp.rubeen.dev';
 const RESOURCE = `${PUBLIC_URL}/mcp`;
@@ -41,6 +42,7 @@ before(async () => {
     index,
     capture,
     editor: createEditor({ vaultPath: root, index }),
+    graph: createGraph({ index, logger: { warn() {} } }),
     verifyToken: (token) => principals.get(token),
   });
 
@@ -104,8 +106,8 @@ test('tools/list nennt alle Vault-Werkzeuge', async () => {
   const r = await rpc('tools/list', {});
   const names = r.body.result.tools.map((t) => t.name).sort();
   assert.deepEqual(names, [
-    'vault_append', 'vault_capture', 'vault_edit', 'vault_links', 'vault_list',
-    'vault_read', 'vault_search', 'vault_set_frontmatter', 'vault_stats',
+    'vault_append', 'vault_capture', 'vault_edit', 'vault_graph', 'vault_links', 'vault_list',
+    'vault_read', 'vault_search', 'vault_set_frontmatter', 'vault_similar', 'vault_stats',
   ]);
 });
 
@@ -123,6 +125,29 @@ test('vault_search findet die Notiz', async () => {
   const data = r.body.result.structuredContent;
   assert.equal(data.total, 1);
   assert.equal(data.results[0].path, 'wiki/concepts/contract-first.md');
+});
+
+test('vault_search: ohne Embeddings hybrid mit Hinweis, mode text bleibt UND-Suche', async () => {
+  const hybrid = (await rpc('tools/call', { name: 'vault_search', arguments: { query: 'Vertrag Unsinnswort' } })).body.result.structuredContent;
+  assert.equal(hybrid.mode, 'hybrid');
+  assert.match(hybrid.degraded, /EMBED_URL/);
+  assert.equal(hybrid.results[0].path, 'wiki/concepts/contract-first.md');
+  assert.deepEqual(hybrid.results[0].streams, ['text']);
+  const text = (await rpc('tools/call', { name: 'vault_search', arguments: { query: 'Vertrag Unsinnswort', mode: 'text' } })).body.result.structuredContent;
+  assert.equal(text.total, 0);
+});
+
+test('vault_graph liefert den Graphen, vault_similar meldet fehlende Embeddings', async () => {
+  const g = (await rpc('tools/call', { name: 'vault_graph', arguments: { path: 'wiki/concepts/contract-first.md' } })).body.result.structuredContent;
+  assert.equal(g.center, 'note:wiki/concepts/contract-first.md');
+  assert.equal(g.nodes[0].label, 'Contract First');
+  const missing = await rpc('tools/call', { name: 'vault_graph', arguments: { path: 'gibt/es/nicht.md' } });
+  assert.equal(missing.body.result.isError, true);
+  const sim = await rpc('tools/call', { name: 'vault_similar', arguments: { path: 'wiki/concepts/contract-first.md' } });
+  assert.equal(sim.body.result.isError, true);
+  assert.match(sim.body.result.content[0].text, /EMBED_URL/);
+  const stats = (await rpc('tools/call', { name: 'vault_stats', arguments: {} })).body.result.structuredContent;
+  assert.equal(stats.semantic.state, 'disabled');
 });
 
 test('vault_read liefert den Inhalt', async () => {
@@ -143,6 +168,8 @@ test('Lesewerkzeuge werden ohne den Scope vault:read verweigert', async () => {
     ['vault_list', {}],
     ['vault_links', { path: 'wiki/concepts/contract-first.md' }],
     ['vault_stats', {}],
+    ['vault_graph', { path: 'wiki/concepts/contract-first.md' }],
+    ['vault_similar', { path: 'wiki/concepts/contract-first.md' }],
   ];
   for (const [name, args] of calls) {
     const r = await rpc('tools/call', { name, arguments: args }, 'token-nur-capture');
