@@ -25,7 +25,7 @@
   // --- Live-Suche -----------------------------------------------------------
 
   function liveSearch() {
-    const form = document.querySelector('nav form.search');
+    const form = document.querySelector('form.search');
     const input = form?.querySelector('input[name=q]');
     if (!input) return;
     const box = el('div', { class: 'live-results', role: 'listbox', id: 'live-results', hidden: true });
@@ -335,7 +335,7 @@
     return new Set([focus, ...graph.neighbors(focus)]);
   }
 
-  stage.classList.add('live', 'loading');
+  stage.classList.add('interactive', 'loading');
   const renderer = new Sigma(graph, stage, {
     allowInvalidContainer: true,
     renderEdgeLabels: false,
@@ -639,7 +639,7 @@
     .catch((err) => {
       // Der Graph ist nicht zu holen: zurück zum SVG.
       renderer.kill();
-      stage.classList.remove('live', 'loading');
+      stage.classList.remove('interactive', 'loading');
       stage.querySelectorAll('.graph-zoom, .graph-card').forEach((n) => n.remove());
       toast(err.message, { kind: 'error' });
     });

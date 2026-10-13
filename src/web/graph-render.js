@@ -1,4 +1,5 @@
 import { esc, formHead, flashToast } from './render.js';
+import { head, appHeader, assets } from './layout.js';
 
 /**
  * Graph- und Suchseite des Web-Cockpits, serverseitig als SVG gerendert. Ohne
@@ -129,24 +130,13 @@ function linkForm(ctx, center, target) {
 function page({ title, query = '', body, user, write = null, graph = false, flash = null, back = '/graph' }) {
   return `<!doctype html>
 <html lang="de">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(title)} · Cockpit</title>
-<link rel="stylesheet" href="/static/cockpit.css">
-${write ? '<script src="/static/cockpit.js" defer></script>' : ''}
-${graph ? '<script src="/static/vendor/graph-lib.js" defer></script>' : ''}
-<script src="/static/graph.js" defer></script>
-</head>
-<body>
-<header>
-  <div><h1>${esc(title)}</h1></div>
-  <nav>
-    <a href="/">Woche</a>
-    <form method="get" action="/graph" class="search" role="search"><input type="search" name="q" value="${esc(query)}" placeholder="Vault durchsuchen" aria-label="Vault durchsuchen" autocomplete="off" spellcheck="false"><button type="submit">Suchen</button></form>
-    <form method="post" action="/logout"><button type="submit" title="${esc(user ?? '')}">Abmelden</button></form>
-  </nav>
-</header>
+${head(title, { script: Boolean(write), scripts: [...(graph ? [assets.graphLib] : []), assets.graph] })}
+<body class="page-graph">
+${appHeader({ current: 'graph', user })}
+<div class="page-head">
+  <h1>${esc(title)}</h1>
+  <form method="get" action="/graph" class="search" role="search"><input type="search" name="q" value="${esc(query)}" placeholder="Vault durchsuchen" aria-label="Vault durchsuchen" enterkeyhint="search" autocomplete="off" spellcheck="false"><button type="submit" class="btn">Suchen</button></form>
+</div>
 <main>
 ${body}
 </main>
@@ -235,19 +225,16 @@ export const GRAPH_CSS = `
 .results li { padding: 8px 0; border-top: 1px solid var(--line); }
 .results li:first-child { border-top: 0; }
 .snippet { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
-nav .search { display: flex; gap: 6px; }
-nav .search input { font: inherit; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); min-width: 220px; }
-nav .search button { color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; }
 .graph-lists li form { display: inline; margin: 0 0 0 6px; }
 .graph-lists .chip { min-height: 26px; padding: 2px 10px; font-size: 12px; }
 
 /* --- Interaktiver Graph (/static/graph.js) --- */
 .graph-panel > .meta { margin: 0 0 12px; }
 .graph-stage { position: relative; }
-.graph-stage.live { height: min(72vh, 780px); min-height: 420px; margin: 0 -20px; border-block: 1px solid var(--line);
+.graph-stage.interactive { height: min(72vh, 780px); min-height: 420px; margin: 0 calc(-1 * var(--s-6)); border-block: 1px solid var(--line);
   background: radial-gradient(circle at 50% 45%, var(--surface), var(--bg)); overflow: hidden; touch-action: none; }
-.graph-stage.live > svg { display: none; }
-.graph-stage.live.loading::after { content: 'Graph wird aufgebaut …'; position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); }
+.graph-stage.interactive > svg { display: none; }
+.graph-stage.interactive.loading::after { content: 'Graph wird aufgebaut …'; position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); }
 .graph-stage canvas { outline: none; }
 .graph-stage.dragging, .graph-stage.dragging canvas { cursor: grabbing; }
 .graph-stage.over-node canvas { cursor: pointer; }
@@ -274,7 +261,7 @@ nav .search button { color: var(--text); border: 1px solid var(--line); border-r
 .legend .hint { margin-left: auto; }
 
 /* Live-Suche */
-nav .search { position: relative; }
+.page-head .search { position: relative; }
 .live-results { position: absolute; z-index: 8; top: calc(100% + 6px); right: 0; width: min(440px, calc(100vw - 24px)); max-height: 70vh; overflow-y: auto;
   padding: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-pop);
   animation: pop-in .12s ease-out; }
@@ -285,10 +272,8 @@ nav .search { position: relative; }
 .live-results .snippet { margin: 2px 0 0; font-size: 13px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .live-results .empty { padding: 8px 10px; }
 .live-results .all { color: var(--muted); font-size: 13px; }
-@media (max-width: 600px) {
-  .graph-stage.live { height: 64vh; min-height: 360px; margin: 0 -20px; }
-  nav .search input { min-width: 0; width: 100%; }
-  nav .search { flex: 1 1 100%; }
+@media (max-width: 700px) {
+  .graph-stage.interactive { height: 60vh; min-height: 340px; margin: 0 calc(-1 * var(--s-4)); }
   .live-results { left: 0; right: auto; }
   .graph-card { left: 8px; right: 8px; bottom: 8px; width: auto; }
 }

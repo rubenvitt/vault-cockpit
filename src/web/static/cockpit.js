@@ -7,6 +7,19 @@
 
   const toasts = document.querySelector('.toasts');
 
+  // Ladeleiste oben, solange eine neue Seite kommt (Links und Formulare ohne Script-Weg).
+  const loading = () => document.documentElement.classList.add('navigating');
+  addEventListener('pageshow', () => document.documentElement.classList.remove('navigating'));
+  document.addEventListener('click', (e) => {
+    const a = e.target instanceof Element ? e.target.closest('a[href]') : null;
+    if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    if (a.target || a.hasAttribute('download') || a.origin !== location.origin || a.hash) return;
+    loading();
+  });
+  document.addEventListener('submit', (e) => {
+    if (!e.defaultPrevented && e.target instanceof HTMLFormElement && !e.target.matches('.tick, .act, .capture')) loading();
+  });
+
   function post(form, extra = {}) {
     const body = new URLSearchParams(new FormData(form));
     for (const [k, v] of Object.entries(extra)) body.set(k, v);
@@ -94,6 +107,11 @@
     const items = rock.querySelectorAll('li.task');
     const done = rock.querySelectorAll('li.task.status-done').length;
     count.textContent = `${done}/${items.length}`;
+    const bar = rock.querySelector('progress');
+    if (bar) {
+      bar.max = items.length;
+      bar.value = done;
+    }
     rock.classList.toggle('all-done', items.length > 0 && done === items.length);
   }
 
@@ -247,9 +265,14 @@
     const mode = () => {
       const task = field.value.trimStart().startsWith('!');
       capture.dataset.mode = task ? 'task' : 'note';
-      button.textContent = task ? 'Aufgabe anlegen' : 'Notiz anlegen';
+      (button.querySelector('.capture-label') ?? button).textContent = task ? 'Aufgabe anlegen' : 'Notiz anlegen';
     };
     const grow = () => {
+      // Leer bleibt das Feld einzeilig, auch wenn der Platzhalter auf dem iPhone länger ist.
+      if (!field.value) {
+        field.style.height = '';
+        return;
+      }
       field.style.height = 'auto';
       field.style.height = `${Math.min(field.scrollHeight, 240)}px`;
     };

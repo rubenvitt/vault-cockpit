@@ -280,10 +280,21 @@ hinein, Enter legt an, Shift+Enter macht eine neue Zeile. Beides läuft ohne
 Seitenwechsel; ohne JavaScript funktionieren dieselben Formulare mit
 Weiterleitung. Schlägt etwas fehl, bleibt die Meldung stehen und der Text im Feld.
 
+**Auf dem iPhone als App:** In Safari „Teilen → Zum Home-Bildschirm“. Das Cockpit
+startet dann ohne Browserleiste, mit eigenem Icon und der Navigation als Leiste
+unten (Manifest unter `/manifest.webmanifest`, Icons unter `/static/icons/`).
+Unter Android bietet Chrome die Installation selbst an; dort führt das Kurzmenü
+des Icons direkt in die Schnelleingabe (`/?erfassen=1`). Gestaltung: ein kleines
+Design-System ohne Build-Schritt in `src/web/static/cockpit.css` (Tokens für Farben
+hell/dunkel, Abstände, Schrift, dazu Bausteine wie Karte, Knopf, Chip, Menü,
+Meldung, leerer Zustand und Ladeleiste). Das Stylesheet wird mit Inhalts-Hash
+ausgeliefert (`cockpit.css?v=…`), nach einem Deploy lädt der Browser es neu.
+
 Fällt eine Quelle aus (Zunder nicht erreichbar, ein Kalender antwortet nicht),
 zeigt nur ihr Abschnitt bzw. nur dieser Kalender den Fehler; die Einstellungsseite
 zeigt je Kalender, ob er erreichbar ist. Die Sitzung gilt 12 Stunden und nur für
-das Web-Cockpit; `/mcp` nimmt weiter ausschließlich Bearer-Tokens.
+das Web-Cockpit; `/mcp` nimmt weiter ausschließlich Bearer-Tokens. Alle Formulare,
+auch Einstellungen und API-Tokens, verlangen das CSRF-Token der Sitzung.
 
 ### Semantische Suche und Graph
 

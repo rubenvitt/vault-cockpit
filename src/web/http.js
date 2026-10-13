@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
-import { timingSafeEqual, randomUUID } from 'node:crypto';
+import { timingSafeEqual, randomUUID, createHash } from 'node:crypto';
 import { createCookieSigner, parseCookies, cookie } from './session.js';
-import { renderWeek, renderMessage, renderSettings, dueLabel, CSS } from './render.js';
+import { renderWeek, renderMessage, renderSettings, dueLabel } from './render.js';
+import { versionAssets, THEME } from './layout.js';
 import { renderGraph, renderSearch, GRAPH_CSS } from './graph-render.js';
 import { renderNote, NOTE_CSS } from './note-render.js';
 import { renderReview, REVIEW_CSS } from './review-render.js';
@@ -9,10 +10,50 @@ import { SettingsError, MAX_CALENDARS } from '../cockpit/settings.js';
 import { describeWeek, weekOf } from '../cockpit/week.js';
 import { ActionError, SETTABLE } from '../cockpit/actions.js';
 
-const CLIENT_JS = readFileSync(new URL('./static/cockpit.js', import.meta.url), 'utf8');
-const GRAPH_JS = readFileSync(new URL('./static/graph.js', import.meta.url), 'utf8');
+const staticFile = (name, enc) => readFileSync(new URL(`./static/${name}`, import.meta.url), enc);
+const CLIENT_JS = staticFile('cockpit.js', 'utf8');
+const GRAPH_JS = staticFile('graph.js', 'utf8');
 // sigma + graphology + ForceAtlas2, gebündelt mit `npm run vendor` und eingecheckt.
-const GRAPH_LIB = readFileSync(new URL('./static/vendor/graph-lib.js', import.meta.url), 'utf8');
+const GRAPH_LIB = staticFile('vendor/graph-lib.js', 'utf8');
+// Design-System (Tokens, Bausteine, Wochenansicht) plus die Teile der übrigen Seiten.
+const CSS = staticFile('cockpit.css', 'utf8') + GRAPH_CSS + NOTE_CSS + REVIEW_CSS;
+const hash = (s) => createHash('sha256').update(s).digest('base64url').slice(0, 10);
+const VERSION = { css: hash(CSS), js: hash(CLIENT_JS), graph: hash(GRAPH_JS), graphLib: hash(GRAPH_LIB) };
+versionAssets(VERSION);
+
+/** Web-App-Manifest: Das Cockpit startet auf dem iPhone und unter Android wie eine App. */
+const MANIFEST = JSON.stringify({
+  name: 'Vault Cockpit',
+  short_name: 'Cockpit',
+  description: 'Woche führen, Gedanken festhalten, Vault durchsuchen.',
+  lang: 'de',
+  start_url: '/',
+  scope: '/',
+  display: 'standalone',
+  background_color: THEME.light,
+  theme_color: THEME.light,
+  icons: [
+    { src: '/static/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+    { src: '/static/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+    { src: '/static/icons/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+    { src: '/static/icon.svg', sizes: 'any', type: 'image/svg+xml' },
+  ],
+  shortcuts: [
+    { name: 'Schnelleingabe', short_name: 'Erfassen', url: '/?erfassen=1' },
+    { name: 'Suche', url: '/graph' },
+  ],
+});
+
+/** Öffentliche Dateien ohne Sitzung: Stylesheet, Script, Manifest, Icons. */
+const PUBLIC = new Map([
+  ['/static/cockpit.css', { type: 'text/css; charset=utf-8', body: CSS, version: VERSION.css }],
+  ['/static/cockpit.js', { type: 'text/javascript; charset=utf-8', body: CLIENT_JS, version: VERSION.js }],
+  ['/static/graph.js', { type: 'text/javascript; charset=utf-8', body: GRAPH_JS, version: VERSION.graph }],
+  ['/static/vendor/graph-lib.js', { type: 'text/javascript; charset=utf-8', body: GRAPH_LIB, version: VERSION.graphLib }],
+  ['/manifest.webmanifest', { type: 'application/manifest+json; charset=utf-8', body: MANIFEST }],
+  ['/static/icon.svg', { type: 'image/svg+xml', body: staticFile('icon.svg') }],
+  ...['apple-touch-icon', 'icon-192', 'icon-512', 'icon-maskable-512'].map((n) => [`/static/icons/${n}.png`, { type: 'image/png', body: staticFile(`icons/${n}.png`) }]),
+]);
 
 const MAX_FORM = 64 * 1024;
 
@@ -162,7 +203,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     const model = await cockpit.week(id || null);
     if (!model) return send(res, 400, renderMessage('Unbekannte Woche', `„${id}“ ist keine Kalenderwoche wie 2026-W42.`, { link: { href: '/', label: 'Zur laufenden Woche' } }));
     const back = url.pathname + url.search;
-    return send(res, status, renderWeek(model, { user: session.name ?? session.sub, write: writeContext(req), back, flash: flash ?? takeFlash(req, res), draft }));
+    return send(res, status, renderWeek(model, { user: session.name ?? session.sub, write: writeContext(req), back, flash: flash ?? takeFlash(req, res), draft, focus: url.searchParams.has('erfassen') }));
   }
 
   /** Notizseite `/notiz?pfad=…`: Vorschau und Verarbeiten. */
@@ -386,6 +427,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       captureEnabled: typeof captureEnabled === 'function' ? captureEnabled() : captureEnabled,
       tz: settings.get().tz,
       user: session.name ?? session.sub,
+      csrf: csrfOf(req),
     });
     return send(res, status, html);
   }
@@ -456,8 +498,19 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     }
   }
 
-  async function saveSettings(req, res, session) {
+  /** Einstellungs- und Token-Formulare: wie die Aktionen nur mit dem CSRF-Token der Sitzung. */
+  async function readSettingsForm(req, res) {
     const form = await readForm(req, res);
+    if (!form) return null;
+    if (!csrfOk(req, form.get('csrf'))) {
+      send(res, 403, renderMessage('Nicht gespeichert', 'Die Seite ist veraltet. Bitte neu laden und noch einmal versuchen.', { link: { href: '/einstellungen', label: 'Neu laden' } }));
+      return null;
+    }
+    return form;
+  }
+
+  async function saveSettings(req, res, session) {
+    const form = await readSettingsForm(req, res);
     if (!form) return;
     try {
       settings.save(fromForm(form));
@@ -471,7 +524,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
 
   /** Antwortet direkt mit der Seite, weil der Klartext nur hier einmal auftaucht. */
   async function createToken(req, res, session) {
-    const form = await readForm(req, res);
+    const form = await readSettingsForm(req, res);
     if (!form) return;
     let created;
     try {
@@ -485,7 +538,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   }
 
   async function revokeToken(req, res, session) {
-    const form = await readForm(req, res);
+    const form = await readSettingsForm(req, res);
     if (!form) return;
     if (tokens.revoke(form.get('id') ?? '')) logger.info?.(`API-Token widerrufen von ${session.sub}`);
     return redirect(res, '/einstellungen?widerrufen=1');
@@ -524,7 +577,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   const TOKEN_ROUTES = { '/einstellungen/tokens': createToken, '/einstellungen/tokens/widerrufen': revokeToken };
   const ACTION_ROUTES = new Set(Object.keys(ACTIONS));
   const SHORTCUT_ROUTES = new Map(shortcuts.map((s) => [`/kurzbefehle/${s.slug}.shortcut`, s]));
-  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), '/static/cockpit.js', '/static/graph.js', '/static/vendor/graph-lib.js', '/', '/api/woche', '/api/suche', '/rueckblick', ...(notes ? ['/notiz'] : []), '/graph', '/api/graph', '/einstellungen', ...(tokens ? Object.keys(TOKEN_ROUTES) : []), '/login', '/auth/callback', '/logout', '/static/cockpit.css']);
+  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...PUBLIC.keys(), '/', '/api/woche', '/api/suche', '/rueckblick', ...(notes ? ['/notiz'] : []), '/graph', '/api/graph', '/einstellungen', ...(tokens ? Object.keys(TOKEN_ROUTES) : []), '/login', '/auth/callback', '/logout']);
 
   return {
     matches: (path) => ROUTES.has(path),
@@ -533,21 +586,16 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       const path = url.pathname;
       const method = req.method === 'HEAD' ? 'GET' : req.method;
 
-      if (path === '/static/cockpit.css' && method === 'GET') {
-        res.writeHead(200, { 'content-type': 'text/css; charset=utf-8', 'cache-control': 'public, max-age=3600' });
-        return res.end(CSS + GRAPH_CSS + NOTE_CSS + REVIEW_CSS);
-      }
-      if (path === '/static/cockpit.js' && method === 'GET') {
-        res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache', 'x-content-type-options': 'nosniff' });
-        return res.end(CLIENT_JS);
-      }
-      if (path === '/static/graph.js' && method === 'GET') {
-        res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache', 'x-content-type-options': 'nosniff' });
-        return res.end(GRAPH_JS);
-      }
-      if (path === '/static/vendor/graph-lib.js' && method === 'GET') {
-        res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'public, max-age=86400', 'x-content-type-options': 'nosniff' });
-        return res.end(GRAPH_LIB);
+      if (PUBLIC.has(path) && method === 'GET') {
+        const file = PUBLIC.get(path);
+        // Mit passendem Versions-Parameter darf der Browser die Datei behalten; ein Deploy ändert die Adresse.
+        const pinned = file.version && url.searchParams.get('v') === file.version;
+        res.writeHead(200, {
+          'content-type': file.type,
+          'cache-control': pinned ? 'public, max-age=31536000, immutable' : file.version ? 'no-cache' : 'public, max-age=86400',
+          'x-content-type-options': 'nosniff',
+        });
+        return res.end(file.body);
       }
       if (path === '/login' && method === 'GET') return login(req, res, url);
       if (path === '/auth/callback' && method === 'GET') return callback(req, res, url);

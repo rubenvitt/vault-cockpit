@@ -1,4 +1,5 @@
 import { esc, dueLabel } from './render.js';
+import { head, appHeader } from './layout.js';
 
 /** Balken als SVG (die CSP erlaubt keine Inline-Styles); `v` in Prozent. */
 const bar = (v, cls = '') => `<svg class="bar ${cls}" viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true"><rect class="track" width="100" height="8"/><rect class="fill" width="${Math.max(0, Math.min(100, v))}" height="8"/></svg>`;
@@ -50,22 +51,17 @@ export function renderReview(model, { user = null } = {}) {
   }
   return `<!doctype html>
 <html lang="de">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Rückblick KW ${w.week} · Cockpit</title>
-<link rel="stylesheet" href="/static/cockpit.css">
-</head>
-<body>
-<header>
-  <div><h1>Rückblick KW ${w.week} <span class="range">${esc(w.monday.split('-').reverse().join('.'))} – ${esc(w.sunday.split('-').reverse().join('.'))}</span></h1></div>
-  <nav>
-    <a href="/rueckblick?woche=${esc(w.prev)}" rel="prev">← KW ${Number(w.prev.slice(6))}</a>
-    <a href="/rueckblick?woche=${esc(w.next)}" rel="next">KW ${Number(w.next.slice(6))} →</a>
-    <a href="/?woche=${esc(w.id)}">Zur Woche</a>
-    <form method="post" action="/logout"><button type="submit" title="${esc(user ?? '')}">Abmelden</button></form>
+${head(`Rückblick KW ${w.week}`)}
+<body class="page-review">
+${appHeader({ current: 'rueckblick', user, links: { woche: `/?woche=${w.id}`, rueckblick: `/rueckblick?woche=${w.id}` } })}
+<div class="page-head">
+  <h1>Rückblick KW ${w.week} <span class="range">${esc(w.monday.split('-').reverse().join('.'))} – ${esc(w.sunday.split('-').reverse().join('.'))}</span></h1>
+  <nav class="pager" aria-label="Wochen">
+    <a href="/rueckblick?woche=${esc(w.prev)}" rel="prev" class="pager-step" aria-label="Vorige Woche, KW ${Number(w.prev.slice(6))}"><span aria-hidden="true">‹</span> KW ${Number(w.prev.slice(6))}</a>
+    <a href="/?woche=${esc(w.id)}" class="pager-now">Zur Woche</a>
+    <a href="/rueckblick?woche=${esc(w.next)}" rel="next" class="pager-step" aria-label="Nächste Woche, KW ${Number(w.next.slice(6))}">KW ${Number(w.next.slice(6))} <span aria-hidden="true">›</span></a>
   </nav>
-</header>
+</div>
 <main class="review-page">
 ${body}
 </main>
@@ -77,7 +73,7 @@ export const REVIEW_CSS = `
 /* --- Wochenrückblick --- */
 .review-page { max-width: 960px; }
 .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; background: none; border: 0; padding: 0; }
-.stat { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 18px; display: grid; gap: 2px; }
+.stat { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-1); padding: 14px 18px; display: grid; gap: 2px; }
 .stat-value { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
 .stat-of { font-size: 18px; color: var(--muted); font-weight: 500; }
 .stat-label { color: var(--muted); font-size: 13px; }
@@ -91,7 +87,7 @@ export const REVIEW_CSS = `
 .meter .track { fill: var(--line); }
 .meter .fill { fill: var(--ok); }
 .meter.flame .fill { fill: var(--accent); }
-.meter-text { flex: none; width: 64px; text-align: right; font-variant-numeric: tabular-nums; font-size: 14px; }
+.meter-text { flex: none; width: 84px; text-align: right; font-variant-numeric: tabular-nums; font-size: 14px; }
 .review-open { grid-column: 1 / -1; font-size: 14px; }
 .review-open summary { cursor: pointer; color: var(--muted); }
 .review-open ul { margin: 6px 0 0; padding-left: 4px; display: grid; gap: 4px; }
