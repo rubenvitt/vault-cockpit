@@ -206,3 +206,16 @@ test('toggleTask: n-te Checkbox ab- und aufhaken, nur wenn die Zeile noch passt'
   assert.throws(() => editor.toggleTask({ path: 'projects/Liste.md', n: 0, line: '- [ ] anders', done: true }), /nicht mehr an dieser Stelle/);
   assert.throws(() => editor.toggleTask({ path: 'projects/Liste.md', n: 5, done: true }), /nicht mehr an dieser Stelle/);
 });
+
+test('setSectionParagraph: ersetzt nur den ersten Absatz, legt fehlende Abschnitte an', () => {
+  put('projects/Feuer.md', '---\ntype: 1-wochen-feuer\n---\n# KW 42\n\n## Feuer-Ziel\nAltes Ziel\nzweite Zeile\n\nZweiter Absatz bleibt.\n\n## Erster Zug\n\n## Rückblick\nText\n');
+  idx.refresh('projects/Feuer.md');
+  const r = editor.setSectionParagraph({ path: 'projects/Feuer.md', heading: 'Feuer-Ziel', text: 'Neues **Ziel**\n' });
+  assert.equal(r.previous, 'Altes Ziel zweite Zeile');
+  assert.match(read('projects/Feuer.md'), /## Feuer-Ziel\nNeues \*\*Ziel\*\*\n\nZweiter Absatz bleibt\./);
+  editor.setSectionParagraph({ path: 'projects/Feuer.md', heading: 'Erster Zug', text: 'Loslegen' });
+  assert.match(read('projects/Feuer.md'), /## Erster Zug\n\nLoslegen\n\n## Rückblick\nText\n$/);
+  editor.setSectionParagraph({ path: 'projects/Feuer.md', heading: 'Notizen', text: 'neu' });
+  assert.match(read('projects/Feuer.md'), /## Rückblick\nText\n\n## Notizen\n\nneu\n$/);
+  assert.throws(() => editor.setSectionParagraph({ path: 'projects/Feuer.md', heading: 'Notizen', text: '  ' }), /leer/);
+});

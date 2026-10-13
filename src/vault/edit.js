@@ -134,6 +134,35 @@ export function createEditor({ vaultPath, index }) {
       });
     },
 
+    /**
+     * Ersetzt den ersten Absatz unter `## <heading>` (wie ihn das Cockpit
+     * anzeigt). Fehlt der Abschnitt, kommt er ans Ende; ist er leer, kommt der
+     * Text direkt unter die Überschrift. Der Rest der Notiz bleibt unberührt.
+     */
+    setSectionParagraph({ path, heading, text }) {
+      const paragraph = String(text ?? '').replace(/\s*\n\s*/g, ' ').trim();
+      if (!paragraph) throw new Error('Text darf nicht leer sein');
+      const wanted = String(heading ?? '').trim().toLowerCase();
+      return modify(path, (content) => {
+        const eol = content.includes('\r\n') ? '\r\n' : '\n';
+        const lines = content.split(/\r?\n/);
+        const h = findHeadings(lines, frontmatterEnd(lines)).find((x) => x.level === 2 && x.text.toLowerCase() === wanted);
+        if (!h) {
+          while (lines.length && lines.at(-1).trim() === '') lines.pop();
+          lines.push('', `## ${heading}`, '', paragraph, '');
+          return { content: lines.join(eol), previous: null };
+        }
+        let i = h.line + 1;
+        while (i < lines.length && lines[i].trim() === '') i += 1;
+        let end = i;
+        while (end < lines.length && lines[end].trim() !== '' && !/^#{1,6}\s/.test(lines[end])) end += 1;
+        const previous = end > i ? lines.slice(i, end).map((l) => l.trim()).join(' ') : null;
+        if (end > i) lines.splice(i, end - i, paragraph);
+        else lines.splice(h.line + 1, i - h.line - 1, '', paragraph, '');
+        return { content: lines.join(eol), previous };
+      });
+    },
+
     replace({ path, oldText, newText, replaceAll = false }) {
       const search = String(oldText ?? '');
       const replacement = String(newText ?? '');

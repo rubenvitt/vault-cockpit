@@ -1,5 +1,9 @@
 import { parseNote } from '../vault/markdown.js';
 import { ActionError } from './actions.js';
+import { FEUER_TYPE } from './feuer.js';
+
+/** Abschnitte der Feuer-Notiz, die das Cockpit bearbeitet. */
+export const FEUER_FIELDS = { ziel: 'Feuer-Ziel', zug: 'Erster Zug' };
 
 const TAG = /^[\p{L}\p{N}_/-]+$/u;
 
@@ -105,6 +109,16 @@ export function createNoteDesk({ index, editor, policy, settings }) {
       mustSee(path);
       if (!String(text ?? '').trim()) throw new ActionError('Der Text ist leer');
       return edit(() => editor.append({ path, text: String(text).slice(0, 20_000) }));
+    },
+
+    /** Feuer-Ziel (`ziel`) oder Ersten Zug (`zug`) in der Feuer-Notiz der Woche ersetzen. */
+    setFeuer(path, field, text) {
+      const row = mustSee(path);
+      const heading = FEUER_FIELDS[field];
+      if (!heading) throw new ActionError('Unbekanntes Feld');
+      if ((row.frontmatter?.type ?? row.type) !== FEUER_TYPE) throw new ActionError('Das ist keine Feuer-Notiz');
+      if (!String(text ?? '').trim()) throw new ActionError(`${heading} darf nicht leer sein`);
+      return { ...edit(() => editor.setSectionParagraph({ path, heading, text: String(text).slice(0, 2000) })), heading };
     },
 
     toggle(path, n, line, done) {

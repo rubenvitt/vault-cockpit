@@ -4,6 +4,7 @@ import { createCookieSigner, parseCookies, cookie } from './session.js';
 import { renderWeek, renderMessage, renderSettings, dueLabel, CSS } from './render.js';
 import { renderGraph, renderSearch, GRAPH_CSS } from './graph-render.js';
 import { renderNote, NOTE_CSS } from './note-render.js';
+import { renderReview, REVIEW_CSS } from './review-render.js';
 import { SettingsError, MAX_CALENDARS } from '../cockpit/settings.js';
 import { describeWeek, weekOf } from '../cockpit/week.js';
 import { ActionError, SETTABLE } from '../cockpit/actions.js';
@@ -48,6 +49,7 @@ const HTML_HEADERS = {
  * `/api/woche`, Login über Pocket ID.
  *
  * - `GET /` und `GET /api/woche` — `?woche=2026-W42`, ohne Angabe die laufende Woche.
+ * - `GET /rueckblick?woche=…` — Wochenrückblick (erledigt gegen geplant, Flammen-Zeit).
  * - `GET /graph?q=…` sucht (hybrid), `GET /graph?pfad=…` zeigt den Graphen um
  *   eine Notiz; `GET /api/graph?pfad=…` liefert ihn als JSON.
  * - `GET /login` → Pocket ID → `GET /auth/callback` setzt die Sitzung (12 h).
@@ -174,6 +176,14 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     return send(res, status, html);
   }
 
+  /** Wochenrückblick `/rueckblick?woche=…`: erledigt gegen geplant, Flammen-Zeit je Bereich. */
+  async function reviewPage(req, res, url, session) {
+    const id = url.searchParams.get('woche');
+    const model = cockpit.review ? await cockpit.review(id || null) : null;
+    if (!model) return send(res, 400, renderMessage('Unbekannte Woche', `„${id}“ ist keine Kalenderwoche wie 2026-W42.`, { link: { href: '/rueckblick', label: 'Zur laufenden Woche' } }));
+    return send(res, 200, renderReview(model, { user: session.name ?? session.sub }));
+  }
+
   /** Seite hinter `back` mit Meldung (Weg ohne JavaScript, wenn eine Aktion scheitert). */
   const backPage = (req, res, back, session, opts) => {
     const url = new URL(back, publicUrl);
@@ -272,6 +282,12 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
               async '/aktion/notiz/anhaengen'(form) {
                 const r = notes.append(form.get('pfad'), form.get('text'));
                 return { message: 'Angehängt', path: r.path };
+              },
+              async '/aktion/feuer'(form, session) {
+                const r = notes.setFeuer(form.get('pfad'), form.get('feld'), form.get('text'));
+                logger.info?.(`Cockpit: ${r.heading} in ${r.path} (${session.sub})`);
+                const undo = r.changed && r.previous ? { action: '/aktion/feuer', fields: { pfad: r.path, feld: form.get('feld'), text: r.previous } } : null;
+                return { message: r.changed ? `${r.heading} gespeichert` : `${r.heading} unverändert`, path: r.path, undo };
               },
               async '/aktion/notiz/checkbox'(form) {
                 const done = form.get('erledigt') === '1';
@@ -462,7 +478,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
 
   const TOKEN_ROUTES = { '/einstellungen/tokens': createToken, '/einstellungen/tokens/widerrufen': revokeToken };
   const ACTION_ROUTES = new Set(Object.keys(ACTIONS));
-  const ROUTES = new Set([...ACTION_ROUTES, '/static/cockpit.js', '/', '/api/woche', ...(notes ? ['/notiz'] : []), '/graph', '/api/graph', '/einstellungen', ...(tokens ? Object.keys(TOKEN_ROUTES) : []), '/login', '/auth/callback', '/logout', '/static/cockpit.css']);
+  const ROUTES = new Set([...ACTION_ROUTES, '/static/cockpit.js', '/', '/api/woche', '/rueckblick', ...(notes ? ['/notiz'] : []), '/graph', '/api/graph', '/einstellungen', ...(tokens ? Object.keys(TOKEN_ROUTES) : []), '/login', '/auth/callback', '/logout', '/static/cockpit.css']);
 
   return {
     matches: (path) => ROUTES.has(path),
@@ -473,7 +489,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
 
       if (path === '/static/cockpit.css' && method === 'GET') {
         res.writeHead(200, { 'content-type': 'text/css; charset=utf-8', 'cache-control': 'public, max-age=3600' });
-        return res.end(CSS + GRAPH_CSS + NOTE_CSS);
+        return res.end(CSS + GRAPH_CSS + NOTE_CSS + REVIEW_CSS);
       }
       if (path === '/static/cockpit.js' && method === 'GET') {
         res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache', 'x-content-type-options': 'nosniff' });
@@ -521,6 +537,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       if (!session) return redirect(res, `/login?next=${encodeURIComponent(url.pathname + url.search)}`);
       if (path === '/graph') return graphPage(req, res, url, session);
       if (path === '/notiz') return notePage(req, res, url, session);
+      if (path === '/rueckblick') return reviewPage(req, res, url, session);
       return page(req, res, url, session);
     },
   };

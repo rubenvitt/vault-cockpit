@@ -57,7 +57,78 @@ export function createCockpit({ index, settings, zunderFor, calendars = null, no
 
   const notConfigured = (what) => ({ ok: false, error: `${what} ist nicht eingerichtet`, unconfigured: true });
 
+  const minutesOf = (t) =>
+    t.flame_started_at && t.flame_ended_at ? Math.max(0, Math.round((Date.parse(t.flame_ended_at) - Date.parse(t.flame_started_at)) / 60_000)) : 0;
+
   return {
+    /**
+     * Wochenrückblick: je Lebensbereich erledigt gegen geplant (Big Rocks und
+     * Flammen der Woche), was außerdem erledigt wurde, und die Flammen-Zeit je
+     * Bereich. Geplant heißt wie in der Wochenansicht: in der Woche fällig oder
+     * Phönix-Markierung der Woche. Ungültige Kennung → null.
+     */
+    async review(id) {
+      const config = settings.get();
+      const { tz } = config;
+      const zunder = zunderOf(config.zunder);
+      const parsed = id ? parseWeekId(id) : weekOf(now(), tz);
+      if (!parsed) return null;
+      const week = describeWeek(parsed, tz);
+      const today = localDate(now(), tz);
+      const head = {
+        tz,
+        week: { id: week.id, year: week.year, week: week.week, monday: week.monday, sunday: week.sunday, prev: week.prev, next: week.next, current: week.monday <= today && today <= week.sunday },
+      };
+      if (!zunder) return { ...head, ok: false, error: 'Zunder ist nicht eingerichtet', unconfigured: true };
+      const task = make(zunder);
+      let phoenix, due, closed;
+      try {
+        [phoenix, due, closed] = await Promise.all([
+          zunder.filterTasks({ phoenix_fire: week.id, include_closed: true, limit: 300 }),
+          zunder.filterTasks({ due_after: week.monday, due_before: week.sunday, include_closed: true, limit: 500 }),
+          zunder.filterTasks({ status: ['done'], closed_after: week.monday, closed_before: week.sunday, limit: 500 }),
+        ]);
+      } catch (err) {
+        logger.warn?.(`Cockpit: Rückblick nicht verfügbar — ${err.message}`);
+        return { ...head, ok: false, error: err.message };
+      }
+
+      const planned = new Map();
+      for (const t of [...phoenix, ...due]) if (t.status !== 'dropped') planned.set(t.id, t);
+      const extra = closed.filter((t) => !planned.has(t.id));
+      // Flammen-Zeit: jeder Block, der in dieser Woche begonnen hat.
+      const flamed = new Map();
+      for (const t of [...planned.values(), ...closed]) {
+        const start = t.flame_started_at ? localDate(new Date(t.flame_started_at), tz) : null;
+        if (start && start >= week.monday && start <= week.sunday && minutesOf(t)) flamed.set(t.id, t);
+      }
+
+      const areas = new Map();
+      const area = (name) => {
+        if (!areas.has(name)) areas.set(name, { area: name, planned: 0, done: 0, extra: 0, minutes: 0, open: [] });
+        return areas.get(name);
+      };
+      for (const t of planned.values()) {
+        const a = area(areaOf(t));
+        a.planned += 1;
+        if (t.status === 'done') a.done += 1;
+        else a.open.push(task(t));
+      }
+      for (const t of extra) area(areaOf(t)).extra += 1;
+      for (const t of flamed.values()) area(areaOf(t)).minutes += minutesOf(t);
+
+      const list = [...areas.values()].sort((a, b) => b.planned - a.planned || b.minutes - a.minutes || a.area.localeCompare(b.area, 'de'));
+      for (const a of list) a.open.sort(byDue);
+      const sum = (k) => list.reduce((n, a) => n + a[k], 0);
+      return {
+        ...head,
+        ok: true,
+        areas: list,
+        totals: { planned: sum('planned'), done: sum('done'), extra: sum('extra'), minutes: sum('minutes') },
+        flames: [...flamed.values()].filter((t) => t.phoenix?.role === 'flamme').map((t) => ({ ...task(t), minutes: minutesOf(t) })),
+      };
+    },
+
     /** Zunder-Client für den aktuellen Zugang aus den Einstellungen, sonst null. */
     zunder: () => zunderOf(settings.get().zunder),
 

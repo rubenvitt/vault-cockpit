@@ -26,6 +26,7 @@ beforeEach(() => {
   put('20-bereiche/Gesundheit/Werte.md', '# Werte\n');
   put('40-archiv/2025/Alt.md', '# Alt\n');
   put('privat/geheim.md', '# Geheim\n');
+  put('10-projekte/Feuer KW42.md', '---\ntype: 1-wochen-feuer\n---\n# KW 42\n\n## Feuer-Ziel\nAlt\n');
   buildIndex({ vaultPath: root, dbPath: ':memory:', policy, persist: (db, vp) => (idx = openIndex(db, { vaultPath: vp, policy })) });
   const settings = createSettingsStore({ defaults: { inboxFolder: '00-inbox' }, logger: quiet });
   desk = createNoteDesk({ index: idx, editor: createEditor({ vaultPath: root, index: idx }), policy, settings });
@@ -101,4 +102,14 @@ test('renderMarkdown: maskiert alles, Links nur mit http(s), Checkboxen gezählt
   assert.match(html, /<span class="tag">#tag<\/span>/);
   assert.match(html, /<blockquote>Zitat<\/blockquote>/);
   assert.equal(inlineMd('a "b" & c'), 'a &quot;b&quot; &amp; c');
+});
+
+test('setFeuer: schreibt Feuer-Ziel und Ersten Zug, nur in Feuer-Notizen', () => {
+  const r = desk.setFeuer('10-projekte/Feuer KW42.md', 'ziel', 'Cockpit fertig bauen');
+  assert.equal(r.previous, 'Alt');
+  desk.setFeuer('10-projekte/Feuer KW42.md', 'zug', 'Menü zuerst');
+  assert.match(read('10-projekte/Feuer KW42.md'), /## Feuer-Ziel\nCockpit fertig bauen\n[^]*## Erster Zug\n\nMenü zuerst\n$/);
+  assert.throws(() => desk.setFeuer('00-inbox/Idee.md', 'ziel', 'x'), /keine Feuer-Notiz/);
+  assert.throws(() => desk.setFeuer('10-projekte/Feuer KW42.md', 'titel', 'x'), /Unbekanntes Feld/);
+  assert.throws(() => desk.setFeuer('10-projekte/Feuer KW42.md', 'ziel', ' '), /leer/);
 });

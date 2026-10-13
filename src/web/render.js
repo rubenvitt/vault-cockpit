@@ -189,6 +189,17 @@ function taskItem(t, tz, ctx = {}, { area = false, mark = null, live = false, in
 const problem = (s) =>
   `<p class="problem${s.unconfigured ? ' unconfigured' : ''}">${esc(s.error)}${s.unconfigured ? ' · <a href="/einstellungen">Einstellungen</a>' : ''}</p>`;
 
+/** Bearbeiten eines Feuer-Abschnitts: klappt ohne JavaScript auf, speichert in die Feuer-Notiz. */
+function feuerEdit(ctx, path, field, label, value) {
+  return `<details class="inline-edit">
+      <summary aria-label="${esc(`${label} bearbeiten`)}" title="${esc(`${label} bearbeiten`)}"><span aria-hidden="true">✎</span> <span class="summary-text">bearbeiten</span></summary>
+      ${formHead(ctx, '/aktion/feuer', { pfad: path, feld: field })}
+        <label><span class="sr-only">${esc(label)}</span><textarea name="text" rows="${field === 'ziel' ? 3 : 2}" maxlength="2000" required>${esc(value ?? '')}</textarea></label>
+        <p><button type="submit" class="chip">Speichern</button></p>
+      </form>
+    </details>`;
+}
+
 export function obsidianLink(path, vaultName) {
   if (!vaultName) return null;
   const file = path.replace(/\.md$/i, '');
@@ -202,9 +213,12 @@ function feuerSection(model, tz, vaultName, ctx) {
   else if (!f.data) goal = '<p class="empty">Für diese Woche gibt es keine Feuer-Notiz.</p>';
   else {
     const link = obsidianLink(f.data.path, vaultName);
+    const editable = Boolean(ctx.write?.notes);
     goal = `<p class="goal">${f.data.goal ? inline(f.data.goal) : '<span class="empty">Die Notiz hat keinen Abschnitt „Feuer-Ziel“.</span>'}</p>
+      ${editable ? feuerEdit(ctx, f.data.path, 'ziel', 'Feuer-Ziel', f.data.goal) : ''}
       ${f.data.alignment ? `<p class="meta">Alignment: ${esc(f.data.alignment)}</p>` : ''}
-      ${f.data.firstMove ? `<p class="first-move"><span class="label">Erster Zug</span> ${inline(f.data.firstMove)}</p>` : ''}
+      ${f.data.firstMove || editable ? `<p class="first-move"><span class="label">Erster Zug</span> ${f.data.firstMove ? inline(f.data.firstMove) : '<span class="empty">noch keiner</span>'}</p>` : ''}
+      ${editable ? feuerEdit(ctx, f.data.path, 'zug', 'Erster Zug', f.data.firstMove) : ''}
       <p class="meta">${link ? `<a href="${esc(link)}">${esc(f.data.title)}</a>` : esc(f.data.title)}</p>`;
   }
 
@@ -376,6 +390,7 @@ ${write ? '<script src="/static/cockpit.js" defer></script>' : ''}
     <a href="/?woche=${esc(w.prev)}" rel="prev">← KW ${Number(w.prev.slice(6))}</a>
     ${w.current ? '' : '<a href="/">Diese Woche</a>'}
     <a href="/?woche=${esc(w.next)}" rel="next">KW ${Number(w.next.slice(6))} →</a>
+    <a href="/rueckblick?woche=${esc(w.id)}">Rückblick</a>
     <a href="/graph">Suche &amp; Graph</a>
     <a href="/einstellungen" class="quiet">Einstellungen</a>
     <form method="post" action="/logout"><button type="submit" title="${esc(user ?? '')}">Abmelden</button></form>
@@ -697,6 +712,17 @@ code { font-size: 13px; background: var(--line); padding: 1px 4px; border-radius
 .burning .chip.stop:hover { background: rgb(255 255 255 / .3); }
 @keyframes flicker { 50% { transform: scale(1.12) rotate(-4deg); opacity: .85; } }
 @media (prefers-color-scheme: dark) { .burning { color: #1b1009; } .burning .chip.stop { color: #1b1009; border-color: rgb(0 0 0 / .3); background: rgb(0 0 0 / .1); } }
+
+/* --- Feuer-Ziel bearbeiten --- */
+.inline-edit { margin: -4px 0 10px; }
+.inline-edit > summary { list-style: none; display: inline-flex; gap: 4px; align-items: center; cursor: pointer; font-size: 13px;
+  color: var(--muted); border-radius: var(--r-sm); padding: 2px 6px; margin-left: -6px; }
+.inline-edit > summary::-webkit-details-marker { display: none; }
+.inline-edit > summary:hover, .inline-edit[open] > summary { color: var(--accent); background: var(--surface); }
+.inline-edit form { margin: 6px 0 0; }
+.inline-edit textarea { width: 100%; font: inherit; font-size: 16px; line-height: 1.45; color: var(--text); background: var(--surface);
+  border: 1px solid var(--accent); border-radius: var(--r-md); padding: 8px 10px; resize: vertical; }
+.inline-edit p { margin: 6px 0 0; }
 
 /* --- Menü an Aufgaben: Bausteine .menu, .chip --- */
 .task { position: relative; }

@@ -70,7 +70,7 @@ const cockpit = {
       vaultName: null,
       week: { id: '2026-W42', year: 2026, week: 42, monday: '2026-10-12', sunday: '2026-10-18', prev: '2026-W41', next: '2026-W43', current: true },
       today: '2026-10-14',
-      feuer: { ok: true, data: null },
+      feuer: { ok: true, data: id === 'feuer' ? { path: 'feuer/KW42.md', title: 'KW42', goal: 'Ziel <b>', firstMove: null, alignment: null } : null },
       burning: id === 'brennt' ? { id: 'f9', ref: null, title: 'Deep Work', startedAt: '2026-10-14T07:00:00Z', url: 'https://zunder.test/#/aufgabe/f9' } : null,
       flames: { ok: true, data: [] },
       rocks: {
@@ -88,6 +88,18 @@ const cockpit = {
     };
   },
 };
+
+cockpit.review = async (id) =>
+  id === 'kaputt'
+    ? null
+    : {
+        tz: 'Europe/Berlin',
+        week: { id: '2026-W42', week: 42, monday: '2026-10-12', sunday: '2026-10-18', prev: '2026-W41', next: '2026-W43' },
+        ok: true,
+        areas: [{ area: 'Finanzen <A>', planned: 4, done: 3, extra: 1, minutes: 95, open: [{ id: 't1', title: 'Steuer', due: '2026-10-16', url: 'https://zunder.test/#/aufgabe/t1' }] }],
+        totals: { planned: 4, done: 3, extra: 1, minutes: 95 },
+        flames: [],
+      };
 
 const graph = {
   async around(path) {
@@ -770,6 +782,10 @@ function fakeNotes() {
       if (text === 'kaputt') throw new ActionError('„00-inbox/Idee.md“ wurde gerade anderweitig geändert.', 400);
       return { path: p };
     },
+    setFeuer(p, field, text) {
+      calls.push(['feuer', p, field, text]);
+      return { path: p, changed: true, previous: 'Altes Ziel', heading: field === 'ziel' ? 'Feuer-Ziel' : 'Erster Zug' };
+    },
     toggle(p, n, line, done) {
       calls.push(['toggle', p, n, line, done]);
       return { path: p, line: done ? '- [x] Preise' : '- [ ] Preise' };
@@ -842,4 +858,50 @@ test('Notiz ablegen: JSON führt zur neuen Adresse, Meldung kommt per Cookie mit
     {},
     { actions: fakeActions(), notes },
   );
+});
+
+test('Feuer-Ziel bearbeiten: Formular an der Feuer-Notiz, Speichern mit Rückgängig', async () => {
+  const notes = fakeNotes();
+  await withServer(
+    async ({ call, login }) => {
+      await login();
+      const html = await (await call('/?woche=feuer')).text();
+      assert.match(html, /<details class="inline-edit">[^]*?action="\/aktion\/feuer" class="act">[^]*?name="pfad" value="feuer\/KW42\.md"[^]*?name="feld" value="ziel"[^]*?<textarea name="text"[^>]*>Ziel &lt;b&gt;<\/textarea>/);
+      assert.match(html, /name="feld" value="zug"/);
+      const csrf = csrfFrom(html);
+      const r = await (await call('/aktion/feuer', { method: 'POST', form: { pfad: 'feuer/KW42.md', feld: 'ziel', text: 'Neu', csrf }, accept: 'application/json' })).json();
+      assert.equal(r.message, 'Feuer-Ziel gespeichert');
+      assert.deepEqual(r.undo, { action: '/aktion/feuer', fields: { pfad: 'feuer/KW42.md', feld: 'ziel', text: 'Altes Ziel' } });
+      assert.deepEqual(notes.calls, [['feuer', 'feuer/KW42.md', 'ziel', 'Neu']]);
+    },
+    {},
+    { actions: fakeActions(), notes },
+  );
+  // Ohne Notiz-Schreibtisch kein Bearbeiten.
+  await withServer(
+    async ({ call, login }) => {
+      await login();
+      assert.ok(!(await (await call('/?woche=feuer')).text()).includes('/aktion/feuer'));
+    },
+    {},
+    { actions: fakeActions() },
+  );
+});
+
+test('Rückblick: Kennzahlen, Balken als SVG ohne Inline-Styles, Navigation', async () => {
+  await withServer(async ({ call, login }) => {
+    assert.equal((await call('/rueckblick')).status, 303);
+    await login();
+    const html = await (await call('/rueckblick?woche=2026-W42')).text();
+    assert.match(html, /<span class="stat-value">3<span class="stat-of">\/4<\/span>/);
+    assert.match(html, /geplant erledigt · 75 %/);
+    assert.match(html, /1 h 35 min/);
+    assert.match(html, /Finanzen &lt;A&gt;/);
+    assert.match(html, /<rect class="fill" width="75" height="8"\/>/);
+    assert.ok(!html.includes('style='));
+    assert.match(html, /href="\/rueckblick\?woche=2026-W43"/);
+    assert.match(html, /1 offen geblieben/);
+    assert.equal((await call('/rueckblick?woche=kaputt')).status, 400);
+    assert.match(await (await call('/')).text(), /href="\/rueckblick\?woche=2026-W42">Rückblick/);
+  });
 });

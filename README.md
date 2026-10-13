@@ -228,7 +228,13 @@ oben eine Leiste mit Timer und „Stopp“. Notizen der Vault-Inbox öffnen sich
 abhaken, Tags setzen, Text anhängen und in einen Ordner **ablegen** (Vorschläge
 aus dem Index, Eingabe frei) oder mit einem Klick ins Archiv (der oberste Ordner
 namens `archiv`, auch `40-archiv`). Vertrauliche und ausgeschlossene Ordner der
-Policy zeigt das Cockpit weder an noch nimmt es sie als Ziel.
+Policy zeigt das Cockpit weder an noch nimmt es sie als Ziel. Feuer-Ziel und
+Ersten Zug der Feuer-Notiz bearbeitet man direkt im Wochenblick (✎ neben dem
+Text, ersetzt den ersten Absatz unter der Überschrift). Der **Wochenrückblick**
+unter `/rueckblick` (in der Navigation, `?woche=` für frühere Wochen) zeigt je
+Bereich, was erledigt war und was geplant war (Phönix-Schritte und in der Woche
+Fälliges), was außerdem erledigt wurde, die Flammen-Zeit der Woche und was offen
+blieb.
 Oben auf der Seite liegt eine
 **Schnelleingabe** mit derselben Logik wie `/capture`: Text wird eine Notiz im
 Inbox-Ordner, mit `!` vorne eine Aufgabe in der Zunder-Inbox. `/` oder `n` springt
