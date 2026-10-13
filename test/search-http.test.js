@@ -1,15 +1,16 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildIndex, openIndex } from '../src/vault/index.js';
 import { compilePolicy } from '../src/vault/policy.js';
 import { createSearchHttp } from '../src/search/http.js';
+import { createTokenStore } from '../src/cockpit/tokens.js';
 import { createApp } from '../src/http/app.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
-let root, index;
+let root, index, tokens, token;
 
 function write(rel, text) {
   mkdirSync(join(root, rel, '..'), { recursive: true });
@@ -24,12 +25,14 @@ before(() => {
   write('readwise/artikel.md', '# Artikel\n\nHund und Wald.\n');
   for (let i = 0; i < 60; i++) write(`masse/notiz-${i}.md`, `# Notiz ${i}\n\nZettelkasten Eintrag ${i}.\n`);
   const policy = compilePolicy({ sensitive: { privat: 'privat' }, readwise: 'readwise' });
+  tokens = createTokenStore({ logger: quiet });
+  ({ token } = tokens.create('Test'));
   buildIndex({ vaultPath: root, dbPath: ':memory:', policy, logger: quiet, persist: (db, vp) => (index = openIndex(db, { vaultPath: vp, policy })) });
 });
 
 after(() => rmSync(root, { recursive: true, force: true }));
 
-async function withServer(run, { searchHttp = createSearchHttp({ token: 'such-geheim', index }) } = {}) {
+async function withServer(run, { searchHttp = createSearchHttp({ tokens, index }) } = {}) {
   const app = createApp({
     config: { publicUrl: 'https://vault.test', resource: 'https://vault.test/mcp', issuer: 'https://id.test', supportedScopes: [], allowedHosts: ['vault.test'], trustProxy: true },
     verifyToken: async () => {
@@ -42,7 +45,7 @@ async function withServer(run, { searchHttp = createSearchHttp({ token: 'such-ge
   app.listen(0, '127.0.0.1');
   await new Promise((res) => app.once('listening', res));
   const base = `http://127.0.0.1:${app.address().port}`;
-  const call = (path, { method = 'GET', auth = 'Bearer such-geheim' } = {}) =>
+  const call = (path, { method = 'GET', auth = `Bearer ${token}` } = {}) =>
     fetch(base + path, { method, headers: { 'x-forwarded-host': 'vault.test', ...(auth ? { authorization: auth } : {}) } });
   try {
     await run(call);
@@ -51,18 +54,50 @@ async function withServer(run, { searchHttp = createSearchHttp({ token: 'such-ge
   }
 }
 
-test('/api/search ist ohne SEARCH_TOKEN aus', async () => {
+test('/api/search verlangt einen angelegten API-Token, widerrufene gelten nicht', async () => {
   await withServer(async (call) => {
-    assert.equal((await call('/api/search?q=Hund')).status, 404);
-  }, { searchHttp: null });
-});
-
-test('/api/search verlangt den Such-Token', async () => {
-  await withServer(async (call) => {
+    assert.equal((await call('/api/search?q=Hund')).status, 200);
     assert.equal((await call('/api/search?q=Hund', { auth: null })).status, 401);
     assert.equal((await call('/api/search?q=Hund', { auth: 'Bearer falsch' })).status, 401);
+    assert.equal((await call('/api/search?q=Hund', { auth: `Bearer ${token}x` })).status, 401);
+    assert.equal((await call('/api/search?q=Hund', { auth: token })).status, 401);
     assert.equal((await call('/api/search?q=Hund', { method: 'POST' })).status, 405);
+
+    const second = tokens.create('Zweiter');
+    assert.equal((await call('/api/search?q=Hund', { auth: `Bearer ${second.token}` })).status, 200);
+    tokens.revoke(second.id);
+    assert.equal((await call('/api/search?q=Hund', { auth: `Bearer ${second.token}` })).status, 401);
+    assert.equal((await call('/api/search?q=Hund')).status, 200);
   });
+});
+
+test('API-Tokens: nur der Hash landet in der Datei, Grenzen werden geprüft', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'vault-tokens-'));
+  try {
+    const file = join(dir, 'api-tokens.json');
+    const store = createTokenStore({ file, logger: quiet });
+    const created = store.create('  Raycast  ');
+    assert.match(created.token, /^vct_[\w-]{43}$/);
+    const text = readFileSync(file, 'utf8');
+    assert.ok(!text.includes(created.token));
+    assert.equal(statSync(file).mode & 0o777, 0o600);
+    const [saved] = JSON.parse(text);
+    assert.deepEqual(Object.keys(saved).sort(), ['createdAt', 'hash', 'id', 'name']);
+    assert.equal(saved.name, 'Raycast');
+
+    const reloaded = createTokenStore({ file, logger: quiet });
+    assert.ok(reloaded.verify(created.token));
+    assert.ok(!reloaded.verify('vct_falsch'));
+    assert.throws(() => reloaded.create(' '), /Namen/);
+    assert.throws(() => reloaded.create('x'.repeat(81)), /zu lang/);
+    for (let i = 1; i < 20; i++) reloaded.create(`T${i}`);
+    assert.throws(() => reloaded.create('zu viel'), /Höchstens 20/);
+    assert.ok(reloaded.revoke(saved.id));
+    assert.ok(!reloaded.revoke(saved.id));
+    assert.ok(!createTokenStore({ file, logger: quiet }).verify(created.token));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('/api/search prüft die Parameter', async () => {
@@ -113,5 +148,5 @@ test('/api/search begrenzt limit auf 50', async () => {
     const rest = await (await call('/api/search?q=Zettelkasten&limit=50&offset=50')).json();
     assert.equal(rest.results.length, 10);
     assert.equal(rest.hasMore, false);
-  }, { searchHttp: createSearchHttp({ token: 'such-geheim', index, semantic }) });
+  }, { searchHttp: createSearchHttp({ tokens, index, semantic }) });
 });

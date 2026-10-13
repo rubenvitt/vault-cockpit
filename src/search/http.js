@@ -1,25 +1,25 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
 import { hybridSearch } from '../semantic/search.js';
 
 const MODES = ['hybrid', 'semantic'];
 const MAX_LIMIT = 50;
 
-const sha256 = (s) => createHash('sha256').update(s).digest();
-
 /**
  * Lesender Such-Endpunkt für Clients ohne OAuth.
  *
- * Geschützt mit einem eigenen statischen Token (`SEARCH_TOKEN`), getrennt vom
- * Capture-Token. Der Token kann nur suchen, und zwar nur in eigenen Notizen
+ * Geschützt mit API-Tokens, die unter Einstellungen → API-Tokens im
+ * Web-Cockpit angelegt werden (`tokens`, siehe `cockpit/tokens.js`), getrennt
+ * vom Capture-Token. Ein Token kann nur suchen, und zwar nur in eigenen Notizen
  * (`core`) ohne vertrauliche Ordner. Notizen lesen oder ändern geht damit nicht.
  *
  * - `GET /api/search?q=…` — `mode` (`hybrid` Standard oder `semantic`),
  *   `folder`, `limit` (Standard 10, höchstens 50), `offset`. Die Antwort ist das
  *   Ergebnis von `hybridSearch` unverändert: `{results, total, hasMore, degraded}`.
  */
-export function createSearchHttp({ token, index, semantic = null }) {
-  const expected = sha256(`Bearer ${token}`);
-  const authorized = (req) => timingSafeEqual(sha256(String(req.headers.authorization ?? '')), expected);
+export function createSearchHttp({ tokens, index, semantic = null }) {
+  const authorized = (req) => {
+    const m = /^Bearer (\S+)$/.exec(String(req.headers.authorization ?? ''));
+    return Boolean(m) && tokens.verify(m[1]);
+  };
 
   const json = (res, status, body) => {
     res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });

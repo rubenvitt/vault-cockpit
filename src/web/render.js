@@ -263,7 +263,28 @@ function calendarRow(c, i, check) {
  * Einstellungsseite. Passwörter, Tokens und Kalenderadressen werden nie
  * zurückgegeben: Ein leeres Feld behält den gespeicherten Wert.
  */
-export function renderSettings({ stored, defaults, checks = {}, notice = null, error = null, user = null }) {
+/** Abschnitt „API-Tokens“: eigene Formulare, damit „Speichern“ oben die Tokens nie berührt. */
+function tokenSection(tokens, created, tz) {
+  const date = (iso) => new Date(iso).toLocaleDateString('de-DE', { timeZone: tz });
+  const rows = tokens
+    .map(
+      (t) => `<li><span>${esc(t.name)} <span class="meta">angelegt am ${esc(date(t.createdAt))}</span></span>
+    <form method="post" action="/einstellungen/tokens/widerrufen"><input type="hidden" name="id" value="${esc(t.id)}"><button type="submit">Widerrufen</button></form></li>`,
+    )
+    .join('');
+  return `<section>
+  <h2>API-Tokens</h2>
+  <p class="meta">Für <code>GET /api/search</code> mit <code>Authorization: Bearer vct_…</code>. Ein Token kann nur suchen, nur in eigenen Notizen ohne vertrauliche Ordner.</p>
+  ${created ? `<div class="created"><p class="notice">Token „${esc(created.name)}“ angelegt. Jetzt kopieren, er wird nicht noch einmal angezeigt:</p><p><code>${esc(created.token)}</code></p></div>` : ''}
+  ${rows ? `<ul class="tokens">${rows}</ul>` : '<p class="empty">Noch keine Tokens.</p>'}
+  <form method="post" action="/einstellungen/tokens" class="token-new">
+    <label>Name<input name="name" maxlength="80" required placeholder="z. B. Raycast"></label>
+    <button type="submit" class="primary">Token anlegen</button>
+  </form>
+</section>`;
+}
+
+export function renderSettings({ stored, defaults, checks = {}, notice = null, error = null, tokens = null, created = null, tz = 'Europe/Berlin', user = null }) {
   const d = defaults;
   const zunderStatus = stored.zunder.url && stored.zunder.token
     ? 'eigener Zugang gespeichert'
@@ -317,6 +338,7 @@ ${error ? `<p class="problem">${esc(error)}</p>` : ''}
 </section>
 <p><button type="submit" class="primary">Speichern</button></p>
 </form>
+${tokens ? tokenSection(tokens, created, tz) : ''}
 </main>
 </body>
 </html>`;
@@ -401,6 +423,11 @@ nav a.quiet { border: 0; color: var(--muted); }
   border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; min-width: 0; }
 button.primary { font: inherit; font-weight: 600; color: #fff; background: var(--accent); border: 0; border-radius: 6px; padding: 8px 18px; cursor: pointer; }
 .notice { color: var(--ok); margin: 0; }
+.tokens li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px 0; border-top: 1px solid var(--line); }
+.tokens li:first-child { border-top: 0; }
+.tokens form, .settings .token-new { margin: 0; display: flex; gap: 12px; align-items: end; flex-wrap: wrap; }
+.created { border: 1px solid var(--ok); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; }
+.created code { word-break: break-all; }
 code { font-size: 13px; background: var(--line); padding: 1px 4px; border-radius: 4px; }
 .message { max-width: 520px; }
 @media (max-width: 900px) {

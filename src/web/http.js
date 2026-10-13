@@ -46,11 +46,13 @@ const HTML_HEADERS = {
  * - `GET /login` → Pocket ID → `GET /auth/callback` setzt die Sitzung (12 h).
  * - `POST /logout` löscht sie. SameSite=Lax hält fremde Seiten davon ab.
  * - `GET`/`POST /einstellungen` — Kalender, Zunder-Zugang und Anzeige pflegen.
+ * - `POST /einstellungen/tokens` legt einen API-Token für `/api/search` an und
+ *   zeigt ihn einmal, `POST /einstellungen/tokens/widerrufen` löscht einen.
  *
  * Die Sitzung ist ein signiertes Cookie und nur für diese Routen gültig; die
  * MCP-Schnittstelle prüft weiter ausschließlich Bearer-Tokens.
  */
-export function createWebHttp({ cockpit, settings, calendars = null, graph = null, search = null, oidc, sessionSecret, publicUrl, allowedSubjects = [], sessionHours = 12, logger = console, now = () => Date.now() }) {
+export function createWebHttp({ cockpit, settings, tokens = null, calendars = null, graph = null, search = null, oidc, sessionSecret, publicUrl, allowedSubjects = [], sessionHours = 12, logger = console, now = () => Date.now() }) {
   const signer = createCookieSigner(sessionSecret);
   const secure = publicUrl.startsWith('https://');
 
@@ -116,14 +118,24 @@ export function createWebHttp({ cockpit, settings, calendars = null, graph = nul
     return json(res, 200, model);
   }
 
-  async function settingsPage(req, res, session, { status = 200, notice = null, error = null } = {}) {
+  async function settingsPage(req, res, session, { status = 200, notice = null, error = null, created = null } = {}) {
     let checks = {};
     if (calendars && settings.get().calendars.length) {
       const tz = settings.get().tz;
       const week = describeWeek(weekOf(new Date(now()), tz), tz);
       checks = await calendars.check(week.start, week.end);
     }
-    const html = renderSettings({ stored: settings.stored(), defaults: settings.defaults(), checks, notice, error, user: session.name ?? session.sub });
+    const html = renderSettings({
+      stored: settings.stored(),
+      defaults: settings.defaults(),
+      checks,
+      notice,
+      error,
+      tokens: tokens?.list() ?? null,
+      created,
+      tz: settings.get().tz,
+      user: session.name ?? session.sub,
+    });
     return send(res, status, html);
   }
 
@@ -164,16 +176,26 @@ export function createWebHttp({ cockpit, settings, calendars = null, graph = nul
     };
   }
 
-  async function saveSettings(req, res, session) {
-    // Zusätzlich zu SameSite=Lax: Formulare nur von dieser Seite annehmen.
-    const origin = req.headers.origin;
-    if (origin && origin !== new URL(publicUrl).origin) return json(res, 403, { error: 'forbidden', error_description: 'fremde Herkunft' });
-    let form;
-    try {
-      form = new URLSearchParams(await readBody(req));
-    } catch {
-      return json(res, 413, { error: 'too_large' });
+  // Zusätzlich zu SameSite=Lax: Formulare nur von dieser Seite annehmen.
+  const foreignOrigin = (req) => req.headers.origin && req.headers.origin !== new URL(publicUrl).origin;
+
+  /** Formular lesen; `null`, wenn schon mit 403/413 geantwortet wurde. */
+  async function readForm(req, res) {
+    if (foreignOrigin(req)) {
+      json(res, 403, { error: 'forbidden', error_description: 'fremde Herkunft' });
+      return null;
     }
+    try {
+      return new URLSearchParams(await readBody(req));
+    } catch {
+      json(res, 413, { error: 'too_large' });
+      return null;
+    }
+  }
+
+  async function saveSettings(req, res, session) {
+    const form = await readForm(req, res);
+    if (!form) return;
     try {
       settings.save(fromForm(form));
     } catch (err) {
@@ -182,6 +204,28 @@ export function createWebHttp({ cockpit, settings, calendars = null, graph = nul
     }
     logger.info?.(`Cockpit-Einstellungen gespeichert von ${session.sub}`);
     return redirect(res, '/einstellungen?gespeichert=1');
+  }
+
+  /** Antwortet direkt mit der Seite, weil der Klartext nur hier einmal auftaucht. */
+  async function createToken(req, res, session) {
+    const form = await readForm(req, res);
+    if (!form) return;
+    let created;
+    try {
+      created = tokens.create(form.get('name'));
+    } catch (err) {
+      if (err instanceof SettingsError) return settingsPage(req, res, session, { status: 400, error: err.message });
+      throw err;
+    }
+    logger.info?.(`API-Token „${created.name}“ angelegt von ${session.sub}`);
+    return settingsPage(req, res, session, { created });
+  }
+
+  async function revokeToken(req, res, session) {
+    const form = await readForm(req, res);
+    if (!form) return;
+    if (tokens.revoke(form.get('id') ?? '')) logger.info?.(`API-Token widerrufen von ${session.sub}`);
+    return redirect(res, '/einstellungen?widerrufen=1');
   }
 
 
@@ -205,7 +249,8 @@ export function createWebHttp({ cockpit, settings, calendars = null, graph = nul
     return json(res, 200, g);
   }
 
-  const ROUTES = new Set(['/', '/api/woche', '/graph', '/api/graph', '/einstellungen', '/login', '/auth/callback', '/logout', '/static/cockpit.css']);
+  const TOKEN_ROUTES = { '/einstellungen/tokens': createToken, '/einstellungen/tokens/widerrufen': revokeToken };
+  const ROUTES = new Set(['/', '/api/woche', '/graph', '/api/graph', '/einstellungen', ...(tokens ? Object.keys(TOKEN_ROUTES) : []), '/login', '/auth/callback', '/logout', '/static/cockpit.css']);
 
   return {
     matches: (path) => ROUTES.has(path),
@@ -228,8 +273,14 @@ export function createWebHttp({ cockpit, settings, calendars = null, graph = nul
         if (!session) return redirect(res, '/login?next=%2Feinstellungen');
         if (method === 'POST') return saveSettings(req, res, session);
         if (method === 'GET') {
-          return settingsPage(req, res, session, { notice: url.searchParams.get('gespeichert') ? 'Gespeichert.' : null });
+          const notice = url.searchParams.get('gespeichert') ? 'Gespeichert.' : url.searchParams.get('widerrufen') ? 'Token widerrufen.' : null;
+          return settingsPage(req, res, session, { notice });
         }
+      }
+      if (tokens && TOKEN_ROUTES[path]) {
+        if (!session) return redirect(res, '/login?next=%2Feinstellungen');
+        if (method === 'POST') return TOKEN_ROUTES[path](req, res, session);
+        return redirect(res, '/einstellungen');
       }
       if (method !== 'GET') return json(res, 405, { error: 'method_not_allowed' });
 

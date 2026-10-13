@@ -57,7 +57,6 @@ Das Image baut GitHub Actions bei jedem Push auf `main`:
 | `SYNC_ADAPTER` | `obsidian-headless` (Standard) oder `none` (keine Dateibeobachtung, kein Sync-Status) |
 | `SYNC_STATUS_FILE` | Statusdatei des Sync-Sidecars, z. B. `/sync-status/sync.json` |
 | `CAPTURE_TOKEN` | Token für `/capture` und `/funke` (ohne Wert sind beide aus), siehe [Capture](#capture) |
-| `SEARCH_TOKEN` | Token für `GET /api/search` (ohne Wert aus), siehe [Suche](#suche) |
 | `ZUNDER_URL`, `ZUNDER_TOKEN` | Zunder-Adresse und API-Token `zt_…`; ohne Wert keine `!`-Weiterleitung und keine Brücke |
 | `ZUNDER_BRIDGE`, `ZUNDER_BRIDGE_TAG` | Zunder-Brücke `on` (Standard, sobald Zunder eingerichtet ist) oder `off`; Tag, Standard `zunder` |
 | `OBSIDIAN_VAULT_NAME` | Name des Vaults in Obsidian, für „In Obsidian öffnen“ in Zunder (optional) |
@@ -132,12 +131,14 @@ gültigen Token, `502` wenn Zunder ablehnt, `503` bei `!` ohne Zunder.
 
 ### Suche
 
-`GET <PUBLIC_URL>/api/search?q=…` mit Header `Authorization: Bearer <SEARCH_TOKEN>`
+`GET <PUBLIC_URL>/api/search?q=…` mit Header `Authorization: Bearer vct_…`
 durchsucht den Vault für Clients ohne OAuth, nur lesend und nur in eigenen Notizen
 ohne vertrauliche Ordner. Parameter: `q` (Pflicht), `mode` (`hybrid` Standard oder
 `semantic`), `folder`, `limit` (Standard 10, höchstens 50), `offset`. Antwort:
 `200 {"results":[{"path","title","streams","similarity","score",…}],"total","hasMore","degraded"}`,
-Pfade relativ zum Vault mit `/`. `400` bei falscher Eingabe, `401` ohne gültigen Token.
+Pfade relativ zum Vault mit `/`. `400` bei falscher Eingabe, `401` ohne gültigen Token. Den Token im Web-Cockpit
+unter **Einstellungen → API-Tokens** anlegen; er wird nur einmal angezeigt, gespeichert
+ist nur sein Hash (`api-tokens.json` neben den Cockpit-Einstellungen). Widerrufen geht dort auch.
 `GET /capture` ist ein Verbindungstest.
 
 Mail-Abruf: Nur Absender aus `MAIL_ALLOWED_SENDERS` werden verarbeitet, alle
