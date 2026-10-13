@@ -53,7 +53,9 @@ const HTML_HEADERS = {
  * - `POST /logout` löscht sie. SameSite=Lax hält fremde Seiten davon ab.
  * - `GET`/`POST /einstellungen` — Kalender, Zunder-Zugang und Anzeige pflegen.
  * - `POST /aktion/status` setzt den Status einer Zunder-Aufgabe (abhaken, in
- *   Arbeit, blockiert, offen), `POST /aktion/faellig` verschiebt die Fälligkeit,
+ *   Arbeit, blockiert, offen, verworfen), `POST /aktion/faellig` verschiebt die
+ *   Fälligkeit, `POST /aktion/zuordnen` legt eine Aufgabe aus der Inbox in einen
+ *   Bereich oder ein Projekt, `POST /aktion/phoenix` markiert einen Phönix-Schritt,
  *   `POST /aktion/erfassen` ist die Schnelleingabe (Notiz, mit `!` eine
  *   Zunder-Aufgabe). Alle brauchen Sitzung, gleiche Herkunft und das CSRF-Token
  *   der Sitzung. Mit `Accept: application/json` antworten sie mit JSON (für
@@ -152,9 +154,16 @@ export function createWebHttp({ cockpit, settings, actions = null, tokens = null
     if (t.status === 'done') return `Erledigt: ${taskName(t)}`;
     if (t.status === 'in_progress') return `In Arbeit: ${taskName(t)}`;
     if (t.status === 'blocked') return `Blockiert: ${taskName(t)}`;
+    if (t.status === 'dropped') return `Verworfen: ${taskName(t)}`;
     return `Wieder offen: ${taskName(t)}`;
   };
   const dueMessage = (t) => (t.due ? `Fällig ${dueLabel(t.due, settings.get().tz)}: ${taskName(t)}` : `Ohne Fälligkeit: ${taskName(t)}`);
+  const placeName = (loc) => {
+    if (!loc || loc.kind === 'inbox') return 'Inbox';
+    if (loc.kind === 'loose') return 'Lose';
+    if (loc.kind === 'project') return loc.area_name ? `${loc.area_name} / ${loc.name}` : (loc.name ?? 'Projekt');
+    return loc.name ?? loc.area_name ?? 'Bereich';
+  };
   const captureMessage = (r) => {
     if (r.kind === 'task') return `${r.duplicate ? 'Schon erfasst' : 'Aufgabe angelegt'}: ${r.ref ?? 'neue Aufgabe'} liegt in der Zunder-Inbox`;
     return `${r.duplicate ? 'Schon erfasst' : 'Notiz angelegt'}: ${r.path}`;
@@ -181,6 +190,22 @@ export function createWebHttp({ cockpit, settings, actions = null, tokens = null
           const undo = form.has('prev') && prev !== (task.due ?? '').slice(0, 10) ? { action: '/aktion/faellig', fields: { id: task.id, due: prev || 'keine' } } : null;
           logger.info?.(`Cockpit: ${task.ref ?? task.id} fällig ${task.due ?? '–'} (${session.sub})`);
           return { message: dueMessage(task), task, undo };
+        },
+        async '/aktion/zuordnen'(form, session) {
+          const prev = form.get('prev');
+          const task = await actions.move(form.get('id'), form.get('ziel'));
+          const undo = prev === 'inbox' && task.location?.kind !== 'inbox' ? { action: '/aktion/zuordnen', fields: { id: task.id, ziel: 'inbox' } } : null;
+          logger.info?.(`Cockpit: ${task.ref ?? task.id} → ${placeName(task.location)} (${session.sub})`);
+          return { message: `${placeName(task.location)}: ${taskName(task)}`, task, undo };
+        },
+        async '/aktion/phoenix'(form, session) {
+          const prev = form.get('prev') ?? '';
+          const task = await actions.setPhoenix(form.get('id'), form.get('fire'));
+          const now = task.phoenix?.role === 'feuer_schritt' ? task.phoenix.fire : '';
+          const undo = form.has('prev') && prev !== now ? { action: '/aktion/phoenix', fields: { id: task.id, fire: prev } } : null;
+          logger.info?.(`Cockpit: ${task.ref ?? task.id} Phönix ${now || '–'} (${session.sub})`);
+          const message = now ? `Phönix-Schritt KW ${Number(now.slice(6))}: ${taskName(task)}` : `Kein Phönix-Schritt mehr: ${taskName(task)}`;
+          return { message, task, undo };
         },
         async '/aktion/erfassen'(form) {
           const result = await actions.capture({ text: form.get('text') ?? '', captureId: form.get('cid') });

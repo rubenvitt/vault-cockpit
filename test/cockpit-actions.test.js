@@ -23,6 +23,10 @@ function fakeZunder({ fail = false } = {}) {
       if (fail) throw new Error('Zunder antwortet mit HTTP 500');
       return { id, ref: 'VCP-1', title: 'Steuer', status: 'open', ...fields };
     },
+    async moveTask(id, location) {
+      calls.push(['moveTask', id, location]);
+      return { id, ref: 'VCP-1', title: 'Steuer', status: 'open', location: { ...location, name: 'Finanzen' } };
+    },
     async createTask(args) {
       calls.push(['createTask', args]);
       return { id: `t${calls.length}`, ref: `ZUN-${calls.length}`, url: `https://zunder.test/#/aufgabe/t${calls.length}` };
@@ -53,14 +57,14 @@ afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 test('setStatus: setzt den Status über Zunder und meldet die Aufgabe zurück', async () => {
   const t = await actions().setStatus('abc123', 'done');
-  assert.deepEqual(t, { id: 'abc123', ref: 'VCP-1', title: 'Steuer', status: 'done', due: null });
+  assert.deepEqual(t, { id: 'abc123', ref: 'VCP-1', title: 'Steuer', status: 'done', due: null, phoenix: null, location: null });
   assert.deepEqual(calls, [['setStatus', 'abc123', 'done']]);
 });
 
 test('setStatus: unbekannte IDs und Status werden vor Zunder abgewiesen', async () => {
   const a = actions();
   await assert.rejects(a.setStatus('../x', 'done'), (e) => e instanceof ActionError && e.status === 400);
-  await assert.rejects(a.setStatus('abc', 'dropped'), /nicht vorgesehen/);
+  await assert.rejects(a.setStatus('abc', 'archived'), /nicht vorgesehen/);
   await assert.rejects(a.setStatus('abc', 'review'), /nicht vorgesehen/);
   assert.equal(calls.length, 0);
 });
@@ -103,6 +107,27 @@ test('setDue: ungültiges Datum vor Zunder abgewiesen, Zunder-Fehler 502', async
   assert.equal(calls.length, 0);
   zunder = fakeZunder({ fail: true });
   await assert.rejects(actions().setDue('abc', 'morgen'), (e) => e.status === 502);
+});
+
+test('move: Ziel aus dem Formular wird zur Zunder-Stelle, Unsinn vorher abgewiesen', async () => {
+  const a = actions();
+  assert.equal((await a.move('abc', 'area:a1')).location.kind, 'area');
+  await a.move('abc', 'project:p_1');
+  await a.move('abc', 'loose');
+  assert.deepEqual(calls.map((c) => c[2]), [{ kind: 'area', id: 'a1' }, { kind: 'project', id: 'p_1' }, { kind: 'loose' }]);
+  for (const bad of ['', 'area:', 'area:../x', 'irgendwo', 'project:a b']) {
+    await assert.rejects(a.move('abc', bad), (e) => e.status === 400 && /Bereich oder ein Projekt/.test(e.message));
+  }
+  assert.equal(calls.length, 3);
+});
+
+test('setPhoenix: Schritt einer Woche setzen und wieder entfernen', async () => {
+  const a = actions();
+  const t = await a.setPhoenix('abc', '2026-W42');
+  assert.deepEqual(t.phoenix, { role: 'feuer_schritt', fire: '2026-W42' });
+  await a.setPhoenix('abc', '');
+  assert.deepEqual(calls, [['updateTask', 'abc', { phoenix: { role: 'feuer_schritt', fire: '2026-W42' } }], ['updateTask', 'abc', { phoenix: null }]]);
+  await assert.rejects(a.setPhoenix('abc', '2026-W60'), (e) => e.status === 400 && /keine Kalenderwoche/.test(e.message));
 });
 
 test('capture: Notiz landet im Inbox-Ordner aus den Einstellungen und sofort im Index', async () => {

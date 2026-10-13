@@ -217,7 +217,10 @@ Zunder-Inbox hakt man direkt ab (Zunder-Status `done`, ein zweiter Klick öffnet
 sie wieder, die Meldung bietet „Rückgängig“). Das Menü `⋯` an jeder Aufgabe
 setzt den Status (in Arbeit, blockiert, offen) und verschiebt die Fälligkeit
 (heute, morgen, nächste Woche = Montag, ein Datum oder ohne); die Ansicht ordnet
-die Aufgabe danach neu ein. Auf dem iPhone öffnet es sich als Leiste von unten.
+die Aufgabe danach neu ein. Dort markiert man auch einen Phönix-Schritt der
+angezeigten Woche. In der Zunder-Inbox kommt **Zuordnen** (Bereich, Projekt oder
+„Lose“) und **Verwerfen** dazu, sodass sich die Inbox im Cockpit auf null bringen
+lässt. Auf dem iPhone öffnet sich das Menü als Leiste von unten.
 Oben auf der Seite liegt eine
 **Schnelleingabe** mit derselben Logik wie `/capture`: Text wird eine Notiz im
 Inbox-Ordner, mit `!` vorne eine Aufgabe in der Zunder-Inbox. `/` oder `n` springt

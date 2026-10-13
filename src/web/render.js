@@ -89,32 +89,66 @@ const DUE_CHOICES = [
  * Menü an einer Aufgabe: `<details>` klappt ohne JavaScript auf, jede Gruppe
  * ist ein eigenes Formular. Mit JavaScript bleibt die Seite stehen.
  */
-function taskMenu(t, ctx) {
+function taskMenu(t, ctx, { inbox = false } = {}) {
   const status = STATUS_CHOICES.map(
     ([value, label]) =>
       `<button type="submit" name="status" value="${value}" class="chip"${t.status === value ? ' aria-current="true" disabled' : ''}>${label}</button>`,
   ).join('');
   const due = DUE_CHOICES.map(([value, label]) => `<button type="submit" name="due" value="${value}" class="chip">${label}</button>`).join('');
   const date = t.due ? String(t.due).slice(0, 10) : '';
-  // Das Datumsfeld steht im Formular vor den Kurzwahl-Knöpfen, damit Enter darin
-  // „Setzen“ auslöst; per CSS steht es unter ihnen.
+  // Phönix-Schritt der angezeigten Woche; Flammen haben ihre eigene Rolle.
+  const step = t.phoenix === 'feuer_schritt' ? t.fire : '';
+  const week = ctx.week;
+  const phoenix =
+    t.phoenix === 'flamme' || !week
+      ? ''
+      : `${formHead(ctx, '/aktion/phoenix', { id: t.id, prev: step })}
+          <p class="menu-label">Phönix${step ? ` <span class="hint">Schritt KW ${Number(step.slice(6))}</span>` : ''}</p>
+          <div class="chips">${
+            step === week.id
+              ? '<button type="submit" name="fire" value="" class="chip quiet">Kein Phönix-Schritt</button>'
+              : `<button type="submit" name="fire" value="${esc(week.id)}" class="chip">Schritt für KW ${week.week}</button>`
+          }</div>
+        </form>`;
   return `<details class="menu">
-      <summary class="menu-button" aria-label="${esc(`Mehr zu: ${t.title}`)}" title="Status, Fälligkeit"><span aria-hidden="true">⋯</span></summary>
+      <summary class="menu-button" aria-label="${esc(`Mehr zu: ${t.title}`)}" title="${inbox ? 'Zuordnen, Status, Fälligkeit' : 'Status, Fälligkeit'}"><span aria-hidden="true">⋯</span></summary>
       <div class="menu-panel">
         <p class="menu-title">${esc(t.title)}</p>
+        ${inbox ? assignForm(t, ctx) : ''}
         ${formHead(ctx, '/aktion/status', { id: t.id, prev: t.status })}
-          <p class="menu-label">Status</p><div class="chips">${status}</div>
+          <p class="menu-label">Status</p><div class="chips">${status}${
+            inbox ? '<button type="submit" name="status" value="dropped" class="chip danger">Verwerfen</button>' : ''
+          }</div>
         </form>
         ${formHead(ctx, '/aktion/faellig', { id: t.id, prev: date })}
           <p class="menu-label">Fällig${t.due ? ` <span class="hint">jetzt ${esc(dueLabel(t.due, ctx.tz))}</span>` : ''}</p>
           <div class="date-row"><label><span class="sr-only">Datum</span><input type="date" name="date" value="${esc(date)}"></label><button type="submit" name="due" value="datum" class="chip">Setzen</button></div>
           <div class="chips">${due}${t.due ? '<button type="submit" name="due" value="keine" class="chip quiet">Ohne</button>' : ''}</div>
         </form>
+        ${phoenix}
       </div>
     </details>`;
 }
 
-function taskItem(t, tz, ctx = {}, { area = false, mark = null, live = false } = {}) {
+/** „Zuordnen“ für Aufgaben in der Zunder-Inbox: Bereich oder Projekt wählen. */
+function assignForm(t, ctx) {
+  if (!ctx.targets) return '<p class="problem">Bereiche und Projekte aus Zunder sind gerade nicht abrufbar.</p>';
+  const options = ctx.targets
+    .map(
+      (a) => `<optgroup label="${esc(a.name)}"><option value="area:${esc(a.id)}">${esc(a.name)}</option>${a.projects
+        .map((p) => `<option value="project:${esc(p.id)}">${esc(a.name)} / ${esc(p.name)}</option>`)
+        .join('')}</optgroup>`,
+    )
+    .join('');
+  return `${formHead(ctx, '/aktion/zuordnen', { id: t.id, prev: 'inbox' })}
+          <p class="menu-label">Zuordnen</p>
+          <div class="assign-row"><label><span class="sr-only">Bereich oder Projekt</span><select name="ziel" required>
+            <option value="">Bereich oder Projekt …</option>${options}<option value="loose">Lose (ohne Bereich)</option>
+          </select></label><button type="submit" class="chip">Zuordnen</button></div>
+        </form>`;
+}
+
+function taskItem(t, tz, ctx = {}, { area = false, mark = null, live = false, inbox = false } = {}) {
   const meta = [t.ref, area ? t.area : t.project, dueLabel(t.due, tz), ...(t.extra ? [t.extra] : [])].filter(Boolean).map(esc).join(' · ');
   const writable = ctx.write && t.id;
   const lead = writable
@@ -123,7 +157,7 @@ function taskItem(t, tz, ctx = {}, { area = false, mark = null, live = false } =
   return `<li class="task status-${esc(t.status)}${t.overdue ? ' overdue' : ''}" data-id="${esc(t.id ?? '')}" data-status="${esc(t.status)}" data-title="${esc(t.title)}">
     ${lead}
     <span class="body"><a href="${esc(t.url)}">${esc(t.title)}</a>${meta || live ? `<span class="meta">${meta}${live ? `${meta ? ' · ' : ''}<span class="live">läuft</span>` : ''}</span>` : ''}</span>
-    ${writable ? taskMenu(t, { ...ctx, tz }) : ''}
+    ${writable ? taskMenu(t, { ...ctx, tz }, { inbox }) : ''}
   </li>`;
 }
 
@@ -243,7 +277,7 @@ function inboxSection(model, tz, vaultName, ctx) {
   }
   let tasks;
   if (!zunder.ok) tasks = problem(zunder);
-  else tasks = inboxList('zunder-inbox', zunder.data.map((x) => taskItem(x, tz, ctx)));
+  else tasks = inboxList('zunder-inbox', zunder.data.map((x) => taskItem(x, tz, { ...ctx, targets: model.inbox.targets }, { inbox: true })));
   return `<section><h2>Inbox</h2>
     <h3>Vault <span class="hint">${esc(folder)}/</span></h3>${notes}
     <h3>Zunder</h3>${tasks}
@@ -292,7 +326,7 @@ export function renderWeek(model, { user = null, write = null, back = '/', flash
   const { tz, vaultName } = model;
   const w = model.week;
   const title = weekTitle(w);
-  const ctx = { write, back };
+  const ctx = { write, back, week: w };
   return `<!doctype html>
 <html lang="de">
 <head>
@@ -639,7 +673,10 @@ code { font-size: 13px; background: var(--line); padding: 1px 4px; border-radius
 .chip.danger { color: var(--warn); }
 .menu-panel form { display: flex; flex-direction: column; }
 .date-row { order: 2; display: flex; gap: 6px; margin-top: 8px; align-items: center; }
-.date-row label { flex: 1; display: flex; }
+.date-row label, .assign-row label { flex: 1; display: flex; min-width: 0; }
+.assign-row { display: flex; gap: 6px; align-items: center; }
+.assign-row select { flex: 1; min-width: 0; font: inherit; font-size: 14px; color: var(--text); background: var(--bg);
+  border: 1px solid var(--line); border-radius: var(--r-sm); padding: 4px 8px; min-height: 32px; }
 .date-row input { flex: 1; min-width: 0; font: inherit; font-size: 14px; color: var(--text); background: var(--bg);
   border: 1px solid var(--line); border-radius: var(--r-sm); padding: 4px 8px; min-height: 32px; }
 form.act.busy { opacity: .6; pointer-events: none; }
@@ -656,7 +693,7 @@ main.refreshing { transition: opacity .2s; }
   /* Abdunkeln dahinter; ein Tipp darauf trifft die Zusammenfassung und schließt, auch ohne JavaScript. */
   .menu[open] > .menu-button::before { content: ''; position: fixed; inset: 0; z-index: 19; background: rgb(0 0 0 / .35); cursor: default; }
   .chip { min-height: 40px; padding: 6px 14px; font-size: 15px; }
-  .date-row input { min-height: 40px; font-size: 16px; }
+  .date-row input, .assign-row select { min-height: 40px; font-size: 16px; }
   .menu-button { width: 36px; height: 32px; }
   .capture button.primary { padding: 8px 12px; }
   .capture-key { display: none; }

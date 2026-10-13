@@ -1,9 +1,12 @@
 import { createCapture } from '../vault/capture.js';
 import { createCaptureRouter, CaptureError } from '../capture/router.js';
-import { localDate, addDays } from './week.js';
+import { localDate, addDays, parseWeekId } from './week.js';
 
-/** Status, die das Cockpit setzen darf: abhaken, zurücknehmen, anfangen, parken. */
-export const SETTABLE = ['open', 'in_progress', 'blocked', 'done'];
+/** Status, die das Cockpit setzen darf: abhaken, zurücknehmen, anfangen, parken, verwerfen. */
+export const SETTABLE = ['open', 'in_progress', 'blocked', 'done', 'dropped'];
+
+/** Ziel für „Zuordnen“: `area:<id>`, `project:<id>`, `loose` oder `inbox`. */
+const TARGET = /^(?:(area|project):([A-Za-z0-9_-]{1,64})|(loose|inbox))$/;
 
 const TASK_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
@@ -67,7 +70,15 @@ export function createCockpitActions({ vaultPath, settings, policy, state, zunde
     if (!task) throw new ActionError('Zunder hat die Aufgabe nicht zurückgegeben', 502);
     return task;
   };
-  const summary = (task) => ({ id: task.id, ref: task.ref ?? null, title: task.title, status: task.status, due: task.due ?? null });
+  const summary = (task) => ({
+    id: task.id,
+    ref: task.ref ?? null,
+    title: task.title,
+    status: task.status,
+    due: task.due ?? null,
+    phoenix: task.phoenix ?? null,
+    location: task.location ?? null,
+  });
 
   return {
     /** Setzt den Status einer Zunder-Aufgabe und liefert `{ id, ref, title, status }`. */
@@ -87,6 +98,24 @@ export function createCockpitActions({ vaultPath, settings, policy, state, zunde
       const due = resolveDue(value, localDate(now(), settings.get().tz));
       if (due === undefined) throw new ActionError(`„${value}“ ist kein Datum`);
       return summary(await call((z) => z.updateTask(id, { due })));
+    },
+
+    /** Legt eine Aufgabe an eine andere Stelle (aus der Inbox in einen Bereich oder ein Projekt). */
+    async move(id, target) {
+      checkId(id);
+      const m = TARGET.exec(String(target ?? ''));
+      if (!m) throw new ActionError('Bitte einen Bereich oder ein Projekt wählen');
+      const location = m[3] ? { kind: m[3] } : { kind: m[1], id: m[2] };
+      return summary(await call((z) => z.moveTask(id, location)));
+    },
+
+    /** Markiert eine Aufgabe als Phönix-Schritt einer Woche (`2026-W42`); leer entfernt die Markierung. */
+    async setPhoenix(id, fire) {
+      checkId(id);
+      const week = String(fire ?? '').trim();
+      if (week && !parseWeekId(week)) throw new ActionError(`„${week}“ ist keine Kalenderwoche`);
+      const phoenix = week ? { role: 'feuer_schritt', fire: week } : null;
+      return summary(await call((z) => z.updateTask(id, { phoenix })));
     },
 
     /**

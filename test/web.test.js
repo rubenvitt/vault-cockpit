@@ -78,7 +78,12 @@ const cockpit = {
       },
       calendar: { ok: true, data: [] },
       tasks: { ok: true, data: [] },
-      inbox: { vault: { ok: true, data: [] }, zunder: { ok: true, data: [] }, folder: 'inbox' },
+      inbox: {
+        vault: { ok: true, data: [] },
+        zunder: { ok: true, data: [{ id: 'z1', ref: null, title: 'Zahnarzt anrufen', status: 'open', due: null, phoenix: null, url: 'https://zunder.test/#/aufgabe/z1' }] },
+        targets: [{ id: 'a1', name: 'Gesundheit', projects: [{ id: 'p1', name: 'Zähne & Co' }] }],
+        folder: 'inbox',
+      },
     };
   },
 };
@@ -448,6 +453,15 @@ function fakeActions() {
       }
       return { id, ref: 'VCP-1', title: 'Steuer', status: 'open', due: due === 'keine' ? null : due === 'morgen' ? '2026-10-15' : due };
     },
+    async move(id, ziel) {
+      calls.push(['move', id, ziel]);
+      const location = ziel === 'inbox' ? { kind: 'inbox' } : { kind: 'project', id: 'p1', name: 'Vault Cockpit', area_name: 'Programmieren' };
+      return { id, ref: null, title: 'Zahnarzt', status: 'open', location };
+    },
+    async setPhoenix(id, fire) {
+      calls.push(['phoenix', id, fire]);
+      return { id, ref: null, title: 'Zahnarzt', status: 'open', phoenix: fire ? { role: 'feuer_schritt', fire } : null };
+    },
     async capture({ text, captureId }) {
       calls.push(['capture', text, captureId]);
       if (fail) {
@@ -647,6 +661,55 @@ test('Fälligkeit verschieben: JSON mit Rückgängig, ohne JavaScript per Weiter
 
       const noCsrf = await call('/aktion/faellig', { method: 'POST', form: { id: 't1', due: 'morgen' }, accept: 'application/json' });
       assert.equal(noCsrf.status, 403);
+    },
+    {},
+    { actions },
+  );
+});
+
+test('Zunder-Inbox: Zuordnen, Phönix-Schritt und Verwerfen im Menü', async () => {
+  await withServer(
+    async ({ call, login }) => {
+      await login();
+      const html = await (await call('/')).text();
+      const inbox = html.slice(html.indexOf('data-list="zunder-inbox"'));
+      assert.match(inbox, /action="\/aktion\/zuordnen" class="act">[^]*?name="id" value="z1"[^]*?name="prev" value="inbox"/);
+      assert.match(inbox, /<optgroup label="Gesundheit"><option value="area:a1">Gesundheit<\/option><option value="project:p1">Gesundheit \/ Zähne &amp; Co<\/option>/);
+      assert.match(inbox, /<option value="loose">/);
+      assert.match(inbox, /name="status" value="dropped" class="chip danger">Verwerfen/);
+      assert.match(inbox, /action="\/aktion\/phoenix" class="act">[^]*?name="fire" value="2026-W42" class="chip">Schritt für KW 42/);
+      // Big Rocks (nicht Inbox) haben kein Zuordnen und kein Verwerfen.
+      const rocks = html.slice(0, html.indexOf('data-list="zunder-inbox"'));
+      assert.ok(!rocks.includes('/aktion/zuordnen'));
+      assert.ok(!rocks.includes('Verwerfen'));
+    },
+    {},
+    { actions: fakeActions() },
+  );
+});
+
+test('Zuordnen und Phönix: Meldung mit Rückgängig', async () => {
+  const actions = fakeActions();
+  await withServer(
+    async ({ call, login }) => {
+      await login();
+      const csrf = csrfFrom(await (await call('/')).text());
+      const moved = await (await call('/aktion/zuordnen', { method: 'POST', form: { id: 'z1', ziel: 'project:p1', prev: 'inbox', csrf }, accept: 'application/json' })).json();
+      assert.equal(moved.message, 'Programmieren / Vault Cockpit: Zahnarzt');
+      assert.deepEqual(moved.undo, { action: '/aktion/zuordnen', fields: { id: 'z1', ziel: 'inbox' } });
+      const back = await (await call('/aktion/zuordnen', { method: 'POST', form: { id: 'z1', ziel: 'inbox', csrf }, accept: 'application/json' })).json();
+      assert.equal(back.message, 'Inbox: Zahnarzt');
+      assert.equal(back.undo, null);
+
+      const step = await (await call('/aktion/phoenix', { method: 'POST', form: { id: 'z1', fire: '2026-W42', prev: '', csrf }, accept: 'application/json' })).json();
+      assert.equal(step.message, 'Phönix-Schritt KW 42: Zahnarzt');
+      assert.deepEqual(step.undo, { action: '/aktion/phoenix', fields: { id: 'z1', fire: '' } });
+      const none = await (await call('/aktion/phoenix', { method: 'POST', form: { id: 'z1', fire: '', prev: '2026-W42', csrf }, accept: 'application/json' })).json();
+      assert.equal(none.message, 'Kein Phönix-Schritt mehr: Zahnarzt');
+
+      const dropped = await (await call('/aktion/status', { method: 'POST', form: { id: 'z1', status: 'dropped', prev: 'open', csrf }, accept: 'application/json' })).json();
+      assert.equal(dropped.message, 'Verworfen: VCP-1 Steuer');
+      assert.deepEqual(dropped.undo, { action: '/aktion/status', fields: { id: 'z1', status: 'open' } });
     },
     {},
     { actions },

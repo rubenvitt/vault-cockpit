@@ -252,6 +252,13 @@ function fakeZunder(tasks, { fail = null } = {}) {
         return true;
       });
     },
+    async listStructure() {
+      return [
+        { id: 'a2', name: 'Zuhause', state: 'active', projects: [{ id: 'p9', name: 'Alt', status: 'done' }] },
+        { id: 'a1', name: 'Arbeitnehmer', state: 'active', projects: [{ id: 'p1', name: 'Odoo', status: 'active' }] },
+        { id: 'a3', name: 'Weg', state: 'archived', projects: [] },
+      ];
+    },
   };
 }
 
@@ -306,6 +313,11 @@ test('Wochenmodell: Big Rocks je Bereich, Flammen mit gemessener Zeit, Aufgaben 
 
   assert.deepEqual(m.tasks.data.map((t) => [t.id, t.overdue]), [['o1', true], ['p1', false]]);
   assert.deepEqual(m.inbox.zunder.data.map((t) => t.id), ['i1']);
+  // Ziele für „Zuordnen“: sortiert, ohne archivierte Bereiche und abgeschlossene Projekte.
+  assert.deepEqual(m.inbox.targets, [
+    { id: 'a1', name: 'Arbeitnehmer', projects: [{ id: 'p1', name: 'Odoo' }] },
+    { id: 'a2', name: 'Zuhause', projects: [] },
+  ]);
   assert.deepEqual(m.inbox.vault.data, [{ path: 'inbox/a.md', title: 'A' }]);
 
   const wed = m.calendar.data.find((d) => d.date === '2026-10-14');

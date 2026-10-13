@@ -41,6 +41,7 @@ export function createCockpit({ index, settings, zunderFor, calendars = null, no
     area: areaOf(t),
     project: t.location?.kind === 'project' ? (t.location.name ?? null) : null,
     phoenix: t.phoenix?.role ?? null,
+    fire: t.phoenix?.fire ?? null,
     url: zunder.taskUrl(t.id),
   });
 
@@ -155,6 +156,21 @@ export function createCockpit({ index, settings, zunderFor, calendars = null, no
         events: events.ok ? events.data.events.filter((e) => e.start < d.end && e.end > d.start) : [],
       }));
 
+      // Ziele für „Zuordnen“ in der Zunder-Inbox; nur nötig, wenn dort etwas liegt.
+      const structure =
+        zunder && zInbox.ok && zInbox.data.length
+          ? await settle('Zunder (Bereiche)', async () =>
+              (await zunder.listStructure())
+                .filter((a) => a.state !== 'archived')
+                .map((a) => ({
+                  id: a.id,
+                  name: a.name,
+                  projects: (a.projects ?? []).filter((p) => !p.status || p.status === 'active').map((p) => ({ id: p.id, name: p.name })),
+                }))
+                .sort((a, b) => a.name.localeCompare(b.name, 'de')),
+            )
+          : { ok: true, data: [] };
+
       const section = (r, data) => (r.ok ? { ok: true, data } : { ok: false, error: r.error, unconfigured: Boolean(r.unconfigured) });
 
       return {
@@ -170,6 +186,7 @@ export function createCockpit({ index, settings, zunderFor, calendars = null, no
         inbox: {
           vault: section(inbox, inbox.data),
           zunder: section(zInbox, zInbox.ok ? zInbox.data.map(task).sort(byDue) : null),
+          targets: structure.ok ? structure.data : null,
           folder: captureFolder,
         },
       };
