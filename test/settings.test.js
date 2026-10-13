@@ -133,3 +133,26 @@ test('Kalender für den Graphen: aus ohne Kalender, Fehler nur wenn alle ausfall
   down = true;
   await assert.rejects(cal.events(W42.start, W42.end), /Privat: .*HTTP 500.*Arbeit/);
 });
+
+test('Ausgeblendete Termine: „Blockiert“ fehlt standardmäßig, eigene Liste ersetzt den Standard', async () => {
+  const blocks = ['BEGIN:VCALENDAR',
+    'BEGIN:VEVENT', 'UID:a', 'SUMMARY: blockiert ', 'DTSTART;TZID=Europe/Berlin:20261013T090000', 'DURATION:PT1H', 'END:VEVENT',
+    'BEGIN:VEVENT', 'UID:b', 'SUMMARY:Zahnarzt', 'DTSTART;TZID=Europe/Berlin:20261013T110000', 'DURATION:PT1H', 'END:VEVENT',
+    'END:VCALENDAR'].join('\r\n');
+  const settings = createSettingsStore({ defaults: { tz: TZ }, logger: quiet });
+  const fetch = async () => new Response(blocks);
+  const sources = createCalendarSources({ settings, fetch, now: () => 0 });
+  const titles = async () => (await sources.events(W42.start, W42.end)).events.map((e) => e.title);
+  const cal = [{ name: 'Privat', kind: 'ical', url: 'https://ok.example/a.ics' }];
+
+  settings.save({ calendars: cal });
+  assert.deepEqual(settings.get().hiddenEvents, ['Blockiert']);
+  assert.deepEqual(await titles(), ['Zahnarzt']);
+
+  settings.save({ calendars: cal, hiddenEvents: [' Zahnarzt ', ''] });
+  assert.deepEqual(settings.stored().hiddenEvents, ['Zahnarzt']);
+  assert.deepEqual((await titles()).map((t) => t.trim()), ['blockiert']);
+
+  settings.save({ calendars: cal, hiddenEvents: [] });
+  assert.equal((await titles()).length, 2);
+});

@@ -299,13 +299,14 @@ test('Einstellungen: nur angemeldet, Kalender anlegen, Geheimnisse bleiben verbo
       const html = await page.text();
       assert.match(html, /aus der Umgebung \(https:\/\/zunder\.env\)/);
       assert.match(html, /Neuer Kalender/);
+      assert.match(html, /name="hiddenEvents" value="Blockiert"/);
 
       const saved = await call('/einstellungen', {
         method: 'POST',
         form: {
           'cal.0.name': 'Privat', 'cal.0.kind': 'ical', 'cal.0.url': 'webcal://cal.example/geheim-123.ics',
           'cal.1.name': '', 'cal.1.url': '',
-          'zunder.url': '', 'zunder.token': '', tz: '', vaultName: 'RNotes', inboxFolder: '00-inbox',
+          'zunder.url': '', 'zunder.token': '', tz: '', vaultName: 'RNotes', inboxFolder: '00-inbox', hiddenEvents: 'Blockiert, Fokus',
         },
       });
       assert.equal(saved.status, 303);
@@ -313,6 +314,7 @@ test('Einstellungen: nur angemeldet, Kalender anlegen, Geheimnisse bleiben verbo
       const [privat] = settings.stored().calendars;
       assert.equal(privat.url, 'https://cal.example/geheim-123.ics');
       assert.equal(settings.get().inboxFolder, '00-inbox');
+      assert.deepEqual(settings.get().hiddenEvents, ['Blockiert', 'Fokus']);
 
       // Zweiter Kalender mit Passwort, erster unverändert (Adresse leer gelassen).
       await call('/einstellungen', {

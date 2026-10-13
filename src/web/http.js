@@ -261,6 +261,7 @@ export function createWebHttp({ cockpit, settings, actions = null, tokens = null
       inboxFolder: field('inboxFolder'),
       zunder: clear ? { url: null, token: null } : { url: field('zunder.url'), token: field('zunder.token') || stored.zunder.token },
       calendars: calendarsIn,
+      hiddenEvents: form.has('hiddenEvents') ? field('hiddenEvents').split(',') : stored.hiddenEvents,
     };
   }
 
