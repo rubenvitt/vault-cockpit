@@ -7,7 +7,7 @@ import { buildIndex, openIndex } from '../src/vault/index.js';
 import { compilePolicy } from '../src/vault/policy.js';
 import { createEditor } from '../src/vault/edit.js';
 import { createStateStore } from '../src/capture/state.js';
-import { createZunderBridge, findMarkedTasks, linkLine } from '../src/capture/bridge.js';
+import { createZunderBridge, findMarkedTasks, findLinkedTasks, closeLine, linkLine } from '../src/capture/bridge.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
 const policy = compilePolicy({ sensitive: { 'areas/Gesundheit': 'gesundheit' } });
@@ -103,4 +103,97 @@ test('ist Zunder nicht erreichbar, bleibt die Marke stehen', async () => {
   const bridge = createZunderBridge({ index: idx, editor, zunder: down, state, logger: quiet });
   assert.equal(await bridge.scanAll(), 0);
   assert.match(read('projects/Alpha.md'), /Angebot schreiben #zunder/);
+});
+
+const linked = (id, label = '↗ Zunder') => `[${label}](https://zunder.test/#/aufgabe/${id})`;
+
+function backVault() {
+  put('projects/Beta.md', [
+    '# Beta',
+    '',
+    `- [ ] Erledigt in Zunder ${linked('d1', '↗ VCP-1')}`,
+    `- [ ] Noch offen ${linked('o1')}`,
+    `- [ ] Verworfen ${linked('x1')}`,
+    `  1. [ ] Nummeriert erledigt ${linked('d2')}`,
+    `- [x] Schon abgehakt ${linked('d3')}`,
+    `- [ ] Fremde Instanz [↗ Zunder](https://anders.test/#/aufgabe/d1)`,
+    '```',
+    `- [ ] Im Code ${linked('d1')}`,
+    '```',
+    '',
+  ].join('\n'));
+  put('areas/Gesundheit/Termin.md', `# Termin\n\n- [ ] Vertraulich ${linked('d1')}\n`);
+  idx.close();
+  buildIndex({ vaultPath: root, dbPath: ':memory:', policy, persist: (db, vp) => (idx = openIndex(db, { vaultPath: vp, policy })) });
+  editor = createEditor({ vaultPath: root, index: idx });
+}
+
+function statusZunder(statuses) {
+  const asked = [];
+  return {
+    asked,
+    taskUrl: (id) => `https://zunder.test/#/aufgabe/${id}`,
+    async getTask(id) {
+      asked.push(id);
+      if (!(id in statuses)) throw new Error('Zunder lehnt ab: Aufgabe nicht gefunden');
+      return { id, status: statuses[id] };
+    },
+  };
+}
+
+test('findLinkedTasks: nur offene Checkboxen mit Zunder-Link, nicht in Codeblöcken', () => {
+  backVault();
+  const found = findLinkedTasks(read('projects/Beta.md'), 'https://zunder.test/#/aufgabe/');
+  assert.deepEqual(found.map((f) => f.id), ['d1', 'o1', 'x1', 'd2']);
+  assert.equal(findLinkedTasks(read('projects/Beta.md')).length, 5, 'ohne Präfix zählt jede Zunder-Adresse');
+});
+
+test('closeLine setzt die Markierung und lässt den Rest stehen', () => {
+  assert.equal(closeLine('- [ ] A [↗ Zunder](u)', 'x'), '- [x] A [↗ Zunder](u)');
+  assert.equal(closeLine('  1. [ ] B', '-'), '  1. [-] B');
+});
+
+test('syncBack hakt erledigte Aufgaben ab und markiert verworfene', async () => {
+  backVault();
+  const z = statusZunder({ d1: 'done', d2: 'done', o1: 'in_progress', x1: 'dropped' });
+  const bridge = createZunderBridge({ index: idx, editor, zunder: z, state, logger: quiet });
+  assert.equal(await bridge.syncBack(), 3);
+
+  const after = read('projects/Beta.md');
+  assert.match(after, /- \[x\] Erledigt in Zunder \[↗ VCP-1\]/);
+  assert.match(after, /- \[ \] Noch offen/);
+  assert.match(after, /- \[-\] Verworfen/);
+  assert.match(after, / {2}1\. \[x\] Nummeriert erledigt/);
+  assert.match(after, /- \[ \] Fremde Instanz/, 'Links auf eine andere Zunder-Instanz bleiben unberührt');
+  assert.match(after, /- \[ \] Im Code/, 'Codeblöcke bleiben unberührt');
+  assert.match(read('areas/Gesundheit/Termin.md'), /- \[ \] Vertraulich/, 'vertrauliche Notizen bleiben unberührt');
+  assert.deepEqual(z.asked.sort(), ['d1', 'd2', 'o1', 'x1'], 'je Aufgabe eine Abfrage, abgehakte nicht');
+});
+
+test('syncBack: nicht abrufbare Aufgaben bleiben offen, der Rest läuft weiter', async () => {
+  backVault();
+  const z = statusZunder({ d2: 'done' });
+  const bridge = createZunderBridge({ index: idx, editor, zunder: z, state, logger: quiet });
+  assert.equal(await bridge.syncBack(), 1);
+  const after = read('projects/Beta.md');
+  assert.match(after, /- \[ \] Erledigt in Zunder/);
+  assert.match(after, /1\. \[x\] Nummeriert erledigt/);
+});
+
+test('Hinweg und Rückweg: übertragene Aufgabe wird nach dem Erledigen abgehakt', async () => {
+  const statuses = {};
+  const z = {
+    ...statusZunder(statuses),
+    async createTask(args) {
+      calls.push(args);
+      statuses.t1 = 'open';
+      return { id: 't1', ref: 'VCP-1', url: 'https://zunder.test/#/aufgabe/t1' };
+    },
+  };
+  const bridge = createZunderBridge({ index: idx, editor, zunder: z, state, logger: quiet });
+  await bridge.scanAll();
+  assert.equal(await bridge.syncBack(), 0);
+  statuses.t1 = 'done';
+  assert.equal(await bridge.syncBack(), 1);
+  assert.match(read('projects/Alpha.md'), /- \[x\] Angebot schreiben \[↗ VCP-1\]/);
 });

@@ -141,8 +141,12 @@ const bridge =
       })
     : null;
 if (bridge) {
-  bridge.scanAll();
-  setInterval(() => bridge.scanAll(), Number(process.env.REINDEX_INTERVAL_MIN ?? 15) * 60_000).unref();
+  const bridgeRound = () => {
+    bridge.scanAll();
+    bridge.syncBack();
+  };
+  bridgeRound();
+  setInterval(bridgeRound, Number(process.env.REINDEX_INTERVAL_MIN ?? 15) * 60_000).unref();
 }
 
 sync.start({
