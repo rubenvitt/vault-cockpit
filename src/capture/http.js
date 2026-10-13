@@ -9,8 +9,10 @@ const sha256 = (s) => createHash('sha256').update(s).digest();
 /**
  * Capture-Endpunkte für Geräte, die kein OAuth sprechen (iOS-Kurzbefehl, Funke).
  *
- * Geschützt mit einem eigenen statischen Token (`CAPTURE_TOKEN`), getrennt vom
- * OAuth der MCP-Schnittstelle. Der Token kann nur anlegen: neue Notizen im
+ * Geschützt mit API-Tokens mit dem Recht „Capture“, angelegt im Web-Cockpit
+ * unter Einstellungen → API-Tokens (`tokens`), getrennt vom OAuth der
+ * MCP-Schnittstelle. Zum Übergang gilt daneben ein statischer Token aus der
+ * Umgebung (`CAPTURE_TOKEN`, `token`). Ein Token kann nur anlegen: neue Notizen im
  * Capture-Ordner oder, mit `!`, Aufgaben in der Zunder-Inbox. Lesen oder
  * Ändern bestehender Notizen ist damit nicht möglich.
  *
@@ -36,10 +38,15 @@ function errorMessage(status, error) {
 }
 
 /** `zunderEnabled`: Wahrheitswert oder Funktion, die bei jeder Abfrage gefragt wird. */
-export function createCaptureHttp({ token, router, zunderEnabled = false }) {
+export function createCaptureHttp({ token = null, tokens = null, router, zunderEnabled = false }) {
   const zunderOn = typeof zunderEnabled === 'function' ? zunderEnabled : () => zunderEnabled;
-  const expected = sha256(`Bearer ${token}`);
-  const authorized = (req) => timingSafeEqual(sha256(String(req.headers.authorization ?? '')), expected);
+  const expected = token ? sha256(`Bearer ${token}`) : null;
+  const authorized = (req) => {
+    const header = String(req.headers.authorization ?? '');
+    const legacy = expected ? timingSafeEqual(sha256(header), expected) : false;
+    const m = /^Bearer (\S+)$/.exec(header);
+    return (Boolean(m) && Boolean(tokens?.verify(m[1], 'capture'))) || legacy;
+  };
 
   const json = (res, status, body) => {
     res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });

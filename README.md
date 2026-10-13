@@ -46,26 +46,37 @@ Das Image baut GitHub Actions bei jedem Push auf `main`:
 3. Sync einrichten (siehe [Sync](#sync)), dann `docker compose up -d` und in
    Claude einen Connector auf `<PUBLIC_URL>/mcp`.
 
+Im Deployment steht nur, was vor der ersten Anmeldung gebraucht wird. Alles
+andere (Zunder, Brücke, Capture- und Such-Tokens, Mail, Embeddings, Kalender,
+Anzeige) stellt man nach dem Login im Web-Cockpit unter **Einstellungen** ein;
+das Sitzungs-Secret erzeugt der Dienst selbst.
+
 | Variable | Bedeutung |
 |---|---|
 | `PUBLIC_URL` | öffentliche Adresse, Pflicht |
 | `OIDC_ISSUER` | Pocket-ID-Issuer, Pflicht |
-| `POLICY_FILE` | Pfad zur Policy (vertrauliche Ordner, Ausschlüsse) |
 | `ALLOWED_SUBJECTS` | Pocket-ID-`sub`-Werte mit Zugriff, Pflicht |
-| `VAULT_PATH`, `INDEX_DB`, `CAPTURE_FOLDER` | Pfade, Standard `/vault`, `/data/index.db`, `inbox` |
-| `REINDEX_INTERVAL_MIN` | Abstand der vollen Index-Neuaufbauten, Standard 15 (Netz neben der Dateibeobachtung) |
+| `WEB_CLIENT_ID`, `WEB_CLIENT_SECRET` | OIDC-Client des [Web-Cockpits](#web-cockpit); ohne `WEB_CLIENT_ID` gibt es keine Oberfläche und damit keine Einstellungen |
+
+Betrieb und Pfade im Container (die Compose-Datei setzt sie, sonst passen die Standards):
+
+| Variable | Bedeutung |
+|---|---|
+| `POLICY_FILE` | Pfad zur Policy (vertrauliche Ordner, Ausschlüsse) |
+| `VAULT_PATH`, `INDEX_DB`, `VECTOR_DB`, `CAPTURE_FOLDER` | Pfade, Standard `/vault`, `/data/index.db`, `/data/vectors.db`, `inbox` |
+| `REINDEX_INTERVAL_MIN` | Abstand der vollen Index-Neuaufbauten und der Brückenrunden, Standard 15 (Netz neben der Dateibeobachtung) |
 | `SYNC_ADAPTER` | `obsidian-headless` (Standard) oder `none` (keine Dateibeobachtung, kein Sync-Status) |
 | `SYNC_STATUS_FILE` | Statusdatei des Sync-Sidecars, z. B. `/sync-status/sync.json` |
-| `CAPTURE_TOKEN` | Token für `/capture` und `/funke` (ohne Wert sind beide aus), siehe [Capture](#capture) |
-| `ZUNDER_URL`, `ZUNDER_TOKEN` | Optional: Zunder-Zugang, falls in den [Einstellungen](#web-cockpit) keiner steht. Besser dort eintragen |
-| `ZUNDER_BRIDGE`, `ZUNDER_BRIDGE_TAG` | Zunder-Brücke `on` (Standard, arbeitet, sobald ein Zunder-Zugang da ist) oder `off`; Tag, Standard `zunder` |
-| `OBSIDIAN_VAULT_NAME` | Name des Vaults in Obsidian, für „In Obsidian öffnen“ in Zunder (optional) |
 | `CAPTURE_STATE_FILE` | Merkzettel gegen doppelte Aufgaben, Standard `/data/capture-state.json` |
-| `MAIL_JMAP_TOKEN` | Fastmail-API-Token (nur Mail); ohne Wert kein Mail-Abruf |
-| `MAIL_ALLOWED_SENDERS` | eigene Absenderadressen (Komma-Liste), `@domain` erlaubt eine ganze Domain ohne Subdomains (z. B. `@rubeen.dev,@rubeen.email`); Pflicht mit `MAIL_JMAP_TOKEN` |
-| `EMBED_URL`, `EMBED_MODEL` | Ollama-Server für Embeddings (z. B. `http://ollama:11434`) und Modell, Standard `bge-m3`; ohne `EMBED_URL` nur Volltext |
-| `VECTOR_DB` | Vektorspeicher, Standard `/data/vectors.db` |
-| `MAIL_MAILBOX`, `MAIL_DONE_MAILBOX`, `MAIL_POLL_MIN` | Ordner zum Abholen (Standard `Vault`), Ablage danach (Standard `Archive`), Abstand in Minuten (Standard 5) |
+
+**Übergang für ältere Deployments:** `CAPTURE_TOKEN`, `ZUNDER_URL`/`ZUNDER_TOKEN`,
+`ZUNDER_BRIDGE`/`ZUNDER_BRIDGE_TAG`, `OBSIDIAN_VAULT_NAME`, `COCKPIT_TZ`,
+`MAIL_JMAP_TOKEN`/`MAIL_ALLOWED_SENDERS`/`MAIL_MAILBOX`/`MAIL_DONE_MAILBOX`/`MAIL_POLL_MIN`
+und `EMBED_URL`/`EMBED_MODEL` wirken weiter, solange das passende Feld in den
+Einstellungen leer ist; die Einstellungsseite zeigt dann „aus der Umgebung“.
+`CAPTURE_TOKEN` gilt neben den angelegten Capture-Tokens weiter. Ist alles in den
+Einstellungen eingetragen (und die Kurzbefehle mit einem neuen Capture-Token
+importiert), können die Variablen aus dem Deployment raus.
 
 ### Sync
 
@@ -118,10 +129,10 @@ nicht, Eingänge schreiben nur in ein festes Projekt.
 
 | Weg | So geht's |
 |---|---|
-| iOS-Kurzbefehl | „Notiz ins Cockpit“ im Web-Cockpit unter **Einstellungen → Kurzbefehle** laden und importieren, beim Import den Capture-Token eintragen (heute der Wert von `CAPTURE_TOKEN`). Läuft aus dem Share-Sheet oder fragt den Text ab. Von Hand: `POST <PUBLIC_URL>/capture?source=ios-kurzbefehl` mit dem Text als Body, Header `Authorization: Bearer <CAPTURE_TOKEN>` |
+| iOS-Kurzbefehl | Unter **Einstellungen → API-Tokens** einen Token mit dem Recht **Capture** anlegen, dann „Notiz ins Cockpit“ unter **Einstellungen → Kurzbefehle** laden und importieren und beim Import den Token eintragen. Läuft aus dem Share-Sheet oder fragt den Text ab. Von Hand: `POST <PUBLIC_URL>/capture?source=ios-kurzbefehl` mit dem Text als Body, Header `Authorization: Bearer vct_…` |
 | Sprachmemo | „Sprachmemo ins Cockpit“ ebenso aus den Einstellungen importieren: „Audio aufnehmen“, „Audio transkribieren“, dann wie oben mit `source=sprachmemo`. Transkribiert wird auf dem Gerät, das Cockpit bekommt nur Text. |
-| Funke | Als Relay-URL `<PUBLIC_URL>/funke` und als Relay-Token den `CAPTURE_TOKEN` eintragen. Notizen landen im Capture-Ordner (der Ordner aus der App wird ignoriert), Aufgaben schickt Funke weiter direkt an Zunder. |
-| Mail | Eine Adresse (Alias) anlegen und per Regel in den Ordner `MAIL_MAILBOX` sortieren. Betreff = Titel, `!` im Betreff = Aufgabe. Verarbeitete Mails wandern nach `MAIL_DONE_MAILBOX`. |
+| Funke | Als Relay-URL `<PUBLIC_URL>/funke` und als Relay-Token einen Capture-Token eintragen. Notizen landen im Capture-Ordner (der Ordner aus der App wird ignoriert), Aufgaben schickt Funke weiter direkt an Zunder. |
+| Mail | Unter **Einstellungen → Mail** Fastmail-API-Token und freigegebene Absender eintragen. Eine Adresse (Alias) anlegen und per Regel in den Ordner zum Abholen sortieren (Standard `Vault`). Betreff = Titel, `!` im Betreff = Aufgabe. Verarbeitete Mails wandern in die Ablage (Standard `Archive`). |
 
 `POST /capture` nimmt Klartext oder JSON `{"text", "title"?, "source"?, "id"?}`.
 Mit `id` ist das Anlegen idempotent (dieselbe ID → `200` mit dem Ergebnis von
@@ -151,7 +162,12 @@ importiert nur signierte Kurzbefehle, deshalb danach auf einem Mac
 signierten Dateien landen in `assets/kurzbefehle/`, von dort liefert das Cockpit sie unter `/kurzbefehle/<name>.shortcut` aus. Der Token steht in keiner der
 Dateien, iOS fragt ihn beim Import ab.
 
-Mail-Abruf: Nur Absender aus `MAIL_ALLOWED_SENDERS` werden verarbeitet, alle
+Capture-Tokens (`vct_…` mit dem Recht **Capture**) können nur anlegen, nicht
+suchen oder lesen; Such-Tokens kommen umgekehrt nicht an `/capture`. Ohne
+Capture-Token (und ohne `CAPTURE_TOKEN` aus älteren Deployments) lehnen `/capture`
+und `/funke` jede Anfrage mit `401` ab.
+
+Mail-Abruf: Nur freigegebene Absender (Einstellungen → Mail) werden verarbeitet, alle
 anderen Mails wandern unverarbeitet in den Ablage-Ordner. Ein Eintrag mit
 führendem `@` (z. B. `@rubeen.dev`) gibt jede Adresse dieser Domain frei, aber
 keine Subdomain. Der Absender einer Mail lässt sich fälschen; die Adresse deshalb
@@ -213,12 +229,17 @@ Einrichtung:
    App-Passwort; optional nur bestimmte Kalender). Daneben Zeitzone, Vault-Name
    für „In Obsidian öffnen“ und der Inbox-Ordner.
 
+   Außerdem: Zunder-Zugang, Zunder-Brücke (an/aus, Tag), Mail-Abruf (Fastmail-Token,
+   freigegebene Absender, Ordner, Abstand), Embeddings (Ollama-Adresse, Modell)
+   und unter **API-Tokens** die Tokens für Suche und Capture.
+
 Der Zunder-Zugang aus den Einstellungen gilt für das ganze Cockpit:
 Wochenansicht, `!`-Capture (Kurzbefehl, Mail, Funke), Zunder-Brücke und Graph.
-Ein neuer Token wirkt ohne Neustart; die Brücke ruht ohne Zugang und legt los,
-sobald einer gespeichert ist. Woher der Zugang kommt, zeigen Startlog und
-`vault_stats`. Leere Felder gelten als Standard aus der Umgebung (`COCKPIT_TZ`,
-`OBSIDIAN_VAULT_NAME`, `CAPTURE_FOLDER`, `ZUNDER_URL`/`ZUNDER_TOKEN`).
+Alles auf der Seite wirkt ohne Neustart: Die Brücke ruht ohne Zugang oder wenn sie
+aus ist und legt los, sobald beides passt; Mail-Abruf und Embeddings starten mit
+dem neuen Stand neu. Woher der Zugang kommt, zeigen Startlog und `vault_stats`.
+Leere Felder gelten als Standard, bei älteren Deployments aus der Umgebung (siehe
+[Betrieb](#betrieb)).
 
 Gespeichert wird in `/data/cockpit-settings.json` (nur für den Dienst lesbar).
 Passwörter, Tokens und Kalenderadressen zeigt die Seite nie wieder an; ein leeres
@@ -243,7 +264,11 @@ aus dem Index, Eingabe frei) oder mit einem Klick ins Archiv (der oberste Ordner
 namens `archiv`, auch `40-archiv`). Vertrauliche und ausgeschlossene Ordner der
 Policy zeigt das Cockpit weder an noch nimmt es sie als Ziel. Feuer-Ziel und
 Ersten Zug der Feuer-Notiz bearbeitet man direkt im Wochenblick (✎ neben dem
-Text, ersetzt den ersten Absatz unter der Überschrift). Der **Wochenrückblick**
+Text, ersetzt den ersten Absatz unter der Überschrift). Fehlt die Feuer-Notiz
+einer Woche, legt **Feuer anlegen** sie mit Feuer-Ziel und (optional) Erstem Zug
+an: im Ordner und Feuersturm der letzten Feuer-Notiz, Wochennummer und Dateiname
+weitergezählt, mit leeren Tabellen für Schritte und Flammen. Nach W12 legt das
+Cockpit keine an, dann gehört ein neuer Feuersturm in Obsidian geplant. Der **Wochenrückblick**
 unter `/rueckblick` (in der Navigation, `?woche=` für frühere Wochen) zeigt je
 Bereich, was erledigt war und was geplant war (Phönix-Schritte und in der Woche
 Fälliges), was außerdem erledigt wurde, die Flammen-Zeit der Woche und was offen
@@ -265,7 +290,7 @@ das Web-Cockpit; `/mcp` nimmt weiter ausschließlich Bearer-Tokens.
 Das Cockpit bettet alle eigenen Notizen (ohne Readwise-Importe) abschnittsweise mit
 **bge-m3** ein, einem mehrsprachigen Modell, das lokal in einem eigenen
 Ollama-Container läuft (`ollama` in `docker-compose.example.yml`). Die Vektoren
-liegen in `VECTOR_DB` neben dem Index; neu eingebettet wird nur, was sich geändert
+liegen in `/data/vectors.db` neben dem Index; neu eingebettet wird nur, was sich geändert
 hat. Der erste Lauf über den ganzen Vault dauert auf der CPU eine Weile, den Stand
 zeigt `vault_stats` unter `semantic`. Bis dahin und wenn Ollama ausfällt, sucht
 `vault_search` per Volltext weiter und sagt das im Feld `degraded`.
@@ -290,8 +315,10 @@ zeigt `vault_stats` unter `semantic`. Bis dahin und wenn Ollama ausfällt, sucht
   (eingecheckt, kein Build im Betrieb). Nach einem Versionswechsel in
   `devDependencies`: `npm run vendor`.
 
-Einrichtung: Dienst `ollama` und `EMBED_URL` wie im Compose-Beispiel; das Modell
-lädt das Cockpit beim ersten Lauf selbst. Vertrauliche Notizen werden mit
+Einrichtung: Dienst `ollama` wie im Compose-Beispiel, dann im Web-Cockpit unter
+**Einstellungen → Embeddings** die Adresse `http://ollama:11434` eintragen; das
+Modell lädt das Cockpit beim ersten Lauf selbst. Ein anderes Modell bettet den
+Vault neu ein. Vertrauliche Notizen werden mit
 eingebettet (das Modell läuft lokal), aber wie beim Volltext nur auf ausdrückliche
 Anforderung ausgeliefert.
 

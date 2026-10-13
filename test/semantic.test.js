@@ -294,7 +294,7 @@ test('Graph: Links, semantische Kanten, Aufgaben mit Zunder-Status und Termine d
   // Ohne Embeddings, Zunder und Kalender: Graph aus Links, Hinweise statt Fehler.
   const bare = await createGraph({ index, logger: quiet }).around('journal/2026-10-12.md');
   assert.ok(bare.nodes.some((n) => n.kind === 'task' && n.status === 'open'));
-  assert.ok(bare.problems.some((p) => /EMBED_URL/.test(p)));
+  assert.ok(bare.problems.some((p) => /Embeddings/.test(p)));
   assert.ok(bare.problems.some((p) => /Einstellungen → Kalender/.test(p)));
   s.close();
 });

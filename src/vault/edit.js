@@ -106,6 +106,34 @@ export function createEditor({ vaultPath, index }) {
     },
 
     /**
+     * Legt eine neue Notiz an. Gibt es die Datei schon, bleibt sie unangetastet
+     * und es kommt ein Fehler; Ordner werden wie bei `move` geprüft.
+     */
+    create({ folder, name, content }) {
+      const target = String(folder ?? '').replace(/^\/+|\/+$/g, '');
+      if (!target || target.split('/').some((p) => !p.trim() || p === '.' || p === '..' || p.startsWith('.')) || CTRL_OR_NEWLINE.test(target) || target.includes('\\')) {
+        throw new Error(`„${folder}“ ist kein gültiger Ordner`);
+      }
+      const file = String(name ?? '');
+      if (!/\.md$/i.test(file) || /[\\/]/.test(file) || file.startsWith('.') || CTRL_OR_NEWLINE.test(file)) throw new Error(`„${name}“ ist kein gültiger Dateiname`);
+      const to = `${target}/${file}`;
+      const destination = join(vaultPath, to);
+      let existing = dirname(destination);
+      while (!existsSync(existing)) existing = dirname(existing);
+      const real = realpathSync(existing);
+      if (real !== vaultReal && !real.startsWith(vaultReal + sep)) throw new Error(`„${target}“ zeigt aus dem Vault heraus`);
+      mkdirSync(dirname(destination), { recursive: true });
+      try {
+        writeFileSync(destination, String(content ?? ''), { encoding: 'utf8', flag: 'wx' });
+      } catch (err) {
+        if (err.code === 'EEXIST') throw new Error(`In „${target}“ gibt es schon eine Notiz „${file}“`);
+        throw err;
+      }
+      reindex([to]);
+      return { path: to, changed: true };
+    },
+
+    /**
      * Hakt die `n`-te Checkbox (ab 0, Codeblöcke zählen nicht) ab oder wieder
      * auf. `line` ist der erwartete Zeilentext: Hat sich die Notiz seit dem
      * Anzeigen verschoben, wird nichts geändert.

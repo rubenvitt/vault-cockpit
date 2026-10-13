@@ -69,7 +69,7 @@ const cockpit = {
     return {
       tz: 'Europe/Berlin',
       vaultName: null,
-      week: { id: '2026-W42', year: 2026, week: 42, monday: '2026-10-12', sunday: '2026-10-18', prev: '2026-W41', next: '2026-W43', current: true },
+      week: { id: '2026-W42', year: 2026, week: 42, monday: '2026-10-12', sunday: '2026-10-18', prev: '2026-W41', next: '2026-W43', current: id !== 'vorbei', past: id === 'vorbei' },
       today: '2026-10-14',
       feuer: { ok: true, data: id === 'feuer' ? { path: 'feuer/KW42.md', title: 'KW42', goal: 'Ziel <b>', firstMove: null, alignment: null } : null },
       burning: id === 'brennt' ? { id: 'f9', ref: null, title: 'Deep Work', startedAt: '2026-10-14T07:00:00Z', url: 'https://zunder.test/#/aufgabe/f9' } : null,
@@ -366,6 +366,42 @@ test('Einstellungen: nur angemeldet, Kalender anlegen, Geheimnisse bleiben verbo
     {},
     { calendars },
   );
+});
+
+test('Einstellungen: Brücke, Mail und Embeddings speichern, Mail-Token bleibt verborgen', async () => {
+  await withServer(async ({ call, login, settings, tokens }) => {
+    await login();
+    const page = await (await call('/einstellungen')).text();
+    for (const name of ['bridge.enabled', 'bridge.tag', 'mail.token', 'mail.senders', 'mail.mailbox', 'mail.doneMailbox', 'mail.pollMinutes', 'embed.url', 'embed.model']) {
+      assert.match(page, new RegExp(`name="${name.replace('.', '\\.')}"`), name);
+    }
+    const form = {
+      'bridge.enabled': 'aus', 'bridge.tag': '#todo',
+      'mail.token': 'fm-geheim-42', 'mail.senders': 'r@rubeen.dev, @rubeen.email', 'mail.mailbox': '', 'mail.doneMailbox': '', 'mail.pollMinutes': '15',
+      'embed.url': 'http://ollama:11434', 'embed.model': '',
+    };
+    assert.equal((await call('/einstellungen', { method: 'POST', form })).status, 303);
+    const g = settings.get();
+    assert.deepEqual(g.bridge, { enabled: false, tag: 'todo' });
+    assert.deepEqual([g.mail.token, g.mail.senders, g.mail.mailbox, g.mail.pollMinutes], ['fm-geheim-42', ['r@rubeen.dev', '@rubeen.email'], 'Vault', 15]);
+    assert.equal(g.embed.model, 'bge-m3');
+
+    const again = await (await call('/einstellungen')).text();
+    assert.ok(!again.includes('fm-geheim-42'));
+    assert.match(again, /<option value="aus" selected>/);
+
+    // Token leer lassen behält ihn, „löschen“ entfernt ihn.
+    await call('/einstellungen', { method: 'POST', form: { ...form, 'mail.token': '' } });
+    assert.equal(settings.stored().mail.token, 'fm-geheim-42');
+    await call('/einstellungen', { method: 'POST', form: { ...form, 'mail.token': '', 'mail.clear': '1' } });
+    assert.equal(settings.stored().mail.token, null);
+
+    // Capture-Token anlegen.
+    const created = await call('/einstellungen/tokens', { method: 'POST', form: { name: 'iPhone', scope: 'capture' } });
+    assert.match(await created.text(), /Capture-Token „iPhone“ angelegt/);
+    assert.deepEqual(tokens.list().map((t) => t.scope), ['capture']);
+    assert.equal((await call('/einstellungen/tokens', { method: 'POST', form: { name: 'x', scope: 'admin' } })).status, 400);
+  });
 });
 
 test('Einstellungen: Fehler zeigt die Meldung, fremde Herkunft wird abgewiesen', async () => {
@@ -795,6 +831,11 @@ function fakeNotes() {
       if (target === 'privat/geheim.md') throw new ActionError('Das Ziel gibt es nicht oder das Cockpit darf es nicht verlinken', 404);
       return { path: p, target, title: 'B', changed: target !== 'wiki/c.md' };
     },
+    createFeuer(week, goal, firstMove) {
+      calls.push(['feuer-anlegen', week, goal, firstMove]);
+      if (week === '2026-W42' && goal === 'doppelt') throw new ActionError('Für diese Woche gibt es schon „Feuer W3 - 2026-Q4“', 409);
+      return { path: 'feuer/Feuer W3 - 2026-Q4.md', title: 'Feuer W3 - 2026-Q4', week };
+    },
     toggle(p, n, line, done) {
       calls.push(['toggle', p, n, line, done]);
       return { path: p, line: done ? '- [x] Preise' : '- [ ] Preise' };
@@ -953,6 +994,31 @@ test('Interaktiver Graph: Skripte ausgeliefert, Live-Suche als JSON, Verlinken m
     assert.ok(!html.includes('/aktion/verlinken'));
     assert.match(html, /<script src="\/static\/graph\.js" defer>/);
   });
+});
+
+test('Feuer anlegen: Formular nur ohne Feuer-Notiz und nicht für vergangene Wochen', async () => {
+  const notes = fakeNotes();
+  await withServer(
+    async ({ call, login }) => {
+      await login();
+      const html = await (await call('/')).text();
+      assert.match(html, /<details class="inline-edit feuer-create">[^]*?action="\/aktion\/feuer\/anlegen" class="act">[^]*?name="woche" value="2026-W42"[^]*?<textarea name="ziel"[^>]*required[^]*?<textarea name="zug"/);
+      assert.ok(!(await (await call('/?woche=feuer')).text()).includes('/aktion/feuer/anlegen'), 'Notiz da: kein Anlegen');
+      assert.ok(!(await (await call('/?woche=vorbei')).text()).includes('/aktion/feuer/anlegen'), 'vergangene Woche: kein Anlegen');
+
+      const csrf = csrfFrom(html);
+      const r = await (await call('/aktion/feuer/anlegen', { method: 'POST', form: { woche: '2026-W42', ziel: 'Cockpit fertig', zug: 'Menü zuerst', csrf }, accept: 'application/json' })).json();
+      assert.equal(r.message, 'Feuer W3 - 2026-Q4 angelegt');
+      assert.equal(r.undo, undefined);
+      const twice = await call('/aktion/feuer/anlegen', { method: 'POST', form: { woche: '2026-W42', ziel: 'doppelt', csrf }, accept: 'application/json' });
+      assert.equal(twice.status, 409);
+      assert.deepEqual(notes.calls, [['feuer-anlegen', '2026-W42', 'Cockpit fertig', 'Menü zuerst'], ['feuer-anlegen', '2026-W42', 'doppelt', null]]);
+      const noCsrf = await call('/aktion/feuer/anlegen', { method: 'POST', form: { woche: '2026-W42', ziel: 'x' }, accept: 'application/json' });
+      assert.equal(noCsrf.status, 403);
+    },
+    {},
+    { actions: fakeActions(), notes },
+  );
 });
 
 test('Rückblick: Kennzahlen, Balken als SVG ohne Inline-Styles, Navigation', async () => {

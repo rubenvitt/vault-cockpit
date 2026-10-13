@@ -60,7 +60,8 @@ const HTML_HEADERS = {
  *   ohne bleibt das SVG.
  * - `GET /login` → Pocket ID → `GET /auth/callback` setzt die Sitzung (12 h).
  * - `POST /logout` löscht sie. SameSite=Lax hält fremde Seiten davon ab.
- * - `GET`/`POST /einstellungen` — Kalender, Zunder-Zugang und Anzeige pflegen.
+ * - `GET`/`POST /einstellungen` — Kalender, Zunder-Zugang und -Brücke, Mail-Abruf,
+ *   Embeddings und Anzeige pflegen.
  * - `POST /aktion/status` setzt den Status einer Zunder-Aufgabe (abhaken, in
  *   Arbeit, blockiert, offen, verworfen), `POST /aktion/faellig` verschiebt die
  *   Fälligkeit, `POST /aktion/zuordnen` legt eine Aufgabe aus der Inbox in einen
@@ -73,8 +74,8 @@ const HTML_HEADERS = {
  *   Zunder-Aufgabe). Alle brauchen Sitzung, gleiche Herkunft und das CSRF-Token
  *   der Sitzung. Mit `Accept: application/json` antworten sie mit JSON (für
  *   `/static/cockpit.js`), sonst mit einer Weiterleitung und einer Meldung.
- * - `POST /einstellungen/tokens` legt einen API-Token für `/api/search` an und
- *   zeigt ihn einmal, `POST /einstellungen/tokens/widerrufen` löscht einen.
+ * - `POST /einstellungen/tokens` legt einen API-Token an (Recht `search` für
+ *   `/api/search` oder `capture` für `/capture` und `/funke`) und zeigt ihn einmal, `POST /einstellungen/tokens/widerrufen` löscht einen.
  * - `GET /kurzbefehle/<slug>.shortcut` liefert die signierten iOS-Kurzbefehle
  *   (verlinkt in den Einstellungen).
  *
@@ -305,6 +306,11 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
                 if (r.changed) logger.info?.(`Cockpit: ${r.path} → [[${r.target}]] (${session.sub})`);
                 return { message: r.changed ? `Verlinkt: ${r.title}` : `Schon verlinkt: ${r.title}`, path: r.path, target: r.target };
               },
+              async '/aktion/feuer/anlegen'(form, session) {
+                const r = notes.createFeuer(form.get('woche'), form.get('ziel'), form.get('zug'));
+                logger.info?.(`Cockpit: ${r.path} angelegt (${session.sub})`);
+                return { message: `${r.title} angelegt`, path: r.path };
+              },
               async '/aktion/notiz/checkbox'(form) {
                 const done = form.get('erledigt') === '1';
                 const r = notes.toggle(form.get('pfad'), form.get('n'), form.get('line'), done);
@@ -377,7 +383,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       tokens: tokens?.list() ?? null,
       created,
       shortcuts,
-      captureEnabled,
+      captureEnabled: typeof captureEnabled === 'function' ? captureEnabled() : captureEnabled,
       tz: settings.get().tz,
       user: session.name ?? session.sub,
     });
@@ -386,7 +392,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
 
   /**
    * Formular → vollständiger Einstellungsstand. Leere Geheimnisfelder
-   * (Kalenderadresse, Passwort, Token) behalten den gespeicherten Wert.
+   * (Kalenderadresse, Passwort, Tokens) behalten den gespeicherten Wert.
    */
   function fromForm(form) {
     const stored = settings.stored();
@@ -412,11 +418,22 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       });
     }
     const clear = Boolean(form.get('zunder.clear'));
+    const choice = (k) => ({ an: true, aus: false })[field(k)] ?? null;
+    const list = (k) => field(k).split(/[,\s]+/);
     return {
       tz: field('tz'),
       vaultName: field('vaultName'),
       inboxFolder: field('inboxFolder'),
       zunder: clear ? { url: null, token: null } : { url: field('zunder.url'), token: field('zunder.token') || stored.zunder.token },
+      bridge: { enabled: choice('bridge.enabled'), tag: field('bridge.tag') },
+      mail: {
+        token: form.get('mail.clear') ? null : field('mail.token') || stored.mail.token,
+        senders: list('mail.senders'),
+        mailbox: field('mail.mailbox'),
+        doneMailbox: field('mail.doneMailbox'),
+        pollMinutes: field('mail.pollMinutes'),
+      },
+      embed: { url: field('embed.url'), model: field('embed.model') },
       calendars: calendarsIn,
       hiddenEvents: form.has('hiddenEvents') ? field('hiddenEvents').split(',') : stored.hiddenEvents,
     };
@@ -458,7 +475,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     if (!form) return;
     let created;
     try {
-      created = tokens.create(form.get('name'));
+      created = tokens.create(form.get('name'), form.get('scope') || 'search');
     } catch (err) {
       if (err instanceof SettingsError) return settingsPage(req, res, session, { status: 400, error: err.message });
       throw err;

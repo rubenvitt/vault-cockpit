@@ -82,7 +82,8 @@ test('API-Tokens: nur der Hash landet in der Datei, Grenzen werden geprüft', ()
     assert.ok(!text.includes(created.token));
     assert.equal(statSync(file).mode & 0o777, 0o600);
     const [saved] = JSON.parse(text);
-    assert.deepEqual(Object.keys(saved).sort(), ['createdAt', 'hash', 'id', 'name']);
+    assert.deepEqual(Object.keys(saved).sort(), ['createdAt', 'hash', 'id', 'name', 'scope']);
+    assert.equal(saved.scope, 'search');
     assert.equal(saved.name, 'Raycast');
 
     const reloaded = createTokenStore({ file, logger: quiet });
@@ -117,7 +118,7 @@ test('/api/search liefert das Ergebnis der hybriden Suche, nur eigene Notizen', 
     assert.equal(res.headers.get('cache-control'), 'no-store');
     const body = await res.json();
     assert.deepEqual(Object.keys(body).sort(), ['degraded', 'hasMore', 'results', 'total']);
-    assert.match(body.degraded, /EMBED_URL/);
+    assert.match(body.degraded, /Embeddings/);
     const paths = body.results.map((r) => r.path);
     assert.ok(paths.includes('wiki/hund.md'));
     assert.ok(!paths.some((p) => p.startsWith('privat/') || p.startsWith('readwise/')));
@@ -149,4 +150,40 @@ test('/api/search begrenzt limit auf 50', async () => {
     assert.equal(rest.results.length, 10);
     assert.equal(rest.hasMore, false);
   }, { searchHttp: createSearchHttp({ tokens, index, semantic }) });
+});
+
+test('API-Tokens: Rechte trennen Suche und Capture, alte Tokens gelten als Suche', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'vault-tokens-'));
+  try {
+    const file = join(dir, 'api-tokens.json');
+    const store = createTokenStore({ file, logger: quiet });
+    const search = store.create('Raycast');
+    const cap = store.create('iPhone', 'capture');
+    assert.equal(cap.scope, 'capture');
+    assert.ok(store.verify(search.token, 'search'));
+    assert.ok(!store.verify(search.token, 'capture'));
+    assert.ok(store.verify(cap.token, 'capture'));
+    assert.ok(!store.verify(cap.token), 'ohne Angabe nur Suche');
+    assert.ok(store.has('capture'));
+    assert.throws(() => store.create('x', 'admin'), /Recht/);
+
+    // Datei aus der Zeit vor den Rechten: Eintrag ohne scope.
+    const legacy = JSON.parse(readFileSync(file, 'utf8')).map(({ scope, ...rest }) => rest);
+    writeFileSync(file, JSON.stringify(legacy));
+    const reloaded = createTokenStore({ file, logger: quiet });
+    assert.deepEqual(reloaded.list().map((t) => t.scope), ['search', 'search']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('/api/search lehnt Capture-Tokens ab', async () => {
+  const cap = tokens.create('Kurzbefehl', 'capture');
+  try {
+    await withServer(async (call) => {
+      assert.equal((await call('/api/search?q=Hund', { auth: `Bearer ${cap.token}` })).status, 401);
+    });
+  } finally {
+    tokens.revoke(cap.id);
+  }
 });
