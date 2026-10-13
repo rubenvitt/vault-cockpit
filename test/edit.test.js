@@ -195,6 +195,24 @@ test('move: Zielordner per Symlink außerhalb des Vaults wird abgelehnt', () => 
   assert.match(read('projects/Alpha.md'), /Erster Absatz/);
 });
 
+test('create: legt eine neue Notiz an, überschreibt nie und bleibt im Vault', () => {
+  const r = editor.create({ folder: 'feuer/2026', name: 'Feuer W3.md', content: '# Feuer W3\n' });
+  assert.deepEqual(r, { path: 'feuer/2026/Feuer W3.md', changed: true });
+  assert.equal(read('feuer/2026/Feuer W3.md'), '# Feuer W3\n');
+  assert.equal(idx.getNote('feuer/2026/Feuer W3.md').title, 'Feuer W3');
+
+  assert.throws(() => editor.create({ folder: 'projects', name: 'Alpha.md', content: 'weg' }), /schon eine Notiz/);
+  assert.match(read('projects/Alpha.md'), /Erster Absatz/);
+  for (const bad of ['', '../raus', '.obsidian']) {
+    assert.throws(() => editor.create({ folder: bad, name: 'x.md', content: '' }), /kein gültiger Ordner/);
+  }
+  for (const bad of ['x.txt', 'a/b.md', '.x.md', '']) {
+    assert.throws(() => editor.create({ folder: 'projects', name: bad, content: '' }), /kein gültiger Dateiname/);
+  }
+  symlinkSync(outside, join(root, 'raus'));
+  assert.throws(() => editor.create({ folder: 'raus/neu', name: 'x.md', content: '' }), /aus dem Vault heraus/);
+});
+
 test('toggleTask: n-te Checkbox ab- und aufhaken, nur wenn die Zeile noch passt', () => {
   put('projects/Liste.md', '# Liste\n\n```\n- [ ] im Code\n```\n- [ ] eins\n  - [x] zwei\n');
   idx.refresh('projects/Liste.md');

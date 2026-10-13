@@ -257,7 +257,7 @@ export function createCockpit({ index, settings, zunderFor, calendars = null, no
       return {
         tz,
         vaultName: config.vaultName,
-        week: { id: week.id, year: week.year, week: week.week, monday: week.monday, sunday: week.sunday, prev: week.prev, next: week.next, current },
+        week: { id: week.id, year: week.year, week: week.week, monday: week.monday, sunday: week.sunday, prev: week.prev, next: week.next, current, past: week.sunday < today },
         today,
         feuer: section(feuer, feuer.data),
         burning: live,

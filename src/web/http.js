@@ -291,6 +291,11 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
                 const undo = r.changed && r.previous ? { action: '/aktion/feuer', fields: { pfad: r.path, feld: form.get('feld'), text: r.previous } } : null;
                 return { message: r.changed ? `${r.heading} gespeichert` : `${r.heading} unverändert`, path: r.path, undo };
               },
+              async '/aktion/feuer/anlegen'(form, session) {
+                const r = notes.createFeuer(form.get('woche'), form.get('ziel'), form.get('zug'));
+                logger.info?.(`Cockpit: ${r.path} angelegt (${session.sub})`);
+                return { message: `${r.title} angelegt`, path: r.path };
+              },
               async '/aktion/notiz/checkbox'(form) {
                 const done = form.get('erledigt') === '1';
                 const r = notes.toggle(form.get('pfad'), form.get('n'), form.get('line'), done);

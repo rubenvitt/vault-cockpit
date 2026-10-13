@@ -1,6 +1,7 @@
 import { parseNote } from '../vault/markdown.js';
 import { ActionError } from './actions.js';
-import { FEUER_TYPE } from './feuer.js';
+import { FEUER_TYPE, findFeuer, planFeuer } from './feuer.js';
+import { describeWeek, parseWeekId } from './week.js';
 
 /** Abschnitte der Feuer-Notiz, die das Cockpit bearbeitet. */
 export const FEUER_FIELDS = { ziel: 'Feuer-Ziel', zug: 'Erster Zug' };
@@ -119,6 +120,23 @@ export function createNoteDesk({ index, editor, policy, settings }) {
       if ((row.frontmatter?.type ?? row.type) !== FEUER_TYPE) throw new ActionError('Das ist keine Feuer-Notiz');
       if (!String(text ?? '').trim()) throw new ActionError(`${heading} darf nicht leer sein`);
       return { ...edit(() => editor.setSectionParagraph({ path, heading, text: String(text).slice(0, 2000) })), heading };
+    },
+
+    /**
+     * Feuer-Notiz einer Woche (`2026-W42`) anlegen, wenn sie fehlt: mit
+     * Feuer-Ziel und optional Erstem Zug, nach dem Muster der letzten.
+     */
+    createFeuer(weekId, goal, firstMove = '') {
+      const parsed = parseWeekId(weekId);
+      if (!parsed) throw new ActionError(`„${weekId ?? ''}“ ist keine Kalenderwoche wie 2026-W42`);
+      if (!String(goal ?? '').trim()) throw new ActionError('Feuer-Ziel darf nicht leer sein');
+      const week = describeWeek(parsed, settings.get().tz);
+      const existing = findFeuer(index, week);
+      if (existing) throw new ActionError(`Für diese Woche gibt es schon „${existing.title}“`, 409);
+      const plan = edit(() => planFeuer(index, week, { goal: String(goal).slice(0, 2000), firstMove: String(firstMove ?? '').slice(0, 2000) }));
+      const folder = allowedFolder(plan.folder);
+      const r = edit(() => editor.create({ folder, name: plan.name, content: plan.content }));
+      return { ...r, title: plan.title, week: week.id };
     },
 
     toggle(path, n, line, done) {
