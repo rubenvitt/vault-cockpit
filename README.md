@@ -41,7 +41,7 @@ Das Image baut GitHub Actions bei jedem Push auf `main`:
 | `PUBLIC_URL` | öffentliche Adresse, Pflicht |
 | `OIDC_ISSUER` | Pocket-ID-Issuer, Pflicht |
 | `POLICY_FILE` | Pfad zur Policy (vertrauliche Ordner, Ausschlüsse) |
-| `ALLOWED_SUBJECTS` | optionale Einschränkung auf `sub`-Werte |
+| `ALLOWED_SUBJECTS` | Pocket-ID-`sub`-Werte mit Zugriff, Pflicht |
 | `VAULT_PATH`, `INDEX_DB`, `CAPTURE_FOLDER` | Pfade, Standard `/vault`, `/data/index.db`, `inbox` |
 | `REINDEX_INTERVAL_MIN` | Abstand der Index-Neuaufbauten, Standard 15 |
 

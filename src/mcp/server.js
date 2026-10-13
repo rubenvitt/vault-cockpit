@@ -22,6 +22,7 @@ function readHeader(headers, name) {
 const READ_ONLY = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
 const EDITS = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false };
 
+const READ_SCOPE_MISSING = 'Für diese Aktion fehlt die Berechtigung "vault:read". Der Connector muss in Claude neu verbunden werden.';
 const EDIT_SCOPE_MISSING = 'Für diese Aktion fehlt die Berechtigung "vault:edit". Der Connector muss in Claude neu verbunden werden.';
 
 export function createVaultMcpHandler({
@@ -39,6 +40,9 @@ export function createVaultMcpHandler({
     const principal = auth.startsWith('Bearer ') ? verifyToken(auth.slice(7)) : null;
     const scopes = principal?.scopes ?? [];
     const server = new McpServer({ name: 'vault-cockpit', version: '1.0.0' });
+
+    /** Gemeinsamer Rahmen der Lesewerkzeuge: ohne vault:read kein Zugriff. */
+    const read = (run) => async (args) => (scopes.includes('vault:read') ? run(args) : fail(READ_SCOPE_MISSING));
 
     server.registerTool(
       'vault_search',
@@ -61,7 +65,7 @@ export function createVaultMcpHandler({
         },
         annotations: READ_ONLY,
       },
-      async (args) => {
+      read(async (args) => {
         const res = index.search(args.query, {
           include: args.include_readwise ? ['core', 'readwise'] : ['core'],
           includeSensitive: args.include_sensitive === true,
@@ -84,7 +88,7 @@ export function createVaultMcpHandler({
             snippet: r.snippet,
           })),
         });
-      },
+      }),
     );
 
     server.registerTool(
@@ -101,7 +105,7 @@ export function createVaultMcpHandler({
         },
         annotations: READ_ONLY,
       },
-      async (args) => {
+      read(async (args) => {
         const note = readNote(index, args.path, {
           offset: args.offset ?? 0,
           allowSensitive: args.allow_sensitive === true,
@@ -113,7 +117,7 @@ export function createVaultMcpHandler({
           );
         }
         return ok(note);
-      },
+      }),
     );
 
     server.registerTool(
@@ -129,7 +133,7 @@ export function createVaultMcpHandler({
         },
         annotations: READ_ONLY,
       },
-      async (args) => ok({ folder: args.folder ?? '', entries: index.listFolder(args.folder ?? '', { limit: args.limit ?? 100 }) }),
+      read(async (args) => ok({ folder: args.folder ?? '', entries: index.listFolder(args.folder ?? '', { limit: args.limit ?? 100 }) })),
     );
 
     server.registerTool(
@@ -142,10 +146,10 @@ export function createVaultMcpHandler({
         inputSchema: { path: z.string().describe('Pfad der Notiz relativ zur Vault-Wurzel.') },
         annotations: READ_ONLY,
       },
-      async (args) => {
+      read(async (args) => {
         if (!index.getNote(args.path)) return fail(`Notiz "${args.path}" wurde nicht gefunden.`);
         return ok({ path: args.path, backlinks: index.backlinks(args.path), outgoing: index.outgoingLinks(args.path) });
-      },
+      }),
     );
 
     server.registerTool(
@@ -156,7 +160,7 @@ export function createVaultMcpHandler({
         inputSchema: {},
         annotations: READ_ONLY,
       },
-      async () => ok(index.stats()),
+      read(async () => ok(index.stats())),
     );
 
     server.registerTool(

@@ -20,6 +20,9 @@ const VAULT_PATH = process.env.VAULT_PATH ?? '/vault';
 const INDEX_DB = process.env.INDEX_DB ?? '/data/index.db';
 const PORT = Number(process.env.PORT ?? 3000);
 const POLICY = loadPolicy(process.env.POLICY_FILE);
+// Pflicht, damit ein leerer Wert nicht jeden Account des Authorization Servers durchlässt.
+const ALLOWED_SUBJECTS = required('ALLOWED_SUBJECTS').split(',').map((s) => s.trim()).filter(Boolean);
+if (!ALLOWED_SUBJECTS.length) throw new Error('ALLOWED_SUBJECTS enthält kein Subject');
 
 const config = {
   publicUrl: PUBLIC_URL,
@@ -44,7 +47,7 @@ const verifier = createTokenVerifier({
   issuer: ISSUER,
   resource: config.resource,
   loadJwks,
-  allowedSubjects: (process.env.ALLOWED_SUBJECTS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
+  allowedSubjects: ALLOWED_SUBJECTS,
 });
 
 const principals = createPrincipalCache();

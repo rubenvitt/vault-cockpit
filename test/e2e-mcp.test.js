@@ -35,6 +35,7 @@ before(async () => {
   readToken = issue(['vault:read'], 'token-nur-lesen');
   captureToken = issue(['vault:read', 'vault:capture'], 'token-mit-capture');
   editToken = issue(['vault:read', 'vault:edit'], 'token-mit-edit');
+  issue(['vault:capture'], 'token-nur-capture');
 
   const mcpHttp = createVaultMcpHandler({
     index,
@@ -133,6 +134,21 @@ test('vault_read meldet einen unbekannten Pfad verständlich', async () => {
   const r = await rpc('tools/call', { name: 'vault_read', arguments: { path: 'gibt/es/nicht.md' } });
   assert.equal(r.body.result.isError, true);
   assert.match(r.body.result.content[0].text, /nicht gefunden/);
+});
+
+test('Lesewerkzeuge werden ohne den Scope vault:read verweigert', async () => {
+  const calls = [
+    ['vault_search', { query: 'Vertrag' }],
+    ['vault_read', { path: 'wiki/concepts/contract-first.md' }],
+    ['vault_list', {}],
+    ['vault_links', { path: 'wiki/concepts/contract-first.md' }],
+    ['vault_stats', {}],
+  ];
+  for (const [name, args] of calls) {
+    const r = await rpc('tools/call', { name, arguments: args }, 'token-nur-capture');
+    assert.equal(r.body.result.isError, true, name);
+    assert.match(r.body.result.content[0].text, /vault:read/, name);
+  }
 });
 
 test('vault_capture wird ohne den Scope vault:capture verweigert', async () => {
