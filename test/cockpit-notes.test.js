@@ -36,6 +36,49 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
+const feuerNote = (woche, zeitraum, status = 'abgeschlossen') =>
+  `---\ntype: 1-wochen-feuer\nfeuersturm: "[[Feuersturm 2026-Q4]]"\nwoche: ${woche}\nzeitraum: "${zeitraum}"\nstatus: ${status}\n---\n# Feuer ${woche}\n\n## Feuer-Ziel\n\nAlt\n`;
+
+function withFeuer() {
+  put('20-bereiche/Phönix/feuer/Feuer W1 - 2026-Q4.md', feuerNote('W1', '28.09.2026 – 04.10.2026'));
+  put('20-bereiche/Phönix/feuer/Feuer W2 - 2026-Q4.md', feuerNote('W2', '05.10.2026 – 11.10.2026'));
+  idx.refresh('20-bereiche/Phönix/feuer/Feuer W1 - 2026-Q4.md');
+  idx.refresh('20-bereiche/Phönix/feuer/Feuer W2 - 2026-Q4.md');
+}
+
+test('createFeuer: legt die Notiz nach dem Muster der letzten an, danach bearbeitbar', () => {
+  withFeuer();
+  const r = desk.createFeuer('2026-W42', 'Cockpit fertig\nbauen', 'Menü zuerst');
+  assert.equal(r.path, '20-bereiche/Phönix/feuer/Feuer W3 - 2026-Q4.md');
+  assert.equal(r.title, 'Feuer W3 - 2026-Q4');
+  const text = read(r.path);
+  assert.match(text, /^---\ntype: 1-wochen-feuer\nfeuersturm: "\[\[Feuersturm 2026-Q4\]\]"\nwoche: W3\nzeitraum: "12\.10\.2026 – 18\.10\.2026"\nstatus: aktiv\n/);
+  assert.match(text, /## Feuer-Ziel\n\nCockpit fertig bauen\n\n## Erster Zug\n\nMenü zuerst\n\n## Tägliche Schritte/);
+  assert.match(text, /\| Mo 12\.10\. \| – \| 🔲 \|[^]*\| So 18\.10\. \| – \| 🔲 \|/);
+  assert.match(text, /## Flammen[^]*## Notizen[^]*## Daily Notes/);
+
+  // Steht sofort im Index: setFeuer findet sie, ein zweites Anlegen nicht.
+  desk.setFeuer(r.path, 'zug', 'Anders');
+  assert.match(read(r.path), /## Erster Zug\n\nAnders\n/);
+  assert.throws(() => desk.createFeuer('2026-W42', 'nochmal'), (err) => err.status === 409 && /schon/.test(err.message));
+});
+
+test('createFeuer: Wochen weiterzählen, ohne Ersten Zug, Grenzen', () => {
+  withFeuer();
+  // Zwei Wochen nach W2 → W4, Erster Zug bleibt leer.
+  const r = desk.createFeuer('2026-W43', 'Ziel');
+  assert.equal(r.path, '20-bereiche/Phönix/feuer/Feuer W4 - 2026-Q4.md');
+  assert.match(read(r.path), /## Erster Zug\n\n## Tägliche Schritte/);
+  assert.throws(() => desk.createFeuer('2026-W42', ' '), /Feuer-Ziel darf nicht leer/);
+  assert.throws(() => desk.createFeuer('KW42', 'x'), /keine Kalenderwoche/);
+  // Nach W12 ist der Feuersturm vorbei.
+  assert.throws(() => desk.createFeuer('2027-W01', 'x'), /W15[^]*nächsten Feuersturm/);
+});
+
+test('createFeuer: ohne frühere Feuer-Notiz gibt es kein Muster', () => {
+  assert.throws(() => desk.createFeuer('2026-W42', 'x'), /keine Feuer-Notiz, nach deren Muster/);
+});
+
 test('get: eigene Notiz mit Tags und Inbox-Kennzeichen; vertraulich und ausgeschlossen bleiben unsichtbar', () => {
   const n = desk.get('00-inbox/Idee.md');
   assert.equal(n.title, 'Idee');
