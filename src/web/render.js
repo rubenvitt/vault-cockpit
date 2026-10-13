@@ -1,4 +1,5 @@
 import { localTime, zonedParts } from '../cockpit/week.js';
+import { DEFAULT_HIDDEN_EVENTS } from '../cockpit/settings.js';
 
 /**
  * HTML der Wochenansicht. Serverseitig gerendert; alles funktioniert über Links
@@ -398,6 +399,7 @@ ${error ? `<p class="problem">${esc(error)}</p>` : ''}
   <p class="meta">iCal-Abo: die geheime .ics-Adresse eines Kalenders, wie Kalender-Apps sie zum Teilen anbieten. CalDAV: das Kalender-Home oder ein einzelner Kalender, mit Benutzer und App-Passwort.</p>
   ${rows}
   ${calendarRow(null, stored.calendars.length)}
+  <label><span>Ausgeblendete Termine <span class="hint">Titel, durch Komma getrennt; leer = alle zeigen</span></span><input name="hiddenEvents" value="${esc((stored.hiddenEvents ?? DEFAULT_HIDDEN_EVENTS).join(', '))}"></label>
 </section>
 <section>
   <h2>Zunder</h2>
