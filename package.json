@@ -9,10 +9,17 @@
   "scripts": {
     "test": "node --test \"test/**/*.test.js\"",
     "start": "node src/main.js",
-    "reindex": "node src/cli/reindex.js"
+    "reindex": "node src/cli/reindex.js",
+    "vendor": "esbuild scripts/graph-lib.js --bundle --minify --format=iife --global-name=GraphLib --legal-comments=eof \"--banner:js=/*! sigma 3.0.3, graphology 0.26.0, graphology-layout-forceatlas2 0.10.1 (alle MIT), gebündelt mit npm run vendor */\" --target=es2020 --outfile=src/web/static/vendor/graph-lib.js"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",
     "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12",
+    "graphology": "0.26.0",
+    "graphology-layout-forceatlas2": "0.10.1",
+    "sigma": "3.0.3"
   }
 }

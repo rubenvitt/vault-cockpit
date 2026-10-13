@@ -279,8 +279,16 @@ zeigt `vault_stats` unter `semantic`. Bis dahin und wenn Ollama ausfällt, sucht
 - **Graph** (`vault_graph`, Seite `<PUBLIC_URL>/graph`): Wikilinks, semantische Kanten
   („ähnlich, aber nicht verlinkt“, gestrichelt), Zunder-Aufgaben aus Links in der
   Notiz (Status aus Zunder) und bei Tagesnotizen die Termine des Tages. Die Seite
-  `/graph` ist zugleich die Suche des Web-Cockpits; ein Klick auf eine Notiz
-  zentriert den Graphen neu. Als JSON unter `/api/graph?pfad=…`.
+  `/graph` ist zugleich die Suche des Web-Cockpits, mit Treffern beim Tippen
+  (`/api/suche?q=…`). Im Browser ist der Graph interaktiv (sigma.js mit
+  ForceAtlas2-Physik): zoomen, Knoten ziehen, Klick klappt die Nachbarn einer
+  Notiz auf, Doppelklick macht sie zur Mitte, Filter nach Art, und „Verlinken“
+  hängt `- [[Ziel]]` an eine ähnliche Notiz an. Ohne JavaScript bleibt das
+  SVG-Bild mit Links. Als JSON unter `/api/graph?pfad=…`.
+
+  Die Graph-Bibliothek liegt gebündelt unter `src/web/static/vendor/graph-lib.js`
+  (eingecheckt, kein Build im Betrieb). Nach einem Versionswechsel in
+  `devDependencies`: `npm run vendor`.
 
 Einrichtung: Dienst `ollama` und `EMBED_URL` wie im Compose-Beispiel; das Modell
 lädt das Cockpit beim ersten Lauf selbst. Vertrauliche Notizen werden mit
