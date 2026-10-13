@@ -17,6 +17,16 @@ export function createIndexManager({ vaultPath, dbPath, policy = DEFAULT_POLICY,
   let builtAt = 0;
   let changedAt = 0;
   let timer = null;
+  const listeners = new Set();
+  const notify = (change) => {
+    for (const fn of listeners) {
+      try {
+        fn(change);
+      } catch (err) {
+        logger.warn?.(`Index-Beobachter fehlgeschlagen: ${err.message}`);
+      }
+    }
+  };
 
   function rebuild() {
     const started = Date.now();
@@ -32,6 +42,7 @@ export function createIndexManager({ vaultPath, dbPath, policy = DEFAULT_POLICY,
       }
     }
     logger.info?.(`Index neu aufgebaut: ${count} Notizen in ${((builtAt - started) / 1000).toFixed(1)} s`);
+    notify({ full: true, paths: [] });
     return count;
   }
 
@@ -48,6 +59,7 @@ export function createIndexManager({ vaultPath, dbPath, policy = DEFAULT_POLICY,
     }
     if (presenceChanged) current.relinkAll();
     changedAt = Date.now();
+    notify({ full: false, paths: [...new Set(paths)] });
   }
 
   rebuild();
@@ -68,6 +80,11 @@ export function createIndexManager({ vaultPath, dbPath, policy = DEFAULT_POLICY,
     applyChanges,
     lastBuiltAt: () => builtAt,
     lastChangedAt: () => changedAt,
+    /** Beobachter für Änderungen am Index: `{ full, paths }`. Liefert eine Abmeldung. */
+    onChange(fn) {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
+    },
     stop() {
       if (timer) clearInterval(timer);
       current?.close();
@@ -83,5 +100,8 @@ export function createIndexManager({ vaultPath, dbPath, policy = DEFAULT_POLICY,
     pathsWithTag: (...a) => current.pathsWithTag(...a),
     notesOfType: (...a) => current.notesOfType(...a),
     refresh: (...a) => current.refresh(...a),
+    filterPaths: (...a) => current.filterPaths(...a),
+    embeddablePaths: (...a) => current.embeddablePaths(...a),
+    describe: (...a) => current.describe(...a),
   };
 }

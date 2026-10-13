@@ -81,7 +81,7 @@ Der Service liefert nur Werkzeuge und Zustand. Intelligenz kommt von außen per 
 1. Headless-Sync als Sidecar mit Adapter (umgesetzt: `sync/`, `src/sync/`), Host-Unit ablösen, Deployment vom alten Vault-MCP übernehmen
 2. Capture mit Zunder-Weiterleitung (umgesetzt: `src/capture/`, Endpunkte `/capture` und `/funke`, Mail über JMAP, Zunder-Brücke)
 3. Cockpit-Web-UI (umgesetzt: `src/web/`, `src/cockpit/`, Wochenansicht unter `/` mit OIDC-Login, Termine per CalDAV, Big Rocks aus Zunder je Bereich)
-4. Graph + semantische Suche
+4. Graph + semantische Suche (umgesetzt: `src/semantic/`, `src/graph/`, Embeddings mit bge-m3 über einen Ollama-Sidecar, hybride `vault_search`, `vault_similar`, `vault_graph`, Seite `/graph`)
 5. Eigener Sync (eigenes Projekt: Konflikte, mobile Clients, E2E)
 
 Obsidian selbst zu ersetzen ist kein Ziel — Editor und Apps sind der teure Teil.
@@ -95,7 +95,13 @@ Obsidian selbst zu ersetzen ist kein Ziel — Editor und Apps sind der teure Tei
 - **Timing-Anreicherung:** Zunder misst Deep-Work-Blöcke bereits mit Timing — Daten dort
   abholen, nicht doppelt erfassen.
 - **Semantische Suche und Graph:** Es gibt bereits eine Hybrid-Suche mit Graph in den
-  Vault-Werkzeugen. Vor Schritt 4 klären, ob das Cockpit sie nutzt oder ablöst — kein
-  zweiter paralleler Index.
+  Vault-Werkzeugen (`mycel.py` in vault-skills). Geklärt am 13.10.2026: `mycel.py` hat
+  keinen eigenen Index, es rechnet BM25 pro Aufruf über `wiki/` neu und leiht sich die
+  Vektoren von Smart Connections (`.smart-env/`, bge-micro-v2, nur ein Teil der Seiten,
+  per Obsidian Sync nicht auf dem Server). Entscheidung (vorgeschlagen, bis Ruben anders
+  entscheidet): **Das Cockpit wird der eine Index.** Es bettet den ganzen Vault mit
+  bge-m3 ein und bietet dieselbe Fusion (Volltext + Embeddings + Graph per RRF).
+  `mycel.py` behält Lebenszyklus, Lint und Supersession und holt Vektoren bzw. die
+  Suche künftig vom Cockpit statt aus `.smart-env` (Nachzug in vault-skills).
 - **Zeit:** Nebenher-Projekt, konkurriert mit der Zunder-Einführung.
 - **CI-Minuten:** Repo ist privat; Workflows sparsam halten (Image nur auf `main`).
