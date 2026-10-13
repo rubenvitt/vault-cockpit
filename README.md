@@ -10,6 +10,8 @@ Konnektoren, Web-UI) — siehe [docs/roadmap.md](docs/roadmap.md).
 
 ## Was er kann
 
+Alle Lesewerkzeuge verlangen den Scope `vault:read`.
+
 | Werkzeug | Zweck |
 |---|---|
 | `vault_search` | Volltextsuche (SQLite FTS5) mit Filtern auf Tag, Ordner und Frontmatter-Typ |
@@ -32,11 +34,11 @@ Das Image baut GitHub Actions bei jedem Push auf `main`:
 2. In Pocket ID unter *Allowed metadata document URLs*
    `https://claude.ai/oauth/mcp-oauth-client-metadata` freischalten und eine API
    mit der Resource `<PUBLIC_URL>/mcp` anlegen. An der API CIMD-Clients zulassen
-   und die Berechtigungen `vault:read`, `vault:capture` und `vault:edit` anlegen,
-   jede mit Freigabe für CIMD-Clients. Fehlt eine davon, lehnt Pocket ID das
-   Verbinden mit `invalid_scope` ab, weil Claude alle drei anfordert. Ein
-   bestehender Connector behält die Scopes seiner ersten Anmeldung und muss nach
-   einer Änderung in Claude neu verbunden werden.
+   und die Berechtigungen `vault:read` (alle Lesewerkzeuge), `vault:capture` und
+   `vault:edit` anlegen, jede mit Freigabe für CIMD-Clients. Fehlt eine davon,
+   lehnt Pocket ID das Verbinden mit `invalid_scope` ab, weil Claude alle drei
+   anfordert. Ein bestehender Connector behält die Scopes seiner ersten Anmeldung
+   und muss nach einer Änderung in Claude neu verbunden werden.
 3. `docker compose up -d`, dann in Claude einen Connector auf `<PUBLIC_URL>/mcp`.
 
 | Variable | Bedeutung |
