@@ -1,4 +1,5 @@
 import { esc } from './render.js';
+import { head, appHeader } from './layout.js';
 
 /**
  * Graph- und Suchseite des Web-Cockpits, serverseitig als SVG gerendert. Wie
@@ -122,21 +123,13 @@ function lists(graph, tz) {
 function page({ title, query = '', body, user }) {
   return `<!doctype html>
 <html lang="de">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(title)} · Cockpit</title>
-<link rel="stylesheet" href="/static/cockpit.css">
-</head>
-<body>
-<header>
-  <div><h1>${esc(title)}</h1></div>
-  <nav>
-    <a href="/">Woche</a>
-    <form method="get" action="/graph" class="search"><input type="search" name="q" value="${esc(query)}" placeholder="Vault durchsuchen" aria-label="Vault durchsuchen"><button type="submit">Suchen</button></form>
-    <form method="post" action="/logout"><button type="submit" title="${esc(user ?? '')}">Abmelden</button></form>
-  </nav>
-</header>
+${head(title)}
+<body class="page-graph">
+${appHeader({ current: 'graph', user })}
+<div class="page-head">
+  <h1>${esc(title)}</h1>
+  <form method="get" action="/graph" class="search" role="search"><input type="search" name="q" value="${esc(query)}" placeholder="Vault durchsuchen" aria-label="Vault durchsuchen" enterkeyhint="search"><button type="submit" class="btn">Suchen</button></form>
+</div>
 <main>
 ${body}
 </main>
@@ -208,7 +201,4 @@ export const GRAPH_CSS = `
 .results li { padding: 8px 0; border-top: 1px solid var(--line); }
 .results li:first-child { border-top: 0; }
 .snippet { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
-nav .search { display: flex; gap: 6px; }
-nav .search input { font: inherit; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); min-width: 220px; }
-nav .search button { color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; }
 `;

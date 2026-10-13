@@ -1,5 +1,6 @@
 import { esc, formHead, flashToast, obsidianLink } from './render.js';
 import { renderMarkdown } from './markdown-render.js';
+import { head, appHeader } from './layout.js';
 
 /**
  * Notizseite: Vorschau links, Verarbeiten rechts (auf dem iPhone darunter).
@@ -41,21 +42,13 @@ export function renderNote(note, { user = null, write = null, back = '/', flash 
     : '';
   return `<!doctype html>
 <html lang="de">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(note.title)} · Cockpit</title>
-<link rel="stylesheet" href="/static/cockpit.css">
-${write ? '<script src="/static/cockpit.js" defer></script>' : ''}
-</head>
-<body>
-<header>
+${head(note.title, { script: Boolean(write) })}
+<body class="page-note">
+${appHeader({ user })}
+<div class="page-head">
   <div><h1>${esc(note.title)}</h1><p class="meta">${esc(note.path)}${obsidian ? ` · <a href="${esc(obsidian)}">In Obsidian öffnen</a>` : ''}</p></div>
-  <nav>
-    <a href="/">← Zur Woche</a>
-    <form method="post" action="/logout"><button type="submit" title="${esc(user ?? '')}">Abmelden</button></form>
-  </nav>
-</header>
+  <a href="/" class="btn quiet">← Zur Woche</a>
+</div>
 <main class="note-page">
   <article class="note-preview">
     ${note.tags.length ? `<p class="tags">${note.tags.map((t) => `<span class="tag">#${esc(t)}</span>`).join(' ')}</p>` : ''}
@@ -72,7 +65,7 @@ ${write ? '<script src="/static/cockpit.js" defer></script>' : ''}
 export const NOTE_CSS = `
 /* --- Notizseite --- */
 .note-page { grid-template-columns: minmax(0, 1fr) 320px; align-items: start; max-width: 1100px; }
-.note-preview { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 20px 24px; min-width: 0; }
+.note-preview { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-1); padding: 20px 24px; min-width: 0; }
 .note-actions { display: grid; gap: 16px; position: sticky; top: 16px; }
 .note-actions section { padding: 14px 16px; }
 .note-actions h2 { margin-bottom: 8px; }
