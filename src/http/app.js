@@ -37,7 +37,7 @@ function send(res, status, body, headers = {}) {
  * nur die Protected Resource Metadata (RFC 9728), damit Claude den zuständigen
  * Authorization Server findet, und prüfen eingehende Bearer-Tokens.
  */
-export function createApp({ config, verifyToken, mcpHandler, logger = console }) {
+export function createApp({ config, verifyToken, mcpHandler, captureHttp = null, logger = console }) {
   const prmUrl = `${config.publicUrl}/.well-known/oauth-protected-resource/mcp`;
 
   const protectedResourceMetadata = () => ({
@@ -79,6 +79,12 @@ export function createApp({ config, verifyToken, mcpHandler, logger = console })
 
       const body = req.method === 'GET' || req.method === 'HEAD' ? null : await readBody(req);
       return mcpHandler(req, res, principal, body);
+    }
+
+    // Capture-Endpunkte mit eigenem Token (Kurzbefehl, Funke), siehe capture/http.js.
+    if (captureHttp?.matches(path)) {
+      const body = req.method === 'POST' ? await readBody(req) : null;
+      return captureHttp.handle(req, res, url, body);
     }
 
     return send(res, 404, { error: 'not_found' });

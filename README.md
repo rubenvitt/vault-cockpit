@@ -54,6 +54,14 @@ Das Image baut GitHub Actions bei jedem Push auf `main`:
 | `REINDEX_INTERVAL_MIN` | Abstand der vollen Index-Neuaufbauten, Standard 15 (Netz neben der Dateibeobachtung) |
 | `SYNC_ADAPTER` | `obsidian-headless` (Standard) oder `none` (keine Dateibeobachtung, kein Sync-Status) |
 | `SYNC_STATUS_FILE` | Statusdatei des Sync-Sidecars, z. B. `/sync-status/sync.json` |
+| `CAPTURE_TOKEN` | Token für `/capture` und `/funke` (ohne Wert sind beide aus), siehe [Capture](#capture) |
+| `ZUNDER_URL`, `ZUNDER_TOKEN` | Zunder-Adresse und API-Token `zt_…`; ohne Wert keine `!`-Weiterleitung und keine Brücke |
+| `ZUNDER_BRIDGE`, `ZUNDER_BRIDGE_TAG` | Zunder-Brücke `on` (Standard, sobald Zunder eingerichtet ist) oder `off`; Tag, Standard `zunder` |
+| `OBSIDIAN_VAULT_NAME` | Name des Vaults in Obsidian, für „In Obsidian öffnen“ in Zunder (optional) |
+| `CAPTURE_STATE_FILE` | Merkzettel gegen doppelte Aufgaben, Standard `/data/capture-state.json` |
+| `MAIL_JMAP_TOKEN` | Fastmail-API-Token (nur Mail); ohne Wert kein Mail-Abruf |
+| `MAIL_ALLOWED_SENDERS` | eigene Absenderadressen (Komma-Liste), Pflicht mit `MAIL_JMAP_TOKEN` |
+| `MAIL_MAILBOX`, `MAIL_DONE_MAILBOX`, `MAIL_POLL_MIN` | Ordner zum Abholen (Standard `Vault`), Ablage danach (Standard `Archive`), Abstand in Minuten (Standard 5) |
 
 ### Sync
 
@@ -94,6 +102,50 @@ vergleicht deshalb den ganzen Ordner (Konflikte nach `CONFLICT_STRATEGY`, Standa
 Nach dem Merge baut CI das Image mit der neuen Version als Tag; danach den Tag in
 der Compose-Datei des Servers nachziehen.
 
+### Capture
+
+Alles, was von außen kommt, landet an einer Stelle: als neue Notiz im
+Capture-Ordner (`CAPTURE_FOLDER`) oder, mit `!` am Anfang, als Aufgabe in der
+**Zunder-Inbox**. Aufgaben legt das Cockpit nicht selbst ab, es leitet sie an
+Zunder weiter (MCP-Werkzeug `create_task`). Dafür in der Zunder-Web-UI unter
+**Tokens** einen API-Token anlegen (Name z. B. `vault-cockpit`) und als
+`ZUNDER_TOKEN` setzen. Ein Eingangs-Token (`zi_…`) reicht nicht, Eingänge
+schreiben nur in ein festes Projekt.
+
+| Weg | So geht's |
+|---|---|
+| iOS-Kurzbefehl | `POST <PUBLIC_URL>/capture?source=ios-kurzbefehl` mit dem Text als Body, Header `Authorization: Bearer <CAPTURE_TOKEN>` |
+| Sprachmemo | Kurzbefehl mit „Audio aufnehmen“ und „Audio transkribieren“ auf dem iPhone, dann wie oben mit `source=sprachmemo`. Transkribiert wird auf dem Gerät, das Cockpit bekommt nur Text. |
+| Funke | Als Relay-URL `<PUBLIC_URL>/funke` und als Relay-Token den `CAPTURE_TOKEN` eintragen. Notizen landen im Capture-Ordner (der Ordner aus der App wird ignoriert), Aufgaben schickt Funke weiter direkt an Zunder. |
+| Mail | Eine Adresse (Alias) anlegen und per Regel in den Ordner `MAIL_MAILBOX` sortieren. Betreff = Titel, `!` im Betreff = Aufgabe. Verarbeitete Mails wandern nach `MAIL_DONE_MAILBOX`. |
+
+`POST /capture` nimmt Klartext oder JSON `{"text", "title"?, "source"?, "id"?}`.
+Mit `id` ist das Anlegen idempotent (dieselbe ID → `200` mit dem Ergebnis von
+damals). Antworten: `201 {"kind":"note","path"}` bzw.
+`201 {"kind":"task","id","ref","url"}`, `400` bei falscher Eingabe, `401` ohne
+gültigen Token, `502` wenn Zunder ablehnt, `503` bei `!` ohne Zunder.
+`GET /capture` ist ein Verbindungstest.
+
+Mail-Abruf: Nur Absender aus `MAIL_ALLOWED_SENDERS` werden verarbeitet, alle
+anderen Mails wandern unverarbeitet in den Ablage-Ordner. Der Absender einer Mail
+lässt sich fälschen; die Adresse deshalb nicht weitergeben. Den API-Token in
+Fastmail unter *Einstellungen → Passwörter & Sicherheit → API-Tokens* mit
+Zugriff nur auf Mail anlegen.
+
+**Zunder-Brücke:** Eine offene Checkbox mit dem Tag `#zunder` wird eine Aufgabe
+in der Zunder-Inbox. Die Aufgabe verweist auf die Notiz (`vault_links`, Wikilink
+und optional „In Obsidian öffnen“), in der Notiz ersetzt ein Link auf die
+Aufgabe den Tag:
+
+```markdown
+- [ ] Angebot schreiben #zunder
+- [ ] Angebot schreiben [↗ Zunder](https://zunder.example/#/aufgabe/…)
+```
+
+Die Brücke prüft geänderte Notizen sofort und alle Notizen mit dem Tag beim Start
+und im Reindex-Intervall. Vertrauliche Ordner, Readwise-Importe und Codeblöcke
+bleiben außen vor. Abhaken in Zunder hakt die Checkbox (noch) nicht ab.
+
 Tests, ohne laufenden Container:
 ```bash
 npm ci && npm test
@@ -106,6 +158,7 @@ npm ci && npm test
 - `src/mcp/` — MCP-Werkzeuge auf Basis von `@modelcontextprotocol/server` v2
 - `src/http/` — HTTP-Schicht, Protected Resource Metadata, Host-Prüfung
 - `src/sync/` — Sync-Adapter: Dateibeobachtung, inkrementeller Reindex, Sync-Status
+- `src/capture/` — Capture von außen: Endpunkte, Mail-Abruf, Zunder-Weiterleitung und -Brücke
 - `sync/` — Image des Sidecars `vault-sync` (Obsidian Headless mit Status-Wrapper)
 
 ## Sicherheitsentscheidungen

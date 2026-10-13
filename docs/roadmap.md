@@ -79,7 +79,7 @@ Der Service liefert nur Werkzeuge und Zustand. Intelligenz kommt von außen per 
 
 0. Übernahme des bestehenden Vault-MCP (Index, Link-Graph, Capture, Bearbeiten, OAuth) — erledigt
 1. Headless-Sync als Sidecar mit Adapter (umgesetzt: `sync/`, `src/sync/`), Host-Unit ablösen, Deployment vom alten Vault-MCP übernehmen
-2. Capture mit Zunder-Weiterleitung
+2. Capture mit Zunder-Weiterleitung (umgesetzt: `src/capture/`, Endpunkte `/capture` und `/funke`, Mail über JMAP, Zunder-Brücke)
 3. Cockpit-Web-UI
 4. Graph + semantische Suche
 5. Eigener Sync (eigenes Projekt: Konflikte, mobile Clients, E2E)
@@ -89,7 +89,9 @@ Obsidian selbst zu ersetzen ist kein Ziel — Editor und Apps sind der teure Tei
 ## Risiken und Überschneidungen
 
 - **Capture** überschneidet sich mit der Zunder-Inbox und vorhandenen Capture-Apps:
-  Weiterleiten statt einen zweiten Eingang bauen.
+  Weiterleiten statt einen zweiten Eingang bauen. Umgesetzt so: Aufgaben gehen
+  immer in die Zunder-Inbox (das Cockpit speichert keine), Funke schickt Notizen
+  an `/funke` statt an einen eigenen Relay, Aufgaben weiter direkt an Zunder.
 - **Timing-Anreicherung:** Zunder misst Deep-Work-Blöcke bereits mit Timing — Daten dort
   abholen, nicht doppelt erfassen.
 - **Semantische Suche und Graph:** Es gibt bereits eine Hybrid-Suche mit Graph in den

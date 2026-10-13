@@ -8,6 +8,12 @@ import { createEditor } from './vault/edit.js';
 import { createSyncAdapter } from './sync/index.js';
 import { createVaultMcpHandler } from './mcp/server.js';
 import { toWebRequest, writeWebResponse } from './http/bridge.js';
+import { createZunderClient } from './capture/zunder.js';
+import { createStateStore } from './capture/state.js';
+import { createCaptureRouter } from './capture/router.js';
+import { createCaptureHttp } from './capture/http.js';
+import { createMailCapture } from './capture/mail.js';
+import { createZunderBridge } from './capture/bridge.js';
 
 function required(name) {
   const v = process.env[name];
@@ -66,16 +72,61 @@ const sync = createSyncAdapter({
   vaultPath: VAULT_PATH,
   statusFile: process.env.SYNC_STATUS_FILE || null,
 });
-sync.start({
-  onChanges({ paths, full }) {
-    if (full) index.rebuild();
-    else index.applyChanges(paths);
-  },
-});
 
 const CAPTURE_FOLDER = process.env.CAPTURE_FOLDER ?? 'inbox';
 const capture = createCapture({ vaultPath: VAULT_PATH, folder: CAPTURE_FOLDER });
 const editor = createEditor({ vaultPath: VAULT_PATH, index });
+
+// Capture von außen (Schritt 2): Weiterleitung an Zunder, Capture-Endpunkte,
+// Mail-Abruf und Zunder-Brücke. Alles optional, je nach gesetzten Variablen.
+const captureState = createStateStore(process.env.CAPTURE_STATE_FILE ?? '/data/capture-state.json');
+const zunder =
+  process.env.ZUNDER_URL && process.env.ZUNDER_TOKEN
+    ? createZunderClient({ url: process.env.ZUNDER_URL, token: process.env.ZUNDER_TOKEN })
+    : null;
+const captureRouter = createCaptureRouter({ capture, zunder, state: captureState });
+
+const captureHttp = process.env.CAPTURE_TOKEN
+  ? createCaptureHttp({ token: process.env.CAPTURE_TOKEN, router: captureRouter, zunderEnabled: Boolean(zunder) })
+  : null;
+
+let mail = null;
+if (process.env.MAIL_JMAP_TOKEN) {
+  mail = createMailCapture({
+    token: process.env.MAIL_JMAP_TOKEN,
+    sessionUrl: process.env.MAIL_JMAP_SESSION_URL || undefined,
+    mailbox: process.env.MAIL_MAILBOX || 'Vault',
+    doneMailbox: process.env.MAIL_DONE_MAILBOX || 'Archive',
+    // Pflicht, damit eine fremde Mail an die Adresse nichts anlegt.
+    allowedSenders: required('MAIL_ALLOWED_SENDERS').split(','),
+    router: captureRouter,
+  });
+  mail.start(Number(process.env.MAIL_POLL_MIN ?? 5));
+}
+
+const bridge =
+  zunder && process.env.ZUNDER_BRIDGE !== 'off'
+    ? createZunderBridge({
+        index,
+        editor,
+        zunder,
+        state: captureState,
+        tag: process.env.ZUNDER_BRIDGE_TAG || 'zunder',
+        vaultName: process.env.OBSIDIAN_VAULT_NAME || null,
+      })
+    : null;
+if (bridge) {
+  bridge.scanAll();
+  setInterval(() => bridge.scanAll(), Number(process.env.REINDEX_INTERVAL_MIN ?? 15) * 60_000).unref();
+}
+
+sync.start({
+  onChanges({ paths, full }) {
+    if (full) index.rebuild();
+    else index.applyChanges(paths);
+    if (bridge) (full ? bridge.scanAll() : bridge.scan(paths));
+  },
+});
 
 const mcpHttp = createVaultMcpHandler({
   index,
@@ -95,6 +146,7 @@ const app = createApp({
     principals.put(token, principal);
     return principal;
   },
+  captureHttp,
   mcpHandler: async (req, res, principal, body) => {
     await writeWebResponse(res, await mcpHttp.fetch(toWebRequest(req, body, PUBLIC_URL)));
   },
@@ -109,12 +161,15 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`  Scopes      : ${config.supportedScopes.join(', ')}`);
   console.log(`  Reindex     : alle ${process.env.REINDEX_INTERVAL_MIN ?? 15} Minuten${sync.name === 'none' ? '' : ', dazu bei jeder Dateiänderung'}`);
   console.log(`  Sync        : ${SYNC_ADAPTER} (${sync.status().state})`);
+  console.log(`  Capture     : ${captureHttp ? '/capture, /funke' : 'Endpunkte aus (CAPTURE_TOKEN)'}${mail ? `, Mail aus „${mail.status().mailbox}“` : ''}`);
+  console.log(`  Zunder      : ${zunder ? `${process.env.ZUNDER_URL} (! → Inbox${bridge ? `, Brücke #${bridge.tag}` : ''})` : 'aus (ZUNDER_URL, ZUNDER_TOKEN)'}`);
 });
 
 for (const sig of ['SIGTERM', 'SIGINT']) {
   process.on(sig, () => {
     console.log(`${sig} empfangen — fahre herunter`);
     sync.stop();
+    mail?.stop();
     index.stop();
     app.close(() => process.exit(0));
   });
