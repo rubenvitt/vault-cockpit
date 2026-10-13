@@ -58,3 +58,12 @@ for (const [title, build] of Object.entries(SHORTCUTS)) {
     assert.doesNotMatch(a, /&(?!amp;|lt;|gt;)/);
   });
 }
+
+test('Sprachmemo ins Cockpit: transkribiert die Aufnahme mit dem App Intent', () => {
+  const actions = SHORTCUTS['Sprachmemo ins Cockpit']({ url }).WFWorkflowActions;
+  const ids = actions.map((a) => a.WFWorkflowActionIdentifier);
+  const i = ids.indexOf('com.apple.ShortcutsActions.TranscribeAudioAction');
+  assert.ok(i > 0, 'Transkription fehlt');
+  const rec = actions[ids.indexOf('is.workflow.actions.recordaudio')].WFWorkflowActionParameters.UUID;
+  assert.equal(actions[i].WFWorkflowActionParameters.audioFile.Value.OutputUUID, rec);
+});

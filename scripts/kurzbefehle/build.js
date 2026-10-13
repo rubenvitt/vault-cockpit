@@ -58,7 +58,11 @@ function dictionary(entries) {
   };
 }
 
-const action = (id, params = {}) => ({ WFWorkflowActionIdentifier: `is.workflow.actions.${id}`, WFWorkflowActionParameters: params });
+// Klassische Aktionen tragen das Präfix `is.workflow.actions.`, App Intents ihre volle ID.
+const action = (id, params = {}) => ({
+  WFWorkflowActionIdentifier: id.includes('.') ? id : `is.workflow.actions.${id}`,
+  WFWorkflowActionParameters: params,
+});
 
 /** Baut If/Otherwise/End-If-Blöcke mit gemeinsamer Gruppen-ID. */
 function makeIf(shortcut) {
@@ -234,8 +238,11 @@ export function sprachmemoInsCockpit({ url }) {
     actions: [
       token.action,
       action('recordaudio', { UUID: record, WFRecordingStart: 'Immediately', WFRecordingEnd: 'On Tap' }),
-      // Ohne Eingabe-Parameter nimmt die Aktion die Ausgabe der vorigen (die Aufnahme).
-      action('transcribeaudio', { UUID: transcribe }),
+      // „Audio transkribieren“ ist ein App Intent von ActionKit (geprüft auf macOS 27).
+      action('com.apple.ShortcutsActions.TranscribeAudioAction', {
+        UUID: transcribe,
+        audioFile: attachment(out(record, 'Aufgenommenes Audio')),
+      }),
       action('setvariable', { WFVariableName: 'Text', WFInput: attachment(out(transcribe, 'Transkript')) }),
       ...ifBlock(named('Text'), HAS_NO_VALUE, undefined, [notify('Nichts verstanden', 'Die Aufnahme ergab keinen Text.'), action('exit')]),
       ...send(name, { tokenUuid: token.uuid, url, source: 'sprachmemo', ifBlock }),
