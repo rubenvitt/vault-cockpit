@@ -5,6 +5,7 @@ import { createIndexManager } from './vault/manager.js';
 import { loadPolicy } from './vault/policy.js';
 import { createCapture } from './vault/capture.js';
 import { createEditor } from './vault/edit.js';
+import { createSyncAdapter } from './sync/index.js';
 import { createVaultMcpHandler } from './mcp/server.js';
 import { toWebRequest, writeWebResponse } from './http/bridge.js';
 
@@ -59,6 +60,19 @@ const index = createIndexManager({
   policy: POLICY,
   intervalMinutes: Number(process.env.REINDEX_INTERVAL_MIN ?? 15),
 });
+const SYNC_ADAPTER = process.env.SYNC_ADAPTER ?? 'obsidian-headless';
+const sync = createSyncAdapter({
+  kind: SYNC_ADAPTER,
+  vaultPath: VAULT_PATH,
+  statusFile: process.env.SYNC_STATUS_FILE || null,
+});
+sync.start({
+  onChanges({ paths, full }) {
+    if (full) index.rebuild();
+    else index.applyChanges(paths);
+  },
+});
+
 const CAPTURE_FOLDER = process.env.CAPTURE_FOLDER ?? 'inbox';
 const capture = createCapture({ vaultPath: VAULT_PATH, folder: CAPTURE_FOLDER });
 const editor = createEditor({ vaultPath: VAULT_PATH, index });
@@ -67,6 +81,7 @@ const mcpHttp = createVaultMcpHandler({
   index,
   capture,
   editor,
+  sync,
   captureFolder: CAPTURE_FOLDER,
   layoutHint: POLICY.layoutHint,
   // Synchron: die Prüfung ist in der HTTP-Schicht bereits gelaufen.
@@ -92,12 +107,14 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`  Vault       : ${VAULT_PATH} (${s.total} Notizen, davon ${s.byClass.core ?? 0} eigene)`);
   console.log(`  Auth-Server : ${ISSUER} (wir sind reiner Resource Server)`);
   console.log(`  Scopes      : ${config.supportedScopes.join(', ')}`);
-  console.log(`  Reindex     : alle ${process.env.REINDEX_INTERVAL_MIN ?? 15} Minuten`);
+  console.log(`  Reindex     : alle ${process.env.REINDEX_INTERVAL_MIN ?? 15} Minuten${sync.name === 'none' ? '' : ', dazu bei jeder Dateiänderung'}`);
+  console.log(`  Sync        : ${SYNC_ADAPTER} (${sync.status().state})`);
 });
 
 for (const sig of ['SIGTERM', 'SIGINT']) {
   process.on(sig, () => {
     console.log(`${sig} empfangen — fahre herunter`);
+    sync.stop();
     index.stop();
     app.close(() => process.exit(0));
   });

@@ -29,6 +29,7 @@ export function createVaultMcpHandler({
   index,
   capture,
   editor,
+  sync = null,
   verifyToken,
   captureFolder = 'inbox',
   layoutHint = null,
@@ -156,11 +157,20 @@ export function createVaultMcpHandler({
       'vault_stats',
       {
         title: 'Vault-Überblick',
-        description: 'Kennzahlen des Vaults: Anzahl Notizen je Klasse, Tags, Verlinkungsgrad. Gut zur ersten Orientierung.',
+        description:
+          'Kennzahlen des Vaults: Anzahl Notizen je Klasse, Tags, Verlinkungsgrad. Gut zur ersten Orientierung. ' +
+          'Dazu der Zustand des Syncs (läuft, letzter Abgleich, letzter Fehler) und wann der Index zuletzt aktualisiert wurde.',
         inputSchema: {},
         annotations: READ_ONLY,
       },
-      read(async () => ok(index.stats())),
+      read(async () => {
+        const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
+        return ok({
+          ...index.stats(),
+          index: { lastBuiltAt: iso(index.lastBuiltAt?.()), lastChangedAt: iso(index.lastChangedAt?.()) },
+          sync: sync?.status() ?? { adapter: 'none', state: 'disabled' },
+        });
+      }),
     );
 
     server.registerTool(

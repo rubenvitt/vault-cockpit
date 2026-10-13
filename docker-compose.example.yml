@@ -18,7 +18,11 @@ services:
       - POLICY_FILE=/config/policy.json
       - PORT=3000
       - TRUST_PROXY=true
-      - REINDEX_INTERVAL_MIN=15
+      # Volle Neuaufbauten nur noch als Netz: Änderungen des Syncs meldet der
+      # Sync-Adapter einzeln (Dateibeobachtung, inkrementeller Reindex).
+      - REINDEX_INTERVAL_MIN=60
+      - SYNC_ADAPTER=obsidian-headless
+      - SYNC_STATUS_FILE=/sync-status/sync.json
     volumes:
       # Beschreibbar, damit vault_edit, vault_append und vault_set_frontmatter
       # bestehende Notizen ändern können. Der Container läuft als uid 1000 (node)
@@ -31,6 +35,8 @@ services:
       #   - /pfad/zum/vault/inbox:/vault/inbox:rw
       - ./policy.json:/config/policy.json:ro
       - ./data:/data
+      # Statusdatei des Sync-Sidecars, nur lesend.
+      - ./sync-status:/sync-status:ro
     networks:
       - proxy
     labels:
@@ -41,3 +47,24 @@ services:
       # Bewusst OHNE gzip- und buffering-Middleware: beides bricht
       # Streamable-HTTP/SSE-Antworten des MCP-Transports.
       - "traefik.http.services.vault-cockpit.loadbalancer.server.port=3000"
+
+  # Sidecar: Obsidian Headless hält den Vault-Ordner mit Obsidian Sync abgeglichen.
+  # Genau EIN Sync pro Ordner — vor dem ersten Start einen Sync auf dem Host
+  # stoppen und deaktivieren (README, Abschnitt Sync).
+  vault-sync:
+    # Tag = gepinnte Version von obsidian-headless (sync/Dockerfile).
+    image: ghcr.io/rubenvitt/vault-cockpit-sync:0.0.14
+    container_name: vault-sync
+    restart: unless-stopped
+    # Eigene Datei, damit das Obsidian-Token nicht im Cockpit-Container landet.
+    env_file: sync.env
+    environment:
+      - TZ=Europe/Berlin
+      - DEVICE_NAME=vault-cockpit
+    volumes:
+      # Derselbe Ordner wie /vault im Cockpit. Beide Container laufen als uid 1000.
+      - /pfad/zum/vault:/vault:rw
+      # Sync-Zustand von Obsidian Headless (Vault-Verknüpfung, Schlüssel, state.db).
+      - ./sync-config:/config
+      - ./sync-status:/status
+    # Kein Netzwerk zum Proxy nötig: Der Sidecar spricht nur nach außen zu Obsidian.

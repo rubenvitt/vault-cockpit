@@ -306,11 +306,15 @@ export function openIndex(dbOrPath, { vaultPath = process.env.VAULT_PATH ?? '/va
      * Eine einzelne Notiz neu einlesen, etwa direkt nach einer Bearbeitung.
      * Der Komplettaufbau läuft weiter periodisch; das hier hält nur Suche,
      * Frontmatter und ausgehende Links der gerade geänderten Notiz aktuell.
-     * Backlinks anderer Notizen auf eine neu entstandene Datei löst erst der
-     * nächste Komplettaufbau auf.
+     * Backlinks anderer Notizen auf eine neu entstandene Datei löst erst
+     * relinkAll() oder der nächste Komplettaufbau auf.
+     *
+     * Liefert, ob die Notiz vorher bzw. nachher im Index stand. Ändert sich
+     * das, ist eine Datei entstanden oder verschwunden.
      */
     refresh(path) {
       const relPath = String(path ?? '');
+      const existed = Boolean(db.prepare('SELECT 1 FROM notes WHERE path = ?').get(relPath));
       let raw = null;
       try {
         raw = readFileSync(join(vaultPath, relPath), 'utf8');
@@ -332,6 +336,18 @@ export function openIndex(dbOrPath, { vaultPath = process.env.VAULT_PATH ?? '/va
         throw err;
       }
       resolveLinks(db, { source: relPath });
+      const exists = Boolean(db.prepare('SELECT 1 FROM notes WHERE path = ?').get(relPath));
+      return { existed, exists };
+    },
+
+    /**
+     * Alle Linkziele neu auflösen. Nötig, wenn Dateien entstanden oder
+     * verschwunden sind: Links anderer Notizen zeigen dann auf ein neues Ziel,
+     * werden mehrdeutig oder laufen ins Leere.
+     */
+    relinkAll() {
+      db.exec('UPDATE links SET target_path = NULL');
+      resolveLinks(db);
     },
 
     close() {

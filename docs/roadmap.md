@@ -32,6 +32,10 @@ weiter. Die Unit steht in keinem Deploy- oder Update-Skript, deshalb bleibt die
 Client-Version stehen, bis jemand sie von Hand anhebt.
 
 **Ziel (entschieden 13.10.2026): Sidecar im Cockpit-Stack.**
+Umgesetzt mit eigenem Image (`sync/`, Client gepinnt statt `:latest` der
+Community-Variante). Den Zustand liest der Adapter aus einer Statusdatei, die ein
+schmaler Wrapper um `ob sync --continuous` aus dessen Ausgabe ableitet; Änderungen
+erkennt er über die Dateien im gemeinsamen Ordner.
 
 - Ein eigener Dienst `vault-sync` in der Compose-Datei führt `ob sync --continuous`
   aus. Cockpit und Sidecar teilen sich das Vault-Volume. Der Sync-Client kommt so
@@ -74,7 +78,7 @@ Der Service liefert nur Werkzeuge und Zustand. Intelligenz kommt von außen per 
 ## Reihenfolge
 
 0. Übernahme des bestehenden Vault-MCP (Index, Link-Graph, Capture, Bearbeiten, OAuth) — erledigt
-1. Headless-Sync als Sidecar mit Adapter, Host-Unit ablösen, Deployment vom alten Vault-MCP übernehmen
+1. Headless-Sync als Sidecar mit Adapter (umgesetzt: `sync/`, `src/sync/`), Host-Unit ablösen, Deployment vom alten Vault-MCP übernehmen
 2. Capture mit Zunder-Weiterleitung
 3. Cockpit-Web-UI
 4. Graph + semantische Suche
