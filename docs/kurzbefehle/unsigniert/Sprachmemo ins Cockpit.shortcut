@@ -25,7 +25,7 @@
 			<key>ParameterKey</key>
 			<string>WFTextActionText</string>
 			<key>Text</key>
-			<string>CAPTURE_TOKEN des Vault Cockpits (steht in der Server-Konfiguration)</string>
+			<string>Capture-Token des Vault Cockpits</string>
 			<key>DefaultValue</key>
 			<string></string>
 		</dict>
@@ -496,7 +496,7 @@
 					<key>Value</key>
 					<dict>
 						<key>string</key>
-						<string>Der CAPTURE_TOKEN stimmt nicht. Den Kurzbefehl neu importieren oder den Token in der ersten Aktion ersetzen.</string>
+						<string>Der Capture-Token stimmt nicht. Den Kurzbefehl neu importieren oder den Token in der ersten Aktion ersetzen.</string>
 						<key>attachmentsByRange</key>
 						<dict/>
 					</dict>

@@ -132,7 +132,7 @@ function send(shortcut, { tokenUuid, url, source, ifBlock }) {
           status,
           IS,
           '401',
-          [notify('Token abgelehnt', 'Der CAPTURE_TOKEN stimmt nicht. Den Kurzbefehl neu importieren oder den Token in der ersten Aktion ersetzen.')],
+          [notify('Token abgelehnt', 'Der Capture-Token stimmt nicht. Den Kurzbefehl neu importieren oder den Token in der ersten Aktion ersetzen.')],
           ifBlock(
             status,
             IS,
@@ -171,7 +171,7 @@ const importQuestion = {
   ActionIndex: 0,
   Category: 'Parameter',
   ParameterKey: 'WFTextActionText',
-  Text: 'CAPTURE_TOKEN des Vault Cockpits (steht in der Server-Konfiguration)',
+  Text: 'Capture-Token des Vault Cockpits',
   DefaultValue: '',
 };
 
