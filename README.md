@@ -57,6 +57,7 @@ Das Image baut GitHub Actions bei jedem Push auf `main`:
 | `SYNC_ADAPTER` | `obsidian-headless` (Standard) oder `none` (keine Dateibeobachtung, kein Sync-Status) |
 | `SYNC_STATUS_FILE` | Statusdatei des Sync-Sidecars, z. B. `/sync-status/sync.json` |
 | `CAPTURE_TOKEN` | Token für `/capture` und `/funke` (ohne Wert sind beide aus), siehe [Capture](#capture) |
+| `SEARCH_TOKEN` | Token für `GET /api/search` (ohne Wert aus), siehe [Suche](#suche) |
 | `ZUNDER_URL`, `ZUNDER_TOKEN` | Zunder-Adresse und API-Token `zt_…`; ohne Wert keine `!`-Weiterleitung und keine Brücke |
 | `ZUNDER_BRIDGE`, `ZUNDER_BRIDGE_TAG` | Zunder-Brücke `on` (Standard, sobald Zunder eingerichtet ist) oder `off`; Tag, Standard `zunder` |
 | `OBSIDIAN_VAULT_NAME` | Name des Vaults in Obsidian, für „In Obsidian öffnen“ in Zunder (optional) |
@@ -128,6 +129,15 @@ Mit `id` ist das Anlegen idempotent (dieselbe ID → `200` mit dem Ergebnis von
 damals). Antworten: `201 {"kind":"note","path"}` bzw.
 `201 {"kind":"task","id","ref","url"}`, `400` bei falscher Eingabe, `401` ohne
 gültigen Token, `502` wenn Zunder ablehnt, `503` bei `!` ohne Zunder.
+
+### Suche
+
+`GET <PUBLIC_URL>/api/search?q=…` mit Header `Authorization: Bearer <SEARCH_TOKEN>`
+durchsucht den Vault für Clients ohne OAuth, nur lesend und nur in eigenen Notizen
+ohne vertrauliche Ordner. Parameter: `q` (Pflicht), `mode` (`hybrid` Standard oder
+`semantic`), `folder`, `limit` (Standard 10, höchstens 50), `offset`. Antwort:
+`200 {"results":[{"path","title","streams","similarity","score",…}],"total","hasMore","degraded"}`,
+Pfade relativ zum Vault mit `/`. `400` bei falscher Eingabe, `401` ohne gültigen Token.
 `GET /capture` ist ein Verbindungstest.
 
 Mail-Abruf: Nur Absender aus `MAIL_ALLOWED_SENDERS` werden verarbeitet, alle
@@ -242,6 +252,7 @@ npm ci && npm test
 - `src/capture/` — Capture von außen: Endpunkte, Mail-Abruf, Zunder-Weiterleitung und -Brücke
 - `src/cockpit/` — Wochenmodell: ISO-Wochen, Feuer-Notiz, Kalender (iCal mit Serienauflösung, CalDAV), Einstellungen, Zusammenstellung aus Zunder
 - `src/semantic/` — Embeddings (Ollama), Abschnitte, Vektorspeicher, hybride Suche
+- `src/search/` — lesender Such-Endpunkt `/api/search` mit eigenem Token
 - `src/graph/` — Graph um eine Notiz mit Aufgaben- und Termin-Knoten
 - `src/web/` — Web-Cockpit: OIDC-Login mit PKCE, signiertes Sitzungs-Cookie, HTML der Wochenansicht, Einstellungen, Suche und Graph
 - `sync/` — Image des Sidecars `vault-sync` (Obsidian Headless mit Status-Wrapper)
