@@ -153,8 +153,15 @@ bleiben außen vor.
 Zurück geht es im selben Takt (Start und Reindex-Intervall): Ist die verlinkte
 Aufgabe in Zunder erledigt, wird die Checkbox abgehakt (`- [x]`); ist sie
 verworfen, wird sie als abgebrochen markiert (`- [-]`, wie im Tasks-Plugin).
-Gezählt werden nur Links auf die eingestellte Zunder-Adresse. Abhaken im Vault
-erledigt die Aufgabe in Zunder nicht: Zunder führt, die Checkbox spiegelt.
+Gezählt werden nur Links auf die eingestellte Zunder-Adresse.
+
+Andersherum erledigt Abhaken im Vault die Aufgabe in Zunder (`- [x]` → erledigt,
+`- [-]` → verworfen), ebenfalls spätestens nach einem Intervall. Die Brücke
+merkt sich dafür je Notiz und Aufgabe die zuletzt gesehene Checkbox (im
+Merkzettel unter `/data`) und meldet nur den Wechsel von offen zu geschlossen.
+Wer eine Aufgabe in Zunder wieder öffnet, während die Checkbox noch abgehakt
+ist, behält sie offen. Checkboxen, die die Brücke zum ersten Mal schon abgehakt
+sieht (etwa nach dem Update), gelten nicht als Wechsel.
 
 ### Web-Cockpit
 
