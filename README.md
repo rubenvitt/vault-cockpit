@@ -148,7 +148,13 @@ Aufgabe den Tag:
 
 Die Brücke prüft geänderte Notizen sofort und alle Notizen mit dem Tag beim Start
 und im Reindex-Intervall. Vertrauliche Ordner, Readwise-Importe und Codeblöcke
-bleiben außen vor. Abhaken in Zunder hakt die Checkbox (noch) nicht ab.
+bleiben außen vor.
+
+Zurück geht es im selben Takt (Start und Reindex-Intervall): Ist die verlinkte
+Aufgabe in Zunder erledigt, wird die Checkbox abgehakt (`- [x]`); ist sie
+verworfen, wird sie als abgebrochen markiert (`- [-]`, wie im Tasks-Plugin).
+Gezählt werden nur Links auf die eingestellte Zunder-Adresse. Abhaken im Vault
+erledigt die Aufgabe in Zunder nicht: Zunder führt, die Checkbox spiegelt.
 
 ### Web-Cockpit
 

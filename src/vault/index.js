@@ -303,6 +303,18 @@ export function openIndex(dbOrPath, { vaultPath = process.env.VAULT_PATH ?? '/va
         .map((r) => r.path);
     },
 
+    /** Pfade eigener, nicht vertraulicher Notizen, deren Text diese Zeichenfolge enthält. */
+    pathsContaining(text) {
+      return db
+        .prepare(
+          `SELECT n.path FROM notes_fts f JOIN notes n ON n.path = f.path
+            WHERE instr(f.body, ?) > 0 AND n.class = 'core' AND n.sensitivity IS NULL
+            ORDER BY n.path`,
+        )
+        .all(String(text))
+        .map((r) => r.path);
+    },
+
     /** Eigene, nicht vertrauliche Notizen mit diesem Frontmatter-`type`, samt Frontmatter. */
     notesOfType(type) {
       return db
