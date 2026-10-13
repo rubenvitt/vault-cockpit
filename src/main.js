@@ -22,6 +22,7 @@ import { createSettingsStore, loadOrCreateSecret } from './cockpit/settings.js';
 import { createTokenStore } from './cockpit/tokens.js';
 import { createOidcLogin } from './web/oidc.js';
 import { createWebHttp } from './web/http.js';
+import { createCockpitActions } from './cockpit/actions.js';
 import { createOllamaEmbedder } from './semantic/embedder.js';
 import { createSemanticIndex } from './semantic/index.js';
 import { hybridSearch } from './semantic/search.js';
@@ -184,13 +185,23 @@ const graph = createGraph({ index, semantic, zunder, calendar: calendarForGraph(
 
 // Web-Cockpit (Schritt 3): Wochenansicht mit eigenem Browser-Login. Aus, bis
 // WEB_CLIENT_ID gesetzt ist.
+const cockpit = createCockpit({
+  index,
+  settings: cockpitSettings,
+  calendars,
+  zunderFor: ({ url, token }) => createZunderClient({ url, token }),
+});
 const webHttp = process.env.WEB_CLIENT_ID
   ? createWebHttp({
-      cockpit: createCockpit({
-        index,
+      cockpit,
+      // Abhaken und Schnelleingabe: Zunder-Zugang und Inbox-Ordner aus den Einstellungen.
+      actions: createCockpitActions({
+        vaultPath: VAULT_PATH,
         settings: cockpitSettings,
-        calendars,
-        zunderFor: ({ url, token }) => createZunderClient({ url, token }),
+        policy: POLICY,
+        state: captureState,
+        zunder: () => cockpit.zunder(),
+        index,
       }),
       settings: cockpitSettings,
       tokens: apiTokens,

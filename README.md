@@ -212,6 +212,15 @@ Passwörter, Tokens und Kalenderadressen zeigt die Seite nie wieder an; ein leer
 Feld behält den gespeicherten Wert. Das Secret für das Sitzungs-Cookie liegt in
 `/data/session-secret` und entsteht beim ersten Start (alternativ `SESSION_SECRET`).
 
+**Handeln statt nur schauen:** Aufgaben in Flammen, Big Rocks, Aufgaben und
+Zunder-Inbox hakt man direkt ab (Zunder-Status `done`, ein zweiter Klick öffnet
+sie wieder, die Meldung bietet „Rückgängig“). Oben auf der Seite liegt eine
+**Schnelleingabe** mit derselben Logik wie `/capture`: Text wird eine Notiz im
+Inbox-Ordner, mit `!` vorne eine Aufgabe in der Zunder-Inbox. `/` oder `n` springt
+hinein, Enter legt an, Shift+Enter macht eine neue Zeile. Beides läuft ohne
+Seitenwechsel; ohne JavaScript funktionieren dieselben Formulare mit
+Weiterleitung. Schlägt etwas fehl, bleibt die Meldung stehen und der Text im Feld.
+
 Fällt eine Quelle aus (Zunder nicht erreichbar, ein Kalender antwortet nicht),
 zeigt nur ihr Abschnitt bzw. nur dieser Kalender den Fehler; die Einstellungsseite
 zeigt je Kalender, ob er erreichbar ist. Die Sitzung gilt 12 Stunden und nur für
@@ -293,8 +302,11 @@ npm ci && npm test
 - **Web-Login getrennt von MCP:** Das Web-Cockpit hat einen eigenen OIDC-Client
   und prüft das ID-Token (Signatur, `iss`, `aud` = Client-ID, `nonce`, PKCE,
   Subject). Das Sitzungs-Cookie ist `HttpOnly`, `Secure`, `SameSite=Lax` und gilt
-  nicht für `/mcp`. Die Seiten laden kein JavaScript; die Content-Security-Policy
-  erlaubt nur das eigene Stylesheet.
+  nicht für `/mcp`. Die Content-Security-Policy erlaubt nur eigene Dateien
+  (Stylesheet und `/static/cockpit.js`, kein Inline-Script). Schreibende Aktionen
+  (`/aktion/…`) brauchen Sitzung, gleiche Herkunft und ein CSRF-Token, das an das
+  Sitzungs-Cookie gebunden ist; die Schnelleingabe schreibt nie in einen
+  vertraulichen oder ausgeschlossenen Ordner der Policy.
 - **Readwise-Importe** sind eine eigene Indexklasse und standardmäßig aus der Suche
   ausgenommen, damit importierte Fremdtexte die eigenen Notizen nicht verdrängen.
 

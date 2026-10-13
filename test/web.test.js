@@ -7,6 +7,7 @@ import { createOidcLogin } from '../src/web/oidc.js';
 import { createCookieSigner, parseCookies } from '../src/web/session.js';
 import { createSettingsStore } from '../src/cockpit/settings.js';
 import { createTokenStore } from '../src/cockpit/tokens.js';
+import { ActionError } from '../src/cockpit/actions.js';
 
 const ISSUER = 'https://id.test';
 const CLIENT = 'cockpit-web';
@@ -71,7 +72,10 @@ const cockpit = {
       today: '2026-10-14',
       feuer: { ok: true, data: null },
       flames: { ok: true, data: [] },
-      rocks: { ok: true, data: [] },
+      rocks: {
+        ok: true,
+        data: [{ area: 'Finanzen', done: 0, tasks: [{ id: 't1', ref: 'VCP-1', title: 'Steuer <abgeben>', status: 'open', due: null, url: 'https://zunder.test/#/aufgabe/t1' }] }],
+      },
       calendar: { ok: true, data: [] },
       tasks: { ok: true, data: [] },
       inbox: { vault: { ok: true, data: [] }, zunder: { ok: true, data: [] }, folder: 'inbox' },
@@ -95,13 +99,14 @@ const graph = {
 };
 const search = async (q) => ({ results: [{ path: 'wiki/a.md', title: 'A', snippet: `zu ${q}`, streams: ['text', 'semantic'] }], total: 1, degraded: null });
 
-async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSubjects = ['ruben'], calendars = null } = {}) {
+async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSubjects = ['ruben'], calendars = null, actions = null } = {}) {
   const idp = fakeIdp(idpOptions);
   const settings = createSettingsStore({ defaults: { tz: 'Europe/Berlin', inboxFolder: 'inbox', zunderUrl: 'https://zunder.env', zunderToken: 'zt_env' }, logger: quiet });
   const tokens = createTokenStore({ logger: quiet });
   const webHttp = createWebHttp({
     cockpit,
     settings,
+    actions,
     tokens,
     calendars,
     graph,
@@ -125,9 +130,9 @@ async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSu
   await new Promise((res) => app.once('listening', res));
   const base = `http://127.0.0.1:${app.address().port}`;
   const jar = {};
-  const call = async (path, { method = 'GET', cookies = true, form = null, origin = null } = {}) => {
+  const call = async (path, { method = 'GET', cookies = true, form = null, origin = null, accept = null } = {}) => {
     const cookie = cookies ? Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ') : '';
-    const headers = { 'x-forwarded-host': 'vault.test', ...(cookie ? { cookie } : {}), ...(origin ? { origin } : {}) };
+    const headers = { 'x-forwarded-host': 'vault.test', ...(cookie ? { cookie } : {}), ...(origin ? { origin } : {}), ...(accept ? { accept } : {}) };
     if (form) headers['content-type'] = 'application/x-www-form-urlencoded';
     const res = await fetch(base + path, { method, redirect: 'manual', headers, body: form ? new URLSearchParams(form).toString() : undefined });
     for (const c of res.headers.getSetCookie()) {
@@ -416,4 +421,174 @@ test('Suche und Graph: nur mit Sitzung, Treffer verlinken auf den Graphen, JSON 
     const css = await (await call('/static/cockpit.css')).text();
     assert.match(css, /\.graph \.edge\.semantic/);
   });
+});
+
+/** Aktions-Attrappe: merkt sich Aufrufe, `fail` lässt den nächsten scheitern. */
+function fakeActions() {
+  const calls = [];
+  let fail = null;
+  return {
+    calls,
+    failNext: (err) => (fail = err),
+    async setStatus(id, status) {
+      calls.push(['status', id, status]);
+      if (fail) {
+        const e = fail;
+        fail = null;
+        throw e;
+      }
+      return { id, ref: 'VCP-1', title: 'Steuer', status };
+    },
+    async capture({ text, captureId }) {
+      calls.push(['capture', text, captureId]);
+      if (fail) {
+        const e = fail;
+        fail = null;
+        throw e;
+      }
+      return text.startsWith('!') ? { kind: 'task', id: 'z9', ref: 'ZUN-9', url: 'https://zunder.test/#/aufgabe/z9' } : { kind: 'note', path: 'inbox/2026-10-14 0900 - Idee.md' };
+    },
+  };
+}
+
+const csrfFrom = (html) => html.match(/name="csrf" value="([^"]+)"/)[1];
+
+test('Wochenseite: Abhaken-Formulare, Schnelleingabe und Script nur mit Aktionen', async () => {
+  await withServer(async ({ call, login }) => {
+    await login();
+    const html = await (await call('/')).text();
+    assert.ok(!html.includes('/static/cockpit.js'));
+    assert.ok(!html.includes('/aktion/'));
+  });
+  await withServer(
+    async ({ call, login }) => {
+      await login();
+      const res = await call('/?woche=2026-W42');
+      assert.match(res.headers.get('content-security-policy'), /script-src 'self'; style-src 'self'; connect-src 'self'/);
+      const html = await res.text();
+      assert.match(html, /<script src="\/static\/cockpit\.js" defer><\/script>/);
+      assert.match(html, /action="\/aktion\/status" class="tick"/);
+      assert.match(html, /aria-label="Abhaken: Steuer &lt;abgeben&gt;"/);
+      assert.match(html, /name="back" value="\/\?woche=2026-W42"/);
+      assert.match(html, /action="\/aktion\/erfassen" class="capture"/);
+      assert.match(html, /name="cid" value="[0-9a-f-]{36}"/);
+      assert.match(html, /data-list="vault-inbox" hidden/);
+
+      const js = await call('/static/cockpit.js', { cookies: false });
+      assert.equal(js.status, 200);
+      assert.match(js.headers.get('content-type'), /text\/javascript/);
+      assert.match(await js.text(), /Rückgängig/);
+    },
+    {},
+    { actions: fakeActions() },
+  );
+});
+
+test('Aktionen: nur angemeldet, mit CSRF-Token und von dieser Seite', async () => {
+  const actions = fakeActions();
+  await withServer(
+    async ({ call, login }) => {
+      const anon = await call('/aktion/status', { method: 'POST', form: { id: 't1', status: 'done' } });
+      assert.equal(anon.status, 303);
+      assert.equal(anon.headers.get('location'), '/login');
+      const anonJson = await call('/aktion/erfassen', { method: 'POST', form: { text: 'x' }, accept: 'application/json' });
+      assert.equal(anonJson.status, 401);
+      assert.equal((await call('/aktion/status')).status, 405);
+
+      await login();
+      const csrf = csrfFrom(await (await call('/')).text());
+      const noToken = await call('/aktion/status', { method: 'POST', form: { id: 't1', status: 'done' }, accept: 'application/json' });
+      assert.equal(noToken.status, 403);
+      assert.equal((await noToken.json()).error, 'csrf');
+      const wrong = await call('/aktion/status', { method: 'POST', form: { id: 't1', status: 'done', csrf: `${csrf.slice(0, -1)}x` } });
+      assert.equal(wrong.status, 403);
+      const foreign = await call('/aktion/status', { method: 'POST', form: { id: 't1', status: 'done', csrf }, origin: 'https://evil.test' });
+      assert.equal(foreign.status, 403);
+      assert.equal(actions.calls.length, 0);
+
+      // Neue Sitzung, neues Token: das alte gilt nicht mehr.
+      await login();
+      assert.equal((await call('/aktion/status', { method: 'POST', form: { id: 't1', status: 'done', csrf } })).status, 403);
+      assert.equal(actions.calls.length, 0);
+    },
+    {},
+    { actions },
+  );
+});
+
+test('Abhaken mit JavaScript: JSON mit Meldung und Rückgängig', async () => {
+  const actions = fakeActions();
+  await withServer(
+    async ({ call, login }) => {
+      await login();
+      const csrf = csrfFrom(await (await call('/')).text());
+      const res = await call('/aktion/status', { method: 'POST', form: { id: 't1', status: 'done', prev: 'in_progress', csrf }, accept: 'application/json', origin: 'https://vault.test' });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.message, 'Erledigt: VCP-1 Steuer');
+      assert.deepEqual(body.undo, { id: 't1', status: 'in_progress' });
+      assert.deepEqual(actions.calls, [['status', 't1', 'done']]);
+
+      actions.failNext(new ActionError('Zunder antwortet mit HTTP 500', 502));
+      const failed = await call('/aktion/status', { method: 'POST', form: { id: 't1', status: 'done', csrf }, accept: 'application/json' });
+      assert.equal(failed.status, 502);
+      assert.equal((await failed.json()).message, 'Zunder antwortet mit HTTP 500');
+    },
+    {},
+    { actions },
+  );
+});
+
+test('Abhaken ohne JavaScript: Weiterleitung zurück, Meldung mit Rückgängig erscheint einmal', async () => {
+  const actions = fakeActions();
+  await withServer(
+    async ({ call, login }) => {
+      await login();
+      const csrf = csrfFrom(await (await call('/')).text());
+      const res = await call('/aktion/status', { method: 'POST', form: { id: 't1', status: 'done', prev: 'open', csrf, back: '/?woche=2026-W42' } });
+      assert.equal(res.status, 303);
+      assert.equal(res.headers.get('location'), '/?woche=2026-W42');
+      const html = await (await call('/?woche=2026-W42')).text();
+      assert.match(html, /class="toast ok"[^>]*><span class="toast-text">Erledigt: VCP-1 Steuer/);
+      assert.match(html, /name="status" value="open">\s*<button type="submit" class="toast-action">Rückgängig/);
+      assert.ok(!(await (await call('/')).text()).includes('toast-text'));
+
+      // Kein offener Redirect über back.
+      const evil = await call('/aktion/status', { method: 'POST', form: { id: 't1', status: 'done', csrf, back: '//evil.test' } });
+      assert.equal(evil.headers.get('location'), '/');
+    },
+    {},
+    { actions },
+  );
+});
+
+test('Schnelleingabe: Notiz und Aufgabe; ohne JavaScript bleibt der Text bei Fehlern erhalten', async () => {
+  const actions = fakeActions();
+  await withServer(
+    async ({ call, login }) => {
+      await login();
+      const html = await (await call('/')).text();
+      const csrf = csrfFrom(html);
+      const cid = html.match(/name="cid" value="([^"]+)"/)[1];
+
+      const note = await call('/aktion/erfassen', { method: 'POST', form: { text: 'Idee', cid, csrf }, accept: 'application/json' });
+      assert.equal((await note.json()).message, 'Notiz angelegt: inbox/2026-10-14 0900 - Idee.md');
+      assert.deepEqual(actions.calls[0], ['capture', 'Idee', cid]);
+      const task = await call('/aktion/erfassen', { method: 'POST', form: { text: '! Steuer', csrf }, accept: 'application/json' });
+      const body = await task.json();
+      assert.equal(body.message, 'Aufgabe angelegt: ZUN-9 liegt in der Zunder-Inbox');
+      assert.equal(body.result.url, 'https://zunder.test/#/aufgabe/z9');
+
+      actions.failNext(new ActionError('Für Aufgaben mit ! fehlt der Zunder-Zugang (Einstellungen → Zunder)', 503));
+      const failed = await call('/aktion/erfassen', { method: 'POST', form: { text: '! Wichtig <b>', csrf, back: '/' } });
+      assert.equal(failed.status, 503);
+      const page = await failed.text();
+      assert.match(page, /class="toast error"/);
+      assert.match(page, /fehlt der Zunder-Zugang/);
+      assert.match(page, /<textarea[^>]*>! Wichtig &lt;b&gt;<\/textarea>/);
+      assert.match(page, /data-mode="task"/);
+    },
+    {},
+    { actions },
+  );
 });

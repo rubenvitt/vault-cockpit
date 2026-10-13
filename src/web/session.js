@@ -12,6 +12,9 @@ export function createCookieSigner(secret) {
   const sign = (data) => createHmac('sha256', secret).update(data).digest('base64url');
 
   return {
+    /** HMAC über beliebigen Text, z. B. für das CSRF-Token einer Sitzung. */
+    mac: (data) => sign(`mac\n${data}`),
+
     seal(payload) {
       const data = Buffer.from(JSON.stringify(payload)).toString('base64url');
       return `${data}.${sign(data)}`;
