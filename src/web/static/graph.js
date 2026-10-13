@@ -127,6 +127,24 @@
 
   // --- Graph ----------------------------------------------------------------
 
+  const STATUS_MARK = { done: '✓ ', in_progress: '◐ ', blocked: '⏸ ', review: '◑ ', dropped: '✕ ' };
+  function labelOf(n) {
+    if (n.kind === 'task') return `${STATUS_MARK[n.status] ?? '○ '}${n.ref ? `${n.ref} ` : ''}${n.label ?? ''}`;
+    if (n.kind === 'event') return `◷ ${n.label ?? ''}`;
+    return String(n.label ?? n.path ?? '');
+  }
+
+  /**
+   * Knotenattribute für sigma aus einem Knoten von `/api/graph`. `type` wählt
+   * in sigma das Zeichenprogramm; der Frontmatter-Typ einer Notiz (etwa
+   * „phönix-zyklus“) darf dort nicht landen und heißt deshalb `noteType`.
+   */
+  function nodeAttrs(n) {
+    const { type, ...rest } = n;
+    return { ...rest, noteType: type ?? null, label: labelOf(n) };
+  }
+  window.cockpitGraph = { nodeAttrs };
+
   const stage = document.querySelector('.graph-stage[data-center]');
   const lib = window.GraphLib;
   if (!stage || !lib) return;
@@ -186,13 +204,6 @@
     return alpha(colors.muted, strength * 0.9);
   }
 
-  const STATUS_MARK = { done: '✓ ', in_progress: '◐ ', blocked: '⏸ ', review: '◑ ', dropped: '✕ ' };
-  function labelOf(n) {
-    if (n.kind === 'task') return `${STATUS_MARK[n.status] ?? '○ '}${n.ref ? `${n.ref} ` : ''}${n.label ?? ''}`;
-    if (n.kind === 'event') return `◷ ${n.label ?? ''}`;
-    return String(n.label ?? n.path ?? '');
-  }
-
   /** Nur Notizen, die ausschließlich über „ähnlich“ hängen, zeichnen wir heller. */
   function refreshDerived() {
     graph.forEachNode((id, a) => {
@@ -213,12 +224,12 @@
     for (const n of data.nodes) {
       if (graph.hasNode(n.id)) {
         // Status und Bezeichnung aus der neueren Antwort übernehmen, Lage behalten.
-        graph.mergeNodeAttributes(n.id, { ...n, label: labelOf(n) });
+        graph.mergeNodeAttributes(n.id, nodeAttrs(n));
         continue;
       }
       const angle = Math.random() * Math.PI * 2;
       const r = n.id === data.center ? 0 : spread * (n.level >= 2 ? 1.6 : 1) * (0.7 + Math.random() * 0.6);
-      graph.addNode(n.id, { ...n, label: labelOf(n), x: origin.x + Math.cos(angle) * r, y: origin.y + Math.sin(angle) * r });
+      graph.addNode(n.id, { ...nodeAttrs(n), x: origin.x + Math.cos(angle) * r, y: origin.y + Math.sin(angle) * r });
       added += 1;
     }
     for (const e of data.edges) {
