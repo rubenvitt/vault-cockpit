@@ -37,6 +37,48 @@ test('Einstellungen: leere Felder fallen auf die Umgebung zurück', () => {
   assert.equal(h.version, 1);
 });
 
+test('Einstellungen: Brücke, Mail und Embeddings, mit Umgebung als Rückfall', () => {
+  const env = { bridgeEnabled: false, bridgeTag: 'aufgabe', mailToken: 'fm_env', mailSenders: ['r@rubeen.dev'], mailbox: 'Vault', embedUrl: 'http://ollama:11434' };
+  const s = createSettingsStore({ defaults: env, logger: quiet });
+  let g = s.get();
+  assert.deepEqual(g.bridge, { enabled: false, tag: 'aufgabe' });
+  assert.deepEqual(g.mail, { token: 'fm_env', senders: ['r@rubeen.dev'], mailbox: 'Vault', doneMailbox: 'Archive', pollMinutes: 5, source: 'umgebung' });
+  assert.deepEqual(g.embed, { url: 'http://ollama:11434', model: 'bge-m3', source: 'umgebung' });
+
+  s.save({
+    bridge: { enabled: true, tag: '#zunder' },
+    mail: { token: 'fm_eigen', senders: ['@Rubeen.Email', ''], mailbox: 'Eingang', pollMinutes: '10' },
+    embed: { url: 'http://gpu:11434', model: 'nomic-embed-text' },
+    calendars: [],
+  });
+  g = s.get();
+  assert.deepEqual(g.bridge, { enabled: true, tag: 'zunder' });
+  assert.deepEqual(g.mail, { token: 'fm_eigen', senders: ['@rubeen.email'], mailbox: 'Eingang', doneMailbox: 'Archive', pollMinutes: 10, source: 'einstellungen' });
+  assert.deepEqual(g.embed, { url: 'http://gpu:11434/', model: 'nomic-embed-text', source: 'einstellungen' });
+
+  // Ohne Token oder ohne Absender kein Mail-Abruf.
+  const bare = createSettingsStore({ logger: quiet });
+  bare.save({ mail: { token: 'fm_x' }, calendars: [] });
+  assert.equal(bare.get().mail, null);
+  assert.equal(bare.get().embed, null);
+  assert.deepEqual(bare.get().bridge, { enabled: true, tag: 'zunder' });
+});
+
+test('Einstellungen: Prüfung von Brücken-Tag, Absendern, Abstand und Embedding-Adresse', () => {
+  const bad = [
+    [{ bridge: { tag: 'zwei wörter' } }, /Brücken-Tag/],
+    [{ mail: { senders: ['rubeen.dev'] } }, /Absender/],
+    [{ mail: { pollMinutes: '0' } }, /Minuten/],
+    [{ mail: { pollMinutes: 'oft' } }, /Minuten/],
+    [{ embed: { url: 'ollama:11434' } }, /Embedding-Server/],
+  ];
+  for (const [input, msg] of bad) assert.throws(() => validateSettings(input), (e) => e instanceof SettingsError && msg.test(e.message));
+  // Ältere Datei ohne die neuen Abschnitte bleibt gültig.
+  const old = validateSettings({ tz: 'UTC', zunder: { url: null, token: null }, calendars: [] });
+  assert.deepEqual(old.bridge, { enabled: null, tag: null });
+  assert.deepEqual(old.mail.senders, []);
+});
+
 test('Einstellungen: onChange meldet jedes Speichern', () => {
   const s = createSettingsStore({ logger: quiet });
   const seen = [];

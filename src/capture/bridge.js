@@ -32,7 +32,8 @@
  *
  * `zunder` ist ein Client oder eine Funktion, die den aktuellen Client liefert.
  * Jeder Durchlauf fragt sie neu: Ohne Zugang ruht die Brücke, mit neuem Zugang
- * (Einstellungen) arbeitet sie ohne Neustart weiter.
+ * (Einstellungen) arbeitet sie ohne Neustart weiter. Ebenso dürfen `tag`,
+ * `vaultName` und `enabled` Funktionen sein (Einstellungen → Zunder-Brücke).
  */
 const FENCE = /^\s*(```|~~~)/;
 const OPEN_CHECKBOX = /^(\s*(?:[-*+]|\d+[.)])\s+)\[ \](\s+)(.*)$/;
@@ -109,14 +110,20 @@ const STATUS_FOR_MARK = { x: 'done', '-': 'dropped' };
 const SEEN = 'seen:';
 const seenKey = (path, id) => `${SEEN}${path}\n${id}`;
 
-export function createZunderBridge({ index, editor, zunder, state, tag = 'zunder', vaultName = null, logger = console }) {
-  const normalizedTag = tag.replace(/^#/, '').toLowerCase();
+const getter = (v) => (typeof v === 'function' ? v : () => v);
+
+export function createZunderBridge({ index, editor, zunder, state, tag = 'zunder', vaultName = null, enabled = true, logger = console }) {
+  const currentTag = getter(tag);
+  const normalized = () => String(currentTag() || 'zunder').replace(/^#/, '').toLowerCase();
+  const currentVaultName = getter(vaultName);
+  const isEnabled = getter(enabled);
   const currentZunder = typeof zunder === 'function' ? zunder : () => zunder;
   let queue = Promise.resolve();
 
   function backlink(path) {
     const name = path.replace(/\.md$/i, '');
     const lines = [`Aus der Notiz [[${name}]] (\`${path}\`).`];
+    const vaultName = currentVaultName();
     if (vaultName) {
       lines.push(`[In Obsidian öffnen](obsidian://open?vault=${encodeURIComponent(vaultName)}&file=${encodeURIComponent(name)})`);
     }
@@ -127,10 +134,11 @@ export function createZunderBridge({ index, editor, zunder, state, tag = 'zunder
   async function processNote(zunder, path) {
     const note = index.getNote(path);
     if (!note?.content || note.class !== 'core' || note.sensitivity) return 0;
-    if (!note.tags.includes(normalizedTag)) return 0;
+    const tag = normalized();
+    if (!note.tags.includes(tag)) return 0;
 
     let created = 0;
-    for (const { line, title } of findMarkedTasks(note.content, normalizedTag)) {
+    for (const { line, title } of findMarkedTasks(note.content, tag)) {
       const key = `bridge:${path}\n${title}`;
       let task = state.get(key);
       if (!task) {
@@ -140,7 +148,7 @@ export function createZunderBridge({ index, editor, zunder, state, tag = 'zunder
         logger.info?.(`Zunder-Brücke: ${path} → ${task.ref ?? task.id}`);
       }
       try {
-        editor.replace({ path, oldText: line, newText: linkLine(line, normalizedTag, task), replaceAll: true });
+        editor.replace({ path, oldText: line, newText: linkLine(line, tag, task), replaceAll: true });
         state.delete(key);
         // Gleich als offen merken, damit Abhaken vor dem nächsten Abgleich zählt.
         state.set(seenKey(path, task.id), ' ');
@@ -152,7 +160,7 @@ export function createZunderBridge({ index, editor, zunder, state, tag = 'zunder
   }
 
   async function run(paths) {
-    const zunder = currentZunder();
+    const zunder = isEnabled() ? currentZunder() : null;
     if (!zunder) return 0;
     let created = 0;
     for (const path of paths) {
@@ -170,7 +178,7 @@ export function createZunderBridge({ index, editor, zunder, state, tag = 'zunder
    * melden, in Zunder erledigte oder verworfene Aufgaben im Vault schließen.
    */
   async function syncBack() {
-    const zunder = currentZunder();
+    const zunder = isEnabled() ? currentZunder() : null;
     if (!zunder) return { closed: 0, reported: 0 };
     const prefix = zunder.taskUrl ? zunder.taskUrl('') : null;
     // Je Notiz und Aufgabe: offene Zeilen und die Markierung des Paars
@@ -262,13 +270,18 @@ export function createZunderBridge({ index, editor, zunder, state, tag = 'zunder
   };
 
   return {
-    tag: normalizedTag,
-    /** Ob die Brücke gerade einen Zunder-Zugang hat. */
-    active: () => Boolean(currentZunder()),
+    /** Aktueller Tag ohne `#`. */
+    get tag() {
+      return normalized();
+    },
+    /** Ob die Brücke eingeschaltet ist, unabhängig vom Zunder-Zugang. */
+    enabled: () => Boolean(isEnabled()),
+    /** Ob die Brücke gerade arbeitet: eingeschaltet und mit Zunder-Zugang. */
+    active: () => Boolean(isEnabled()) && Boolean(currentZunder()),
     /** Nur diese Notizen prüfen (nach gemeldeten Änderungen). */
     scan: (paths) => enqueue(paths.filter((p) => p.toLowerCase().endsWith('.md'))),
     /** Alle Notizen mit dem Tag prüfen (Start, periodisch). */
-    scanAll: () => enqueue(index.pathsWithTag(normalizedTag)),
+    scanAll: () => enqueue(index.pathsWithTag(normalized())),
     /** Erledigt-Stand in beide Richtungen abgleichen (Start, periodisch). */
     syncBack: () => enqueueJob(syncBack),
   };

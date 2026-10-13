@@ -31,7 +31,7 @@ export function createVaultMcpHandler({
   capture,
   editor,
   sync = null,
-  semantic = null,
+  semantic: semanticOrGetter = null,
   graph = null,
   zunderStatus = null,
   verifyToken,
@@ -39,6 +39,8 @@ export function createVaultMcpHandler({
   layoutHint = null,
 }) {
   return createMcpHandler((ctx) => {
+    // Index oder Funktion, die den aktuellen liefert (Einstellungen → Embeddings); pro Request neu.
+    const semantic = typeof semanticOrGetter === 'function' ? semanticOrGetter() : semanticOrGetter;
     // Die Factory läuft pro Request. Der Principal kommt aus dem Bearer-Token
     // des jeweiligen Requests, nicht aus geteiltem Zustand.
     const auth = readHeader(ctx?.requestInfo?.headers, 'authorization');
@@ -130,7 +132,7 @@ export function createVaultMcpHandler({
         annotations: READ_ONLY,
       },
       read(async (args) => {
-        if (!semantic) return fail('Die semantische Suche ist auf dem Server nicht eingerichtet (EMBED_URL).');
+        if (!semantic) return fail('Die semantische Suche ist auf dem Server nicht eingerichtet (Cockpit → Einstellungen → Embeddings).');
         const allowed = index.filterPaths({ includeSensitive: args.include_sensitive === true });
         if (!allowed.has(args.path)) return fail(`Notiz "${args.path}" wurde nicht gefunden.`);
         const limit = args.limit ?? 10;
