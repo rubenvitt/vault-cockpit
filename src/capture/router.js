@@ -10,6 +10,7 @@ export const SOURCES = {
   mail: 'Mail',
   funke: 'Funke',
   api: 'Capture-Endpunkt',
+  cockpit: 'Web-Cockpit',
 };
 
 const TITLE_MAX = 80;

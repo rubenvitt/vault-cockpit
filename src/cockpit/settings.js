@@ -84,7 +84,7 @@ export function validateSettings(input) {
   return { tz, vaultName: text(input.vaultName, 200, 'Vault-Name'), inboxFolder, zunder: { url: zunderUrl, token: zunderToken }, calendars };
 }
 
-function writePrivate(file, content) {
+export function writePrivate(file, content) {
   mkdirSync(dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
   writeFileSync(tmp, content, { mode: 0o600 });

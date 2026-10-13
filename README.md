@@ -62,7 +62,7 @@ Das Image baut GitHub Actions bei jedem Push auf `main`:
 | `OBSIDIAN_VAULT_NAME` | Name des Vaults in Obsidian, für „In Obsidian öffnen“ in Zunder (optional) |
 | `CAPTURE_STATE_FILE` | Merkzettel gegen doppelte Aufgaben, Standard `/data/capture-state.json` |
 | `MAIL_JMAP_TOKEN` | Fastmail-API-Token (nur Mail); ohne Wert kein Mail-Abruf |
-| `MAIL_ALLOWED_SENDERS` | eigene Absenderadressen (Komma-Liste), Pflicht mit `MAIL_JMAP_TOKEN` |
+| `MAIL_ALLOWED_SENDERS` | eigene Absenderadressen (Komma-Liste), `@domain` erlaubt eine ganze Domain ohne Subdomains (z. B. `@rubeen.dev,@rubeen.email`); Pflicht mit `MAIL_JMAP_TOKEN` |
 | `EMBED_URL`, `EMBED_MODEL` | Ollama-Server für Embeddings (z. B. `http://ollama:11434`) und Modell, Standard `bge-m3`; ohne `EMBED_URL` nur Volltext |
 | `VECTOR_DB` | Vektorspeicher, Standard `/data/vectors.db` |
 | `MAIL_MAILBOX`, `MAIL_DONE_MAILBOX`, `MAIL_POLL_MIN` | Ordner zum Abholen (Standard `Vault`), Ablage danach (Standard `Archive`), Abstand in Minuten (Standard 5) |
@@ -131,6 +131,17 @@ gültigen Token, `502` wenn Zunder ablehnt, `503` bei `!` ohne Zunder.
 Jede Antwort trägt zusätzlich `message`, einen fertigen Satz für die Mitteilung, und
 Fehler ihren `status` im Body (`{"error","status","message"}`), weil ein Kurzbefehl den
 HTTP-Status nicht sieht.
+
+### Suche
+
+`GET <PUBLIC_URL>/api/search?q=…` mit Header `Authorization: Bearer vct_…`
+durchsucht den Vault für Clients ohne OAuth, nur lesend und nur in eigenen Notizen
+ohne vertrauliche Ordner. Parameter: `q` (Pflicht), `mode` (`hybrid` Standard oder
+`semantic`), `folder`, `limit` (Standard 10, höchstens 50), `offset`. Antwort:
+`200 {"results":[{"path","title","streams","similarity","score",…}],"total","hasMore","degraded"}`,
+Pfade relativ zum Vault mit `/`. `400` bei falscher Eingabe, `401` ohne gültigen Token. Den Token im Web-Cockpit
+unter **Einstellungen → API-Tokens** anlegen; er wird nur einmal angezeigt, gespeichert
+ist nur sein Hash (`api-tokens.json` neben den Cockpit-Einstellungen). Widerrufen geht dort auch.
 `GET /capture` ist ein Verbindungstest.
 
 **Kurzbefehle neu bauen:** `node scripts/kurzbefehle/build.js [--url <PUBLIC_URL>]`
@@ -141,8 +152,11 @@ signierten Dateien landen in `docs/kurzbefehle/`. Der Token steht in keiner der
 Dateien, iOS fragt ihn beim Import ab.
 
 Mail-Abruf: Nur Absender aus `MAIL_ALLOWED_SENDERS` werden verarbeitet, alle
-anderen Mails wandern unverarbeitet in den Ablage-Ordner. Der Absender einer Mail
-lässt sich fälschen; die Adresse deshalb nicht weitergeben. Den API-Token in
+anderen Mails wandern unverarbeitet in den Ablage-Ordner. Ein Eintrag mit
+führendem `@` (z. B. `@rubeen.dev`) gibt jede Adresse dieser Domain frei, aber
+keine Subdomain. Der Absender einer Mail lässt sich fälschen; die Adresse deshalb
+nicht weitergeben. Mit ganzen Domains wird die Annahme breiter, also die
+Alias-Adresse erst recht geheim halten. Den API-Token in
 Fastmail unter *Einstellungen → Passwörter & Sicherheit → API-Tokens* mit
 Zugriff nur auf Mail anlegen.
 
@@ -163,8 +177,15 @@ bleiben außen vor.
 Zurück geht es im selben Takt (Start und Reindex-Intervall): Ist die verlinkte
 Aufgabe in Zunder erledigt, wird die Checkbox abgehakt (`- [x]`); ist sie
 verworfen, wird sie als abgebrochen markiert (`- [-]`, wie im Tasks-Plugin).
-Gezählt werden nur Links auf die eingestellte Zunder-Adresse. Abhaken im Vault
-erledigt die Aufgabe in Zunder nicht: Zunder führt, die Checkbox spiegelt.
+Gezählt werden nur Links auf die eingestellte Zunder-Adresse.
+
+Andersherum erledigt Abhaken im Vault die Aufgabe in Zunder (`- [x]` → erledigt,
+`- [-]` → verworfen), ebenfalls spätestens nach einem Intervall. Die Brücke
+merkt sich dafür je Notiz und Aufgabe die zuletzt gesehene Checkbox (im
+Merkzettel unter `/data`) und meldet nur den Wechsel von offen zu geschlossen.
+Wer eine Aufgabe in Zunder wieder öffnet, während die Checkbox noch abgehakt
+ist, behält sie offen. Checkboxen, die die Brücke zum ersten Mal schon abgehakt
+sieht (etwa nach dem Update), gelten nicht als Wechsel.
 
 ### Web-Cockpit
 
@@ -200,6 +221,15 @@ Gespeichert wird in `/data/cockpit-settings.json` (nur für den Dienst lesbar).
 Passwörter, Tokens und Kalenderadressen zeigt die Seite nie wieder an; ein leeres
 Feld behält den gespeicherten Wert. Das Secret für das Sitzungs-Cookie liegt in
 `/data/session-secret` und entsteht beim ersten Start (alternativ `SESSION_SECRET`).
+
+**Handeln statt nur schauen:** Aufgaben in Flammen, Big Rocks, Aufgaben und
+Zunder-Inbox hakt man direkt ab (Zunder-Status `done`, ein zweiter Klick öffnet
+sie wieder, die Meldung bietet „Rückgängig“). Oben auf der Seite liegt eine
+**Schnelleingabe** mit derselben Logik wie `/capture`: Text wird eine Notiz im
+Inbox-Ordner, mit `!` vorne eine Aufgabe in der Zunder-Inbox. `/` oder `n` springt
+hinein, Enter legt an, Shift+Enter macht eine neue Zeile. Beides läuft ohne
+Seitenwechsel; ohne JavaScript funktionieren dieselben Formulare mit
+Weiterleitung. Schlägt etwas fehl, bleibt die Meldung stehen und der Text im Feld.
 
 Fällt eine Quelle aus (Zunder nicht erreichbar, ein Kalender antwortet nicht),
 zeigt nur ihr Abschnitt bzw. nur dieser Kalender den Fehler; die Einstellungsseite
@@ -252,6 +282,7 @@ npm ci && npm test
 - `src/capture/` — Capture von außen: Endpunkte, Mail-Abruf, Zunder-Weiterleitung und -Brücke
 - `src/cockpit/` — Wochenmodell: ISO-Wochen, Feuer-Notiz, Kalender (iCal mit Serienauflösung, CalDAV), Einstellungen, Zusammenstellung aus Zunder
 - `src/semantic/` — Embeddings (Ollama), Abschnitte, Vektorspeicher, hybride Suche
+- `src/search/` — lesender Such-Endpunkt `/api/search` mit eigenem Token
 - `src/graph/` — Graph um eine Notiz mit Aufgaben- und Termin-Knoten
 - `src/web/` — Web-Cockpit: OIDC-Login mit PKCE, signiertes Sitzungs-Cookie, HTML der Wochenansicht, Einstellungen, Suche und Graph
 - `sync/` — Image des Sidecars `vault-sync` (Obsidian Headless mit Status-Wrapper)
@@ -281,8 +312,11 @@ npm ci && npm test
 - **Web-Login getrennt von MCP:** Das Web-Cockpit hat einen eigenen OIDC-Client
   und prüft das ID-Token (Signatur, `iss`, `aud` = Client-ID, `nonce`, PKCE,
   Subject). Das Sitzungs-Cookie ist `HttpOnly`, `Secure`, `SameSite=Lax` und gilt
-  nicht für `/mcp`. Die Seiten laden kein JavaScript; die Content-Security-Policy
-  erlaubt nur das eigene Stylesheet.
+  nicht für `/mcp`. Die Content-Security-Policy erlaubt nur eigene Dateien
+  (Stylesheet und `/static/cockpit.js`, kein Inline-Script). Schreibende Aktionen
+  (`/aktion/…`) brauchen Sitzung, gleiche Herkunft und ein CSRF-Token, das an das
+  Sitzungs-Cookie gebunden ist; die Schnelleingabe schreibt nie in einen
+  vertraulichen oder ausgeschlossenen Ordner der Policy.
 - **Readwise-Importe** sind eine eigene Indexklasse und standardmäßig aus der Suche
   ausgenommen, damit importierte Fremdtexte die eigenen Notizen nicht verdrängen.
 

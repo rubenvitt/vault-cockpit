@@ -1,3 +1,4 @@
+import { dirname, join } from 'node:path';
 import { createApp } from './http/app.js';
 import { createTokenVerifier } from './oauth/verifier.js';
 import { createPrincipalCache } from './oauth/principal-cache.js';
@@ -12,13 +13,16 @@ import { createZunderClient } from './capture/zunder.js';
 import { createStateStore } from './capture/state.js';
 import { createCaptureRouter } from './capture/router.js';
 import { createCaptureHttp } from './capture/http.js';
+import { createSearchHttp } from './search/http.js';
 import { createMailCapture } from './capture/mail.js';
 import { createZunderBridge } from './capture/bridge.js';
 import { createCockpit } from './cockpit/data.js';
 import { createCalendarSources, calendarForGraph } from './cockpit/calendars.js';
 import { createSettingsStore, loadOrCreateSecret } from './cockpit/settings.js';
+import { createTokenStore } from './cockpit/tokens.js';
 import { createOidcLogin } from './web/oidc.js';
 import { createWebHttp } from './web/http.js';
+import { createCockpitActions } from './cockpit/actions.js';
 import { createOllamaEmbedder } from './semantic/embedder.js';
 import { createSemanticIndex } from './semantic/index.js';
 import { hybridSearch } from './semantic/search.js';
@@ -115,6 +119,12 @@ const captureHttp = process.env.CAPTURE_TOKEN
   ? createCaptureHttp({ token: process.env.CAPTURE_TOKEN, router: captureRouter, zunderEnabled: Boolean(zunder) })
   : null;
 
+// Lesende Suche für Clients ohne OAuth. Die Tokens werden im Web-Cockpit unter
+// Einstellungen → API-Tokens angelegt und liegen neben den Einstellungen.
+const COCKPIT_SETTINGS_FILE = process.env.COCKPIT_SETTINGS_FILE ?? '/data/cockpit-settings.json';
+const apiTokens = createTokenStore({ file: join(dirname(COCKPIT_SETTINGS_FILE), 'api-tokens.json') });
+const searchHttp = createSearchHttp({ tokens: apiTokens, index, semantic });
+
 let mail = null;
 if (process.env.MAIL_JMAP_TOKEN) {
   mail = createMailCapture({
@@ -161,7 +171,7 @@ sync.start({
 // und werden im Browser gepflegt; leere Felder fallen auf die Umgebung zurück.
 // Der Graph nutzt dieselben Kalender und dieselbe Zeitzone.
 const cockpitSettings = createSettingsStore({
-  file: process.env.COCKPIT_SETTINGS_FILE ?? '/data/cockpit-settings.json',
+  file: COCKPIT_SETTINGS_FILE,
   defaults: {
     tz: process.env.COCKPIT_TZ || 'Europe/Berlin',
     vaultName: process.env.OBSIDIAN_VAULT_NAME || null,
@@ -175,15 +185,26 @@ const graph = createGraph({ index, semantic, zunder, calendar: calendarForGraph(
 
 // Web-Cockpit (Schritt 3): Wochenansicht mit eigenem Browser-Login. Aus, bis
 // WEB_CLIENT_ID gesetzt ist.
+const cockpit = createCockpit({
+  index,
+  settings: cockpitSettings,
+  calendars,
+  zunderFor: ({ url, token }) => createZunderClient({ url, token }),
+});
 const webHttp = process.env.WEB_CLIENT_ID
   ? createWebHttp({
-      cockpit: createCockpit({
-        index,
+      cockpit,
+      // Abhaken und Schnelleingabe: Zunder-Zugang und Inbox-Ordner aus den Einstellungen.
+      actions: createCockpitActions({
+        vaultPath: VAULT_PATH,
         settings: cockpitSettings,
-        calendars,
-        zunderFor: ({ url, token }) => createZunderClient({ url, token }),
+        policy: POLICY,
+        state: captureState,
+        zunder: () => cockpit.zunder(),
+        index,
       }),
       settings: cockpitSettings,
+      tokens: apiTokens,
       calendars,
       graph,
       search: (query) => hybridSearch({ index, semantic, query, limit: 30 }),
@@ -222,6 +243,7 @@ const app = createApp({
     return principal;
   },
   captureHttp,
+  searchHttp,
   webHttp,
   mcpHandler: async (req, res, principal, body) => {
     await writeWebResponse(res, await mcpHttp.fetch(toWebRequest(req, body, PUBLIC_URL)));
@@ -238,6 +260,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`  Reindex     : alle ${process.env.REINDEX_INTERVAL_MIN ?? 15} Minuten${sync.name === 'none' ? '' : ', dazu bei jeder Dateiänderung'}`);
   console.log(`  Sync        : ${SYNC_ADAPTER} (${sync.status().state})`);
   console.log(`  Capture     : ${captureHttp ? '/capture, /funke' : 'Endpunkte aus (CAPTURE_TOKEN)'}${mail ? `, Mail aus „${mail.status().mailbox}“` : ''}`);
+  console.log(`  Suche       : /api/search (${apiTokens.list().length} API-Tokens)`);
   console.log(`  Zunder      : ${zunder ? `${process.env.ZUNDER_URL} (! → Inbox${bridge ? `, Brücke #${bridge.tag}` : ''})` : 'aus (ZUNDER_URL, ZUNDER_TOKEN)'}`);
   console.log(`  Semantik    : ${semantic ? `${semantic.model} über ${process.env.EMBED_URL}` : 'aus (EMBED_URL)'}`);
   console.log(`  Cockpit     : ${webHttp ? `${PUBLIC_URL}/ (${cockpitSettings.get().calendars.length} Kalender, Einstellungen unter /einstellungen)` : 'aus (WEB_CLIENT_ID)'}`);
