@@ -290,6 +290,18 @@ export function openIndex(dbOrPath, { vaultPath = process.env.VAULT_PATH ?? '/va
         .all(prefix, prefix, `${prefix}/%`, limit);
     },
 
+    /** Pfade eigener, nicht vertraulicher Notizen mit diesem Tag (auch inline). */
+    pathsWithTag(tag) {
+      return db
+        .prepare(
+          `SELECT DISTINCT n.path FROM note_tags t JOIN notes n ON n.path = t.path
+            WHERE t.tag = ? AND n.class = 'core' AND n.sensitivity IS NULL
+            ORDER BY n.path`,
+        )
+        .all(tag)
+        .map((r) => r.path);
+    },
+
     stats() {
       const byClass = {};
       for (const r of db.prepare('SELECT class, COUNT(*) c FROM notes GROUP BY class').all()) {

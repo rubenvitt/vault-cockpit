@@ -80,6 +80,7 @@ export function createIndexManager({ vaultPath, dbPath, policy = DEFAULT_POLICY,
     outgoingLinks: (...a) => current.outgoingLinks(...a),
     listFolder: (...a) => current.listFolder(...a),
     stats: (...a) => current.stats(...a),
+    pathsWithTag: (...a) => current.pathsWithTag(...a),
     refresh: (...a) => current.refresh(...a),
   };
 }
