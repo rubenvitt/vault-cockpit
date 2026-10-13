@@ -31,9 +31,12 @@ Das Image baut GitHub Actions bei jedem Push auf `main`:
    den Stack kopieren (ohne `.example`) und anpassen.
 2. In Pocket ID unter *Allowed metadata document URLs*
    `https://claude.ai/oauth/mcp-oauth-client-metadata` freischalten und eine API
-   mit der Resource `<PUBLIC_URL>/mcp` anlegen. Der Scope `vault:edit` muss dort
-   genauso freigegeben sein wie `vault:capture`; ein bestehender Connector muss
-   danach in Claude neu verbunden werden, damit das Token ihn trägt.
+   mit der Resource `<PUBLIC_URL>/mcp` anlegen. An der API CIMD-Clients zulassen
+   und die Berechtigungen `vault:read`, `vault:capture` und `vault:edit` anlegen,
+   jede mit Freigabe für CIMD-Clients. Fehlt eine davon, lehnt Pocket ID das
+   Verbinden mit `invalid_scope` ab, weil Claude alle drei anfordert. Ein
+   bestehender Connector behält die Scopes seiner ersten Anmeldung und muss nach
+   einer Änderung in Claude neu verbunden werden.
 3. `docker compose up -d`, dann in Claude einen Connector auf `<PUBLIC_URL>/mcp`.
 
 | Variable | Bedeutung |
