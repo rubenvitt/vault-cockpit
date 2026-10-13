@@ -6,6 +6,7 @@ import { createWebHttp } from '../src/web/http.js';
 import { createOidcLogin } from '../src/web/oidc.js';
 import { createCookieSigner, parseCookies } from '../src/web/session.js';
 import { createSettingsStore } from '../src/cockpit/settings.js';
+import { createTokenStore } from '../src/cockpit/tokens.js';
 
 const ISSUER = 'https://id.test';
 const CLIENT = 'cockpit-web';
@@ -97,9 +98,11 @@ const search = async (q) => ({ results: [{ path: 'wiki/a.md', title: 'A', snippe
 async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSubjects = ['ruben'], calendars = null } = {}) {
   const idp = fakeIdp(idpOptions);
   const settings = createSettingsStore({ defaults: { tz: 'Europe/Berlin', inboxFolder: 'inbox', zunderUrl: 'https://zunder.env', zunderToken: 'zt_env' }, logger: quiet });
+  const tokens = createTokenStore({ logger: quiet });
   const webHttp = createWebHttp({
     cockpit,
     settings,
+    tokens,
     calendars,
     graph,
     search,
@@ -143,7 +146,7 @@ async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSu
     return call(`/auth/callback?code=${code}&state=${state}`);
   };
   try {
-    await run({ call, login, idp, jar, settings });
+    await run({ call, login, idp, jar, settings, tokens });
   } finally {
     app.close();
   }
@@ -349,6 +352,43 @@ test('Einstellungen: Fehler zeigt die Meldung, fremde Herkunft wird abgewiesen',
     const same = await call('/einstellungen', { method: 'POST', form: { tz: 'UTC' }, origin: 'https://vault.test' });
     assert.equal(same.status, 303);
     assert.equal(settings.get().tz, 'UTC');
+  });
+});
+
+test('API-Tokens: anlegen zeigt den Klartext einmal, widerrufen, nur angemeldet und von dieser Seite', async () => {
+  await withServer(async ({ call, login, settings, tokens }) => {
+    const anon = await call('/einstellungen/tokens', { method: 'POST', form: { name: 'Raycast' } });
+    assert.equal(anon.status, 303);
+    assert.equal(anon.headers.get('location'), '/login?next=%2Feinstellungen');
+    assert.equal(tokens.list().length, 0);
+
+    await login();
+    assert.match(await (await call('/einstellungen')).text(), /Noch keine Tokens/);
+    const foreign = await call('/einstellungen/tokens', { method: 'POST', form: { name: 'Raycast' }, origin: 'https://evil.test' });
+    assert.equal(foreign.status, 403);
+    assert.equal((await call('/einstellungen/tokens', { method: 'POST', form: { name: '' } })).status, 400);
+    assert.equal(tokens.list().length, 0);
+
+    const created = await call('/einstellungen/tokens', { method: 'POST', form: { name: 'Raycast' }, origin: 'https://vault.test' });
+    assert.equal(created.status, 200);
+    const html = await created.text();
+    const plain = html.match(/<code>(vct_[\w-]+)<\/code>/)[1];
+    assert.match(html, /nicht noch einmal angezeigt/);
+    assert.ok(tokens.verify(plain));
+
+    // Speichern der übrigen Einstellungen lässt die Tokens stehen.
+    await call('/einstellungen', { method: 'POST', form: { tz: 'UTC' } });
+    assert.equal(settings.get().tz, 'UTC');
+    const page = await (await call('/einstellungen')).text();
+    assert.ok(!page.includes(plain));
+    assert.match(page, /Raycast/);
+
+    const [{ id }] = tokens.list();
+    const revoked = await call('/einstellungen/tokens/widerrufen', { method: 'POST', form: { id } });
+    assert.equal(revoked.headers.get('location'), '/einstellungen?widerrufen=1');
+    assert.equal(tokens.list().length, 0);
+    assert.ok(!tokens.verify(plain));
+    assert.equal((await call('/einstellungen/tokens')).headers.get('location'), '/einstellungen');
   });
 });
 
