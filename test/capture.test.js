@@ -177,7 +177,9 @@ async function withServer(run, { zunder = fakeZunder() } = {}) {
 test('/capture verlangt den Capture-Token', async () => {
   await withServer(async (call) => {
     assert.equal((await call('/capture', { body: 'x', type: 'text/plain', auth: null })).status, 401);
-    assert.equal((await call('/capture', { body: 'x', type: 'text/plain', auth: 'Bearer falsch' })).status, 401);
+    const denied = await call('/capture', { body: 'x', type: 'text/plain', auth: 'Bearer falsch' });
+    assert.equal(denied.status, 401);
+    assert.deepEqual(await denied.json(), { error: 'unauthorized', status: 401 }, 'Status auch im Body für den Kurzbefehl');
     assert.equal((await call('/capture', { method: 'GET' })).status, 200);
   });
 });
@@ -213,7 +215,9 @@ test('/capture meldet Fehler verständlich', async () => {
     async (call) => {
       const res = await call('/capture', { body: '!Aufgabe', type: 'text/plain' });
       assert.equal(res.status, 502);
-      assert.match((await res.json()).error, /503/);
+      const body = await res.json();
+      assert.match(body.error, /503/);
+      assert.equal(body.status, 502);
     },
     { zunder: fakeZunder({ fail: true }) },
   );

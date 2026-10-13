@@ -31,6 +31,8 @@ export function createCaptureHttp({ token, router, zunderEnabled = false }) {
     res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify(body));
   };
+  // Fehler tragen den Status auch im Body: Ein iOS-Kurzbefehl sieht den HTTP-Status nicht.
+  const fail = (res, status, error) => json(res, status, { error, status });
 
   function parseCapture(req, url, body) {
     const type = String(req.headers['content-type'] ?? '');
@@ -89,21 +91,21 @@ export function createCaptureHttp({ token, router, zunderEnabled = false }) {
     matches: (path) => path === '/capture' || path === '/funke/notes' || path === '/funke/health',
 
     async handle(req, res, url, body) {
-      if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
+      if (!authorized(req)) return fail(res, 401, 'unauthorized');
       const path = url.pathname;
 
       if (req.method === 'GET' && (path === '/capture' || path === '/funke/health')) {
         return json(res, 200, { ok: true, zunder: zunderEnabled });
       }
-      if (req.method !== 'POST' || path === '/funke/health') return json(res, 405, { error: 'method not allowed' });
+      if (req.method !== 'POST' || path === '/funke/health') return fail(res, 405, 'method not allowed');
 
       try {
         const input = path === '/funke/notes' ? parseFunke(body) : parseCapture(req, url, body);
         const result = await router.route(input);
         return json(res, result.duplicate ? 200 : 201, { ok: true, ...result });
       } catch (err) {
-        if (err instanceof CaptureError) return json(res, err.status, { error: err.message });
-        return json(res, 502, { error: err.message });
+        if (err instanceof CaptureError) return fail(res, err.status, err.message);
+        return fail(res, 502, err.message);
       }
     },
   };

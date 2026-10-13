@@ -118,8 +118,8 @@ schreiben nur in ein festes Projekt.
 
 | Weg | So geht's |
 |---|---|
-| iOS-Kurzbefehl | `POST <PUBLIC_URL>/capture?source=ios-kurzbefehl` mit dem Text als Body, Header `Authorization: Bearer <CAPTURE_TOKEN>` |
-| Sprachmemo | Kurzbefehl mit „Audio aufnehmen“ und „Audio transkribieren“ auf dem iPhone, dann wie oben mit `source=sprachmemo`. Transkribiert wird auf dem Gerät, das Cockpit bekommt nur Text. |
+| iOS-Kurzbefehl | [Notiz ins Cockpit](docs/kurzbefehle/Notiz%20ins%20Cockpit.shortcut) laden und importieren, beim Import den `CAPTURE_TOKEN` eintragen. Läuft aus dem Share-Sheet oder fragt den Text ab. Von Hand: `POST <PUBLIC_URL>/capture?source=ios-kurzbefehl` mit dem Text als Body, Header `Authorization: Bearer <CAPTURE_TOKEN>` |
+| Sprachmemo | [Sprachmemo ins Cockpit](docs/kurzbefehle/Sprachmemo%20ins%20Cockpit.shortcut) importieren: „Audio aufnehmen“, „Audio transkribieren“, dann wie oben mit `source=sprachmemo`. Transkribiert wird auf dem Gerät, das Cockpit bekommt nur Text. |
 | Funke | Als Relay-URL `<PUBLIC_URL>/funke` und als Relay-Token den `CAPTURE_TOKEN` eintragen. Notizen landen im Capture-Ordner (der Ordner aus der App wird ignoriert), Aufgaben schickt Funke weiter direkt an Zunder. |
 | Mail | Eine Adresse (Alias) anlegen und per Regel in den Ordner `MAIL_MAILBOX` sortieren. Betreff = Titel, `!` im Betreff = Aufgabe. Verarbeitete Mails wandern nach `MAIL_DONE_MAILBOX`. |
 
@@ -128,7 +128,15 @@ Mit `id` ist das Anlegen idempotent (dieselbe ID → `200` mit dem Ergebnis von
 damals). Antworten: `201 {"kind":"note","path"}` bzw.
 `201 {"kind":"task","id","ref","url"}`, `400` bei falscher Eingabe, `401` ohne
 gültigen Token, `502` wenn Zunder ablehnt, `503` bei `!` ohne Zunder.
+Fehler kommen als `{"error","status"}`, weil ein Kurzbefehl den HTTP-Status nicht sieht.
 `GET /capture` ist ein Verbindungstest.
+
+**Kurzbefehle neu bauen:** `node scripts/kurzbefehle/build.js [--url <PUBLIC_URL>]`
+schreibt die unsignierten Dateien nach `docs/kurzbefehle/unsigniert/`. iOS
+importiert nur signierte Kurzbefehle, deshalb danach auf einem Mac
+`scripts/kurzbefehle/sign.sh` laufen lassen (`shortcuts sign --mode anyone`); die
+signierten Dateien landen in `docs/kurzbefehle/`. Der Token steht in keiner der
+Dateien, iOS fragt ihn beim Import ab.
 
 Mail-Abruf: Nur Absender aus `MAIL_ALLOWED_SENDERS` werden verarbeitet, alle
 anderen Mails wandern unverarbeitet in den Ablage-Ordner. Der Absender einer Mail
