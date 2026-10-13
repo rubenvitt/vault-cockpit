@@ -1,0 +1,244 @@
+// Progressive Enhancement für das Web-Cockpit. Ohne dieses Script funktioniert
+// alles über normale Formulare mit Weiterleitung; mit ihm passiert Abhaken und
+// Erfassen ohne Seitenwechsel, mit Rückmeldung und Rückgängig.
+(() => {
+  'use strict';
+
+  const toasts = document.querySelector('.toasts');
+
+  async function post(form, extra = {}) {
+    const body = new URLSearchParams(new FormData(form));
+    for (const [k, v] of Object.entries(extra)) body.set(k, v);
+    let res;
+    try {
+      res = await fetch(form.action, {
+        method: 'POST',
+        headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' },
+        body,
+        credentials: 'same-origin',
+      });
+    } catch {
+      throw new Error('Keine Verbindung zum Cockpit. Nichts gespeichert.');
+    }
+    let data = null;
+    try {
+      data = await res.json();
+    } catch {
+      /* leer */
+    }
+    if (!res.ok || !data?.ok) throw new Error(data?.message || `Fehler ${res.status}. Nichts gespeichert.`);
+    return data;
+  }
+
+  // --- Meldungen ------------------------------------------------------------
+
+  function toast(message, { kind = 'ok', action = null } = {}) {
+    if (!toasts) return;
+    const el = document.createElement('div');
+    el.className = `toast ${kind}`;
+    el.setAttribute('role', kind === 'error' ? 'alert' : 'status');
+    const text = document.createElement('span');
+    text.className = 'toast-text';
+    text.textContent = message;
+    el.append(text);
+    if (action) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'toast-action';
+      b.textContent = action.label;
+      b.addEventListener('click', () => {
+        dismiss(el);
+        action.run();
+      });
+      el.append(b);
+    }
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'toast-close';
+    close.setAttribute('aria-label', 'Schließen');
+    close.textContent = '×';
+    close.addEventListener('click', () => dismiss(el));
+    el.append(close);
+    toasts.append(el);
+    // Fehler bleiben stehen, bis man sie schließt: nichts soll still verschwinden.
+    if (kind !== 'error') autoDismiss(el);
+    while (toasts.children.length > 4) toasts.firstElementChild.remove();
+  }
+
+  function autoDismiss(el, ms = 6000) {
+    let timer = setTimeout(() => dismiss(el), ms);
+    el.addEventListener('mouseenter', () => clearTimeout(timer));
+    el.addEventListener('mouseleave', () => (timer = setTimeout(() => dismiss(el), 2500)));
+  }
+
+  function dismiss(el) {
+    el.classList.add('leaving');
+    setTimeout(() => el.remove(), 200);
+  }
+
+  // Meldungen vom Server (Weg ohne JavaScript) verschwinden genauso.
+  for (const el of document.querySelectorAll('.toast.ok')) autoDismiss(el);
+  for (const b of document.querySelectorAll('.toast-close')) b.addEventListener('click', () => dismiss(b.closest('.toast')));
+
+  // --- Abhaken --------------------------------------------------------------
+
+  function recount(li) {
+    const rock = li.closest('.rock');
+    const count = rock?.querySelector('[data-count]');
+    if (!count) return;
+    const items = rock.querySelectorAll('li.task');
+    const done = rock.querySelectorAll('li.task.status-done').length;
+    count.textContent = `${done}/${items.length}`;
+    rock.classList.toggle('all-done', items.length > 0 && done === items.length);
+  }
+
+  function show(li, status) {
+    li.className = li.className.replace(/\bstatus-\S+/, `status-${status}`);
+    li.dataset.status = status;
+    const form = li.querySelector('form.tick');
+    const button = form.querySelector('button');
+    const done = status === 'done';
+    form.elements.status.value = done ? 'open' : 'done';
+    form.elements.prev.value = status;
+    button.setAttribute('aria-pressed', String(done));
+    button.setAttribute('aria-label', `${done ? 'Wieder öffnen' : 'Abhaken'}: ${li.dataset.title}`);
+    recount(li);
+  }
+
+  async function setStatus(li, status) {
+    const form = li.querySelector('form.tick');
+    const before = li.dataset.status;
+    if (li.classList.contains('busy')) return;
+    li.classList.add('busy');
+    show(li, status);
+    if (status === 'done') li.classList.add('just-done');
+    try {
+      const data = await post(form, { status, prev: before });
+      show(li, data.task.status);
+      const undo = data.undo;
+      toast(data.message, undo ? { action: { label: 'Rückgängig', run: () => setStatus(li, undo.status) } } : {});
+    } catch (err) {
+      show(li, before);
+      toast(err.message, { kind: 'error' });
+    } finally {
+      li.classList.remove('busy');
+      setTimeout(() => li.classList.remove('just-done'), 700);
+    }
+  }
+
+  document.addEventListener('submit', (e) => {
+    const form = e.target;
+    if (!(form instanceof HTMLFormElement) || !form.classList.contains('tick')) return;
+    e.preventDefault();
+    setStatus(form.closest('li'), form.elements.status.value);
+  });
+
+  // --- Schnelleingabe -------------------------------------------------------
+
+  const capture = document.querySelector('form.capture');
+  if (capture) {
+    const field = capture.elements.text;
+    const button = capture.querySelector('button[type=submit]');
+    const newId = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+
+    const mode = () => {
+      const task = field.value.trimStart().startsWith('!');
+      capture.dataset.mode = task ? 'task' : 'note';
+      button.textContent = task ? 'Aufgabe anlegen' : 'Notiz anlegen';
+    };
+    const grow = () => {
+      field.style.height = 'auto';
+      field.style.height = `${Math.min(field.scrollHeight, 240)}px`;
+    };
+    field.addEventListener('input', () => {
+      mode();
+      grow();
+    });
+    mode();
+    grow();
+
+    field.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        capture.requestSubmit();
+      } else if (e.key === 'Escape') {
+        field.blur();
+      }
+    });
+
+    capture.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!field.value.trim()) {
+        capture.classList.remove('nudge');
+        void capture.offsetWidth;
+        capture.classList.add('nudge');
+        field.focus();
+        return;
+      }
+      if (capture.classList.contains('busy')) return;
+      capture.classList.add('busy');
+      button.disabled = true;
+      try {
+        const sent = field.value;
+        const data = await post(capture);
+        field.value = '';
+        capture.elements.cid.value = newId();
+        mode();
+        grow();
+        prepend(data.result, sent);
+        toast(data.message, data.result.kind === 'task' && data.result.url ? { action: { label: 'Öffnen', run: () => window.open(data.result.url, '_blank', 'noopener') } } : {});
+      } catch (err) {
+        // Der Text bleibt im Feld; dieselbe Erfassungs-ID verhindert Doppelte beim erneuten Senden.
+        toast(err.message, { kind: 'error' });
+      } finally {
+        capture.classList.remove('busy');
+        button.disabled = false;
+      }
+    });
+
+    // `/` oder `n` springt in die Schnelleingabe, wenn nicht gerade getippt wird.
+    document.addEventListener('keydown', (e) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target;
+      if (t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      if (e.key === '/' || e.key === 'n') {
+        e.preventDefault();
+        field.focus();
+      }
+    });
+  }
+
+  function prepend(result, sent) {
+    if (!result || result.duplicate) return;
+    const list = document.querySelector(`ul[data-list="${result.kind === 'task' ? 'zunder-inbox' : 'vault-inbox'}"]`);
+    if (!list) return;
+    list.parentElement.querySelector(`[data-empty="${list.dataset.list}"]`)?.remove();
+    list.hidden = false;
+    const li = document.createElement('li');
+    li.className = result.kind === 'task' ? 'task status-open fresh' : 'note fresh';
+    const firstLine = sent.trim().replace(/^!\s*/, '').split(/\r?\n/)[0].trim();
+    const label = result.kind === 'task' ? firstLine || 'Neue Aufgabe' : result.path.split('/').pop().replace(/\.md$/i, '').replace(/^\d{4}-\d{2}-\d{2} \d{4} - /, '');
+    if (result.kind === 'task') {
+      const mark = document.createElement('span');
+      mark.className = 'mark';
+      mark.textContent = '○';
+      li.append(mark);
+    }
+    const body = document.createElement('span');
+    body.className = 'body';
+    if (result.url) {
+      const a = document.createElement('a');
+      a.href = result.url;
+      a.textContent = label;
+      body.append(a);
+    } else {
+      body.append(document.createTextNode(label));
+    }
+    const meta = document.createElement('span');
+    meta.className = 'meta';
+    meta.textContent = result.kind === 'task' ? (result.ref ?? 'Zunder-Inbox') : result.path;
+    body.append(meta);
+    li.append(body);
+    list.prepend(li);
+  }
+})();

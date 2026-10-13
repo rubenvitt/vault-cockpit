@@ -1,9 +1,9 @@
 import { localTime, zonedParts } from '../cockpit/week.js';
 
 /**
- * HTML der Wochenansicht. Serverseitig gerendert, ohne JavaScript im Browser:
- * Blättern zwischen Wochen sind Links, Abmelden ist ein Formular. Die
- * Content-Security-Policy erlaubt deshalb nur das eigene Stylesheet.
+ * HTML der Wochenansicht. Serverseitig gerendert; alles funktioniert über Links
+ * und Formulare. `/static/cockpit.js` macht Abhaken und Schnelleingabe ohne
+ * Seitenwechsel, die Content-Security-Policy erlaubt nur eigene Dateien.
  */
 
 const WEEKDAY = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
@@ -45,12 +45,34 @@ function weekTitle(w) {
 
 const STATUS_MARK = { done: '✓', in_progress: '◐', blocked: '⏸', review: '◑' };
 
-function taskItem(t, tz, { area = false } = {}) {
-  const mark = STATUS_MARK[t.status] ?? '○';
-  const meta = [t.ref, area ? t.area : t.project, dueLabel(t.due, tz)].filter(Boolean).map(esc).join(' · ');
-  return `<li class="task status-${esc(t.status)}${t.overdue ? ' overdue' : ''}">
-    <span class="mark" aria-label="${esc(t.status)}">${mark}</span>
-    <span class="body"><a href="${esc(t.url)}">${esc(t.title)}</a>${meta ? `<span class="meta">${meta}</span>` : ''}</span>
+const CHECK_SVG = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg>';
+
+/**
+ * Kästchen zum Abhaken: ein Formular, das ohne JavaScript per Weiterleitung
+ * arbeitet. Erledigte Aufgaben öffnet ein zweiter Klick wieder.
+ */
+function tickForm(t, ctx) {
+  const done = t.status === 'done';
+  const label = `${done ? 'Wieder öffnen' : 'Abhaken'}: ${t.title}`;
+  const working = t.status === 'in_progress' ? ' working' : t.status === 'blocked' ? ' parked' : '';
+  return `<form method="post" action="/aktion/status" class="tick">
+      <input type="hidden" name="csrf" value="${esc(ctx.write.csrf)}">
+      <input type="hidden" name="back" value="${esc(ctx.back)}">
+      <input type="hidden" name="id" value="${esc(t.id)}">
+      <input type="hidden" name="status" value="${done ? 'open' : 'done'}">
+      <input type="hidden" name="prev" value="${esc(t.status)}">
+      <button type="submit" class="check${working}" aria-pressed="${done}" aria-label="${esc(label)}" title="${esc(label)}">${CHECK_SVG}</button>
+    </form>`;
+}
+
+function taskItem(t, tz, ctx = {}, { area = false, mark = null, live = false } = {}) {
+  const meta = [t.ref, area ? t.area : t.project, dueLabel(t.due, tz), ...(t.extra ? [t.extra] : [])].filter(Boolean).map(esc).join(' · ');
+  const lead = ctx.write && t.id
+    ? tickForm(t, ctx)
+    : `<span class="mark" aria-label="${esc(t.status)}">${mark ?? STATUS_MARK[t.status] ?? '○'}</span>`;
+  return `<li class="task status-${esc(t.status)}${t.overdue ? ' overdue' : ''}" data-id="${esc(t.id ?? '')}" data-status="${esc(t.status)}" data-title="${esc(t.title)}">
+    ${lead}
+    <span class="body"><a href="${esc(t.url)}">${esc(t.title)}</a>${meta || live ? `<span class="meta">${meta}${live ? `${meta ? ' · ' : ''}<span class="live">läuft</span>` : ''}</span>` : ''}</span>
   </li>`;
 }
 
@@ -63,7 +85,7 @@ function obsidianLink(path, vaultName) {
   return `obsidian://open?vault=${encodeURIComponent(vaultName)}&file=${encodeURIComponent(file)}`;
 }
 
-function feuerSection(model, tz, vaultName) {
+function feuerSection(model, tz, vaultName, ctx) {
   const f = model.feuer;
   let goal;
   if (!f.ok) goal = problem(f);
@@ -83,12 +105,8 @@ function feuerSection(model, tz, vaultName) {
   else {
     flames = `<ul class="flames">${fl.data
       .map((t) => {
-        const measured = t.running ? '<span class="live">läuft</span>' : t.minutes != null ? `${t.minutes} min` : '';
-        return `<li class="task status-${esc(t.status)}">
-          <span class="mark">${t.status === 'done' ? '✓' : '🕯️'}</span>
-          <span class="body"><a href="${esc(t.url)}">${esc(t.title)}</a>
-          <span class="meta">${[dueLabel(t.due, tz), measured].filter(Boolean).join(' · ')}</span></span>
-        </li>`;
+        const extra = t.running ? null : t.minutes != null ? `${t.minutes} min` : null;
+        return taskItem({ ...t, ref: null, project: null, extra }, tz, ctx, { mark: t.status === 'done' ? '✓' : '🕯️', live: t.running });
       })
       .join('')}</ul>`;
   }
@@ -99,7 +117,7 @@ function feuerSection(model, tz, vaultName) {
   </section>`;
 }
 
-function rocksSection(model, tz) {
+function rocksSection(model, tz, ctx) {
   const r = model.rocks;
   let body;
   if (!r.ok) body = problem(r);
@@ -107,9 +125,9 @@ function rocksSection(model, tz) {
   else {
     body = `<div class="rocks">${r.data
       .map(
-        (g) => `<article class="rock">
-          <h3>${esc(g.area)} <span class="count">${g.done}/${g.tasks.length}</span></h3>
-          <ul>${g.tasks.map((t) => taskItem(t, tz)).join('')}</ul>
+        (g) => `<article class="rock${g.tasks.length && g.done === g.tasks.length ? ' all-done' : ''}">
+          <h3>${esc(g.area)} <span class="count" data-count>${g.done}/${g.tasks.length}</span></h3>
+          <ul>${g.tasks.map((t) => taskItem(t, tz, ctx)).join('')}</ul>
         </article>`,
       )
       .join('')}</div>`;
@@ -147,50 +165,99 @@ function calendarSection(model, tz) {
   return `<section><h2>Termine</h2>${failed}<div class="week">${days}</div></section>`;
 }
 
-function tasksSection(model, tz) {
+function tasksSection(model, tz, ctx) {
   const t = model.tasks;
   let body;
   if (!t.ok) body = problem(t);
   else if (!t.data.length) body = '<p class="empty">Nichts in Arbeit, nichts überfällig.</p>';
-  else body = `<ul>${t.data.map((x) => taskItem(x, tz, { area: true })).join('')}</ul>`;
+  else body = `<ul>${t.data.map((x) => taskItem(x, tz, ctx, { area: true })).join('')}</ul>`;
   return `<section><h2>Aufgaben <span class="hint">in Arbeit und überfällig</span></h2>${body}</section>`;
 }
 
-function inboxSection(model, tz, vaultName) {
+/** Liste, die das Script nach dem Erfassen ergänzt; leer zeigt sie „Leer.“. */
+const inboxList = (name, items) =>
+  `${items.length ? '' : `<p class="empty" data-empty="${name}">Leer.</p>`}<ul data-list="${name}"${items.length ? '' : ' hidden'}>${items.join('')}</ul>`;
+
+function inboxSection(model, tz, vaultName, ctx) {
   const { vault, zunder, folder } = model.inbox;
   let notes;
   if (!vault.ok) notes = problem(vault);
-  else if (!vault.data.length) notes = '<p class="empty">Leer.</p>';
   else {
-    notes = `<ul>${vault.data
+    notes = inboxList('vault-inbox', vault.data
       .map((n) => {
         const link = obsidianLink(n.path, vaultName);
         const title = esc(n.title ?? n.path.split('/').pop().replace(/\.md$/i, ''));
         return `<li class="note">${link ? `<a href="${esc(link)}">${title}</a>` : title}<span class="meta">${esc(n.path)}</span></li>`;
-      })
-      .join('')}</ul>`;
+      }));
   }
   let tasks;
   if (!zunder.ok) tasks = problem(zunder);
-  else if (!zunder.data.length) tasks = '<p class="empty">Leer.</p>';
-  else tasks = `<ul>${zunder.data.map((x) => taskItem(x, tz)).join('')}</ul>`;
+  else tasks = inboxList('zunder-inbox', zunder.data.map((x) => taskItem(x, tz, ctx)));
   return `<section><h2>Inbox</h2>
     <h3>Vault <span class="hint">${esc(folder)}/</span></h3>${notes}
     <h3>Zunder</h3>${tasks}
   </section>`;
 }
 
-export function renderWeek(model, { user = null } = {}) {
+/**
+ * Schnelleingabe: eine Zeile, die beim Tippen wächst. `!` vorne macht eine
+ * Zunder-Aufgabe daraus. Die Erfassungs-ID verhindert Doppelte beim Neusenden.
+ */
+function captureBar(ctx, draft) {
+  const task = String(draft ?? '').trimStart().startsWith('!');
+  return `<form method="post" action="/aktion/erfassen" class="capture" data-mode="${task ? 'task' : 'note'}">
+  <input type="hidden" name="csrf" value="${esc(ctx.write.csrf)}">
+  <input type="hidden" name="back" value="${esc(ctx.back)}">
+  <input type="hidden" name="cid" value="${esc(ctx.write.captureId)}">
+  <label class="capture-field">
+    <span class="sr-only">Schnelleingabe</span>
+    <span class="capture-mode" aria-hidden="true"><span class="as-note">Notiz</span><span class="as-task">Aufgabe</span></span>
+    <textarea name="text" rows="1" maxlength="20000" enterkeyhint="send" autocomplete="off"
+      placeholder="Gedanke festhalten … mit ! vorne wird es eine Zunder-Aufgabe">${esc(draft ?? '')}</textarea>
+    <kbd class="capture-key" title="Mit / oder n hierher springen">/</kbd>
+  </label>
+  <button type="submit" class="primary">${task ? 'Aufgabe anlegen' : 'Notiz anlegen'}</button>
+</form>`;
+}
+
+/** Meldung nach einer Aktion ohne JavaScript, mit Rückgängig als Formular. */
+function flashToast(flash, ctx) {
+  if (!flash?.message) return '';
+  const undo =
+    flash.undo && ctx.write
+      ? `<form method="post" action="/aktion/status">
+      <input type="hidden" name="csrf" value="${esc(ctx.write.csrf)}">
+      <input type="hidden" name="back" value="${esc(ctx.back)}">
+      <input type="hidden" name="id" value="${esc(flash.undo.id)}">
+      <input type="hidden" name="status" value="${esc(flash.undo.status)}">
+      <button type="submit" class="toast-action">Rückgängig</button>
+    </form>`
+      : '';
+  const kind = flash.kind === 'error' ? 'error' : 'ok';
+  return `<div class="toast ${kind}" role="${kind === 'error' ? 'alert' : 'status'}"><span class="toast-text">${esc(flash.message)}</span>${undo}<button type="button" class="toast-close" aria-label="Schließen">×</button></div>`;
+}
+
+/**
+ * @param {object} [opts.write]  `{ csrf, captureId }`, wenn die Seite schreiben darf
+ * @param {string} [opts.back]   Rücksprung nach einer Aktion ohne JavaScript
+ * @param {object} [opts.flash]  `{ kind, message, undo }` aus der letzten Aktion
+ * @param {string} [opts.draft]  Text, der nach einem Fehler wieder ins Eingabefeld kommt
+ */
+export function renderWeek(model, { user = null, write = null, back = '/', flash = null, draft = null } = {}) {
   const { tz, vaultName } = model;
   const w = model.week;
   const title = weekTitle(w);
+  const ctx = { write, back };
   return `<!doctype html>
 <html lang="de">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title.short)} · Cockpit</title>
+<meta name="theme-color" content="#f6f5f2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#171614" media="(prefers-color-scheme: dark)">
 <link rel="stylesheet" href="/static/cockpit.css">
+${write ? '<script src="/static/cockpit.js" defer></script>' : ''}
 </head>
 <body>
 <header>
@@ -206,15 +273,17 @@ export function renderWeek(model, { user = null } = {}) {
     <form method="post" action="/logout"><button type="submit" title="${esc(user ?? '')}">Abmelden</button></form>
   </nav>
 </header>
+${write ? `<div class="capture-wrap">${captureBar(ctx, draft)}</div>` : ''}
 <main>
-${feuerSection(model, tz, vaultName)}
-${rocksSection(model, tz)}
+${feuerSection(model, tz, vaultName, ctx)}
+${rocksSection(model, tz, ctx)}
 ${calendarSection(model, tz)}
 <div class="columns">
-${tasksSection(model, tz)}
-${inboxSection(model, tz, vaultName)}
+${tasksSection(model, tz, ctx)}
+${inboxSection(model, tz, vaultName, ctx)}
 </div>
 </main>
+<div class="toasts" aria-live="polite">${flashToast(flash, ctx)}</div>
 </body>
 </html>`;
 }
@@ -430,6 +499,83 @@ button.primary { font: inherit; font-weight: 600; color: #fff; background: var(-
 .created code { word-break: break-all; }
 code { font-size: 13px; background: var(--line); padding: 1px 4px; border-radius: 4px; }
 .message { max-width: 520px; }
+/* --- Schreiben: Schnelleingabe, Abhaken, Meldungen --- */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.capture-wrap { position: sticky; top: 0; z-index: 5; padding: 12px clamp(16px, 4vw, 40px);
+  background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line); }
+.capture { max-width: 1280px; margin: 0 auto; display: flex; gap: 10px; align-items: flex-end; }
+.capture-field { flex: 1; display: flex; align-items: flex-start; gap: 10px; min-width: 0; background: var(--surface);
+  border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px 8px 8px;
+  box-shadow: 0 1px 2px rgb(0 0 0 / .04); transition: border-color .15s, box-shadow .15s; }
+.capture-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.capture textarea { flex: 1; min-width: 0; resize: none; border: 0; outline: 0; background: none; color: var(--text);
+  font: inherit; font-size: 16px; line-height: 1.45; padding: 3px 0; max-height: 240px; }
+.capture textarea::placeholder { color: var(--muted); }
+.capture-mode { flex: none; font-size: 12px; font-weight: 600; letter-spacing: .02em; padding: 4px 8px; border-radius: 999px;
+  background: var(--line); color: var(--muted); transition: background .15s, color .15s; margin-top: 1px; }
+.capture .as-task, .capture[data-mode=task] .as-note { display: none; }
+.capture[data-mode=task] .as-task { display: inline; }
+.capture[data-mode=task] .capture-mode { background: var(--accent); color: #fff; }
+.capture-key { flex: none; font: 12px/1 ui-monospace, monospace; color: var(--muted); border: 1px solid var(--line);
+  border-bottom-width: 2px; border-radius: 5px; padding: 3px 6px; margin-top: 3px; }
+.capture-field:focus-within .capture-key { visibility: hidden; }
+.capture button.primary { flex: none; min-height: 44px; border-radius: 12px; transition: opacity .15s, transform .1s; }
+.capture button.primary:active { transform: scale(.97); }
+.capture.busy button.primary { opacity: .6; cursor: progress; }
+.capture.nudge .capture-field { animation: nudge .3s; }
+@keyframes nudge { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+
+.tick { margin: 0; flex: none; display: flex; }
+.check { --size: 20px; width: var(--size); height: var(--size); margin: 1px 0 0; padding: 0; flex: none; cursor: pointer;
+  display: grid; place-items: center; border-radius: 50%; border: 1.5px solid var(--muted); background: var(--surface);
+  color: #fff; position: relative; transition: background .18s, border-color .18s, transform .1s; }
+.check::before { content: ''; position: absolute; inset: -12px; }
+.check svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round;
+  stroke-linejoin: round; stroke-dasharray: 16; stroke-dashoffset: 16; transition: stroke-dashoffset .25s ease-out .05s; }
+.check:hover { border-color: var(--ok); }
+.check:hover svg { stroke-dashoffset: 0; color: var(--ok); }
+.check:active { transform: scale(.88); }
+.check:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.check.working { border-color: var(--accent); background: linear-gradient(90deg, var(--accent-soft) 50%, var(--surface) 50%); }
+.check.parked { border-style: dashed; }
+.check[aria-pressed=true] { background: var(--ok); border-color: var(--ok); }
+.check[aria-pressed=true] svg { stroke-dashoffset: 0; color: #fff; }
+.task .body { min-width: 0; overflow-wrap: anywhere; }
+.task .body > a { transition: color .2s; }
+.task.status-done .body > a { text-decoration: line-through; text-decoration-color: var(--muted); }
+.task.busy { opacity: .7; }
+.task.just-done .check { animation: pop .35s ease-out; }
+@keyframes pop { 50% { transform: scale(1.25); } }
+.rock.all-done { border-color: var(--ok); }
+.rock.all-done .count { color: var(--ok); font-weight: 600; }
+.fresh { animation: fresh 1.6s ease-out; border-radius: 6px; }
+@keyframes fresh { from { background: var(--accent-soft); } to { background: transparent; } }
+
+.toasts { position: fixed; z-index: 10; left: 50%; bottom: max(16px, env(safe-area-inset-bottom)); transform: translateX(-50%);
+  display: grid; gap: 8px; width: min(560px, calc(100vw - 24px)); pointer-events: none; }
+.toast { pointer-events: auto; display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 14px; border-radius: 12px;
+  background: var(--text); color: var(--bg); box-shadow: 0 8px 24px rgb(0 0 0 / .18); font-size: 14px;
+  animation: toast-in .22s ease-out; transition: opacity .2s, transform .2s; }
+.toast.error { background: var(--warn); color: #fff; }
+.toast.leaving { opacity: 0; transform: translateY(6px); }
+.toast-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.toast form { margin: 0; }
+.toast-action, .toast-close { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; min-height: 32px; }
+.toast-action { font-weight: 700; padding: 4px 8px; border-radius: 8px; color: var(--accent); }
+.toast.error .toast-action { color: inherit; text-decoration: underline; }
+.toast-action:hover { background: rgb(127 127 127 / .2); }
+.toast-close { font-size: 20px; line-height: 1; padding: 0 6px; opacity: .7; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(10px); } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+@media (max-width: 600px) {
+  .capture button.primary { padding: 8px 12px; }
+  .capture-key { display: none; }
+  .check { --size: 24px; }
+  .task { padding: 8px 0; gap: 10px; }
+}
 @media (max-width: 900px) {
   .feuer, .columns { grid-template-columns: 1fr; }
   .week { grid-template-columns: 1fr; }

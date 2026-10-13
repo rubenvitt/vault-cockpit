@@ -56,6 +56,9 @@ export function createCockpit({ index, settings, zunderFor, calendars = null, no
   const notConfigured = (what) => ({ ok: false, error: `${what} ist nicht eingerichtet`, unconfigured: true });
 
   return {
+    /** Zunder-Client für den aktuellen Zugang aus den Einstellungen, sonst null. */
+    zunder: () => zunderOf(settings.get().zunder),
+
     /** Kennung der laufenden Woche. */
     currentWeekId: () => weekId(weekOf(now(), settings.get().tz)),
 
