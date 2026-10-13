@@ -37,6 +37,17 @@ test('Einstellungen: leere Felder fallen auf die Umgebung zurück', () => {
   assert.equal(h.version, 1);
 });
 
+test('Einstellungen: onChange meldet jedes Speichern', () => {
+  const s = createSettingsStore({ logger: quiet });
+  const seen = [];
+  const off = s.onChange(() => seen.push(s.get().zunder?.token ?? null));
+  s.save({ zunder: { url: 'https://z.test', token: 'zt_eins' }, calendars: [] });
+  s.save({ zunder: { url: 'https://z.test', token: 'zt_zwei' }, calendars: [] });
+  off();
+  s.save({ calendars: [] });
+  assert.deepEqual(seen, ['zt_eins', 'zt_zwei']);
+});
+
 test('Einstellungen: Prüfung von Zeitzone, Pfad, Adressen und Kalendern', () => {
   const ok = validateSettings({ calendars: [{ name: 'Privat', kind: 'ical', url: 'webcal://p.example/x.ics' }] });
   assert.equal(ok.calendars[0].url, 'https://p.example/x.ics');

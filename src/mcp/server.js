@@ -33,6 +33,7 @@ export function createVaultMcpHandler({
   sync = null,
   semantic = null,
   graph = null,
+  zunderStatus = null,
   verifyToken,
   captureFolder = 'inbox',
   layoutHint = null,
@@ -246,7 +247,8 @@ export function createVaultMcpHandler({
         title: 'Vault-Überblick',
         description:
           'Kennzahlen des Vaults: Anzahl Notizen je Klasse, Tags, Verlinkungsgrad. Gut zur ersten Orientierung. ' +
-          'Dazu der Zustand des Syncs (läuft, letzter Abgleich, letzter Fehler), wann der Index zuletzt aktualisiert wurde und der Stand der Embeddings.',
+          'Dazu der Zustand des Syncs (läuft, letzter Abgleich, letzter Fehler), wann der Index zuletzt aktualisiert wurde, der Stand der Embeddings ' +
+          'und ob Zunder angebunden ist (Quelle des Zugangs: Einstellungen oder Umgebung).',
         inputSchema: {},
         annotations: READ_ONLY,
       },
@@ -257,6 +259,7 @@ export function createVaultMcpHandler({
           index: { lastBuiltAt: iso(index.lastBuiltAt?.()), lastChangedAt: iso(index.lastChangedAt?.()) },
           sync: sync?.status() ?? { adapter: 'none', state: 'disabled' },
           semantic: semantic?.status() ?? { state: 'disabled' },
+          zunder: zunderStatus?.() ?? { state: 'disabled' },
         });
       }),
     );

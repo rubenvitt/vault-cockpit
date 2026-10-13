@@ -29,6 +29,10 @@
  *
  * Bearbeitet wird nur über den Editor, also nur eigene, nicht vertrauliche
  * Notizen; Codeblöcke bleiben unberührt.
+ *
+ * `zunder` ist ein Client oder eine Funktion, die den aktuellen Client liefert.
+ * Jeder Durchlauf fragt sie neu: Ohne Zugang ruht die Brücke, mit neuem Zugang
+ * (Einstellungen) arbeitet sie ohne Neustart weiter.
  */
 const FENCE = /^\s*(```|~~~)/;
 const OPEN_CHECKBOX = /^(\s*(?:[-*+]|\d+[.)])\s+)\[ \](\s+)(.*)$/;
@@ -107,6 +111,7 @@ const seenKey = (path, id) => `${SEEN}${path}\n${id}`;
 
 export function createZunderBridge({ index, editor, zunder, state, tag = 'zunder', vaultName = null, logger = console }) {
   const normalizedTag = tag.replace(/^#/, '').toLowerCase();
+  const currentZunder = typeof zunder === 'function' ? zunder : () => zunder;
   let queue = Promise.resolve();
 
   function backlink(path) {
@@ -119,7 +124,7 @@ export function createZunderBridge({ index, editor, zunder, state, tag = 'zunder
     return lines.join('\n');
   }
 
-  async function processNote(path) {
+  async function processNote(zunder, path) {
     const note = index.getNote(path);
     if (!note?.content || note.class !== 'core' || note.sensitivity) return 0;
     if (!note.tags.includes(normalizedTag)) return 0;
@@ -147,10 +152,12 @@ export function createZunderBridge({ index, editor, zunder, state, tag = 'zunder
   }
 
   async function run(paths) {
+    const zunder = currentZunder();
+    if (!zunder) return 0;
     let created = 0;
     for (const path of paths) {
       try {
-        created += await processNote(path);
+        created += await processNote(zunder, path);
       } catch (err) {
         logger.error?.(`Zunder-Brücke: ${path} übersprungen: ${err.message}`);
       }
@@ -163,6 +170,8 @@ export function createZunderBridge({ index, editor, zunder, state, tag = 'zunder
    * melden, in Zunder erledigte oder verworfene Aufgaben im Vault schließen.
    */
   async function syncBack() {
+    const zunder = currentZunder();
+    if (!zunder) return { closed: 0, reported: 0 };
     const prefix = zunder.taskUrl ? zunder.taskUrl('') : null;
     // Je Notiz und Aufgabe: offene Zeilen und die Markierung des Paars
     // (offen, sobald eine Zeile offen ist, sonst die der ersten Zeile).
@@ -254,6 +263,8 @@ export function createZunderBridge({ index, editor, zunder, state, tag = 'zunder
 
   return {
     tag: normalizedTag,
+    /** Ob die Brücke gerade einen Zunder-Zugang hat. */
+    active: () => Boolean(currentZunder()),
     /** Nur diese Notizen prüfen (nach gemeldeten Änderungen). */
     scan: (paths) => enqueue(paths.filter((p) => p.toLowerCase().endsWith('.md'))),
     /** Alle Notizen mit dem Tag prüfen (Start, periodisch). */

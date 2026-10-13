@@ -55,6 +55,8 @@ export function dailyDate(note) {
  * der Rest des Graphen bleibt.
  */
 export function createGraph({ index, semantic = null, zunder = null, calendar = null, tz = 'Europe/Berlin', logger = console }) {
+  // Client oder Funktion, die den aktuellen Client liefert (Zugang aus den Einstellungen).
+  const currentZunder = typeof zunder === 'function' ? zunder : () => zunder;
   const noteId = (path) => `note:${path}`;
 
   async function around(path, { depth = 1, includeSensitive = false, similar = 8, minSimilarity = 0.55, maxNodes = 80 } = {}) {
@@ -127,6 +129,7 @@ export function createGraph({ index, semantic = null, zunder = null, calendar = 
         addEdge(src.id, node.id, 'task');
       }
     }
+    const zunder = currentZunder();
     if (taskNodes.length && zunder) {
       const results = await Promise.allSettled(taskNodes.slice(0, 30).map((n) => zunder.getTask(n.taskId)));
       let failed = 0;

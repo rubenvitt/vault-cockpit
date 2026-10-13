@@ -81,6 +81,20 @@ test('scan prüft nur gemeldete Notizen', async () => {
   assert.equal(await bridge.scan(['projects/Alpha.md']), 1);
 });
 
+test('ohne Zunder-Zugang ruht die Brücke und legt los, sobald einer da ist', async () => {
+  let current = null;
+  const bridge = createZunderBridge({ index: idx, editor, zunder: () => current, state, logger: quiet });
+  assert.equal(bridge.active(), false);
+  assert.equal(await bridge.scanAll(), 0);
+  assert.deepEqual(await bridge.syncBack(), { closed: 0, reported: 0 });
+  assert.match(read('projects/Alpha.md'), /Angebot schreiben #zunder/, 'Notiz bleibt unverändert');
+
+  current = zunder;
+  assert.equal(bridge.active(), true);
+  assert.equal(await bridge.scanAll(), 1);
+  assert.equal(calls[0].title, 'Angebot schreiben');
+});
+
 test('scheitert das Zurückschreiben, entsteht beim nächsten Mal keine zweite Aufgabe', async () => {
   let fail = true;
   const flaky = {

@@ -57,8 +57,8 @@ Das Image baut GitHub Actions bei jedem Push auf `main`:
 | `SYNC_ADAPTER` | `obsidian-headless` (Standard) oder `none` (keine Dateibeobachtung, kein Sync-Status) |
 | `SYNC_STATUS_FILE` | Statusdatei des Sync-Sidecars, z. B. `/sync-status/sync.json` |
 | `CAPTURE_TOKEN` | Token für `/capture` und `/funke` (ohne Wert sind beide aus), siehe [Capture](#capture) |
-| `ZUNDER_URL`, `ZUNDER_TOKEN` | Zunder-Adresse und API-Token `zt_…`; ohne Wert keine `!`-Weiterleitung und keine Brücke |
-| `ZUNDER_BRIDGE`, `ZUNDER_BRIDGE_TAG` | Zunder-Brücke `on` (Standard, sobald Zunder eingerichtet ist) oder `off`; Tag, Standard `zunder` |
+| `ZUNDER_URL`, `ZUNDER_TOKEN` | Optional: Zunder-Zugang, falls in den [Einstellungen](#web-cockpit) keiner steht. Besser dort eintragen |
+| `ZUNDER_BRIDGE`, `ZUNDER_BRIDGE_TAG` | Zunder-Brücke `on` (Standard, arbeitet, sobald ein Zunder-Zugang da ist) oder `off`; Tag, Standard `zunder` |
 | `OBSIDIAN_VAULT_NAME` | Name des Vaults in Obsidian, für „In Obsidian öffnen“ in Zunder (optional) |
 | `CAPTURE_STATE_FILE` | Merkzettel gegen doppelte Aufgaben, Standard `/data/capture-state.json` |
 | `MAIL_JMAP_TOKEN` | Fastmail-API-Token (nur Mail); ohne Wert kein Mail-Abruf |
@@ -112,9 +112,9 @@ Alles, was von außen kommt, landet an einer Stelle: als neue Notiz im
 Capture-Ordner (`CAPTURE_FOLDER`) oder, mit `!` am Anfang, als Aufgabe in der
 **Zunder-Inbox**. Aufgaben legt das Cockpit nicht selbst ab, es leitet sie an
 Zunder weiter (MCP-Werkzeug `create_task`). Dafür in der Zunder-Web-UI unter
-**Tokens** einen API-Token anlegen (Name z. B. `vault-cockpit`) und als
-`ZUNDER_TOKEN` setzen. Ein Eingangs-Token (`zi_…`) reicht nicht, Eingänge
-schreiben nur in ein festes Projekt.
+**Tokens** einen API-Token anlegen (Name z. B. `vault-cockpit`) und im Cockpit
+unter **Einstellungen → Zunder** eintragen. Ein Eingangs-Token (`zi_…`) reicht
+nicht, Eingänge schreiben nur in ein festes Projekt.
 
 | Weg | So geht's |
 |---|---|
@@ -213,9 +213,12 @@ Einrichtung:
    App-Passwort; optional nur bestimmte Kalender). Daneben Zeitzone, Vault-Name
    für „In Obsidian öffnen“ und der Inbox-Ordner.
 
-Der Zunder-Zugang kommt aus `ZUNDER_URL`/`ZUNDER_TOKEN` (Capture), lässt sich in
-den Einstellungen aber durch einen eigenen ersetzen. Leere Felder gelten als
-Standard aus der Umgebung (`COCKPIT_TZ`, `OBSIDIAN_VAULT_NAME`, `CAPTURE_FOLDER`).
+Der Zunder-Zugang aus den Einstellungen gilt für das ganze Cockpit:
+Wochenansicht, `!`-Capture (Kurzbefehl, Mail, Funke), Zunder-Brücke und Graph.
+Ein neuer Token wirkt ohne Neustart; die Brücke ruht ohne Zugang und legt los,
+sobald einer gespeichert ist. Woher der Zugang kommt, zeigen Startlog und
+`vault_stats`. Leere Felder gelten als Standard aus der Umgebung (`COCKPIT_TZ`,
+`OBSIDIAN_VAULT_NAME`, `CAPTURE_FOLDER`, `ZUNDER_URL`/`ZUNDER_TOKEN`).
 
 Gespeichert wird in `/data/cockpit-settings.json` (nur für den Dienst lesbar).
 Passwörter, Tokens und Kalenderadressen zeigt die Seite nie wieder an; ein leeres

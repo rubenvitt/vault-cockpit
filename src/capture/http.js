@@ -35,7 +35,9 @@ function errorMessage(status, error) {
   return `Fehler: ${error}`;
 }
 
+/** `zunderEnabled`: Wahrheitswert oder Funktion, die bei jeder Abfrage gefragt wird. */
 export function createCaptureHttp({ token, router, zunderEnabled = false }) {
+  const zunderOn = typeof zunderEnabled === 'function' ? zunderEnabled : () => zunderEnabled;
   const expected = sha256(`Bearer ${token}`);
   const authorized = (req) => timingSafeEqual(sha256(String(req.headers.authorization ?? '')), expected);
 
@@ -108,7 +110,7 @@ export function createCaptureHttp({ token, router, zunderEnabled = false }) {
       const path = url.pathname;
 
       if (req.method === 'GET' && (path === '/capture' || path === '/funke/health')) {
-        return json(res, 200, { ok: true, zunder: zunderEnabled });
+        return json(res, 200, { ok: true, zunder: Boolean(zunderOn()) });
       }
       if (req.method !== 'POST' || path === '/funke/health') return fail(res, 405, 'method not allowed');
 
