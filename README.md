@@ -146,6 +146,34 @@ Die Brücke prüft geänderte Notizen sofort und alle Notizen mit dem Tag beim S
 und im Reindex-Intervall. Vertrauliche Ordner, Readwise-Importe und Codeblöcke
 bleiben außen vor. Abhaken in Zunder hakt die Checkbox (noch) nicht ab.
 
+### Web-Cockpit
+
+Unter `<PUBLIC_URL>/` liegt die Wochenansicht, gebaut um die Woche statt um
+„Heute“. Oben das **Feuer-Ziel** aus der Feuer-Notiz der Woche (Frontmatter
+`type: 1-wochen-feuer`, `zeitraum` ab Montag, Abschnitt „## Feuer-Ziel“) und die
+**Flammen** der Woche aus Zunder, mit den dort gemessenen Zeiten. Darunter die
+**Big Rocks** je Lebensbereich: Zunder-Aufgaben, die in der Woche fällig oder als
+Phönix-Schritt der Woche markiert sind, gruppiert nach Zunder-Bereich. Es folgen
+die **Termine** der Woche (CalDAV), **Aufgaben** in Arbeit oder überfällig und
+die **Inbox** (Capture-Ordner im Vault und Zunder-Inbox). Mit `?woche=2026-W43`
+blättert man; dieselben Daten gibt es als JSON unter `/api/woche`.
+
+Einrichtung:
+
+1. In Pocket ID einen OIDC-Client anlegen, Callback `<PUBLIC_URL>/auth/callback`,
+   als öffentlichen Client (PKCE) oder mit Secret (`WEB_CLIENT_SECRET`). Wie beim
+   CIMD-Client auf die eigene Gruppe beschränken.
+2. `WEB_CLIENT_ID` und `SESSION_SECRET` setzen. Zugang haben dieselben
+   `ALLOWED_SUBJECTS` wie bei MCP.
+3. Für Termine `CALDAV_URL`, `CALDAV_USERNAME` und `CALDAV_PASSWORD` setzen. Bei
+   Fastmail ein App-Passwort nur für „Kalender (CalDAV)“ anlegen.
+4. Für Zunder-Abschnitte dient der `ZUNDER_TOKEN` aus dem Capture.
+5. Mit `OBSIDIAN_VAULT_NAME` führen Feuer-Notiz und Inbox-Einträge direkt nach Obsidian.
+
+Fällt eine Quelle aus (Zunder nicht erreichbar, falsches CalDAV-Passwort), zeigt
+nur ihr Abschnitt den Fehler. Die Sitzung ist ein signiertes Cookie (12 Stunden)
+und gilt nur für das Web-Cockpit; `/mcp` nimmt weiter ausschließlich Bearer-Tokens.
+
 Tests, ohne laufenden Container:
 ```bash
 npm ci && npm test
@@ -159,6 +187,8 @@ npm ci && npm test
 - `src/http/` — HTTP-Schicht, Protected Resource Metadata, Host-Prüfung
 - `src/sync/` — Sync-Adapter: Dateibeobachtung, inkrementeller Reindex, Sync-Status
 - `src/capture/` — Capture von außen: Endpunkte, Mail-Abruf, Zunder-Weiterleitung und -Brücke
+- `src/cockpit/` — Wochenmodell: ISO-Wochen, Feuer-Notiz, CalDAV-Client, Zusammenstellung aus Zunder
+- `src/web/` — Web-Cockpit: OIDC-Login mit PKCE, signiertes Sitzungs-Cookie, HTML der Wochenansicht
 - `sync/` — Image des Sidecars `vault-sync` (Obsidian Headless mit Status-Wrapper)
 
 ## Sicherheitsentscheidungen
@@ -183,6 +213,11 @@ npm ci && npm test
   der von der MCP-Spec geforderte Schutz gegen Token-Passthrough.
 - **Kein eigener Authorization Server:** Login, Consent, Refresh und Widerruf
   liegen vollständig bei Pocket ID.
+- **Web-Login getrennt von MCP:** Das Web-Cockpit hat einen eigenen OIDC-Client
+  und prüft das ID-Token (Signatur, `iss`, `aud` = Client-ID, `nonce`, PKCE,
+  Subject). Das Sitzungs-Cookie ist `HttpOnly`, `Secure`, `SameSite=Lax` und gilt
+  nicht für `/mcp`. Die Seiten laden kein JavaScript; die Content-Security-Policy
+  erlaubt nur das eigene Stylesheet.
 - **Readwise-Importe** sind eine eigene Indexklasse und standardmäßig aus der Suche
   ausgenommen, damit importierte Fremdtexte die eigenen Notizen nicht verdrängen.
 

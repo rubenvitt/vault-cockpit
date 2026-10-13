@@ -37,7 +37,7 @@ function send(res, status, body, headers = {}) {
  * nur die Protected Resource Metadata (RFC 9728), damit Claude den zuständigen
  * Authorization Server findet, und prüfen eingehende Bearer-Tokens.
  */
-export function createApp({ config, verifyToken, mcpHandler, captureHttp = null, logger = console }) {
+export function createApp({ config, verifyToken, mcpHandler, captureHttp = null, webHttp = null, logger = console }) {
   const prmUrl = `${config.publicUrl}/.well-known/oauth-protected-resource/mcp`;
 
   const protectedResourceMetadata = () => ({
@@ -86,6 +86,9 @@ export function createApp({ config, verifyToken, mcpHandler, captureHttp = null,
       const body = req.method === 'POST' ? await readBody(req) : null;
       return captureHttp.handle(req, res, url, body);
     }
+
+    // Web-Cockpit mit eigenem Browser-Login (Sitzungs-Cookie), siehe web/http.js.
+    if (webHttp?.matches(path)) return webHttp.handle(req, res, url);
 
     return send(res, 404, { error: 'not_found' });
   }

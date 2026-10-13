@@ -40,6 +40,12 @@ export function createZunderClient({ url, token, fetch = globalThis.fetch, timeo
     /** Web-Adresse einer Aufgabe, für Rücklinks im Vault. */
     taskUrl: (id) => `${base}/#/aufgabe/${id}`,
 
+    /** Aufgaben nach Filtern (`filter_tasks`), für die Wochenansicht des Cockpits. */
+    async filterTasks(filters) {
+      const out = await callTool('filter_tasks', filters);
+      return out?.tasks ?? [];
+    },
+
     /** Legt eine Aufgabe in der Zunder-Inbox an und liefert `{ id, ref, url }`. */
     async createTask({ title, description, vaultLinks }) {
       const args = { title: clampTitle(title) };
