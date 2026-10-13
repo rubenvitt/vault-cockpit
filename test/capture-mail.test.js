@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createMailCapture, toCapture } from '../src/capture/mail.js';
+import { createMailCapture, senderFilter, toCapture } from '../src/capture/mail.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
 
@@ -89,6 +89,35 @@ test('scheitert die Weiterleitung, bleibt die Mail liegen', async () => {
 
 test('ohne freigegebene Absender startet der Mail-Abruf nicht', () => {
   assert.throws(() => createMailCapture({ token: 't', allowedSenders: [' '], router: {} }), /MAIL_ALLOWED_SENDERS/);
+});
+
+test('Einträge mit @ geben eine ganze Domain frei, aber keine Subdomain', () => {
+  const allowed = senderFilter(['@rubeen.dev', ' @Rubeen.Email ', 'a@x.test']);
+  assert.equal(allowed('x@rubeen.dev'), true);
+  assert.equal(allowed('ruben@rubeen.email'), true);
+  assert.equal(allowed('a@x.test'), true);
+  assert.equal(allowed('b@x.test'), false, 'Adresse bleibt exakt');
+  assert.equal(allowed('x@evil-rubeen.dev'), false);
+  assert.equal(allowed('x@sub.rubeen.dev'), false);
+  assert.equal(allowed('rubeen.dev'), false);
+  assert.equal(allowed('@rubeen.dev'), false);
+  assert.equal(allowed(''), false);
+});
+
+test('Abruf nimmt Absender einer freigegebenen Domain an', async () => {
+  const jmap = fakeJmap([mail('m1', 'X@Rubeen.dev', 'Notiz', 'Text'), mail('m2', 'x@sub.rubeen.dev', 'Fremd', 'x')]);
+  const routed = [];
+  const capture = createMailCapture({
+    token: 't',
+    sessionUrl: 'https://jmap.test/session',
+    allowedSenders: '@rubeen.dev,@rubeen.email'.split(','),
+    router: { route: async (input) => routed.push(input) },
+    fetch: jmap.fetch,
+    logger: quiet,
+  });
+  assert.equal(await capture.runOnce(), 1);
+  assert.deepEqual(routed.map((r) => r.title), ['Notiz']);
+  assert.deepEqual(jmap.moved, ['m1', 'm2']);
 });
 
 test('fehlender Ordner wird als Fehler gemeldet', async () => {
