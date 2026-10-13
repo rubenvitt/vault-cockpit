@@ -34,7 +34,7 @@ for (const [title, build] of Object.entries(SHORTCUTS)) {
     assert.match(auth.WFValue.Value.string, /^Bearer ￼$/);
   });
 
-  test(`${title}: Verweise und Wenn-Blöcke sind vollständig`, () => {
+  test(`${title}: Verweise zeigen auf frühere Aktionen`, () => {
     const actions = build({ url }).WFWorkflowActions;
     const seen = new Set();
     for (const a of actions) {
@@ -49,6 +49,15 @@ for (const [title, build] of Object.entries(SHORTCUTS)) {
       (modes[p.GroupingIdentifier] ??= []).push(p.WFControlFlowMode);
     }
     for (const m of Object.values(modes)) assert.ok(m[0] === 0 && m.at(-1) === 2, `Wenn-Block ${m} unvollständig`);
+  });
+
+  test(`${title}: zeigt den Satz aus der Antwort, ohne Wenn-Abfragen`, () => {
+    const actions = build({ url }).WFWorkflowActions;
+    const ids = actions.map((a) => a.WFWorkflowActionIdentifier);
+    assert.ok(!ids.includes('is.workflow.actions.conditional'), 'Wenn-Abfragen auf Wörterbuchwerte scheitern auf iOS');
+    const get = actions.find((a) => a.WFWorkflowActionIdentifier === 'is.workflow.actions.getvalueforkey');
+    assert.equal(get.WFWorkflowActionParameters.WFDictionaryKey, 'message');
+    assert.equal(ids.at(-1), 'is.workflow.actions.notification');
   });
 
   test(`${title}: Plist ist stabil und gültiges XML`, () => {

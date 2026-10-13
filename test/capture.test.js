@@ -179,7 +179,9 @@ test('/capture verlangt den Capture-Token', async () => {
     assert.equal((await call('/capture', { body: 'x', type: 'text/plain', auth: null })).status, 401);
     const denied = await call('/capture', { body: 'x', type: 'text/plain', auth: 'Bearer falsch' });
     assert.equal(denied.status, 401);
-    assert.deepEqual(await denied.json(), { error: 'unauthorized', status: 401 }, 'Status auch im Body für den Kurzbefehl');
+    const deniedBody = await denied.json();
+    assert.equal(deniedBody.status, 401, 'Status auch im Body für den Kurzbefehl');
+    assert.match(deniedBody.message, /Token abgelehnt/);
     assert.equal((await call('/capture', { method: 'GET' })).status, 200);
   });
 });
@@ -190,6 +192,7 @@ test('/capture nimmt Klartext vom Kurzbefehl an', async () => {
     assert.equal(res.status, 201);
     const body = await res.json();
     assert.equal(body.kind, 'note');
+    assert.equal(body.message, `Notiz angelegt: ${body.path}`);
     assert.match(readInbox(inbox()[0]), /source: sprachmemo/);
   });
 });
@@ -218,6 +221,7 @@ test('/capture meldet Fehler verständlich', async () => {
       const body = await res.json();
       assert.match(body.error, /503/);
       assert.equal(body.status, 502);
+      assert.match(body.message, /^Zunder lehnt ab: /);
     },
     { zunder: fakeZunder({ fail: true }) },
   );

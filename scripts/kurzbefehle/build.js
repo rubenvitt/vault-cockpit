@@ -64,56 +64,15 @@ const action = (id, params = {}) => ({
   WFWorkflowActionParameters: params,
 });
 
-/** Baut If/Otherwise/End-If-Blöcke mit gemeinsamer Gruppen-ID. */
-function makeIf(shortcut) {
-  let n = 0;
-  return (input, condition, value, then, otherwise) => {
-    const group = uuidFor(shortcut, 'if', ++n);
-    const compare = value === undefined ? {} : { WFConditionalActionString: value };
-    const head = action('conditional', {
-      GroupingIdentifier: group,
-      WFControlFlowMode: 0,
-      WFCondition: condition,
-      WFInput: { Type: 'Variable', Variable: attachment(input) },
-      ...compare,
-    });
-    const blocks = [head, ...then];
-    if (otherwise) blocks.push(action('conditional', { GroupingIdentifier: group, WFControlFlowMode: 1 }), ...otherwise);
-    blocks.push(action('conditional', { GroupingIdentifier: group, WFControlFlowMode: 2, UUID: uuidFor(shortcut, 'endif', n) }));
-    return blocks;
-  };
-}
-
-// Bedingungen der Wenn-Aktion
-const IS = 4;
-const HAS_VALUE = 100;
-const HAS_NO_VALUE = 101;
-
-const notify = (title, ...body) =>
-  action('notification', {
-    WFNotificationActionTitle: tokens(title),
-    WFNotificationActionBody: tokens(...body),
-    WFNotificationActionSound: true,
-  });
-
 /**
- * Gemeinsamer Schluss: Variable „Text“ an /capture schicken und die Antwort als
- * Mitteilung zeigen. Fehler tragen ihren Status im Body (`{error, status}`), weil
- * „Inhalte von URL abrufen“ den HTTP-Status nicht liefert.
+ * Gemeinsamer Schluss: Variable „Text“ an /capture schicken und den Satz aus der
+ * Antwort (`message`) als Mitteilung zeigen. Bewusst ohne Wenn-Abfragen: Das
+ * Cockpit formuliert Erfolg und Fehler (401, 502, 503 …) selbst, weil „Inhalte von
+ * URL abrufen“ den HTTP-Status nicht liefert.
  */
-function send(shortcut, { tokenUuid, url, source, ifBlock }) {
-  const id = (label) => uuidFor(shortcut, label);
-  const value = (key, from, label) =>
-    action('getvalueforkey', {
-      UUID: id(label),
-      WFGetDictionaryValueType: 'Value',
-      WFDictionaryKey: key,
-      WFInput: attachment(out(from, 'Inhalte von URL')),
-    });
-  const res = id('antwort');
-  const error = out(id('error'), 'Wörterbuchwert');
-  const status = out(id('status-text'), 'Text');
-
+function send(shortcut, { tokenUuid, url, source }) {
+  const res = uuidFor(shortcut, 'antwort');
+  const message = uuidFor(shortcut, 'message');
   return [
     action('downloadurl', {
       UUID: res,
@@ -124,45 +83,17 @@ function send(shortcut, { tokenUuid, url, source, ifBlock }) {
       WFHTTPBodyType: 'JSON',
       WFJSONValues: dictionary({ text: [named('Text')], source }),
     }),
-    value('error', res, 'error'),
-    ...ifBlock(
-      error,
-      HAS_VALUE,
-      undefined,
-      [
-        value('status', res, 'status'),
-        action('gettext', { UUID: id('status-text'), WFTextActionText: tokens(out(id('status'), 'Wörterbuchwert')) }),
-        ...ifBlock(
-          status,
-          IS,
-          '401',
-          [notify('Token abgelehnt', 'Der Capture-Token stimmt nicht. Den Kurzbefehl neu importieren oder den Token in der ersten Aktion ersetzen.')],
-          ifBlock(
-            status,
-            IS,
-            '503',
-            [notify('Zunder nicht angebunden', 'Aufgaben mit ! gehen erst, wenn das Cockpit mit Zunder verbunden ist. Ohne ! vorne wird es eine Notiz.')],
-            ifBlock(
-              status,
-              IS,
-              '502',
-              [notify('Zunder lehnt ab', error)],
-              [notify('Cockpit meldet einen Fehler', status, ': ', error)],
-            ),
-          ),
-        ),
-      ],
-      [
-        value('kind', res, 'kind'),
-        ...ifBlock(
-          out(id('kind'), 'Wörterbuchwert'),
-          IS,
-          'task',
-          [value('ref', res, 'ref'), notify('Aufgabe angelegt', out(id('ref'), 'Wörterbuchwert'), ' liegt in der Zunder-Inbox.')],
-          [value('path', res, 'path'), notify('Notiz angelegt', out(id('path'), 'Wörterbuchwert'))],
-        ),
-      ],
-    ),
+    action('getvalueforkey', {
+      UUID: message,
+      WFGetDictionaryValueType: 'Value',
+      WFDictionaryKey: 'message',
+      WFInput: attachment(out(res, 'Inhalte von URL')),
+    }),
+    action('notification', {
+      WFNotificationActionTitle: tokens('Vault Cockpit'),
+      WFNotificationActionBody: tokens(out(message, 'Wörterbuchwert')),
+      WFNotificationActionSound: true,
+    }),
   ];
 }
 
@@ -179,8 +110,9 @@ const importQuestion = {
   DefaultValue: '',
 };
 
-function workflow({ actions, types = [], input = [], hasInput = false, glyph, color }) {
+function workflow({ actions, types = [], input = [], hasInput = false, noInput, glyph, color }) {
   return {
+    ...(noInput ? { WFWorkflowNoInputBehavior: noInput } : {}),
     WFWorkflowMinimumClientVersion: 900,
     WFWorkflowMinimumClientVersionString: '900',
     WFWorkflowClientVersion: '2607.0.2',
@@ -199,28 +131,19 @@ function workflow({ actions, types = [], input = [], hasInput = false, glyph, co
 /** „Notiz ins Cockpit“: Text aus dem Share-Sheet oder abfragen, an /capture schicken. */
 export function notizInsCockpit({ url }) {
   const name = 'notiz';
-  const ifBlock = makeIf(name);
   const token = tokenAction(name);
-  const ask = uuidFor(name, 'frage');
   return workflow({
     types: ['ActionExtension'],
     input: ['WFStringContentItem', 'WFURLContentItem', 'WFRichTextContentItem'],
     hasInput: true,
+    // Ohne Share-Sheet-Eingabe fragt iOS selbst nach dem Text.
+    noInput: { Name: 'WFWorkflowNoInputBehaviorAskForInput', Parameters: { ItemClass: 'WFStringContentItem' } },
     glyph: 59446,
     color: 4282601983,
     actions: [
       token.action,
-      ...ifBlock(
-        shortcutInput,
-        HAS_VALUE,
-        undefined,
-        [action('setvariable', { WFVariableName: 'Text', WFInput: attachment(shortcutInput) })],
-        [
-          action('ask', { UUID: ask, WFAskActionPrompt: 'Was soll ins Cockpit? (! vorne = Aufgabe)', WFInputType: 'Text' }),
-          action('setvariable', { WFVariableName: 'Text', WFInput: attachment(out(ask, 'Eingabe')) }),
-        ],
-      ),
-      ...send(name, { tokenUuid: token.uuid, url, source: 'ios-kurzbefehl', ifBlock }),
+      action('setvariable', { WFVariableName: 'Text', WFInput: attachment(shortcutInput) }),
+      ...send(name, { tokenUuid: token.uuid, url, source: 'ios-kurzbefehl' }),
     ],
   });
 }
@@ -228,7 +151,6 @@ export function notizInsCockpit({ url }) {
 /** „Sprachmemo ins Cockpit“: aufnehmen, auf dem Gerät transkribieren, Text an /capture. */
 export function sprachmemoInsCockpit({ url }) {
   const name = 'sprachmemo';
-  const ifBlock = makeIf(name);
   const token = tokenAction(name);
   const record = uuidFor(name, 'aufnahme');
   const transcribe = uuidFor(name, 'transkript');
@@ -244,8 +166,8 @@ export function sprachmemoInsCockpit({ url }) {
         audioFile: attachment(out(record, 'Aufgenommenes Audio')),
       }),
       action('setvariable', { WFVariableName: 'Text', WFInput: attachment(out(transcribe, 'Transkript')) }),
-      ...ifBlock(named('Text'), HAS_NO_VALUE, undefined, [notify('Nichts verstanden', 'Die Aufnahme ergab keinen Text.'), action('exit')]),
-      ...send(name, { tokenUuid: token.uuid, url, source: 'sprachmemo', ifBlock }),
+      // Leeres Transkript meldet das Cockpit selbst („Text darf nicht leer sein“).
+      ...send(name, { tokenUuid: token.uuid, url, source: 'sprachmemo' }),
     ],
   });
 }

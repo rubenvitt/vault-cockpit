@@ -128,7 +128,9 @@ Mit `id` ist das Anlegen idempotent (dieselbe ID → `200` mit dem Ergebnis von
 damals). Antworten: `201 {"kind":"note","path"}` bzw.
 `201 {"kind":"task","id","ref","url"}`, `400` bei falscher Eingabe, `401` ohne
 gültigen Token, `502` wenn Zunder ablehnt, `503` bei `!` ohne Zunder.
-Fehler kommen als `{"error","status"}`, weil ein Kurzbefehl den HTTP-Status nicht sieht.
+Jede Antwort trägt zusätzlich `message`, einen fertigen Satz für die Mitteilung, und
+Fehler ihren `status` im Body (`{"error","status","message"}`), weil ein Kurzbefehl den
+HTTP-Status nicht sieht.
 `GET /capture` ist ein Verbindungstest.
 
 **Kurzbefehle neu bauen:** `node scripts/kurzbefehle/build.js [--url <PUBLIC_URL>]`
