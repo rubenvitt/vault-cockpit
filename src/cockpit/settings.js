@@ -11,6 +11,8 @@ import { randomBytes, randomUUID } from 'node:crypto';
  * Zunder-Zugang fallen dann auf die Umgebungsvariablen zurück, die der Dienst
  * ohnehin kennt (`COCKPIT_TZ`, `OBSIDIAN_VAULT_NAME`, `CAPTURE_FOLDER`,
  * `ZUNDER_URL`/`ZUNDER_TOKEN`). Im Deployment muss dafür nichts stehen.
+ * Der Zunder-Zugang gilt für das ganze Cockpit: Wochenansicht, `!`-Capture,
+ * Brücke und Graph lesen ihn bei jedem Aufruf neu.
  */
 
 export class SettingsError extends Error {}
@@ -113,6 +115,7 @@ export function createSettingsStore({ file = null, defaults = {}, logger = conso
     }
   }
   let version = 0;
+  const listeners = new Set();
 
   const d = { tz: 'Europe/Berlin', vaultName: null, inboxFolder: 'inbox', zunderUrl: null, zunderToken: null, ...defaults };
 
@@ -142,7 +145,20 @@ export function createSettingsStore({ file = null, defaults = {}, logger = conso
       if (file) writePrivate(file, `${JSON.stringify(next, null, 2)}\n`);
       stored = next;
       version += 1;
+      for (const fn of listeners) {
+        try {
+          fn();
+        } catch (err) {
+          logger.warn?.(`Einstellungen: Reaktion auf Änderung fehlgeschlagen: ${err.message}`);
+        }
+      }
       return next;
+    },
+
+    /** Ruft `fn` nach jedem Speichern auf; liefert eine Funktion zum Abmelden. */
+    onChange(fn) {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
     },
   };
 }

@@ -148,6 +148,7 @@ test('vault_graph liefert den Graphen, vault_similar meldet fehlende Embeddings'
   assert.match(sim.body.result.content[0].text, /EMBED_URL/);
   const stats = (await rpc('tools/call', { name: 'vault_stats', arguments: {} })).body.result.structuredContent;
   assert.equal(stats.semantic.state, 'disabled');
+  assert.equal(stats.zunder.state, 'disabled');
 });
 
 test('vault_read liefert den Inhalt', async () => {

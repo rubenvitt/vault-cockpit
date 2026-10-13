@@ -40,10 +40,18 @@ export function cleanTitle(raw) {
   return t;
 }
 
+/**
+ * `zunder`: Client oder Funktion, die den aktuellen Client liefert (bzw. null).
+ * Als Funktion wird sie bei jeder Aufgabe neu gefragt, damit ein in den
+ * Einstellungen geänderter Zugang ohne Neustart gilt.
+ */
 export function createCaptureRouter({ capture, zunder = null, state, logger = console }) {
+  const currentZunder = typeof zunder === 'function' ? zunder : () => zunder;
+
   async function toZunder({ text, title, source, captureId }) {
+    const zunder = currentZunder();
     if (!zunder) {
-      throw new CaptureError('Weiterleitung an Zunder ist nicht eingerichtet (ZUNDER_URL, ZUNDER_TOKEN)', 503);
+      throw new CaptureError('Weiterleitung an Zunder ist nicht eingerichtet (Cockpit → Einstellungen → Zunder)', 503);
     }
     const key = captureId ? `capture:${source}:${captureId}` : null;
     const known = key ? state.get(key) : null;

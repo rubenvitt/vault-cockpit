@@ -108,22 +108,45 @@ const CAPTURE_FOLDER = process.env.CAPTURE_FOLDER ?? 'inbox';
 const capture = createCapture({ vaultPath: VAULT_PATH, folder: CAPTURE_FOLDER });
 const editor = createEditor({ vaultPath: VAULT_PATH, index });
 
+// Cockpit-Einstellungen (Kalender, Zunder-Zugang, Anzeige) liegen unter /data
+// und werden im Browser gepflegt; leere Felder fallen auf die Umgebung zurück.
+// Der Zunder-Zugang daraus gilt für alles: Wochenansicht, `!`-Capture, Brücke
+// und Graph fragen ihn bei jedem Aufruf neu, ein neuer Token wirkt ohne Neustart.
+const COCKPIT_SETTINGS_FILE = process.env.COCKPIT_SETTINGS_FILE ?? '/data/cockpit-settings.json';
+const cockpitSettings = createSettingsStore({
+  file: COCKPIT_SETTINGS_FILE,
+  defaults: {
+    tz: process.env.COCKPIT_TZ || 'Europe/Berlin',
+    vaultName: process.env.OBSIDIAN_VAULT_NAME || null,
+    inboxFolder: CAPTURE_FOLDER,
+    zunderUrl: process.env.ZUNDER_URL || null,
+    zunderToken: process.env.ZUNDER_TOKEN || null,
+  },
+});
+const calendars = createCalendarSources({ settings: cockpitSettings });
+const cockpit = createCockpit({
+  index,
+  settings: cockpitSettings,
+  calendars,
+  zunderFor: ({ url, token }) => createZunderClient({ url, token }),
+});
+const zunder = () => cockpit.zunder();
+const zunderSource = () => {
+  const z = cockpitSettings.get().zunder;
+  return z ? `${z.url} aus ${z.source === 'einstellungen' ? 'den Einstellungen' : 'der Umgebung'}` : null;
+};
+
 // Capture von außen (Schritt 2): Weiterleitung an Zunder, Capture-Endpunkte,
 // Mail-Abruf und Zunder-Brücke. Alles optional, je nach gesetzten Variablen.
 const captureState = createStateStore(process.env.CAPTURE_STATE_FILE ?? '/data/capture-state.json');
-const zunder =
-  process.env.ZUNDER_URL && process.env.ZUNDER_TOKEN
-    ? createZunderClient({ url: process.env.ZUNDER_URL, token: process.env.ZUNDER_TOKEN })
-    : null;
 const captureRouter = createCaptureRouter({ capture, zunder, state: captureState });
 
 const captureHttp = process.env.CAPTURE_TOKEN
-  ? createCaptureHttp({ token: process.env.CAPTURE_TOKEN, router: captureRouter, zunderEnabled: Boolean(zunder) })
+  ? createCaptureHttp({ token: process.env.CAPTURE_TOKEN, router: captureRouter, zunderEnabled: () => Boolean(zunder()) })
   : null;
 
 // Lesende Suche für Clients ohne OAuth. Die Tokens werden im Web-Cockpit unter
 // Einstellungen → API-Tokens angelegt und liegen neben den Einstellungen.
-const COCKPIT_SETTINGS_FILE = process.env.COCKPIT_SETTINGS_FILE ?? '/data/cockpit-settings.json';
 const apiTokens = createTokenStore({ file: join(dirname(COCKPIT_SETTINGS_FILE), 'api-tokens.json') });
 const searchHttp = createSearchHttp({ tokens: apiTokens, index, semantic });
 
@@ -141,8 +164,10 @@ if (process.env.MAIL_JMAP_TOKEN) {
   mail.start(Number(process.env.MAIL_POLL_MIN ?? 5));
 }
 
+// Die Brücke ruht, solange kein Zunder-Zugang da ist, und legt los, sobald
+// einer in den Einstellungen steht.
 const bridge =
-  zunder && process.env.ZUNDER_BRIDGE !== 'off'
+  process.env.ZUNDER_BRIDGE !== 'off'
     ? createZunderBridge({
         index,
         editor,
@@ -154,45 +179,35 @@ const bridge =
     : null;
 if (bridge) {
   const bridgeRound = () => {
+    if (!bridge.active()) return;
     bridge.scanAll();
     bridge.syncBack();
   };
   bridgeRound();
   setInterval(bridgeRound, Number(process.env.REINDEX_INTERVAL_MIN ?? 15) * 60_000).unref();
+  // Neuer oder geänderter Zugang in den Einstellungen: gleich eine Runde, nicht erst beim nächsten Takt.
+  let lastZunder = zunderSource();
+  cockpitSettings.onChange(() => {
+    const now = zunderSource();
+    if (now === lastZunder) return;
+    console.log(`Zunder-Brücke: ${now ? `Zugang ${now}` : 'ruht (kein Zunder-Zugang)'}`);
+    lastZunder = now;
+    bridgeRound();
+  });
 }
 
 sync.start({
   onChanges({ paths, full }) {
     if (full) index.rebuild();
     else index.applyChanges(paths);
-    if (bridge) (full ? bridge.scanAll() : bridge.scan(paths));
+    if (bridge?.active()) (full ? bridge.scanAll() : bridge.scan(paths));
   },
 });
 
-// Cockpit-Einstellungen (Kalender, Zunder-Zugang, Anzeige) liegen unter /data
-// und werden im Browser gepflegt; leere Felder fallen auf die Umgebung zurück.
-// Der Graph nutzt dieselben Kalender und dieselbe Zeitzone.
-const cockpitSettings = createSettingsStore({
-  file: COCKPIT_SETTINGS_FILE,
-  defaults: {
-    tz: process.env.COCKPIT_TZ || 'Europe/Berlin',
-    vaultName: process.env.OBSIDIAN_VAULT_NAME || null,
-    inboxFolder: CAPTURE_FOLDER,
-    zunderUrl: process.env.ZUNDER_URL || null,
-    zunderToken: process.env.ZUNDER_TOKEN || null,
-  },
-});
-const calendars = createCalendarSources({ settings: cockpitSettings });
 const graph = createGraph({ index, semantic, zunder, calendar: calendarForGraph(calendars), tz: () => cockpitSettings.get().tz });
 
 // Web-Cockpit (Schritt 3): Wochenansicht mit eigenem Browser-Login. Aus, bis
 // WEB_CLIENT_ID gesetzt ist.
-const cockpit = createCockpit({
-  index,
-  settings: cockpitSettings,
-  calendars,
-  zunderFor: ({ url, token }) => createZunderClient({ url, token }),
-});
 const webHttp = process.env.WEB_CLIENT_ID
   ? createWebHttp({
       cockpit,
@@ -202,7 +217,7 @@ const webHttp = process.env.WEB_CLIENT_ID
         settings: cockpitSettings,
         policy: POLICY,
         state: captureState,
-        zunder: () => cockpit.zunder(),
+        zunder,
         index,
       }),
       // Vault-Notizen ansehen und verarbeiten, über denselben Editor wie vault_edit.
@@ -235,6 +250,12 @@ const mcpHttp = createVaultMcpHandler({
   sync,
   semantic,
   graph,
+  zunderStatus: () => {
+    const z = cockpitSettings.get().zunder;
+    return z
+      ? { state: 'enabled', source: z.source, url: z.url, bridge: bridge ? `#${bridge.tag}` : 'off' }
+      : { state: 'disabled', bridge: bridge ? `#${bridge.tag} (ruht)` : 'off' };
+  },
   captureFolder: CAPTURE_FOLDER,
   layoutHint: POLICY.layoutHint,
   // Synchron: die Prüfung ist in der HTTP-Schicht bereits gelaufen.
@@ -267,7 +288,8 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`  Sync        : ${SYNC_ADAPTER} (${sync.status().state})`);
   console.log(`  Capture     : ${captureHttp ? '/capture, /funke' : 'Endpunkte aus (CAPTURE_TOKEN)'}${mail ? `, Mail aus „${mail.status().mailbox}“` : ''}`);
   console.log(`  Suche       : /api/search (${apiTokens.list().length} API-Tokens)`);
-  console.log(`  Zunder      : ${zunder ? `${process.env.ZUNDER_URL} (! → Inbox${bridge ? `, Brücke #${bridge.tag}` : ''})` : 'aus (ZUNDER_URL, ZUNDER_TOKEN)'}`);
+  const z = zunderSource();
+  console.log(`  Zunder      : ${z ? `${z} (! → Inbox${bridge ? `, Brücke #${bridge.tag}` : ''})` : `aus (Einstellungen → Zunder)${bridge ? `, Brücke #${bridge.tag} ruht` : ''}`}`);
   console.log(`  Semantik    : ${semantic ? `${semantic.model} über ${process.env.EMBED_URL}` : 'aus (EMBED_URL)'}`);
   console.log(`  Cockpit     : ${webHttp ? `${PUBLIC_URL}/ (${cockpitSettings.get().calendars.length} Kalender, Einstellungen unter /einstellungen)` : 'aus (WEB_CLIENT_ID)'}`);
 });

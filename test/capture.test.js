@@ -98,6 +98,22 @@ test('! ohne eingerichtetes Zunder ist ein Fehler, keine stille Notiz', async ()
   await assert.rejects(r.route({ text: '!Aufgabe', source: 'api' }), (err) => err.status === 503);
 });
 
+test('Zunder-Zugang wird je Aufgabe neu gefragt (Einstellungen ohne Neustart)', async () => {
+  let current = null;
+  const r = createCaptureRouter({ capture, zunder: () => current, state, logger: quiet });
+  await assert.rejects(r.route({ text: '!Erst ohne Zugang', source: 'api' }), (err) => err.status === 503);
+
+  current = fakeZunder();
+  const first = await r.route({ text: '!Mit altem Token', source: 'api' });
+  assert.equal(first.kind, 'task');
+  const old = zunderCalls;
+
+  current = fakeZunder();
+  await r.route({ text: '!Mit neuem Token', source: 'api' });
+  assert.equal(old.length, 1, 'der alte Client bekommt nichts mehr');
+  assert.equal(zunderCalls[0].title, 'Mit neuem Token');
+});
+
 test('! ohne Text wird abgelehnt', async () => {
   await assert.rejects(router.route({ text: '!   ', source: 'api' }), /fehlt/);
 });
@@ -147,7 +163,7 @@ test('Zunder-Client meldet Ablehnungen mit der Begründung', async () => {
 
 // --- HTTP ---
 
-async function withServer(run, { zunder = fakeZunder() } = {}) {
+async function withServer(run, { zunder = fakeZunder(), zunderEnabled = true } = {}) {
   const r = createCaptureRouter({ capture, zunder, state, logger: quiet });
   const app = createApp({
     config: { publicUrl: 'https://vault.test', resource: 'https://vault.test/mcp', issuer: 'https://id.test', supportedScopes: [], allowedHosts: ['vault.test'], trustProxy: true },
@@ -155,7 +171,7 @@ async function withServer(run, { zunder = fakeZunder() } = {}) {
       throw new Error('nicht benutzt');
     },
     mcpHandler: async () => {},
-    captureHttp: createCaptureHttp({ token: 'capture-geheim', router: r, zunderEnabled: true }),
+    captureHttp: createCaptureHttp({ token: 'capture-geheim', router: r, zunderEnabled }),
     logger: quiet,
   });
   app.listen(0, '127.0.0.1');
@@ -184,6 +200,18 @@ test('/capture verlangt den Capture-Token', async () => {
     assert.match(deniedBody.message, /Token abgelehnt/);
     assert.equal((await call('/capture', { method: 'GET' })).status, 200);
   });
+});
+
+test('/capture meldet den aktuellen Zunder-Stand', async () => {
+  let on = false;
+  await withServer(
+    async (call) => {
+      assert.equal((await (await call('/capture', { method: 'GET' })).json()).zunder, false);
+      on = true;
+      assert.equal((await (await call('/capture', { method: 'GET' })).json()).zunder, true);
+    },
+    { zunderEnabled: () => on },
+  );
 });
 
 test('/capture nimmt Klartext vom Kurzbefehl an', async () => {
