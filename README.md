@@ -118,7 +118,7 @@ schreiben nur in ein festes Projekt.
 
 | Weg | So geht's |
 |---|---|
-| iOS-Kurzbefehl | [Notiz ins Cockpit](docs/kurzbefehle/Notiz%20ins%20Cockpit.shortcut) laden und importieren, beim Import den `CAPTURE_TOKEN` eintragen. Läuft aus dem Share-Sheet oder fragt den Text ab. Von Hand: `POST <PUBLIC_URL>/capture?source=ios-kurzbefehl` mit dem Text als Body, Header `Authorization: Bearer <CAPTURE_TOKEN>` |
+| iOS-Kurzbefehl | [Notiz ins Cockpit](docs/kurzbefehle/Notiz%20ins%20Cockpit.shortcut) laden und importieren, beim Import den Capture-Token eintragen (heute der Wert von `CAPTURE_TOKEN`). Läuft aus dem Share-Sheet oder fragt den Text ab. Von Hand: `POST <PUBLIC_URL>/capture?source=ios-kurzbefehl` mit dem Text als Body, Header `Authorization: Bearer <CAPTURE_TOKEN>` |
 | Sprachmemo | [Sprachmemo ins Cockpit](docs/kurzbefehle/Sprachmemo%20ins%20Cockpit.shortcut) importieren: „Audio aufnehmen“, „Audio transkribieren“, dann wie oben mit `source=sprachmemo`. Transkribiert wird auf dem Gerät, das Cockpit bekommt nur Text. |
 | Funke | Als Relay-URL `<PUBLIC_URL>/funke` und als Relay-Token den `CAPTURE_TOKEN` eintragen. Notizen landen im Capture-Ordner (der Ordner aus der App wird ignoriert), Aufgaben schickt Funke weiter direkt an Zunder. |
 | Mail | Eine Adresse (Alias) anlegen und per Regel in den Ordner `MAIL_MAILBOX` sortieren. Betreff = Titel, `!` im Betreff = Aufgabe. Verarbeitete Mails wandern nach `MAIL_DONE_MAILBOX`. |
