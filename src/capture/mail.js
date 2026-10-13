@@ -10,7 +10,8 @@ import { createHash } from 'node:crypto';
  * Erledigt-Ordner (Standard „Archive“). Scheitert eine Mail, bleibt sie liegen
  * und kommt beim nächsten Abruf wieder dran.
  *
- * Nur Absender aus `allowedSenders` werden verarbeitet; alles andere wird
+ * Nur Absender aus `allowedSenders` werden verarbeitet (Adresse oder mit
+ * führendem `@` eine ganze Domain ohne Subdomains); alles andere wird
  * unverarbeitet in den Erledigt-Ordner verschoben, damit eine fremde Mail an die
  * Adresse weder Notizen noch Aufgaben erzeugt.
  */
@@ -28,8 +29,7 @@ export function createMailCapture({
   batch = 20,
   logger = console,
 }) {
-  const allowed = new Set(allowedSenders.map((s) => s.trim().toLowerCase()).filter(Boolean));
-  if (!allowed.size) throw new Error('MAIL_ALLOWED_SENDERS enthält keinen Absender');
+  const isAllowed = senderFilter(allowedSenders);
   const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
   let session = null;
   let timer = null;
@@ -99,7 +99,7 @@ export function createMailCapture({
     for (const email of emails) {
       const sender = String(email.from?.[0]?.email ?? '').toLowerCase();
       try {
-        if (!allowed.has(sender)) {
+        if (!isAllowed(sender)) {
           logger.warn?.(`Mail-Capture: Absender nicht freigegeben, Mail wird nur verschoben (${email.id})`);
         } else {
           await router.route(toCapture(email));
@@ -144,6 +144,23 @@ export function createMailCapture({
       if (timer) clearInterval(timer);
     },
     status: () => ({ mailbox, lastPollAt: last.at, lastProcessed: last.processed, lastError: last.error }),
+  };
+}
+
+/**
+ * Prüffunktion für freigegebene Absender. Ein Eintrag wie `r@rubeen.dev` gilt
+ * genau für diese Adresse, `@rubeen.dev` für jede Adresse dieser Domain, aber
+ * nicht für Subdomains wie `x@sub.rubeen.dev`.
+ */
+export function senderFilter(allowedSenders) {
+  const entries = allowedSenders.map((s) => s.trim().toLowerCase()).filter(Boolean);
+  if (!entries.length) throw new Error('MAIL_ALLOWED_SENDERS enthält keinen Absender');
+  const addresses = new Set(entries.filter((e) => !e.startsWith('@')));
+  const domains = new Set(entries.filter((e) => e.startsWith('@')).map((e) => e.slice(1)));
+  return (sender) => {
+    const at = sender.lastIndexOf('@');
+    if (at <= 0) return false;
+    return addresses.has(sender) || domains.has(sender.slice(at + 1));
   };
 }
 

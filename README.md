@@ -63,7 +63,7 @@ Das Image baut GitHub Actions bei jedem Push auf `main`:
 | `OBSIDIAN_VAULT_NAME` | Name des Vaults in Obsidian, für „In Obsidian öffnen“ in Zunder (optional) |
 | `CAPTURE_STATE_FILE` | Merkzettel gegen doppelte Aufgaben, Standard `/data/capture-state.json` |
 | `MAIL_JMAP_TOKEN` | Fastmail-API-Token (nur Mail); ohne Wert kein Mail-Abruf |
-| `MAIL_ALLOWED_SENDERS` | eigene Absenderadressen (Komma-Liste), Pflicht mit `MAIL_JMAP_TOKEN` |
+| `MAIL_ALLOWED_SENDERS` | eigene Absenderadressen (Komma-Liste), `@domain` erlaubt eine ganze Domain ohne Subdomains (z. B. `@rubeen.dev,@rubeen.email`); Pflicht mit `MAIL_JMAP_TOKEN` |
 | `EMBED_URL`, `EMBED_MODEL` | Ollama-Server für Embeddings (z. B. `http://ollama:11434`) und Modell, Standard `bge-m3`; ohne `EMBED_URL` nur Volltext |
 | `VECTOR_DB` | Vektorspeicher, Standard `/data/vectors.db` |
 | `MAIL_MAILBOX`, `MAIL_DONE_MAILBOX`, `MAIL_POLL_MIN` | Ordner zum Abholen (Standard `Vault`), Ablage danach (Standard `Archive`), Abstand in Minuten (Standard 5) |
@@ -141,8 +141,11 @@ Pfade relativ zum Vault mit `/`. `400` bei falscher Eingabe, `401` ohne gültige
 `GET /capture` ist ein Verbindungstest.
 
 Mail-Abruf: Nur Absender aus `MAIL_ALLOWED_SENDERS` werden verarbeitet, alle
-anderen Mails wandern unverarbeitet in den Ablage-Ordner. Der Absender einer Mail
-lässt sich fälschen; die Adresse deshalb nicht weitergeben. Den API-Token in
+anderen Mails wandern unverarbeitet in den Ablage-Ordner. Ein Eintrag mit
+führendem `@` (z. B. `@rubeen.dev`) gibt jede Adresse dieser Domain frei, aber
+keine Subdomain. Der Absender einer Mail lässt sich fälschen; die Adresse deshalb
+nicht weitergeben. Mit ganzen Domains wird die Annahme breiter, also die
+Alias-Adresse erst recht geheim halten. Den API-Token in
 Fastmail unter *Einstellungen → Passwörter & Sicherheit → API-Tokens* mit
 Zugriff nur auf Mail anlegen.
 
