@@ -201,6 +201,18 @@ function feuerEdit(ctx, path, field, label, value) {
     </details>`;
 }
 
+/** Feuer-Notiz der Woche anlegen: Feuer-Ziel ist Pflicht, der Erste Zug kann später kommen. */
+function feuerCreate(ctx, weekId) {
+  return `<details class="inline-edit feuer-create">
+      <summary><span aria-hidden="true">＋</span> <span class="summary-text">Feuer anlegen</span></summary>
+      ${formHead(ctx, '/aktion/feuer/anlegen', { woche: weekId })}
+        <label>Feuer-Ziel<textarea name="ziel" rows="3" maxlength="2000" required></textarea></label>
+        <label>Erster Zug <span class="hint">(optional)</span><textarea name="zug" rows="2" maxlength="2000"></textarea></label>
+        <p><button type="submit" class="chip">Anlegen</button></p>
+      </form>
+    </details>`;
+}
+
 export function obsidianLink(path, vaultName) {
   if (!vaultName) return null;
   const file = path.replace(/\.md$/i, '');
@@ -211,7 +223,7 @@ function feuerSection(model, tz, vaultName, ctx) {
   const f = model.feuer;
   let goal;
   if (!f.ok) goal = problem(f);
-  else if (!f.data) goal = '<p class="empty">Für diese Woche gibt es keine Feuer-Notiz.</p>';
+  else if (!f.data) goal = `<p class="empty">Für diese Woche gibt es keine Feuer-Notiz.</p>${ctx.write?.notes && !model.week.past ? feuerCreate(ctx, model.week.id) : ''}`;
   else {
     const link = obsidianLink(f.data.path, vaultName);
     const editable = Boolean(ctx.write?.notes);
@@ -783,6 +795,10 @@ code { font-size: 13px; background: var(--line); padding: 1px 4px; border-radius
 .inline-edit textarea { width: 100%; font: inherit; font-size: 16px; line-height: 1.45; color: var(--text); background: var(--surface);
   border: 1px solid var(--accent); border-radius: var(--r-md); padding: 8px 10px; resize: vertical; }
 .inline-edit p { margin: 6px 0 0; }
+.feuer-create { margin: 8px 0 0; }
+.feuer-create label { display: block; margin: 8px 0 0; font-size: 13px; color: var(--muted); }
+.feuer-create textarea { margin-top: 4px; }
+.feuer-create .hint { color: var(--muted); }
 
 /* --- Menü an Aufgaben: Bausteine .menu, .chip --- */
 .task { position: relative; }

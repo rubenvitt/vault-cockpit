@@ -264,7 +264,11 @@ aus dem Index, Eingabe frei) oder mit einem Klick ins Archiv (der oberste Ordner
 namens `archiv`, auch `40-archiv`). Vertrauliche und ausgeschlossene Ordner der
 Policy zeigt das Cockpit weder an noch nimmt es sie als Ziel. Feuer-Ziel und
 Ersten Zug der Feuer-Notiz bearbeitet man direkt im Wochenblick (✎ neben dem
-Text, ersetzt den ersten Absatz unter der Überschrift). Der **Wochenrückblick**
+Text, ersetzt den ersten Absatz unter der Überschrift). Fehlt die Feuer-Notiz
+einer Woche, legt **Feuer anlegen** sie mit Feuer-Ziel und (optional) Erstem Zug
+an: im Ordner und Feuersturm der letzten Feuer-Notiz, Wochennummer und Dateiname
+weitergezählt, mit leeren Tabellen für Schritte und Flammen. Nach W12 legt das
+Cockpit keine an, dann gehört ein neuer Feuersturm in Obsidian geplant. Der **Wochenrückblick**
 unter `/rueckblick` (in der Navigation, `?woche=` für frühere Wochen) zeigt je
 Bereich, was erledigt war und was geplant war (Phönix-Schritte und in der Woche
 Fälliges), was außerdem erledigt wurde, die Flammen-Zeit der Woche und was offen
