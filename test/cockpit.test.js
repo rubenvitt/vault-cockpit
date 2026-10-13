@@ -259,6 +259,7 @@ function fakeZunder(tasks, { fail = null } = {}) {
         { id: 'a2', name: 'Zuhause', state: 'active', projects: [{ id: 'p9', name: 'Alt', status: 'done' }] },
         { id: 'a1', name: 'Arbeitnehmer', state: 'active', projects: [{ id: 'p1', name: 'Odoo', status: 'active' }] },
         { id: 'a3', name: 'Weg', state: 'archived', projects: [] },
+        { id: 'a4', name: 'Programmieren', state: 'active', projects: [{ id: 'pdev', name: 'Vault Cockpit', status: 'active', kind: 'dev' }] },
       ];
     },
   };
@@ -272,6 +273,8 @@ const TASKS = [
   { id: 'x1', title: 'Verworfen', status: 'dropped', due: '2026-10-15', location: loc('Arbeitnehmer') },
   { id: 'o1', title: 'Seite für Personalentwicklung', status: 'open', due: '2026-07-05', location: loc('Arbeitnehmer') },
   { id: 'p1', title: 'Zunder läuft', status: 'in_progress', due: null, location: loc('Programmieren', 'Zunder') },
+  { id: 'v1', title: 'Dev läuft', status: 'in_progress', due: null, location: { ...loc('Programmieren', 'Vault Cockpit'), id: 'pdev' } },
+  { id: 'v2', title: 'Dev überfällig', status: 'open', due: '2026-10-01', location: { ...loc('Programmieren', 'Vault Cockpit'), id: 'pdev' } },
   { id: 'i1', title: 'Neu erfasst', status: 'open', due: null, location: { kind: 'inbox' } },
 ];
 
@@ -313,11 +316,13 @@ test('Wochenmodell: Big Rocks je Bereich, Flammen mit gemessener Zeit, Aufgaben 
   );
   assert.equal(m.rocks.data[2].tasks[0].project, 'Gruppe I&K');
 
+  // Aufgaben aus Dev-Projekten (v1, v2) stehen nicht unter „in Arbeit und überfällig“ (VCP-41).
   assert.deepEqual(m.tasks.data.map((t) => [t.id, t.overdue]), [['o1', true], ['p1', false]]);
   assert.deepEqual(m.inbox.zunder.data.map((t) => t.id), ['i1']);
   // Ziele für „Zuordnen“: sortiert, ohne archivierte Bereiche und abgeschlossene Projekte.
   assert.deepEqual(m.inbox.targets, [
     { id: 'a1', name: 'Arbeitnehmer', projects: [{ id: 'p1', name: 'Odoo' }] },
+    { id: 'a4', name: 'Programmieren', projects: [{ id: 'pdev', name: 'Vault Cockpit' }] },
     { id: 'a2', name: 'Zuhause', projects: [] },
   ]);
   assert.deepEqual(m.inbox.vault.data, [{ path: 'inbox/a.md', title: 'A' }]);
