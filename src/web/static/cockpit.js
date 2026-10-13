@@ -181,6 +181,10 @@
   async function replay(undo) {
     try {
       const data = await send(undo.action, new URLSearchParams({ ...undo.fields, csrf: csrf() }));
+      if (data.redirect) {
+        location.assign(data.redirect);
+        return;
+      }
       toast(data.message);
       await refresh();
     } catch (err) {
@@ -200,7 +204,13 @@
     const fromToast = form.closest('.toast');
     try {
       const data = await post(form, extra);
+      // Die Notiz liegt jetzt woanders: dorthin, die Meldung kommt vom Server mit.
+      if (data.redirect) {
+        location.assign(data.redirect);
+        return;
+      }
       if (fromToast) dismiss(fromToast);
+      if (form.elements.text instanceof HTMLTextAreaElement) form.elements.text.value = '';
       closeMenus();
       toast(data.message, data.undo ? { action: { label: 'Rückgängig', run: () => replay(data.undo) } } : {});
       await refresh();

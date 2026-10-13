@@ -105,7 +105,7 @@ const graph = {
 };
 const search = async (q) => ({ results: [{ path: 'wiki/a.md', title: 'A', snippet: `zu ${q}`, streams: ['text', 'semantic'] }], total: 1, degraded: null });
 
-async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSubjects = ['ruben'], calendars = null, actions = null } = {}) {
+async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSubjects = ['ruben'], calendars = null, actions = null, notes = null } = {}) {
   const idp = fakeIdp(idpOptions);
   const settings = createSettingsStore({ defaults: { tz: 'Europe/Berlin', inboxFolder: 'inbox', zunderUrl: 'https://zunder.env', zunderToken: 'zt_env' }, logger: quiet });
   const tokens = createTokenStore({ logger: quiet });
@@ -113,6 +113,7 @@ async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSu
     cockpit,
     settings,
     actions,
+    notes,
     tokens,
     calendars,
     graph,
@@ -743,5 +744,102 @@ test('Flammen: Knopf an Big Rocks, Leiste mit Timer und Stopp, Meldungen', async
     },
     {},
     { actions },
+  );
+});
+
+/** Notiz-Attrappe für die Notizseite. */
+function fakeNotes() {
+  const calls = [];
+  const note = { path: '00-inbox/Idee.md', folder: '00-inbox', title: 'Idee <Hund>', frontmatter: { source: 'cockpit' }, tags: ['alt'], body: '- [ ] Preise\n- [x] Termin\n', inInbox: true };
+  return {
+    calls,
+    get: (p) => (p === note.path ? note : null),
+    targets: () => ['10-projekte/Hund', '40-archiv'],
+    archiveFolder: () => '40-archiv',
+    move(p, folder) {
+      calls.push(['move', p, folder]);
+      if (folder === 'privat') throw new ActionError('„privat“ ist vertraulich oder ausgeschlossen; dorthin legt das Cockpit nichts ab', 403);
+      return { path: `${folder}/Idee.md`, from: p, changed: true };
+    },
+    setTags(p, raw) {
+      calls.push(['tags', p, raw]);
+      return { path: p, tags: raw.split(',').map((t) => t.trim()).filter(Boolean) };
+    },
+    append(p, text) {
+      calls.push(['append', p, text]);
+      if (text === 'kaputt') throw new ActionError('„00-inbox/Idee.md“ wurde gerade anderweitig geändert.', 400);
+      return { path: p };
+    },
+    toggle(p, n, line, done) {
+      calls.push(['toggle', p, n, line, done]);
+      return { path: p, line: done ? '- [x] Preise' : '- [ ] Preise' };
+    },
+  };
+}
+
+test('Notizseite: Vorschau mit Checkbox-Knöpfen und Verarbeiten; unbekannte Notiz 404', async () => {
+  const notes = fakeNotes();
+  await withServer(
+    async ({ call, login }) => {
+      assert.equal((await call('/notiz?pfad=00-inbox%2FIdee.md')).status, 303);
+      await login();
+      const res = await call('/notiz?pfad=00-inbox%2FIdee.md');
+      assert.equal(res.status, 200);
+      const html = await res.text();
+      assert.match(html, /<h1>Idee &lt;Hund&gt;<\/h1>/);
+      assert.match(html, /action="\/aktion\/notiz\/checkbox" class="act box-form">[^]*?name="n" value="0"[^]*?name="line" value="- \[ \] Preise"[^]*?name="erledigt" value="1"/);
+      assert.match(html, /<option value="10-projekte\/Hund">/);
+      assert.match(html, /name="ordner" value="40-archiv"[^]*?Ins Archiv/);
+      assert.match(html, /name="tags" value="alt"/);
+      assert.equal((await call('/notiz?pfad=privat%2Fgeheim.md')).status, 404);
+
+      // Die Wochenansicht verlinkt Inbox-Notizen auf die Vorschau.
+      assert.ok((await (await call('/')).text()).includes('/static/cockpit.js'));
+    },
+    {},
+    { actions: fakeActions(), notes },
+  );
+});
+
+test('Notiz ablegen: JSON führt zur neuen Adresse, Meldung kommt per Cookie mit; Fehler bleiben auf der Seite', async () => {
+  const notes = fakeNotes();
+  await withServer(
+    async ({ call, login }) => {
+      await login();
+      const csrf = csrfFrom(await (await call('/notiz?pfad=00-inbox%2FIdee.md')).text());
+      const back = '/notiz?pfad=00-inbox%2FIdee.md';
+      const res = await call('/aktion/notiz/ablegen', { method: 'POST', form: { pfad: '00-inbox/Idee.md', ordner: '40-archiv', back, csrf }, accept: 'application/json' });
+      const body = await res.json();
+      assert.equal(body.message, 'Abgelegt in 40-archiv/');
+      assert.equal(body.redirect, '/notiz?pfad=40-archiv%2FIdee.md');
+      assert.deepEqual(body.undo, { action: '/aktion/notiz/ablegen', fields: { pfad: '40-archiv/Idee.md', ordner: '00-inbox', back } });
+      assert.match(res.headers.get('set-cookie'), /vc_flash=/);
+
+      // Ohne JavaScript: Weiterleitung zur neuen Adresse.
+      const plain = await call('/aktion/notiz/ablegen', { method: 'POST', form: { pfad: '00-inbox/Idee.md', ordner: '10-projekte/Hund', back, csrf } });
+      assert.equal(plain.headers.get('location'), '/notiz?pfad=10-projekte%2FHund%2FIdee.md');
+      // Aus der Woche abgelegt: zurück zur Woche.
+      const fromWeek = await call('/aktion/notiz/ablegen', { method: 'POST', form: { pfad: '00-inbox/Idee.md', ordner: '40-archiv', back: '/', csrf } });
+      assert.equal(fromWeek.headers.get('location'), '/');
+
+      const denied = await call('/aktion/notiz/ablegen', { method: 'POST', form: { pfad: '00-inbox/Idee.md', ordner: 'privat', csrf }, accept: 'application/json' });
+      assert.equal(denied.status, 403);
+
+      const tags = await (await call('/aktion/notiz/tags', { method: 'POST', form: { pfad: '00-inbox/Idee.md', tags: 'hund, idee', csrf }, accept: 'application/json' })).json();
+      assert.equal(tags.message, 'Tags: #hund #idee');
+      const box = await (await call('/aktion/notiz/checkbox', { method: 'POST', form: { pfad: '00-inbox/Idee.md', n: '0', line: '- [ ] Preise', erledigt: '1', csrf }, accept: 'application/json' })).json();
+      assert.equal(box.message, 'Abgehakt');
+      assert.deepEqual(box.undo.fields, { pfad: '00-inbox/Idee.md', n: '0', line: '- [x] Preise', erledigt: '0' });
+
+      // Anhängen scheitert ohne JavaScript: Notizseite mit Fehler, Text bleibt im Feld.
+      const failed = await call('/aktion/notiz/anhaengen', { method: 'POST', form: { pfad: '00-inbox/Idee.md', text: 'kaputt', back, csrf } });
+      assert.equal(failed.status, 400);
+      const page = await failed.text();
+      assert.match(page, /<h1>Idee &lt;Hund&gt;<\/h1>/);
+      assert.match(page, /anderweitig geändert/);
+      assert.match(page, /<textarea name="text"[^>]*>kaputt<\/textarea>/);
+    },
+    {},
+    { actions: fakeActions(), notes },
   );
 });

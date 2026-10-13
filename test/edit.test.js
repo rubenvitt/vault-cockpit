@@ -172,3 +172,37 @@ test('eine unveränderte Notiz wird nicht geschrieben', () => {
   const r = editor.setFrontmatter({ path: 'projects/Ohne.md', set: { gibtsnicht: null } });
   assert.equal(r.changed, false);
 });
+
+test('move: legt eine Notiz in einen anderen Ordner, ohne zu überschreiben', () => {
+  const r = editor.move({ path: 'projects/Ohne.md', folder: 'archiv/2026/' });
+  assert.deepEqual(r, { path: 'archiv/2026/Ohne.md', from: 'projects/Ohne.md', changed: true });
+  assert.match(read('archiv/2026/Ohne.md'), /Nur Text/);
+  assert.equal(idx.getNote('projects/Ohne.md'), null);
+  assert.equal(idx.getNote('archiv/2026/Ohne.md').title, 'Ohne Frontmatter');
+
+  put('projects/Ohne.md', 'neu');
+  idx.refresh('projects/Ohne.md');
+  assert.throws(() => editor.move({ path: 'projects/Ohne.md', folder: 'archiv/2026' }), /schon eine Notiz/);
+  for (const bad of ['', '../raus', 'a/../b', '.obsidian', 'a\nb']) {
+    assert.throws(() => editor.move({ path: 'projects/Alpha.md', folder: bad }), /kein gültiger Ordner/);
+  }
+  assert.throws(() => editor.move({ path: 'areas/Gesundheit/Werte.md', folder: 'x' }), /vertraulichen/);
+});
+
+test('move: Zielordner per Symlink außerhalb des Vaults wird abgelehnt', () => {
+  symlinkSync(outside, join(root, 'raus'));
+  assert.throws(() => editor.move({ path: 'projects/Alpha.md', folder: 'raus/neu' }), /aus dem Vault heraus/);
+  assert.match(read('projects/Alpha.md'), /Erster Absatz/);
+});
+
+test('toggleTask: n-te Checkbox ab- und aufhaken, nur wenn die Zeile noch passt', () => {
+  put('projects/Liste.md', '# Liste\n\n```\n- [ ] im Code\n```\n- [ ] eins\n  - [x] zwei\n');
+  idx.refresh('projects/Liste.md');
+  editor.toggleTask({ path: 'projects/Liste.md', n: 0, line: '- [ ] eins', done: true });
+  assert.match(read('projects/Liste.md'), /^- \[x\] eins$/m);
+  assert.match(read('projects/Liste.md'), /^- \[ \] im Code$/m);
+  editor.toggleTask({ path: 'projects/Liste.md', n: 1, line: '- [x] zwei', done: false });
+  assert.match(read('projects/Liste.md'), /^ {2}- \[ \] zwei$/m);
+  assert.throws(() => editor.toggleTask({ path: 'projects/Liste.md', n: 0, line: '- [ ] anders', done: true }), /nicht mehr an dieser Stelle/);
+  assert.throws(() => editor.toggleTask({ path: 'projects/Liste.md', n: 5, done: true }), /nicht mehr an dieser Stelle/);
+});

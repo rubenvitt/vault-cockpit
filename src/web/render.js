@@ -66,12 +66,12 @@ function tickForm(t, ctx) {
 }
 
 /** Felder, die jedes Aktionsformular braucht. */
-const hidden = (fields) =>
+export const hidden = (fields) =>
   Object.entries(fields)
     .filter(([, v]) => v != null)
     .map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`)
     .join('');
-const formHead = (ctx, action, fields = {}) =>
+export const formHead = (ctx, action, fields = {}) =>
   `<form method="post" action="${action}" class="act">${hidden({ csrf: ctx.write.csrf, back: ctx.back, ...fields })}`;
 
 const STATUS_CHOICES = [
@@ -189,7 +189,7 @@ function taskItem(t, tz, ctx = {}, { area = false, mark = null, live = false, in
 const problem = (s) =>
   `<p class="problem${s.unconfigured ? ' unconfigured' : ''}">${esc(s.error)}${s.unconfigured ? ' · <a href="/einstellungen">Einstellungen</a>' : ''}</p>`;
 
-function obsidianLink(path, vaultName) {
+export function obsidianLink(path, vaultName) {
   if (!vaultName) return null;
   const file = path.replace(/\.md$/i, '');
   return `obsidian://open?vault=${encodeURIComponent(vaultName)}&file=${encodeURIComponent(file)}`;
@@ -297,6 +297,10 @@ function inboxSection(model, tz, vaultName, ctx) {
       .map((n) => {
         const link = obsidianLink(n.path, vaultName);
         const title = esc(n.title ?? n.path.split('/').pop().replace(/\.md$/i, ''));
+        // Mit Notiz-Vorschau öffnet der Titel die Notiz im Cockpit, Obsidian bleibt daneben.
+        if (ctx.write?.notes) {
+          return `<li class="note"><a href="/notiz?pfad=${encodeURIComponent(n.path)}">${title}</a><span class="meta">${esc(n.path)}${link ? ` · <a href="${esc(link)}">Obsidian</a>` : ''}</span></li>`;
+        }
         return `<li class="note">${link ? `<a href="${esc(link)}">${title}</a>` : title}<span class="meta">${esc(n.path)}</span></li>`;
       }));
   }
@@ -331,7 +335,7 @@ function captureBar(ctx, draft) {
 }
 
 /** Meldung nach einer Aktion ohne JavaScript, mit Rückgängig als Formular. */
-function flashToast(flash, ctx) {
+export function flashToast(flash, ctx) {
   if (!flash?.message) return '';
   const undo =
     flash.undo?.action?.startsWith('/aktion/') && ctx.write

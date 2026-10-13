@@ -3,6 +3,7 @@ import { timingSafeEqual, randomUUID } from 'node:crypto';
 import { createCookieSigner, parseCookies, cookie } from './session.js';
 import { renderWeek, renderMessage, renderSettings, dueLabel, CSS } from './render.js';
 import { renderGraph, renderSearch, GRAPH_CSS } from './graph-render.js';
+import { renderNote, NOTE_CSS } from './note-render.js';
 import { SettingsError, MAX_CALENDARS } from '../cockpit/settings.js';
 import { describeWeek, weekOf } from '../cockpit/week.js';
 import { ActionError, SETTABLE } from '../cockpit/actions.js';
@@ -57,6 +58,8 @@ const HTML_HEADERS = {
  *   Fälligkeit, `POST /aktion/zuordnen` legt eine Aufgabe aus der Inbox in einen
  *   Bereich oder ein Projekt, `POST /aktion/phoenix` markiert einen Phönix-Schritt,
  *   `POST /aktion/flamme` startet (`an=1`) oder stoppt eine Flamme,
+ *   `POST /aktion/notiz/…` legt eine Notiz ab, setzt Tags, hängt Text an oder
+ *   hakt eine Checkbox ab (Vorschau unter `GET /notiz?pfad=…`),
  *   `POST /aktion/erfassen` ist die Schnelleingabe (Notiz, mit `!` eine
  *   Zunder-Aufgabe). Alle brauchen Sitzung, gleiche Herkunft und das CSRF-Token
  *   der Sitzung. Mit `Accept: application/json` antworten sie mit JSON (für
@@ -67,7 +70,7 @@ const HTML_HEADERS = {
  * Die Sitzung ist ein signiertes Cookie und nur für diese Routen gültig; die
  * MCP-Schnittstelle prüft weiter ausschließlich Bearer-Tokens.
  */
-export function createWebHttp({ cockpit, settings, actions = null, tokens = null, calendars = null, graph = null, search = null, oidc, sessionSecret, publicUrl, allowedSubjects = [], sessionHours = 12, logger = console, now = () => Date.now() }) {
+export function createWebHttp({ cockpit, settings, actions = null, notes = null, tokens = null, calendars = null, graph = null, search = null, oidc, sessionSecret, publicUrl, allowedSubjects = [], sessionHours = 12, logger = console, now = () => Date.now() }) {
   const signer = createCookieSigner(sessionSecret);
   const secure = publicUrl.startsWith('https://');
 
@@ -140,7 +143,7 @@ export function createWebHttp({ cockpit, settings, actions = null, tokens = null
   }
 
   /** Was die Seite zum Schreiben braucht; ohne `actions` bleibt sie lesend. */
-  const writeContext = (req) => (actions ? { csrf: csrfOf(req), captureId: randomUUID() } : null);
+  const writeContext = (req) => (actions ? { csrf: csrfOf(req), captureId: randomUUID(), notes: Boolean(notes) } : null);
 
   async function page(req, res, url, session, { status = 200, flash = null, draft = null } = {}) {
     const id = url.searchParams.get('woche');
@@ -149,6 +152,35 @@ export function createWebHttp({ cockpit, settings, actions = null, tokens = null
     const back = url.pathname + url.search;
     return send(res, status, renderWeek(model, { user: session.name ?? session.sub, write: writeContext(req), back, flash: flash ?? takeFlash(req, res), draft }));
   }
+
+  /** Notizseite `/notiz?pfad=…`: Vorschau und Verarbeiten. */
+  async function notePage(req, res, url, session, { status = 200, flash = null, draft = null } = {}) {
+    const path = url.searchParams.get('pfad') ?? '';
+    const note = notes?.get(path);
+    if (!note) {
+      return send(res, 404, renderMessage('Notiz nicht verfügbar', `„${path}“ gibt es nicht, oder sie liegt in einem vertraulichen oder ausgeschlossenen Ordner.`, { link: { href: '/', label: 'Zur Woche' } }));
+    }
+    const { vaultName } = settings.get();
+    const html = renderNote(note, {
+      user: session.name ?? session.sub,
+      write: actions ? writeContext(req) : null,
+      back: url.pathname + url.search,
+      flash: flash ?? takeFlash(req, res),
+      draft,
+      targets: notes.targets(note.path),
+      archive: notes.archiveFolder(),
+      vaultName,
+    });
+    return send(res, status, html);
+  }
+
+  /** Seite hinter `back` mit Meldung (Weg ohne JavaScript, wenn eine Aktion scheitert). */
+  const backPage = (req, res, back, session, opts) => {
+    const url = new URL(back, publicUrl);
+    return url.pathname === '/notiz' && notes ? notePage(req, res, url, session, opts) : page(req, res, url, session, opts);
+  };
+  /** Nach dem Verschieben gibt es die alte Notizseite nicht mehr. */
+  const notePageOf = (path) => `/notiz?pfad=${encodeURIComponent(path)}`;
 
   const taskName = (t) => (t.ref ? `${t.ref} ${t.title}` : t.title);
   const statusMessage = (t) => {
@@ -220,6 +252,35 @@ export function createWebHttp({ cockpit, settings, actions = null, tokens = null
           logger.info?.(`Cockpit: Flamme ${on ? 'an' : 'aus'} ${task.ref ?? task.id} (${session.sub})`);
           return { message: flameMessage(task, on), task };
         },
+        ...(notes
+          ? {
+              async '/aktion/notiz/ablegen'(form, session) {
+                const back = safeNext(form.get('back'));
+                const r = notes.move(form.get('pfad'), form.get('ordner'));
+                const folder = r.path.slice(0, r.path.lastIndexOf('/'));
+                const from = r.from.includes('/') ? r.from.slice(0, r.from.lastIndexOf('/')) : '';
+                logger.info?.(`Cockpit: ${r.from} → ${r.path} (${session.sub})`);
+                // Von der Notizseite aus geht es zur neuen Adresse der Notiz.
+                const redirect = back.startsWith('/notiz') ? notePageOf(r.path) : null;
+                const undo = r.changed && from ? { action: '/aktion/notiz/ablegen', fields: { pfad: r.path, ordner: from, back: redirect ? notePageOf(r.from) : back } } : null;
+                return { message: r.changed ? `Abgelegt in ${folder}/` : `Liegt schon in ${folder}/`, path: r.path, redirect, undo };
+              },
+              async '/aktion/notiz/tags'(form) {
+                const r = notes.setTags(form.get('pfad'), form.get('tags'));
+                return { message: r.tags.length ? `Tags: ${r.tags.map((t) => `#${t}`).join(' ')}` : 'Tags entfernt', path: r.path };
+              },
+              async '/aktion/notiz/anhaengen'(form) {
+                const r = notes.append(form.get('pfad'), form.get('text'));
+                return { message: 'Angehängt', path: r.path };
+              },
+              async '/aktion/notiz/checkbox'(form) {
+                const done = form.get('erledigt') === '1';
+                const r = notes.toggle(form.get('pfad'), form.get('n'), form.get('line'), done);
+                const undo = { action: '/aktion/notiz/checkbox', fields: { pfad: r.path, n: form.get('n'), line: r.line, erledigt: done ? '0' : '1' } };
+                return { message: done ? 'Abgehakt' : 'Wieder offen', path: r.path, undo };
+              },
+            }
+          : {}),
         async '/aktion/erfassen'(form) {
           const result = await actions.capture({ text: form.get('text') ?? '', captureId: form.get('cid') });
           return { message: captureMessage(result), result };
@@ -249,11 +310,16 @@ export function createWebHttp({ cockpit, settings, actions = null, tokens = null
       if (!(err instanceof ActionError)) throw err;
       logger.warn?.(`Cockpit-Aktion ${path} fehlgeschlagen: ${err.message}`);
       if (wantsJson) return json(res, err.status, { error: 'action_failed', message: err.message });
-      const draft = path === '/aktion/erfassen' ? form.get('text') : null;
-      return page(req, res, new URL(back, publicUrl), session, { status: err.status, flash: { kind: 'error', message: err.message }, draft });
+      const draft = path === '/aktion/erfassen' || path === '/aktion/notiz/anhaengen' ? form.get('text') : null;
+      return backPage(req, res, back, session, { status: err.status, flash: { kind: 'error', message: err.message }, draft });
     }
-    if (wantsJson) return json(res, 200, body);
-    return redirect(res, back, [flashCookie({ kind: 'ok', message: body.message, undo: body.undo ?? null })]);
+    const flash = flashCookie({ kind: 'ok', message: body.message, undo: body.undo ?? null });
+    // Muss die Seite wechseln (Notiz verschoben), kommt die Meldung per Cookie mit.
+    if (wantsJson) {
+      if (body.redirect) res.setHeader('set-cookie', [flash]);
+      return json(res, 200, body);
+    }
+    return redirect(res, body.redirect ?? back, [flash]);
   }
 
   async function api(req, res, url) {
@@ -396,7 +462,7 @@ export function createWebHttp({ cockpit, settings, actions = null, tokens = null
 
   const TOKEN_ROUTES = { '/einstellungen/tokens': createToken, '/einstellungen/tokens/widerrufen': revokeToken };
   const ACTION_ROUTES = new Set(Object.keys(ACTIONS));
-  const ROUTES = new Set([...ACTION_ROUTES, '/static/cockpit.js', '/', '/api/woche', '/graph', '/api/graph', '/einstellungen', ...(tokens ? Object.keys(TOKEN_ROUTES) : []), '/login', '/auth/callback', '/logout', '/static/cockpit.css']);
+  const ROUTES = new Set([...ACTION_ROUTES, '/static/cockpit.js', '/', '/api/woche', ...(notes ? ['/notiz'] : []), '/graph', '/api/graph', '/einstellungen', ...(tokens ? Object.keys(TOKEN_ROUTES) : []), '/login', '/auth/callback', '/logout', '/static/cockpit.css']);
 
   return {
     matches: (path) => ROUTES.has(path),
@@ -407,7 +473,7 @@ export function createWebHttp({ cockpit, settings, actions = null, tokens = null
 
       if (path === '/static/cockpit.css' && method === 'GET') {
         res.writeHead(200, { 'content-type': 'text/css; charset=utf-8', 'cache-control': 'public, max-age=3600' });
-        return res.end(CSS + GRAPH_CSS);
+        return res.end(CSS + GRAPH_CSS + NOTE_CSS);
       }
       if (path === '/static/cockpit.js' && method === 'GET') {
         res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache', 'x-content-type-options': 'nosniff' });
@@ -454,6 +520,7 @@ export function createWebHttp({ cockpit, settings, actions = null, tokens = null
       }
       if (!session) return redirect(res, `/login?next=${encodeURIComponent(url.pathname + url.search)}`);
       if (path === '/graph') return graphPage(req, res, url, session);
+      if (path === '/notiz') return notePage(req, res, url, session);
       return page(req, res, url, session);
     },
   };

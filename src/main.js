@@ -23,6 +23,7 @@ import { createTokenStore } from './cockpit/tokens.js';
 import { createOidcLogin } from './web/oidc.js';
 import { createWebHttp } from './web/http.js';
 import { createCockpitActions } from './cockpit/actions.js';
+import { createNoteDesk } from './cockpit/notes.js';
 import { createOllamaEmbedder } from './semantic/embedder.js';
 import { createSemanticIndex } from './semantic/index.js';
 import { hybridSearch } from './semantic/search.js';
@@ -203,6 +204,8 @@ const webHttp = process.env.WEB_CLIENT_ID
         zunder: () => cockpit.zunder(),
         index,
       }),
+      // Vault-Notizen ansehen und verarbeiten, über denselben Editor wie vault_edit.
+      notes: createNoteDesk({ index, editor, policy: POLICY, settings: cockpitSettings }),
       settings: cockpitSettings,
       tokens: apiTokens,
       calendars,

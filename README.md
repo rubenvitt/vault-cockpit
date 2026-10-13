@@ -223,7 +223,12 @@ angezeigten Woche. In der Zunder-Inbox kommt **Zuordnen** (Bereich, Projekt oder
 lässt. Auf dem iPhone öffnet sich das Menü als Leiste von unten. Flammen und
 Big Rocks haben einen **Flammen-Knopf**: Er startet einen Deep-Work-Block in
 Zunder (und Timing, falls dort angebunden); solange eine Flamme brennt, steht
-oben eine Leiste mit Timer und „Stopp“.
+oben eine Leiste mit Timer und „Stopp“. Notizen der Vault-Inbox öffnen sich als
+**Vorschau** im Cockpit (`/notiz?pfad=…`, Obsidian-Link daneben): Checkboxen
+abhaken, Tags setzen, Text anhängen und in einen Ordner **ablegen** (Vorschläge
+aus dem Index, Eingabe frei) oder mit einem Klick ins Archiv (der oberste Ordner
+namens `archiv`, auch `40-archiv`). Vertrauliche und ausgeschlossene Ordner der
+Policy zeigt das Cockpit weder an noch nimmt es sie als Ziel.
 Oben auf der Seite liegt eine
 **Schnelleingabe** mit derselben Logik wie `/capture`: Text wird eine Notiz im
 Inbox-Ordner, mit `!` vorne eine Aufgabe in der Zunder-Inbox. `/` oder `n` springt
