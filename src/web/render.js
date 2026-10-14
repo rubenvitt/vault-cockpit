@@ -193,7 +193,7 @@ const problem = (s) =>
 /** Bearbeiten eines Feuer-Abschnitts: klappt ohne JavaScript auf, speichert in die Feuer-Notiz. */
 function feuerEdit(ctx, path, field, label, value) {
   return `<details class="inline-edit">
-      <summary aria-label="${esc(`${label} bearbeiten`)}" title="${esc(`${label} bearbeiten`)}"><span aria-hidden="true">✎</span> <span class="summary-text">bearbeiten</span></summary>
+      <summary aria-label="${esc(`${label} bearbeiten`)}" title="${esc(`${label} bearbeiten`)}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 2.5l3 3-8 8H2.5v-3z"/></svg></summary>
       ${formHead(ctx, '/aktion/feuer', { pfad: path, feld: field })}
         <label><span class="sr-only">${esc(label)}</span><textarea name="text" rows="${field === 'ziel' ? 3 : 2}" maxlength="2000" required>${esc(value ?? '')}</textarea></label>
         <p><button type="submit" class="chip">Speichern</button></p>
@@ -227,12 +227,15 @@ function feuerSection(model, tz, vaultName, ctx) {
   else {
     const link = obsidianLink(f.data.path, vaultName);
     const editable = Boolean(ctx.write?.notes);
-    goal = `<p class="goal">${f.data.goal ? inline(f.data.goal) : '<span class="empty">Die Notiz hat keinen Abschnitt „Feuer-Ziel“.</span>'}</p>
-      ${editable ? feuerEdit(ctx, f.data.path, 'ziel', 'Feuer-Ziel', f.data.goal) : ''}
-      ${f.data.alignment ? `<p class="meta">Alignment: ${esc(f.data.alignment)}</p>` : ''}
-      ${f.data.firstMove || editable ? `<p class="first-move"><span class="label">Erster Zug</span> ${f.data.firstMove ? inline(f.data.firstMove) : '<span class="empty">noch keiner</span>'}</p>` : ''}
-      ${editable ? feuerEdit(ctx, f.data.path, 'zug', 'Erster Zug', f.data.firstMove) : ''}
-      <p class="meta">${link ? `<a href="${esc(link)}">${esc(f.data.title)}</a>` : esc(f.data.title)}</p>`;
+    const meta = [f.data.alignment ? `Alignment: ${esc(f.data.alignment)}` : '', link ? `<a href="${esc(link)}">${esc(f.data.title)}</a>` : esc(f.data.title)].filter(Boolean).join(' · ');
+    // Bearbeiten sitzt als kleiner Stift rechts; aufgeklappt ersetzt das Feld den Text.
+    goal = `<div class="editable">
+        <p class="goal">${f.data.goal ? inline(f.data.goal) : '<span class="empty">Die Notiz hat keinen Abschnitt „Feuer-Ziel“.</span>'}</p>
+        ${editable ? feuerEdit(ctx, f.data.path, 'ziel', 'Feuer-Ziel', f.data.goal) : ''}
+      </div>
+      ${f.data.firstMove || editable ? `<div class="editable"><p class="first-move"><span class="label">Erster Zug</span> ${f.data.firstMove ? inline(f.data.firstMove) : '<span class="empty">noch keiner</span>'}</p>
+        ${editable ? feuerEdit(ctx, f.data.path, 'zug', 'Erster Zug', f.data.firstMove) : ''}</div>` : ''}
+      <p class="meta feuer-meta">${meta}</p>`;
   }
 
   const fl = model.flames;
@@ -277,10 +280,12 @@ function rocksSection(model, tz, ctx) {
 function calendarSection(model, tz) {
   const c = model.calendar;
   if (!c.ok) return `<section><h2>Termine</h2>${problem(c)}</section>`;
+  // Vergangene Tage der laufenden Woche treten zurück; auf dem iPhone bleibt nur die Zahl.
+  const todayAt = c.data.findIndex((d) => d.today);
   const days = c.data
     .map(
-      (d) => `<div class="day${d.today ? ' today' : ''}">
-        <h3>${esc(d.label)}</h3>
+      (d, i) => `<div class="day${d.today ? ' today' : ''}${i < todayAt ? ' past' : ''}">
+        <h3>${esc(d.label)}${i < todayAt && d.events.length ? ` <span class="day-count">${d.events.length} ${d.events.length === 1 ? 'Termin' : 'Termine'}</span>` : ''}</h3>
         ${
           d.events.length
             ? `<ul>${d.events
@@ -300,7 +305,8 @@ function calendarSection(model, tz) {
   const failed = (c.errors ?? [])
     .map((e) => `<p class="problem">${esc(e.calendar)}: ${esc(e.error)}</p>`)
     .join('');
-  return `<section><h2>Termine</h2>${failed}<div class="week">${days}</div></section>`;
+  const today = todayAt >= 0 ? c.data[todayAt].events.length : null;
+  return `<section><h2>Termine${today != null ? ` <span class="hint">heute ${today ? `${today} ${today === 1 ? 'Termin' : 'Termine'}` : 'frei'}</span>` : ''}</h2>${failed}<div class="week">${days}</div></section>`;
 }
 
 function tasksSection(model, tz, ctx) {
@@ -309,7 +315,7 @@ function tasksSection(model, tz, ctx) {
   if (!t.ok) body = problem(t);
   else if (!t.data.length) body = '<p class="empty">Nichts in Arbeit, nichts überfällig.</p>';
   else body = `<ul>${t.data.map((x) => taskItem(x, tz, ctx, { area: true })).join('')}</ul>`;
-  return `<section><h2>Aufgaben <span class="hint">in Arbeit und überfällig</span></h2>${body}</section>`;
+  return `<section><h2>Aufgaben <span class="hint">in Arbeit und überfällig</span>${t.ok && t.data.length ? ` <span class="count-badge">${t.data.length}</span>` : ''}</h2>${body}</section>`;
 }
 
 /** Liste, die das Script nach dem Erfassen ergänzt; leer zeigt sie „Leer.“. */
@@ -327,15 +333,16 @@ function inboxSection(model, tz, vaultName, ctx) {
         const title = esc(n.title ?? n.path.split('/').pop().replace(/\.md$/i, ''));
         // Mit Notiz-Vorschau öffnet der Titel die Notiz im Cockpit, Obsidian bleibt daneben.
         if (ctx.write?.notes) {
-          return `<li class="note"><a href="/notiz?pfad=${encodeURIComponent(n.path)}">${title}</a><span class="meta">${esc(n.path)}${link ? ` · <a href="${esc(link)}">Obsidian</a>` : ''}</span></li>`;
+          return `<li class="note"><a href="/notiz?pfad=${encodeURIComponent(n.path)}" title="${esc(n.path)}">${title}</a>${link ? `<a href="${esc(link)}" class="note-out" aria-label="${esc(`In Obsidian öffnen: ${n.title ?? n.path}`)}">Obsidian</a>` : ''}</li>`;
         }
-        return `<li class="note">${link ? `<a href="${esc(link)}">${title}</a>` : title}<span class="meta">${esc(n.path)}</span></li>`;
+        return `<li class="note">${link ? `<a href="${esc(link)}" title="${esc(n.path)}">${title}</a>` : `<span title="${esc(n.path)}">${title}</span>`}</li>`;
       }));
   }
   let tasks;
   if (!zunder.ok) tasks = problem(zunder);
   else tasks = inboxList('zunder-inbox', zunder.data.map((x) => taskItem(x, tz, { ...ctx, targets: model.inbox.targets }, { inbox: true })));
-  return `<section><h2>Inbox</h2>
+  const open = (vault.ok ? vault.data.length : 0) + (zunder.ok ? zunder.data.length : 0);
+  return `<section><h2>Inbox${open ? ` <span class="count-badge" data-inbox-count>${open}</span>` : ''}</h2>
     <h3>Vault <span class="hint">${esc(folder)}/</span></h3>${notes}
     <h3>Zunder</h3>${tasks}
   </section>`;
@@ -427,38 +434,62 @@ const maskUrl = (url) => {
   }
 };
 
+/** Kleines Schild für Zustände: `ok`, `warn`, `off` oder neutral. */
+const pill = (text, tone = '') => `<span class="pill${tone ? ` ${tone}` : ''}">${text}</span>`;
+
+const hostOf = (url) => {
+  try {
+    return new URL(url).host;
+  } catch {
+    return '';
+  }
+};
+
+/**
+ * Ein Kalender: kompakte Zeile (Name, Art, Erreichbarkeit), „Bearbeiten“
+ * klappt die Felder auf. Benutzer und Passwort zeigt die Seite bei CalDAV
+ * immer, bei iCal-Abos nur nach „Mit Anmeldung“; „Nur diese Kalender“ nur bei
+ * CalDAV. Das regelt CSS (`:has`), das Formular bleibt ohne JavaScript gleich.
+ */
 function calendarRow(c, i, check) {
   const isNew = !c;
   const v = (k) => (c ? esc(c[k] ?? '') : '');
   const kind = c?.kind ?? 'ical';
-  const status = check
-    ? check.ok
-      ? `<span class="ok">✓ erreichbar, ${check.count} Termine diese Woche</span>`
-      : `<span class="problem">${esc(check.error)}</span>`
-    : '';
-  return `<fieldset class="calendar">
-    <legend>${isNew ? 'Neuer Kalender' : esc(c.name)} ${status}</legend>
+  const status = !check
+    ? ''
+    : check.ok
+      ? pill(`✓ ${check.count} ${check.count === 1 ? 'Termin' : 'Termine'} diese Woche`, 'ok')
+      : pill(esc(check.error), 'warn');
+  const summary = isNew
+    ? `<summary class="cal-add"><span aria-hidden="true">＋</span> Neuer Kalender</summary>`
+    : `<summary class="cal-row">
+        <span class="cal-name">${esc(c.name)}</span>
+        <span class="cal-meta">${esc(KIND_LABEL[c.kind] ?? c.kind)}${hostOf(c.url) ? ` · ${esc(hostOf(c.url))}` : ''}</span>
+        ${status}
+        <span class="cal-edit">Bearbeiten</span>
+      </summary>`;
+  return `<details class="cal${isNew ? ' cal-new' : ''}"${check && !check.ok ? ' data-problem' : ''}>
+    ${summary}
+    <div class="cal-body">
     ${isNew ? '' : `<input type="hidden" name="cal.${i}.id" value="${v('id')}">`}
     <div class="grid">
       <label>Name<input name="cal.${i}.name" value="${v('name')}" maxlength="80" placeholder="z. B. Privat"></label>
-      <label>Art<select name="cal.${i}.kind">
+      <label>Art<select name="cal.${i}.kind" class="cal-kind">
         ${Object.entries(KIND_LABEL).map(([k, l]) => `<option value="${k}"${k === kind ? ' selected' : ''}>${l}</option>`).join('')}
       </select></label>
-      <label class="wide">Adresse<input name="cal.${i}.url" type="text" inputmode="url" autocomplete="off"
+      <label class="wide"><span>Adresse <span class="hint only-ical">die geheime .ics-Adresse, wie Kalender-Apps sie zum Teilen anbieten</span><span class="hint only-caldav">Kalender-Home oder ein einzelner Kalender</span></span><input name="cal.${i}.url" type="text" inputmode="url" autocomplete="off"
         placeholder="${isNew ? 'https://… oder webcal://…' : `${esc(maskUrl(c.url))} (leer lassen = unverändert)`}"></label>
-      <label><span>Benutzer <span class="hint">optional</span></span><input name="cal.${i}.username" value="${v('username')}" autocomplete="off"></label>
-      <label><span>Passwort <span class="hint">optional</span></span><input name="cal.${i}.password" type="password" autocomplete="new-password"
+      <label class="checkline wide auth-toggle only-ical"><input type="checkbox" name="cal.${i}.auth" value="1"${c?.username ? ' checked' : ''}> Mit Anmeldung <span class="hint">(selten nötig)</span></label>
+      <label class="auth"><span>Benutzer</span><input name="cal.${i}.username" value="${v('username')}" autocomplete="off"></label>
+      <label class="auth"><span>Passwort <span class="hint only-caldav">App-Passwort</span></span><input name="cal.${i}.password" type="password" autocomplete="new-password"
         placeholder="${c?.password ? 'gesetzt (leer lassen = unverändert)' : ''}"></label>
-      <label class="wide"><span>Nur diese Kalender <span class="hint">CalDAV, Anzeigenamen mit Komma; leer = alle</span></span><input name="cal.${i}.filter" value="${c ? esc((c.filter ?? []).join(', ')) : ''}"></label>
+      <label class="wide only-caldav"><span>Nur diese Kalender <span class="hint">Anzeigenamen mit Komma; leer = alle</span></span><input name="cal.${i}.filter" value="${c ? esc((c.filter ?? []).join(', ')) : ''}"></label>
     </div>
-    ${isNew ? '' : `<label class="check"><input type="checkbox" name="cal.${i}.remove" value="1"> entfernen</label>`}
-  </fieldset>`;
+    ${isNew ? '' : `<div class="cal-actions"><button type="submit" name="cal.${i}.remove" value="1" class="btn quiet danger">Kalender entfernen</button></div>`}
+    </div>
+  </details>`;
 }
 
-/**
- * Einstellungsseite. Passwörter, Tokens und Kalenderadressen werden nie
- * zurückgegeben: Ein leeres Feld behält den gespeicherten Wert.
- */
 /** Abschnitt „API-Tokens“: eigene Formulare, damit „Speichern“ oben die Tokens nie berührt. */
 const SCOPE_LABEL = { search: 'Suche', capture: 'Capture' };
 
@@ -466,51 +497,77 @@ function tokenSection(tokens, created, tz, token) {
   const date = (iso) => new Date(iso).toLocaleDateString('de-DE', { timeZone: tz });
   const rows = tokens
     .map(
-      (t) => `<li><span>${esc(t.name)} <span class="meta">${esc(SCOPE_LABEL[t.scope] ?? t.scope)} · angelegt am ${esc(date(t.createdAt))}</span></span>
+      (t) => `<li><span class="token-name">${esc(t.name)} ${pill(esc(SCOPE_LABEL[t.scope] ?? t.scope))}<span class="meta">angelegt am ${esc(date(t.createdAt))}</span></span>
     <form method="post" action="/einstellungen/tokens/widerrufen">${token}<input type="hidden" name="id" value="${esc(t.id)}"><button type="submit" class="btn quiet danger">Widerrufen</button></form></li>`,
     )
     .join('');
-  return `<section>
-  <h2>API-Tokens</h2>
-  <p class="meta">Mit <code>Authorization: Bearer vct_…</code>. Jeder Token hat ein Recht: <b>Suche</b> für <code>GET /api/search</code> (nur eigene Notizen ohne vertrauliche Ordner), <b>Capture</b> für <code>/capture</code> und <code>/funke</code> (iOS-Kurzbefehle, Funke; kann nur neue Notizen und Zunder-Aufgaben anlegen).</p>
+  return `<section id="tokens">
+  <h2>API-Tokens ${pill(tokens.length ? String(tokens.length) : 'keine')}</h2>
+  <p class="meta">Für Kurzbefehle, Raycast und Funke. <b>Suche</b> darf <code>GET /api/search</code> (ohne vertrauliche Ordner), <b>Capture</b> darf <code>/capture</code> und <code>/funke</code> und kann nur neue Notizen und Zunder-Aufgaben anlegen.</p>
   ${created ? `<div class="created"><p class="notice">${esc(SCOPE_LABEL[created.scope] ?? '')}-Token „${esc(created.name)}“ angelegt. Jetzt kopieren, er wird nicht noch einmal angezeigt:</p><p><code>${esc(created.token)}</code></p></div>` : ''}
   ${rows ? `<ul class="tokens">${rows}</ul>` : '<p class="empty">Noch keine Tokens.</p>'}
-  <form method="post" action="/einstellungen/tokens" class="token-new">${token}
-    <label>Name<input name="name" maxlength="80" required placeholder="z. B. Raycast"></label>
-    <label>Recht<select name="scope">${Object.entries(SCOPE_LABEL).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></label>
-    <button type="submit" class="primary">Token anlegen</button>
-  </form>
+  <details class="cal cal-new token-add">
+    <summary class="cal-add"><span aria-hidden="true">＋</span> Neuer Token</summary>
+    <form method="post" action="/einstellungen/tokens" class="token-new cal-body">${token}
+      <label>Name<input name="name" maxlength="80" required placeholder="z. B. Raycast"></label>
+      <label>Recht<select name="scope">${Object.entries(SCOPE_LABEL).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></label>
+      <button type="submit" class="primary">Token anlegen</button>
+    </form>
+  </details>
 </section>`;
 }
 
 /** Abschnitt „Kurzbefehle“: die signierten iOS-Kurzbefehle zum Laden. */
 function shortcutSection(shortcuts, captureEnabled) {
   const items = shortcuts
-    .map((s) => `<li><a href="/kurzbefehle/${esc(s.slug)}.shortcut" download="${esc(s.file)}">${esc(s.title)}</a> <span class="meta">${esc(s.text)}</span></li>`)
+    .map((s) => `<li><a href="/kurzbefehle/${esc(s.slug)}.shortcut" download="${esc(s.file)}" class="btn">${esc(s.title)}</a> <span class="meta">${esc(s.text)}</span></li>`)
     .join('');
-  return `<section>
+  return `<section id="kurzbefehle">
   <h2>Kurzbefehle</h2>
-  <p class="meta">Auf dem iPhone antippen und importieren. Beim Import fragt iOS nach einem Token mit dem Recht „Capture“${captureEnabled ? '' : ' (noch keiner angelegt, siehe API-Tokens)'}.</p>
+  <p class="meta">Auf dem iPhone antippen und importieren. Beim Import fragt iOS nach einem Token mit dem Recht „Capture“${captureEnabled ? '' : ' (noch keiner angelegt, siehe <a href="#tokens">API-Tokens</a>)'}.</p>
   <ul class="shortcuts">${items}</ul>
 </section>`;
 }
 
+/**
+ * Einstellungsseite. Passwörter, Tokens und Kalenderadressen werden nie
+ * zurückgegeben: Ein leeres Feld behält den gespeicherten Wert. Links eine
+ * Sprungleiste mit dem Stand jedes Abschnitts, auf dem iPhone oben als Leiste.
+ */
 export function renderSettings({ stored, defaults, checks = {}, notice = null, error = null, tokens = null, created = null, shortcuts = [], captureEnabled = false, tz = 'Europe/Berlin', user = null, csrf = '' }) {
   const d = defaults;
   const token = `<input type="hidden" name="csrf" value="${esc(csrf)}">`;
-  const zunderStatus = stored.zunder.url && stored.zunder.token
-    ? 'eigener Zugang gespeichert'
+  const zunder = stored.zunder.url && stored.zunder.token
+    ? ['eigener Zugang', 'ok']
     : d.zunderUrl && d.zunderToken
-      ? `aus der Umgebung (${esc(d.zunderUrl)})`
-      : 'nicht eingerichtet';
-  const mailStatus = stored.mail.token
-    ? (stored.mail.senders.length || d.mailSenders.length) ? 'eigener Token gespeichert' : 'eigener Token gespeichert, es fehlen freigegebene Absender'
+      ? [`aus der Umgebung (${esc(d.zunderUrl)})`, 'ok']
+      : ['nicht eingerichtet', 'off'];
+  const mail = stored.mail.token
+    ? (stored.mail.senders.length || d.mailSenders.length) ? ['eigener Token', 'ok'] : ['es fehlen freigegebene Absender', 'warn']
     : d.mailToken
-      ? 'Token aus der Umgebung'
-      : 'nicht eingerichtet';
-  const embedStatus = stored.embed.url ? 'eigener Server' : d.embedUrl ? `aus der Umgebung (${esc(d.embedUrl)})` : 'aus, nur Volltextsuche';
+      ? ['Token aus der Umgebung', 'ok']
+      : ['nicht eingerichtet', 'off'];
+  const embed = stored.embed.url ? ['eigener Server', 'ok'] : d.embedUrl ? [`aus der Umgebung (${esc(d.embedUrl)})`, 'ok'] : ['aus, nur Volltextsuche', 'off'];
   const bridgeOn = stored.bridge.enabled ?? d.bridgeEnabled;
+  const bridge = bridgeOn ? ['an', 'ok'] : ['aus', 'off'];
+  const problems = stored.calendars.filter((c) => checks[c.id] && !checks[c.id].ok).length;
+  const cal = !stored.calendars.length
+    ? ['keine', 'off']
+    : problems
+      ? [`${problems} von ${stored.calendars.length} nicht erreichbar`, 'warn']
+      : [`${stored.calendars.length} verbunden`, 'ok'];
   const rows = stored.calendars.map((c, i) => calendarRow(c, i, checks[c.id])).join('');
+  const nav = [
+    ['kalender', 'Kalender', cal],
+    ['zunder', 'Zunder', zunder],
+    ['bruecke', 'Zunder-Brücke', bridge],
+    ['mail', 'Mail', mail],
+    ['embeddings', 'Embeddings', embed],
+    ['anzeige', 'Anzeige', null],
+    ...(tokens ? [['tokens', 'API-Tokens', null]] : []),
+    ...(shortcuts.length ? [['kurzbefehle', 'Kurzbefehle', null]] : []),
+  ];
+  const head2 = (title, state) => `<h2>${title}${state ? ` ${pill(state[0], state[1])}` : ''}</h2>`;
   return `<!doctype html>
 <html lang="de">
 ${head('Einstellungen')}
@@ -518,29 +575,37 @@ ${head('Einstellungen')}
 ${appHeader({ current: 'einstellungen', user })}
 <div class="page-head"><h1>Einstellungen</h1></div>
 <main class="settings">
+<nav class="settings-nav" aria-label="Abschnitte">${nav
+    .map(([id, label, state]) => `<a href="#${id}">${state ? `<span class="dot ${state[1]}" aria-hidden="true"></span>` : '<span class="dot" aria-hidden="true"></span>'}${label}</a>`)
+    .join('')}</nav>
+<div class="settings-body">
 ${notice ? `<p class="notice">${esc(notice)}</p>` : ''}
 ${error ? `<p class="problem">${esc(error)}</p>` : ''}
 <form method="post" action="/einstellungen">${token}
-<section>
-  <h2>Kalender</h2>
-  <p class="meta">iCal-Abo: die geheime .ics-Adresse eines Kalenders, wie Kalender-Apps sie zum Teilen anbieten. CalDAV: das Kalender-Home oder ein einzelner Kalender, mit Benutzer und App-Passwort.</p>
+<button type="submit" class="sr-only" tabindex="-1" aria-hidden="true">Speichern</button>
+<input type="hidden" name="cal.auth" value="1">
+<section id="kalender">
+  ${head2('Kalender', cal)}
+  <p class="meta">Termine aus iCal-Abos (z. B. Outlook, Google) und CalDAV (z. B. Fastmail, iCloud) erscheinen in der Woche.</p>
+  <div class="cal-list">
   ${rows}
   ${calendarRow(null, stored.calendars.length)}
-  <label><span>Ausgeblendete Termine <span class="hint">Titel, durch Komma getrennt; leer = alle zeigen</span></span><input name="hiddenEvents" value="${esc((stored.hiddenEvents ?? DEFAULT_HIDDEN_EVENTS).join(', '))}"></label>
+  </div>
+  <label class="field"><span>Ausgeblendete Termine <span class="hint">Titel, durch Komma getrennt; leer = alle zeigen</span></span><input name="hiddenEvents" value="${esc((stored.hiddenEvents ?? DEFAULT_HIDDEN_EVENTS).join(', '))}"></label>
 </section>
-<section>
-  <h2>Zunder</h2>
-  <p class="meta">Stand: ${zunderStatus}. Leer lassen, um den Zugang aus der Umgebung zu nutzen.</p>
+<section id="zunder">
+  ${head2('Zunder', zunder)}
+  <p class="meta">Eigener Zugang statt dem aus der Umgebung. Leer lassen, um den aus der Umgebung zu nutzen.</p>
   <div class="grid">
     <label>Adresse<input name="zunder.url" value="${esc(stored.zunder.url ?? '')}" placeholder="${esc(d.zunderUrl ?? 'https://zunder.example')}"></label>
     <label><span>API-Token <span class="hint">zt_…</span></span><input name="zunder.token" type="password" autocomplete="new-password"
       placeholder="${stored.zunder.token ? 'gesetzt (leer lassen = unverändert)' : ''}"></label>
   </div>
-  ${stored.zunder.token ? '<label class="check"><input type="checkbox" name="zunder.clear" value="1"> eigenen Zugang löschen</label>' : ''}
+  ${stored.zunder.token ? '<label class="checkline"><input type="checkbox" name="zunder.clear" value="1"> eigenen Zugang löschen</label>' : ''}
 </section>
-<section>
-  <h2>Zunder-Brücke</h2>
-  <p class="meta">Offene Checkboxen mit dem Tag werden Zunder-Aufgaben, Abhaken gleicht sich in beide Richtungen ab. Stand: ${bridgeOn ? 'an' : 'aus'}.</p>
+<section id="bruecke">
+  ${head2('Zunder-Brücke', bridge)}
+  <p class="meta">Offene Checkboxen mit dem Tag werden Zunder-Aufgaben, Abhaken gleicht sich in beide Richtungen ab.</p>
   <div class="grid">
     <label>Brücke<select name="bridge.enabled">
       <option value=""${stored.bridge.enabled === null ? ' selected' : ''}>Standard (${d.bridgeEnabled ? 'an' : 'aus'})</option>
@@ -550,39 +615,45 @@ ${error ? `<p class="problem">${esc(error)}</p>` : ''}
     <label><span>Tag <span class="hint">ohne #</span></span><input name="bridge.tag" value="${esc(stored.bridge.tag ?? '')}" placeholder="${esc(d.bridgeTag)}"></label>
   </div>
 </section>
-<section>
-  <h2>Mail</h2>
-  <p class="meta">Holt Mails aus einem Fastmail-Ordner ab und macht Notizen daraus, mit <code>!</code> im Betreff Zunder-Aufgaben. Stand: ${mailStatus}.</p>
+<section id="mail">
+  ${head2('Mail', mail)}
+  <p class="meta">Holt Mails aus einem Fastmail-Ordner ab und macht Notizen daraus, mit <code>!</code> im Betreff Zunder-Aufgaben.</p>
   <div class="grid">
     <label><span>Fastmail-API-Token <span class="hint">nur Mail</span></span><input name="mail.token" type="password" autocomplete="new-password"
       placeholder="${stored.mail.token ? 'gesetzt (leer lassen = unverändert)' : ''}"></label>
-    <label><span>Freigegebene Absender <span class="hint">Adressen oder @domain, durch Komma getrennt</span></span><input name="mail.senders" value="${esc(stored.mail.senders.join(', '))}" placeholder="${esc(d.mailSenders.join(', '))}"></label>
-    <label>Ordner zum Abholen<input name="mail.mailbox" value="${esc(stored.mail.mailbox ?? '')}" placeholder="${esc(d.mailbox)}"></label>
-    <label>Ablage danach<input name="mail.doneMailbox" value="${esc(stored.mail.doneMailbox ?? '')}" placeholder="${esc(d.doneMailbox)}"></label>
-    <label>Abstand in Minuten<input name="mail.pollMinutes" inputmode="numeric" value="${esc(stored.mail.pollMinutes ?? '')}" placeholder="${esc(d.mailPollMinutes)}"></label>
+    <label><span>Freigegebene Absender <span class="hint">mit Komma</span></span><input name="mail.senders" value="${esc(stored.mail.senders.join(', '))}" placeholder="${esc(d.mailSenders.join(', ') || 'r@example.dev, @example.dev')}"></label>
   </div>
-  ${stored.mail.token ? '<label class="check"><input type="checkbox" name="mail.clear" value="1"> eigenen Token löschen</label>' : ''}
+  <details class="more">
+    <summary>Ordner und Abstand</summary>
+    <div class="grid">
+      <label>Ordner zum Abholen<input name="mail.mailbox" value="${esc(stored.mail.mailbox ?? '')}" placeholder="${esc(d.mailbox)}"></label>
+      <label>Ablage danach<input name="mail.doneMailbox" value="${esc(stored.mail.doneMailbox ?? '')}" placeholder="${esc(d.doneMailbox)}"></label>
+      <label>Abstand in Minuten<input name="mail.pollMinutes" inputmode="numeric" value="${esc(stored.mail.pollMinutes ?? '')}" placeholder="${esc(d.mailPollMinutes)}"></label>
+    </div>
+  </details>
+  ${stored.mail.token ? '<label class="checkline"><input type="checkbox" name="mail.clear" value="1"> eigenen Token löschen</label>' : ''}
 </section>
-<section>
-  <h2>Embeddings</h2>
-  <p class="meta">Ollama-Server für die semantische Suche und ähnliche Notizen. Fehlt das Modell, lädt das Cockpit es selbst. Ein neues Modell bettet den Vault neu ein. Stand: ${embedStatus}.</p>
+<section id="embeddings">
+  ${head2('Embeddings', embed)}
+  <p class="meta">Ollama-Server für die semantische Suche und ähnliche Notizen. Fehlt das Modell, lädt das Cockpit es selbst. Ein neues Modell bettet den Vault neu ein.</p>
   <div class="grid">
     <label>Adresse<input name="embed.url" value="${esc(stored.embed.url ?? '')}" placeholder="${esc(d.embedUrl ?? 'http://ollama:11434')}"></label>
     <label>Modell<input name="embed.model" value="${esc(stored.embed.model ?? '')}" placeholder="${esc(d.embedModel)}"></label>
   </div>
 </section>
-<section>
-  <h2>Anzeige</h2>
+<section id="anzeige">
+  ${head2('Anzeige')}
   <div class="grid">
     <label>Zeitzone<input name="tz" value="${esc(stored.tz ?? '')}" placeholder="${esc(d.tz)}"></label>
-    <label><span>Vault-Name in Obsidian <span class="hint">für „In Obsidian öffnen“</span></span><input name="vaultName" value="${esc(stored.vaultName ?? '')}" placeholder="${esc(d.vaultName ?? '')}"></label>
+    <label><span>Vault-Name in Obsidian <span class="hint">für Links</span></span><input name="vaultName" value="${esc(stored.vaultName ?? '')}" placeholder="${esc(d.vaultName ?? '')}"></label>
     <label>Inbox-Ordner im Vault<input name="inboxFolder" value="${esc(stored.inboxFolder ?? '')}" placeholder="${esc(d.inboxFolder)}"></label>
   </div>
 </section>
-<p><button type="submit" class="primary">Speichern</button></p>
+<p class="save-bar"><span class="meta">Leere Geheimnisfelder behalten den gespeicherten Wert.</span><button type="submit" class="primary">Speichern</button></p>
 </form>
 ${tokens ? tokenSection(tokens, created, tz, token) : ''}
 ${shortcuts.length ? shortcutSection(shortcuts, captureEnabled) : ''}
+</div>
 </main>
 </body>
 </html>`;
