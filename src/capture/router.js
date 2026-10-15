@@ -22,12 +22,6 @@ export class CaptureError extends Error {
   }
 }
 
-/** Erste nicht-leere Zeile, bereinigt, als Titel. */
-export function deriveTitle(text) {
-  const first = String(text ?? '').split(/\r?\n/).find((l) => l.trim()) ?? '';
-  return cleanTitle(first.replace(/^#+\s*/, ''));
-}
-
 /** Macht aus beliebigem Text einen Titel, den capture.write annimmt. */
 export function cleanTitle(raw) {
   let t = String(raw ?? '')
@@ -75,10 +69,12 @@ export function createCaptureRouter({ capture, zunder = null, state, logger = co
   }
 
   function toVault({ text, title, source, captureId, created }) {
-    const noteTitle = cleanTitle(title) || deriveTitle(text) || 'Notiz';
+    // Ohne eigenen Titel heißt die Notiz nach Quelle und Zeitpunkt; der Text
+    // gehört in den Inhalt, nicht in Dateiname oder Titel (ZUN-12).
+    const noteTitle = cleanTitle(title) || null;
     let r;
     try {
-      r = capture.write({ title: noteTitle, text, source, captureId, created });
+      r = capture.write({ title: noteTitle, label: SOURCES[source], text, source, captureId, created });
     } catch (err) {
       throw new CaptureError(err.message);
     }
@@ -90,7 +86,7 @@ export function createCaptureRouter({ capture, zunder = null, state, logger = co
     /**
      * @param {object} input
      * @param {string} input.text      der erfasste Text; `!` vorne → Zunder-Aufgabe
-     * @param {string} [input.title]   optionaler Titel, sonst die erste Zeile
+     * @param {string} [input.title]   optionaler Titel; Notizen ohne heißen nach Quelle und Zeit, Aufgaben nach der ersten Zeile
      * @param {string} input.source    Herkunft (Schlüssel aus SOURCES)
      * @param {string} [input.captureId] macht das Anlegen idempotent
      * @param {Date}   [input.created] Zeitpunkt der Erfassung (Funke, Mail)

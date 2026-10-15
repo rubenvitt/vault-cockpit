@@ -12,6 +12,10 @@ import { join, resolve } from 'node:path';
  * sprachmemo, mail, funke). Eine optionale `captureId` macht das Anlegen
  * idempotent: Kommt dieselbe ID noch einmal (Offline-Queue, erneuter Abruf),
  * wird die vorhandene Notiz gemeldet statt eine zweite angelegt.
+ *
+ * Ohne Titel (`title: null`) wird nichts aus dem Text in Dateiname oder Titel
+ * gezogen: Die Datei heißt dann nach `label` (z. B. der Quelle), der Titel
+ * nennt zusätzlich den Zeitpunkt, der Text steht nur im Inhalt.
  */
 export function createCapture({ vaultPath, folder = 'inbox', now = () => new Date() }) {
   const baseDir = resolve(vaultPath, folder);
@@ -48,8 +52,9 @@ export function createCapture({ vaultPath, folder = 'inbox', now = () => new Dat
   }
 
   return {
-    write({ title, text, tags = [], source = 'claude-mcp', captureId = null, created = null }) {
-      const cleanTitle = safeTitle(title);
+    write({ title, label = 'Notiz', text, tags = [], source = 'claude-mcp', captureId = null, created = null }) {
+      const untitled = title === null || title === undefined;
+      const name = safeTitle(untitled ? label : title);
       const body = String(text ?? '').trim();
       if (!body) throw new Error('Text darf nicht leer sein');
       if (!/^[a-z0-9-]{1,40}$/.test(source)) throw new Error('Ungültige Quelle');
@@ -59,21 +64,24 @@ export function createCapture({ vaultPath, folder = 'inbox', now = () => new Dat
 
       if (captureId !== null) {
         const existing = findByCaptureId(captureId);
-        if (existing) return { path: `${folder}/${existing}`, absolute: join(baseDir, existing), title: cleanTitle, duplicate: true };
+        if (existing) return { path: `${folder}/${existing}`, absolute: join(baseDir, existing), title: name, duplicate: true };
       }
 
       const d = created instanceof Date && !Number.isNaN(created.getTime()) ? created : now();
       const pad = (n) => String(n).padStart(2, '0');
       const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
       const stamp = `${date} ${pad(d.getHours())}${pad(d.getMinutes())}`;
+      const noteTitle = untitled
+        ? `${name}, ${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+        : name;
 
       mkdirSync(baseDir, { recursive: true });
 
-      let filename = `${stamp} - ${cleanTitle}.md`;
+      let filename = `${stamp} - ${name}.md`;
       let absolute = join(baseDir, filename);
       let counter = 2;
       while (existsSync(absolute)) {
-        filename = `${stamp} - ${cleanTitle} (${counter}).md`;
+        filename = `${stamp} - ${name} (${counter}).md`;
         absolute = join(baseDir, filename);
         counter += 1;
       }
@@ -86,7 +94,7 @@ export function createCapture({ vaultPath, folder = 'inbox', now = () => new Dat
       const tagList = ['quick-capture', ...tags.map((t) => String(t).replace(/^#/, '').trim()).filter(Boolean)];
       const frontmatter = [
         '---',
-        `title: ${cleanTitle}`,
+        `title: ${noteTitle}`,
         `created: ${date}`,
         `source: ${source}`,
         ...(captureId !== null ? [`capture_id: ${captureId}`] : []),
@@ -98,7 +106,7 @@ export function createCapture({ vaultPath, folder = 'inbox', now = () => new Dat
       ].join('\n');
 
       writeFileSync(absolute, `${frontmatter}${body}\n`, { flag: 'wx' });
-      return { path: `${folder}/${filename}`, absolute, title: cleanTitle, created: date };
+      return { path: `${folder}/${filename}`, absolute, title: noteTitle, created: date };
     },
   };
 }
