@@ -155,9 +155,10 @@ test('flame: Start und Stopp über Zunder, Timing-Ergebnis wird mitgegeben', asy
 test('capture: Notiz landet im Inbox-Ordner aus den Einstellungen und sofort im Index', async () => {
   const r = await actions().capture({ text: 'Idee für den Hundeplatz\nmit Details', captureId: 'c-1' });
   assert.equal(r.kind, 'note');
-  assert.match(r.path, /^00-inbox\/\d{4}-\d{2}-\d{2} \d{4} - Idee für den Hundeplatz\.md$/);
+  assert.match(r.path, /^00-inbox\/\d{4}-\d{2}-\d{2} \d{4} - Web-Cockpit\.md$/);
   const body = readFileSync(join(root, r.path), 'utf8');
   assert.match(body, /source: cockpit/);
+  assert.match(body, /\n---\nIdee für den Hundeplatz\nmit Details\n$/);
   assert.match(body, /capture_id: c-1/);
   assert.deepEqual(changed, [r.path]);
 

@@ -127,6 +127,12 @@ Zunder weiter (MCP-Werkzeug `create_task`). Dafür in der Zunder-Web-UI unter
 unter **Einstellungen → Zunder** eintragen. Ein Eingangs-Token (`zi_…`) reicht
 nicht, Eingänge schreiben nur in ein festes Projekt.
 
+Eine Notiz ohne eigenen Titel heißt nach Quelle und Zeitpunkt
+(`2026-10-13 1430 - Sprachmemo.md`, Titel „Sprachmemo, 13.10.2026 14:30“), der
+erfasste Text steht vollständig im Inhalt. Einen Titel setzen nur ein
+ausdrückliches `title`, der Mail-Betreff und der Dateiname aus Funke. Bei
+Aufgaben mit `!` bleibt die erste Zeile der Titel.
+
 | Weg | So geht's |
 |---|---|
 | iOS-Kurzbefehl | Unter **Einstellungen → API-Tokens** einen Token mit dem Recht **Capture** anlegen, dann „Notiz ins Cockpit“ unter **Einstellungen → Kurzbefehle** laden und importieren und beim Import den Token eintragen. Läuft aus dem Share-Sheet oder fragt den Text ab. Von Hand: `POST <PUBLIC_URL>/capture?source=ios-kurzbefehl` mit dem Text als Body, Header `Authorization: Bearer vct_…` |

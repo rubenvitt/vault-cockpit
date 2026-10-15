@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createCapture } from '../src/vault/capture.js';
-import { createCaptureRouter, deriveTitle, cleanTitle } from '../src/capture/router.js';
+import { createCaptureRouter, cleanTitle } from '../src/capture/router.js';
 import { createStateStore } from '../src/capture/state.js';
 import { createZunderClient } from '../src/capture/zunder.js';
 import { createCaptureHttp } from '../src/capture/http.js';
@@ -64,8 +64,8 @@ test('capture.write übernimmt den Zeitpunkt der Erfassung', () => {
   assert.match(r.path, /^inbox\/2026-01-02 0805 - Alt\.md$/);
 });
 
-test('Titel: erste Zeile, ohne Pfadtrenner und gekürzt', () => {
-  assert.equal(deriveTitle('\n# Einkauf / Liste\nMilch'), 'Einkauf - Liste');
+test('Titel: ohne Pfadtrenner und gekürzt', () => {
+  assert.equal(cleanTitle('# Einkauf / Liste'), '# Einkauf - Liste');
   assert.equal(cleanTitle('a..b'), 'a.b');
   assert.ok(cleanTitle('x'.repeat(200)).length <= 80);
 });
@@ -73,9 +73,30 @@ test('Titel: erste Zeile, ohne Pfadtrenner und gekürzt', () => {
 test('Text ohne ! wird eine Notiz im Capture-Ordner', async () => {
   const r = await router.route({ text: 'Gedanke zum Wochenende\nmehr Text', source: 'ios-kurzbefehl' });
   assert.equal(r.kind, 'note');
-  assert.equal(r.path, 'inbox/2026-10-13 1430 - Gedanke zum Wochenende.md');
+  assert.equal(r.path, 'inbox/2026-10-13 1430 - iOS-Kurzbefehl.md');
   assert.match(readInbox(inbox()[0]), /source: ios-kurzbefehl/);
   assert.equal(zunderCalls.length, 0);
+});
+
+test('Notiz ohne Titel: Text steht im Inhalt, nicht in Dateiname oder Titel', async () => {
+  const r = await router.route({ text: 'Ein langer Gedanke, der kein Titel ist\nmit zweiter Zeile', source: 'cockpit' });
+  assert.equal(r.path, 'inbox/2026-10-13 1430 - Web-Cockpit.md');
+  const note = readInbox(inbox()[0]);
+  assert.match(note, /^title: Web-Cockpit, 13\.10\.2026 14:30$/m);
+  assert.doesNotMatch(note.split('\n---\n')[0], /langer Gedanke/);
+  assert.match(note, /---\nEin langer Gedanke, der kein Titel ist\nmit zweiter Zeile\n$/);
+});
+
+test('Notizen ohne Titel in derselben Minute bekommen eigene Dateien', async () => {
+  await router.route({ text: 'eins', source: 'sprachmemo' });
+  const b = await router.route({ text: 'zwei', source: 'sprachmemo' });
+  assert.equal(b.path, 'inbox/2026-10-13 1430 - Sprachmemo (2).md');
+});
+
+test('ein ausdrücklicher Titel bleibt Dateiname und Titel', async () => {
+  const r = await router.route({ text: 'Inhalt', title: 'Einkauf / Liste', source: 'api' });
+  assert.equal(r.path, 'inbox/2026-10-13 1430 - Einkauf - Liste.md');
+  assert.match(readInbox(inbox()[0]), /^title: Einkauf - Liste$/m);
 });
 
 test('Text mit ! wird eine Aufgabe in der Zunder-Inbox', async () => {
