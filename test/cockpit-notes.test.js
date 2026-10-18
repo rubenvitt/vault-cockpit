@@ -158,7 +158,7 @@ test('renderMarkdown: maskiert alles, Links nur mit http(s), Checkboxen gezählt
     '# Titel\n\nText mit **fett**, *kursiv*, `<code>` und <script>alert(1)</script>\n\n- [ ] eins\n- [x] zwei\n\n```\n- [ ] kein Kasten\n```\n\n[gut](https://a.test/x) [böse](javascript:alert(1)) [[Seite|Anzeige]] #tag\n\n> Zitat',
     { checkbox: (n, line, done) => `[${n}:${done}]` },
   );
-  assert.match(html, /<h2>Titel<\/h2>/);
+  assert.match(html, /<h2 id="h-titel">Titel<\/h2>/);
   assert.ok(!html.includes('<script>'));
   assert.match(html, /&lt;script&gt;/);
   assert.match(html, /<code>&lt;code&gt;<\/code>/);

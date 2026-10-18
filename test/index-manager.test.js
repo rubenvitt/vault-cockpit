@@ -50,3 +50,17 @@ test('meldet den Zeitpunkt des letzten Neuaufbaus', () => {
   assert.ok(mgr.lastBuiltAt() >= before);
   assert.ok(mgr.stats().total >= 1);
 });
+
+test('reicht jede Lesefunktion des Index durch', async () => {
+  // Fehlt eine, scheitern Brücke oder Cockpit erst im Betrieb (vorher: basenameCount, pathsContaining).
+  const { openIndex } = await import('../src/vault/index.js');
+  const raw = openIndex(dbPath, { vaultPath: root });
+  try {
+    // close gehört dem Manager selbst, relinkAll erledigt er in applyChanges.
+    const own = new Set(['close', 'relinkAll']);
+    const missing = Object.keys(raw).filter((k) => typeof raw[k] === 'function' && !own.has(k) && typeof mgr[k] !== 'function');
+    assert.deepEqual(missing, []);
+  } finally {
+    raw.close();
+  }
+});

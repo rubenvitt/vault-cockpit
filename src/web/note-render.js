@@ -1,13 +1,79 @@
 import { esc, formHead, flashToast, obsidianLink } from './render.js';
-import { renderMarkdown } from './markdown-render.js';
+import { renderMarkdown, inlineMd } from './markdown-render.js';
 import { head, appHeader } from './layout.js';
+
+const noteHref = (path) => `/notiz?pfad=${encodeURIComponent(path)}`;
+const graphHref = (path) => `/graph?pfad=${encodeURIComponent(path)}`;
+const fmText = (v) => (Array.isArray(v) ? v.join(', ') : typeof v === 'object' && v ? JSON.stringify(v) : String(v ?? ''));
+const plain = (s) => s.replace(/!?\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, t, l) => l ?? t);
+
+/**
+ * Frontmatter kompakt: eine Zeile mit den ersten Feldern, aufgeklappt alle.
+ * Werte mit Wikilinks (`"[[Feuersturm]]"`) werden Links wie im Text.
+ */
+function frontmatter(fm, links) {
+  if (!fm.length) return '';
+  const short = fm.slice(0, 3).map(([k, v]) => {
+    const t = plain(fmText(v));
+    return `${esc(k)}: ${esc(t.length > 40 ? `${t.slice(0, 39)}…` : t)}`;
+  });
+  const more = fm.length > 3 ? ` <span class="hint">+${fm.length - 3}</span>` : '';
+  return `<details class="fm"><summary>${short.join(' · ')}${more}</summary><dl>${fm.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${inlineMd(fmText(v), links)}</dd>`).join('')}</dl></details>`;
+}
+
+/** „Verweist hierher“ und „Ähnlich“ unter der Notiz. */
+function relatedSection(related) {
+  if (!related) return '';
+  const { backlinks, similar } = related;
+  const li = (n, extra = '') => `<li><a href="${esc(noteHref(n.path))}">${esc(n.title)}</a>${extra}<span class="meta">${esc(n.path)}</span></li>`;
+  const score = (h) => (h.score == null ? '' : ` <span class="score">${Math.round(h.score * 100)} %</span>`);
+  const linked = (h) => (h.linked ? ' <span class="hint">verlinkt</span>' : '');
+  const hits = similar.hits.slice(0, 6);
+  return `<section class="note-related">
+    <div><h2>Verweist hierher</h2>${backlinks.length ? `<ul>${backlinks.map((b) => li(b)).join('')}</ul>` : '<p class="empty">Keine Backlinks.</p>'}</div>
+    <div><h2>Ähnlich</h2>${hits.length ? `<ul>${hits.map((h) => li(h, `${score(h)}${linked(h)}`)).join('')}</ul>` : '<p class="empty">Keine ähnlichen Notizen.</p>'}${similar.problem ? `<p class="hint">${esc(similar.problem)}</p>` : ''}</div>
+  </section>`;
+}
+
+/**
+ * Vorschläge für eine Inbox-Notiz (`notes.suggest`): Tags, Zielordner und
+ * ähnliche, noch nicht verlinkte Notizen, jeweils als Knopf auf die
+ * bestehenden Aktionen. Tags kommen zuerst, weil die Notiz nach dem Ablegen
+ * nicht mehr in der Inbox liegt: „Alle übernehmen“ und ein Ordner sind zwei Klicks.
+ */
+function suggestSection(s, note, ctx) {
+  if (!s) return '';
+  const button = (action, fields, label, title = '') =>
+    `${formHead(ctx, action, { pfad: note.path, ...fields })}<button type="submit" class="chip"${title ? ` title="${esc(title)}"` : ''}>${label}</button></form>`;
+  const withTags = (extra) => [...note.tags, ...extra].join(', ');
+  const rows = [];
+  if (s.tags.length) {
+    rows.push(`<div class="suggest-row"><h3>Tags</h3><div class="chips">${s.tags.map((t) => button('/aktion/notiz/tags', { tags: withTags([t.tag]) }, `+ #${esc(t.tag)}`, `bei ${t.count} von ${s.of} ähnlichen`)).join('')}${s.tags.length > 1 ? button('/aktion/notiz/tags', { tags: withTags(s.tags.map((t) => t.tag)) }, 'Alle übernehmen') : ''}</div></div>`);
+  }
+  if (s.folders.length) {
+    rows.push(`<div class="suggest-row"><h3>Ablegen in</h3><div class="chips">${s.folders.map((f) => button('/aktion/notiz/ablegen', { ordner: f.folder }, `${esc(f.folder)}/ <span class="hint">${f.count} von ${s.of}</span>`)).join('')}</div></div>`);
+  }
+  if (s.unlinked.length) {
+    rows.push(`<div class="suggest-row"><h3>Ähnlich, nicht verlinkt</h3><ul>${s.unlinked.map((h) => `<li><a href="${esc(noteHref(h.path))}">${esc(h.title)}</a>${h.score == null ? '' : ` <span class="score">${Math.round(h.score * 100)} %</span>`}${button('/aktion/verlinken', { ziel: h.path }, 'Verlinken', `[[…]] an ${note.title} anhängen`)}</li>`).join('')}</ul></div>`);
+  }
+  const why = s.source === 'text' && s.problem ? `<p class="hint">${esc(s.problem)}</p>` : '';
+  const empty = rows.length ? '' : `<p class="empty">${s.of ? 'Aus den ähnlichen Notizen ergibt sich kein Vorschlag.' : `Keine Vorschläge: keine ähnlichen Notizen gefunden${s.problem ? ` (${esc(s.problem)})` : ''}.`}</p>`;
+  return `<section class="suggest">
+      <h2>Vorschläge${s.of ? ` <span class="hint">aus ${s.of} ähnlichen Notizen</span>` : ''}</h2>
+      ${rows.join('\n      ')}${empty}${rows.length ? why : ''}
+    </section>`;
+}
 
 /**
  * Notizseite: Vorschau links, Verarbeiten rechts (auf dem iPhone darunter).
  * Jede Aktion ist ein Formular; `/static/cockpit.js` schickt sie ohne
  * Seitenwechsel. Checkboxen in der Vorschau sind Knöpfe zum Abhaken.
+ * Wikilinks und Backlinks führen zu weiteren Notizseiten, so lässt sich im
+ * Vault lesen, ohne Obsidian zu öffnen. `related` kommt von `notes.related`,
+ * `graph` verlinkt den Graphen der Notiz, `suggestions` (nur Inbox) kommt von
+ * `notes.suggest`.
  */
-export function renderNote(note, { user = null, write = null, back = '/', flash = null, draft = null, targets = [], archive = null, vaultName = null } = {}) {
+export function renderNote(note, { user = null, write = null, back = '/', flash = null, draft = null, targets = [], archive = null, vaultName = null, related = null, graph = false, suggestions = null } = {}) {
   const ctx = { write, back };
   const obsidian = obsidianLink(note.path, vaultName);
   const checkbox = write
@@ -17,6 +83,7 @@ export function renderNote(note, { user = null, write = null, back = '/', flash 
   const fm = Object.entries(note.frontmatter ?? {}).filter(([k]) => k !== 'tags' && k !== 'tag');
   const panel = write
     ? `<aside class="note-actions">
+    ${suggestSection(suggestions, note, ctx)}
     <section>
       <h2>Ablegen</h2>
       ${formHead(ctx, '/aktion/notiz/ablegen', { pfad: note.path })}
@@ -46,15 +113,18 @@ ${head(note.title, { script: Boolean(write) })}
 <body class="page-note">
 ${appHeader({ user })}
 <div class="page-head">
-  <div><h1>${esc(note.title)}</h1><p class="meta">${esc(note.path)}${obsidian ? ` · <a href="${esc(obsidian)}">In Obsidian öffnen</a>` : ''}</p></div>
+  <div><h1>${esc(note.title)}</h1><p class="meta">${esc(note.path)}${graph ? ` · <a href="${esc(graphHref(note.path))}">Graph</a>` : ''}${obsidian ? ` · <a href="${esc(obsidian)}">In Obsidian öffnen</a>` : ''}</p></div>
   <a href="/" class="btn quiet">← Zur Woche</a>
 </div>
 <main class="note-page">
+  <div class="note-main">
   <article class="note-preview">
     ${note.tags.length ? `<p class="tags">${note.tags.map((t) => `<span class="tag">#${esc(t)}</span>`).join(' ')}</p>` : ''}
-    ${fm.length ? `<dl class="fm">${fm.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(Array.isArray(v) ? v.join(', ') : typeof v === 'object' && v ? JSON.stringify(v) : v)}</dd>`).join('')}</dl>` : ''}
-    <div class="md">${renderMarkdown(note.body, { checkbox }) || '<p class="empty">Die Notiz ist leer.</p>'}</div>
+    ${frontmatter(fm, note.links ?? null)}
+    <div class="md">${renderMarkdown(note.body, { checkbox, links: note.links ?? null }) || '<p class="empty">Die Notiz ist leer.</p>'}</div>
   </article>
+  ${relatedSection(related)}
+  </div>
   ${panel}
 </main>
 <div class="toasts" aria-live="polite">${flashToast(flash, ctx)}</div>
@@ -75,11 +145,22 @@ export const NOTE_CSS = `
 .note-actions textarea { resize: vertical; }
 .note-actions p { margin: 8px 0 0; }
 .note-actions .archive { margin-top: 10px; }
+.suggest h2 .hint { font-size: 12px; }
+.suggest-row + .suggest-row { margin-top: 12px; }
+.suggest-row h3 { margin: 0 0 6px; font-size: 13px; color: var(--text-2); }
+.suggest .chips form { display: inline; }
+.suggest .chip { min-height: 30px; padding: 3px 10px; font-size: 13px; }
+.suggest ul { margin: 0; padding: 0; list-style: none; }
+.suggest li { padding: 3px 0; overflow-wrap: anywhere; }
+.suggest li form { display: inline; margin: 0 0 0 6px; }
+.suggest li .chip { min-height: 26px; padding: 2px 10px; font-size: 12px; }
+.suggest > .hint { margin: 10px 0 0; font-size: 12px; }
 header .meta a { color: inherit; }
 .tags { margin: 0 0 10px; }
 .tag { color: var(--accent); font-size: 14px; }
-.fm { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0 0 16px; padding: 8px 12px;
-  font-size: 13px; color: var(--muted); background: var(--bg); border-radius: var(--r-md); }
+.fm { margin: 0 0 16px; padding: 6px 12px; font-size: 13px; color: var(--muted); background: var(--bg); border-radius: var(--r-md); }
+.fm summary { cursor: pointer; overflow-wrap: anywhere; }
+.fm dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 8px 0 2px; }
 .fm dt { font-weight: 600; }
 .fm dd { margin: 0; overflow-wrap: anywhere; }
 .md { line-height: 1.6; overflow-wrap: anywhere; }
@@ -96,7 +177,34 @@ header .meta a { color: inherit; }
 .md pre { background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-md); padding: 10px 12px; overflow-x: auto; }
 .md pre code { background: none; padding: 0; }
 .md hr { border: 0; border-top: 1px solid var(--line); margin: 16px 0; }
-.md .wikilink { color: var(--accent); }
+.md .wikilink, .fm .wikilink { color: var(--accent); }
+.md a.wikilink { text-decoration: none; border-bottom: 1px solid var(--accent-soft); }
+.md a.wikilink:hover { border-bottom-color: var(--accent); }
+.wikilink.missing { color: var(--muted); border-bottom: 1px dashed var(--line); }
+.wikilink.missing .missing-mark { font-size: 12px; }
+.wikilink.file { color: var(--muted); }
+.md img { max-width: 100%; height: auto; border-radius: var(--r-md); vertical-align: middle; }
+.md mark { background: var(--accent-soft); color: inherit; padding: 0 2px; border-radius: 3px; }
+.md .table-wrap { overflow-x: auto; margin: 0 0 12px; }
+.md table { border-collapse: collapse; font-size: 14px; min-width: 50%; }
+.md th, .md td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; vertical-align: top; }
+.md th { background: var(--bg); font-weight: 600; }
+.md .al-c { text-align: center; } .md .al-r { text-align: right; }
+.md .callout { margin: 0 0 12px; padding: 8px 12px; border-left: 3px solid var(--accent); border-radius: var(--r-md); background: var(--bg); }
+.md .callout-title { margin: 0; font-weight: 600; }
+.md details.callout > summary { cursor: pointer; }
+.md .callout-body { margin-top: 6px; }
+.md .callout-body > :last-child { margin-bottom: 0; }
+.md .callout-ok { border-left-color: var(--ok); }
+.md .callout-warn { border-left-color: var(--warn); }
+.md .callout-bad { border-left-color: var(--danger); }
+.md .callout-plain { border-left-color: var(--line); }
+.note-main { display: grid; gap: 16px; min-width: 0; }
+.note-related { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px 24px; padding: 14px 16px; }
+.note-related h2 { margin: 0 0 6px; }
+.note-related ul { margin: 0; padding: 0; list-style: none; }
+.note-related li { padding: 3px 0; }
+.note-related li .meta { display: block; font-size: 12px; overflow-wrap: anywhere; }
 .box-form { margin: 0; display: flex; flex: none; }
 .box { width: 20px; height: 20px; margin-top: 3px; padding: 0; display: grid; place-items: center; cursor: pointer;
   border: 1.5px solid var(--muted); border-radius: 5px; background: var(--surface); color: #fff; position: relative; }

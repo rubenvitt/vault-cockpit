@@ -357,7 +357,24 @@ oben eine Leiste mit Timer und „Stopp“. Notizen der Vault-Inbox öffnen sich
 abhaken, Tags setzen, Text anhängen und in einen Ordner **ablegen** (Vorschläge
 aus dem Index, Eingabe frei) oder mit einem Klick ins Archiv (der oberste Ordner
 namens `archiv`, auch `40-archiv`). Vertrauliche und ausgeschlossene Ordner der
-Policy zeigt das Cockpit weder an noch nimmt es sie als Ziel. Feuer-Ziel und
+Policy zeigt das Cockpit weder an noch nimmt es sie als Ziel. Die Vorschau
+taugt auch zum Lesen im ganzen Vault: Wikilinks (über Pfad, Dateiname oder
+Alias aus `aliases`, auch `[[Notiz#Überschrift]]`) führen zur nächsten
+Notizseite, nicht auflösbare oder vertrauliche Ziele stehen als „fehlt“ da.
+Unter der Notiz stehen **Verweist hierher** (Backlinks) und **Ähnlich** (aus den
+Embeddings, ohne sie per Volltext). Bilder (`![[bild.png]]`, `![](anhang/bild.png)`;
+PNG, JPEG, GIF, WebP, AVIF, kein SVG) liefert `/notiz/bild?pfad=…` nur angemeldet
+und nie aus vertraulichen, ausgeschlossenen oder versteckten Ordnern oder über
+Symlinks aus; Bilder von außen lädt die Vorschau nicht, sie werden ein Link.
+Tabellen und Callouts (`> [!note]`, aufklappbar mit `+`/`-`) werden dargestellt,
+das Frontmatter steht eingeklappt in einer Zeile. Bei Inbox-Notizen schlägt
+das Cockpit oben im Verarbeiten-Bereich **Tags** (häufig bei den ähnlichsten
+Notizen), die drei wahrscheinlichsten **Zielordner** (Mehrheit der ähnlichsten
+Notizen) und ähnliche, noch nicht verlinkte Notizen zum **Verlinken** vor; ein
+Klick übernimmt einen Vorschlag, „Alle übernehmen“ und ein Ordner reichen also
+zum Taggen und Ablegen. Ohne Embeddings kommen die Vorschläge aus dem Volltext
+(mit Hinweis), vertrauliche Ordner und die Inbox selbst sind nie dabei, der Tag
+der Zunder-Brücke auch nicht. Feuer-Ziel und
 Ersten Zug der Feuer-Notiz bearbeitet man direkt im Wochenblick (✎ neben dem
 Text, ersetzt den ersten Absatz unter der Überschrift). Fehlt die Feuer-Notiz
 einer Woche, legt **Feuer anlegen** sie mit Feuer-Ziel und (optional) Erstem Zug
@@ -459,7 +476,7 @@ zeigt `vault_stats` unter `semantic`. Bis dahin und wenn Ollama ausfällt, sucht
   („ähnlich, aber nicht verlinkt“, gestrichelt), Zunder-Aufgaben aus Links in der
   Notiz (Status aus Zunder) und bei Tagesnotizen die Termine des Tages. Die Seite
   `/graph` ist zugleich die Suche des Web-Cockpits, mit Treffern beim Tippen
-  (`/api/suche?q=…`). Im Browser ist der Graph interaktiv (sigma.js mit
+  (`/api/suche?q=…`); ein Treffer öffnet die Notiz, der Graph steht als Link daneben. Im Browser ist der Graph interaktiv (sigma.js mit
   ForceAtlas2-Physik): zoomen, Knoten ziehen, Klick klappt die Nachbarn einer
   Notiz auf, Doppelklick macht sie zur Mitte, Filter nach Art, und „Verlinken“
   hängt `- [[Ziel]]` an eine ähnliche Notiz an. Ohne JavaScript bleibt das
