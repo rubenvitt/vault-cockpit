@@ -25,6 +25,7 @@ Alle Lesewerkzeuge verlangen den Scope `vault:read`.
 | `vault_edit` | Exakte Textstelle in einer Notiz ersetzen oder löschen (Scope `vault:edit`) |
 | `vault_append` | Text am Notizende oder unter einer Überschrift anhängen (Scope `vault:edit`) |
 | `vault_set_frontmatter` | Einzelne Frontmatter-Felder setzen oder entfernen (Scope `vault:edit`) |
+| `vault_move` | Notiz in einen Ordner verschieben, optional umbenennen, etwa zum Leeren der Inbox; nie in oder aus vertraulichen Ordnern, nennt Links, die danach ins Leere zeigen (Scope `vault:edit`) |
 
 ## Betrieb
 

@@ -65,7 +65,8 @@ Der Service liefert nur Werkzeuge und Zustand. Intelligenz kommt von außen per 
 - **Capture von überall:** Mail-Adresse, iOS-Kurzbefehl, Sprachmemo (transkribiert) → Inbox.
   Mit Präfix (z. B. `!`) direkt als Zunder-Aufgabe.
 - **Inbox-Agent:** verarbeitet die Inbox über MCP-Werkzeuge, schlägt Ablage, Tags und
-  Querverbindungen vor.
+  Querverbindungen vor. Die Werkzeuge dafür gibt es: lesen, taggen
+  (`vault_set_frontmatter`) und ablegen (`vault_move`).
 - **Zunder-Brücke:** markierte Checkboxen → Zunder-Aufgaben, mit Rücklink zur Notiz.
 - **Kalender-Brücke:** Termine sichtbar im Cockpit; Meeting-Notizen nur optional.
 - **Timing-Anreicherung:** Zeiten und erledigte Deep-Work-Blöcke in Tages- bzw. Wochennotiz.

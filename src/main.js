@@ -285,6 +285,8 @@ const mcpHttp = createVaultMcpHandler({
   index,
   capture,
   editor,
+  // vault_move legt wie das Cockpit nie in oder aus vertraulichen Ordnern ab.
+  policy: POLICY,
   sync,
   semantic: currentSemantic,
   graph,
