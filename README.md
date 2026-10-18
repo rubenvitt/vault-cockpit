@@ -236,8 +236,9 @@ Einrichtung:
    für „In Obsidian öffnen“ und der Inbox-Ordner.
 
    Außerdem: Zunder-Zugang, Zunder-Brücke (an/aus, Tag), Mail-Abruf (Fastmail-Token,
-   freigegebene Absender, Ordner, Abstand), Embeddings (Ollama-Adresse, Modell)
-   und unter **API-Tokens** die Tokens für Suche und Capture.
+   freigegebene Absender, Ordner, Abstand), Embeddings (Ollama-Adresse, Modell),
+   Dauer der Anmeldung samt „Überall abmelden“ und unter **API-Tokens** die
+   Tokens für Suche und Capture.
 
 Der Zunder-Zugang aus den Einstellungen gilt für das ganze Cockpit:
 Wochenansicht, `!`-Capture (Kurzbefehl, Mail, Funke), Zunder-Brücke und Graph.
@@ -298,9 +299,22 @@ ausgeliefert (`cockpit.css?v=…`), nach einem Deploy lädt der Browser es neu.
 
 Fällt eine Quelle aus (Zunder nicht erreichbar, ein Kalender antwortet nicht),
 zeigt nur ihr Abschnitt bzw. nur dieser Kalender den Fehler; die Einstellungsseite
-zeigt je Kalender, ob er erreichbar ist. Die Sitzung gilt 12 Stunden und nur für
-das Web-Cockpit; `/mcp` nimmt weiter ausschließlich Bearer-Tokens. Alle Formulare,
-auch Einstellungen und API-Tokens, verlangen das CSRF-Token der Sitzung.
+zeigt je Kalender, ob er erreichbar ist. Die Sitzung gilt nur für das Web-Cockpit;
+`/mcp` nimmt weiter ausschließlich Bearer-Tokens. Alle Formulare, auch
+Einstellungen und API-Tokens, verlangen das CSRF-Token der Sitzung.
+
+**Angemeldet bleiben:** Jede Nutzung verlängert die Sitzung (das Cookie wird
+höchstens stündlich erneuert). Sie endet erst nach 30 Tagen ohne Nutzung oder
+spätestens 90 Tage nach dem Login; wer das Cockpit mindestens einmal im Monat
+öffnet, meldet sich also höchstens alle drei Monate bei Pocket ID an. Beide
+Dauern lassen sich unter **Einstellungen → Anmeldung** ändern (leer = Standard,
+eine kürzere wirkt sofort). Dort beendet **Überall abmelden** alle Sitzungen auf
+allen Geräten, auch die eigene: Die Einstellungen zählen eine Generation hoch,
+die in jedem Sitzungs-Cookie steht. Läuft die Sitzung ab, während man ohne
+JavaScript etwas abschickt, geht es über den Login zurück auf dieselbe Seite;
+der Text aus Schnelleingabe oder „Anhängen“ steht dann wieder im Feld (15
+Minuten lang, verschlüsselt in einem Cookie, nie in einer URL). Ist er dafür zu
+lang, zeigt die Seite ihn zum Kopieren.
 
 ### Semantische Suche und Graph
 
@@ -388,7 +402,8 @@ npm ci && npm test
 - **Web-Login getrennt von MCP:** Das Web-Cockpit hat einen eigenen OIDC-Client
   und prüft das ID-Token (Signatur, `iss`, `aud` = Client-ID, `nonce`, PKCE,
   Subject). Das Sitzungs-Cookie ist `HttpOnly`, `Secure`, `SameSite=Lax` und gilt
-  nicht für `/mcp`. Die Content-Security-Policy erlaubt nur eigene Dateien
+  nicht für `/mcp`; das Subject wird bei jedem Request erneut gegen
+  `ALLOWED_SUBJECTS` geprüft, „Überall abmelden“ widerruft alle Sitzungen. Die Content-Security-Policy erlaubt nur eigene Dateien
   (Stylesheet und `/static/cockpit.js`, kein Inline-Script). Schreibende Aktionen
   (`/aktion/…`) brauchen Sitzung, gleiche Herkunft und ein CSRF-Token, das an das
   Sitzungs-Cookie gebunden ist; die Schnelleingabe schreibt nie in einen

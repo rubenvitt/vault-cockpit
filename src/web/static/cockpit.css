@@ -547,6 +547,7 @@ main.refreshing { transition: opacity var(--mid); }
 .message .brand-name { display: none; }
 .message p { margin: 0; color: var(--text-2); }
 .message p + p { margin-top: var(--s-3); }
+.message textarea { width: 100%; text-align: left; resize: vertical; }
 
 /* --- Schmale Bildschirme ------------------------------------------------- */
 @media (max-width: 900px) {

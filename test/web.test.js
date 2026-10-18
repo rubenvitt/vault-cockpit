@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { generateKeyPairSync, createSign, createHash } from 'node:crypto';
+import { generateKeyPairSync, createSign, createHash, randomBytes } from 'node:crypto';
 import { createApp } from '../src/http/app.js';
 import { createWebHttp } from '../src/web/http.js';
 import { loadShortcuts } from '../src/web/shortcuts.js';
@@ -118,7 +118,7 @@ const graph = {
 };
 const search = async (q) => ({ results: [{ path: 'wiki/a.md', title: 'A', snippet: `zu ${q}`, streams: ['text', 'semantic'] }], total: 1, degraded: null });
 
-async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSubjects = ['ruben'], calendars = null, actions = null, notes = null, shortcuts = [] } = {}) {
+async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSubjects = ['ruben'], calendars = null, actions = null, notes = null, shortcuts = [], clock = null } = {}) {
   const idp = fakeIdp(idpOptions);
   const settings = createSettingsStore({ defaults: { tz: 'Europe/Berlin', inboxFolder: 'inbox', zunderUrl: 'https://zunder.env', zunderToken: 'zt_env' }, logger: quiet });
   const tokens = createTokenStore({ logger: quiet });
@@ -137,6 +137,8 @@ async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSu
     publicUrl: 'https://vault.test',
     allowedSubjects,
     logger: quiet,
+    // `clock.t` verstellbar, damit Tests Wochen vergehen lassen können.
+    ...(clock ? { now: () => clock.t } : {}),
   });
   const app = createApp({
     config: { publicUrl: 'https://vault.test', resource: 'https://vault.test/mcp', issuer: ISSUER, supportedScopes: [], allowedHosts: ['vault.test'], trustProxy: true },
@@ -285,10 +287,17 @@ test('Sitzung: gefälschte, abgelaufene und gestrichene Cookies gelten nicht', a
   assert.deepEqual(parseCookies('a=1; b=2=3'), { a: '1', b: '2=3' });
 
   await withServer(async ({ call, jar }) => {
-    jar.vc_session = signer.seal({ sub: 'fremd', exp });
+    const t = exp - 600;
+    const session = { sid: 's1', gen: 0, iat: t, seen: t, exp };
+    jar.vc_session = signer.seal({ ...session, sub: 'fremd' });
     assert.equal((await call('/')).status, 303);
-    jar.vc_session = signer.seal({ sub: 'ruben', exp });
+    jar.vc_session = signer.seal({ ...session, sub: 'ruben' });
     assert.equal((await call('/')).status, 200);
+    // Cookies im alten Format (bis VCP-45 nur `sub` und `exp`) gelten nicht mehr.
+    jar.vc_session = signer.seal({ sub: 'ruben', name: 'Ruben', sid: 's1', exp });
+    assert.equal((await call('/')).status, 303);
+    jar.vc_session = signer.seal({ ...session, sub: 'ruben', gen: 1 });
+    assert.equal((await call('/')).status, 303);
   });
 });
 
@@ -665,7 +674,7 @@ test('Aktionen: nur angemeldet, mit CSRF-Token und von dieser Seite', async () =
     async ({ call, login }) => {
       const anon = await call('/aktion/status', { method: 'POST', form: { id: 't1', status: 'done' } });
       assert.equal(anon.status, 303);
-      assert.equal(anon.headers.get('location'), '/login');
+      assert.equal(anon.headers.get('location'), '/login?next=%2F');
       const anonJson = await call('/aktion/erfassen', { method: 'POST', form: { text: 'x' }, accept: 'application/json' });
       assert.equal(anonJson.status, 401);
       assert.equal((await call('/aktion/status')).status, 405);
@@ -1153,4 +1162,243 @@ test('Kurzbefehle: in den Einstellungen verlinkt, nur angemeldet zu laden', asyn
     {},
     { shortcuts },
   );
+});
+
+const DAY_MS = 86_400_000;
+const sessionCookieOf = (res) => res.headers.getSetCookie().find((c) => c.startsWith('vc_session='));
+
+test('Sitzung: verlängert sich bei Nutzung, endet nach 30 Tagen Pause und spätestens nach 90', async () => {
+  const clock = { t: Date.now() };
+  await withServer(
+    async ({ call, login, jar }) => {
+      const res = await login();
+      assert.match(sessionCookieOf(res), /HttpOnly; SameSite=Lax; Secure; Max-Age=2592000$/);
+      const first = jar.vc_session;
+      // In der ersten Stunde bleibt das Cookie, wie es ist.
+      clock.t += 10 * 60_000;
+      const soon = await call('/');
+      assert.equal(soon.status, 200);
+      assert.equal(sessionCookieOf(soon), undefined);
+      assert.equal(jar.vc_session, first);
+      // Einmal im Monat öffnen reicht, jedes Mal gibt es wieder 30 Tage.
+      for (let i = 0; i < 3; i++) {
+        clock.t += 29 * DAY_MS;
+        const page = await call('/');
+        assert.equal(page.status, 200);
+        assert.match(sessionCookieOf(page), i < 2 ? /Max-Age=2592000$/ : /Max-Age=258600$/);
+      }
+      // 90 Tage nach dem Login ist Schluss, auch wenn die letzte Nutzung drei Tage her ist.
+      clock.t += 3 * DAY_MS;
+      const late = await call('/?woche=2026-W42');
+      assert.equal(late.status, 303);
+      assert.equal(late.headers.get('location'), '/login?next=%2F%3Fwoche%3D2026-W42');
+      assert.equal((await call('/api/woche')).status, 401);
+    },
+    {},
+    { clock },
+  );
+  const idle = { t: Date.now() };
+  await withServer(
+    async ({ call, login }) => {
+      await login();
+      idle.t += 30 * DAY_MS;
+      assert.equal((await call('/')).status, 303);
+    },
+    {},
+    { clock: idle },
+  );
+});
+
+test('Sitzung: CSRF-Token bleibt beim Verlängern gültig', async () => {
+  const clock = { t: Date.now() };
+  const actions = fakeActions();
+  await withServer(
+    async ({ call, login, jar }) => {
+      await login();
+      const csrf = csrfFrom(await (await call('/')).text());
+      const before = jar.vc_session;
+      clock.t += 2 * 3600_000;
+      const renewed = await call('/api/woche');
+      assert.ok(sessionCookieOf(renewed));
+      assert.notEqual(jar.vc_session, before);
+      assert.equal(csrfFrom(await (await call('/')).text()), csrf);
+      const res = await call('/aktion/status', { method: 'POST', form: { id: 't1', status: 'done', csrf }, origin: 'https://vault.test' });
+      assert.equal(res.status, 303);
+      assert.deepEqual(actions.calls, [['status', 't1', 'done']]);
+    },
+    {},
+    { actions, clock },
+  );
+});
+
+test('Überall abmelden: beendet alle Sitzungen, nur mit CSRF-Token und von dieser Seite', async () => {
+  await withServer(async ({ call, login, jar, settings }) => {
+    assert.equal((await call('/einstellungen/abmelden', { method: 'POST', form: {} })).headers.get('location'), '/login?next=%2Feinstellungen');
+    await login();
+    const other = jar.vc_session; // z. B. das iPhone
+    await login();
+    const html = await (await call('/einstellungen')).text();
+    assert.match(html, /<a href="#anmeldung">/);
+    assert.match(html, /<button type="submit" form="abmelden-ueberall" class="btn quiet danger">Überall abmelden<\/button>/);
+    assert.match(html, /<form method="post" action="\/einstellungen\/abmelden" id="abmelden-ueberall" hidden><input type="hidden" name="csrf" value="[^"]+"><\/form>/);
+    const csrf = csrfFrom(html);
+    assert.equal((await call('/einstellungen/abmelden', { method: 'POST', form: {} })).status, 403);
+    assert.equal((await call('/einstellungen/abmelden', { method: 'POST', form: { csrf }, origin: 'https://evil.test' })).status, 403);
+    assert.equal((await call('/einstellungen/abmelden')).status, 303);
+    assert.equal(settings.stored().session.generation, 0);
+
+    const res = await call('/einstellungen/abmelden', { method: 'POST', form: { csrf }, origin: 'https://vault.test' });
+    assert.equal(res.status, 200);
+    assert.match(await res.text(), /Überall abgemeldet/);
+    assert.equal(jar.vc_session, undefined);
+    assert.equal(settings.stored().session.generation, 1);
+    jar.vc_session = other;
+    assert.equal((await call('/')).status, 303);
+
+    // Neu anmelden geht; Speichern der Einstellungen lässt die Generation stehen.
+    await login();
+    const fresh = csrfFrom(await (await call('/einstellungen')).text());
+    assert.equal((await call('/einstellungen', { method: 'POST', form: { tz: 'UTC', csrf: fresh } })).status, 303);
+    assert.equal(settings.stored().session.generation, 1);
+    assert.equal((await call('/')).status, 200);
+  });
+});
+
+test('Einstellungen: Dauer der Anmeldung, leer = Standard, eine kürzere wirkt sofort', async () => {
+  const clock = { t: Date.now() };
+  await withServer(
+    async ({ call, login, settings }) => {
+      await login();
+      const html = await (await call('/einstellungen')).text();
+      assert.match(html, /name="session\.idleDays" inputmode="numeric" value="" placeholder="30"/);
+      assert.match(html, /name="session\.maxDays" inputmode="numeric" value="" placeholder="90"/);
+      const csrf = csrfFrom(html);
+      const zero = await call('/einstellungen', { method: 'POST', form: { 'session.idleDays': '0', csrf } });
+      assert.equal(zero.status, 400);
+      assert.match(await zero.text(), /ganze Tage zwischen 1 und 365/);
+      assert.equal((await call('/einstellungen', { method: 'POST', form: { 'session.idleDays': '40', 'session.maxDays': '20', csrf } })).status, 400);
+      assert.equal((await call('/einstellungen', { method: 'POST', form: { 'session.idleDays': '2', csrf } })).status, 303);
+      assert.deepEqual(settings.get().session, { idleDays: 2, maxDays: 90, generation: 0 });
+      assert.match(await (await call('/einstellungen')).text(), /name="session\.idleDays" inputmode="numeric" value="2"/);
+      clock.t += 3 * DAY_MS;
+      assert.equal((await call('/')).status, 303);
+    },
+    {},
+    { clock },
+  );
+});
+
+test('Abgelaufene Sitzung: Schnelleingabe geht über den Login zurück, der Text steht wieder im Feld', async () => {
+  const clock = { t: Date.now() };
+  const actions = fakeActions();
+  await withServer(
+    async ({ call, login, idp, jar }) => {
+      await login();
+      const html = await (await call('/?woche=2026-W42')).text();
+      const csrf = csrfFrom(html);
+      const cid = html.match(/name="cid" value="([^"]+)"/)[1];
+      clock.t += 31 * DAY_MS;
+
+      const res = await call('/aktion/erfassen', { method: 'POST', form: { text: '! Wichtig <b>', cid, csrf, back: '/?woche=2026-W42' }, origin: 'https://vault.test' });
+      assert.equal(res.status, 303);
+      assert.equal(res.headers.get('location'), '/login?next=%2F%3Fwoche%3D2026-W42');
+      assert.match(res.headers.getSetCookie().find((c) => c.startsWith('vc_draft=')), /HttpOnly; SameSite=Lax; Secure; Max-Age=900$/);
+      // Verschlüsselt: Der Text steht weder im Cookie noch in der Adresse zu Pocket ID.
+      assert.ok(!Buffer.from(jar.vc_draft, 'base64url').toString('latin1').includes('Wichtig'));
+      assert.equal(actions.calls.length, 0);
+      const start = await call(res.headers.get('location'));
+      assert.ok(!start.headers.get('location').includes('Wichtig'));
+      const { code, state } = idp.authorize(start.headers.get('location'));
+      const back = await call(`/auth/callback?code=${code}&state=${state}`);
+      assert.equal(back.headers.get('location'), '/?woche=2026-W42');
+
+      const page = await (await call('/?woche=2026-W42')).text();
+      assert.match(page, /<textarea[^>]*autofocus[^>]*>! Wichtig &lt;b&gt;<\/textarea>/);
+      assert.match(page, /data-mode="task"/);
+      assert.match(page, /class="toast error"[^>]*><span class="toast-text">Nicht gespeichert: Die Anmeldung war abgelaufen/);
+      assert.equal(jar.vc_draft, undefined);
+      assert.ok(!(await (await call('/')).text()).includes('Wichtig'));
+      assert.equal(actions.calls.length, 0);
+    },
+    {},
+    { actions, clock },
+  );
+});
+
+test('Abgelaufene Sitzung: Text zum Anhängen wartet auf seine Notiz', async () => {
+  const clock = { t: Date.now() };
+  const notes = fakeNotes();
+  await withServer(
+    async ({ call, login, jar }) => {
+      await login();
+      const csrf = csrfFrom(await (await call('/notiz?pfad=00-inbox%2FIdee.md')).text());
+      clock.t += 31 * DAY_MS;
+      const back = '/notiz?pfad=00-inbox%2FIdee.md';
+      const res = await call('/aktion/notiz/anhaengen', { method: 'POST', form: { pfad: '00-inbox/Idee.md', text: 'Nachtrag', csrf, back }, origin: 'https://vault.test' });
+      assert.equal(res.headers.get('location'), `/login?next=${encodeURIComponent(back)}`);
+      await login('/');
+      // Die Wochenansicht nimmt den Entwurf nicht, er bleibt für die Notiz liegen.
+      assert.ok(!(await (await call('/')).text()).includes('Nachtrag'));
+      assert.ok(jar.vc_draft);
+      const page = await (await call(back)).text();
+      assert.match(page, /<textarea name="text"[^>]*>Nachtrag<\/textarea>/);
+      assert.equal(jar.vc_draft, undefined);
+      assert.ok(!notes.calls.some((c) => c[0] === 'append'));
+    },
+    {},
+    { actions: fakeActions(), notes, clock },
+  );
+});
+
+test('Abgelaufene Sitzung: zu langer Text oder unklare Herkunft kommt zum Kopieren zurück, andere Aktionen über den Login', async () => {
+  const clock = { t: Date.now() };
+  const actions = fakeActions();
+  await withServer(
+    async ({ call, login, jar }) => {
+      await login();
+      const csrf = csrfFrom(await (await call('/')).text());
+      clock.t += 31 * DAY_MS;
+      const vault = 'https://vault.test';
+
+      // Ohne Origin kein Cookie: Niemand soll einen Entwurf unterschieben können.
+      const unclear = await call('/aktion/erfassen', { method: 'POST', form: { text: 'Idee <i>', csrf, back: '/' } });
+      assert.equal(unclear.status, 401);
+      assert.match(await unclear.text(), /<textarea readonly[^>]*>Idee &lt;i&gt;<\/textarea><p><a href="\/login\?next=%2F" class="btn primary">/);
+      assert.equal(jar.vc_draft, undefined);
+
+      // Passt nicht in ein Cookie.
+      const long = randomBytes(6000).toString('base64');
+      const big = await call('/aktion/erfassen', { method: 'POST', form: { text: long, csrf, back: '/' }, origin: vault });
+      assert.equal(big.status, 401);
+      assert.ok((await big.text()).includes(long));
+      assert.equal(jar.vc_draft, undefined);
+
+      assert.equal((await call('/aktion/erfassen', { method: 'POST', form: { text: 'x', csrf }, origin: 'https://evil.test' })).status, 403);
+      const empty = await call('/aktion/erfassen', { method: 'POST', form: { text: '  ', csrf, back: '/' }, origin: vault });
+      assert.equal(empty.headers.get('location'), '/login?next=%2F');
+      const status = await call('/aktion/status', { method: 'POST', form: { id: 't1', status: 'done', csrf, back: '/?woche=2026-W42' }, origin: vault });
+      assert.equal(status.status, 303);
+      assert.equal(status.headers.get('location'), '/login?next=%2F%3Fwoche%3D2026-W42');
+      assert.equal((await call('/aktion/status', { method: 'POST', form: { id: 't1', status: 'done', back: '//evil.test' }, origin: vault })).headers.get('location'), '/login?next=%2F');
+      assert.equal(jar.vc_draft, undefined);
+      assert.equal(actions.calls.length, 0);
+    },
+    {},
+    { actions, clock },
+  );
+});
+
+test('Entwurfs-Cookie: verschlüsselt, fälschungssicher, läuft ab', () => {
+  const signer = createCookieSigner(SECRET);
+  const exp = Math.floor(Date.now() / 1000) + 60;
+  const value = signer.encrypt({ text: 'Geheimer Gedanke', exp });
+  assert.equal(signer.decrypt(value).text, 'Geheimer Gedanke');
+  assert.notEqual(signer.encrypt({ text: 'Geheimer Gedanke', exp }), value);
+  const raw = Buffer.from(value, 'base64url');
+  raw[raw.length - 1] ^= 1;
+  assert.equal(signer.decrypt(raw.toString('base64url')), null);
+  assert.equal(signer.decrypt(value, (exp + 1) * 1000), null);
+  assert.equal(createCookieSigner('y'.repeat(40)).decrypt(value), null);
+  assert.equal(signer.decrypt('kaputt'), null);
+  assert.equal(signer.open(value), null);
 });

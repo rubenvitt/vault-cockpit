@@ -79,6 +79,30 @@ test('Einstellungen: Prüfung von Brücken-Tag, Absendern, Abstand und Embedding
   assert.deepEqual(old.mail.senders, []);
 });
 
+test('Einstellungen: Dauer der Web-Sitzung, leer = Standard, Generation bleibt beim Speichern', () =>
+  withDir((dir) => {
+    const file = join(dir, 'cockpit-settings.json');
+    const s = createSettingsStore({ file, logger: quiet });
+    assert.deepEqual(s.get().session, { idleDays: 30, maxDays: 90, generation: 0 });
+    s.save({ calendars: [], session: { idleDays: '7', maxDays: '', generation: 3 } });
+    assert.deepEqual(s.get().session, { idleDays: 7, maxDays: 90, generation: 3 });
+    // Ohne Nutzung nie länger als die Obergrenze, auch wenn nur die gesetzt ist.
+    s.save({ calendars: [], session: { maxDays: 14, generation: 3 } });
+    assert.deepEqual(s.get().session, { idleDays: 14, maxDays: 14, generation: 3 });
+    assert.deepEqual(createSettingsStore({ file, logger: quiet }).get().session, { idleDays: 14, maxDays: 14, generation: 3 });
+
+    const bad = [
+      [{ session: { idleDays: '0' } }, /zwischen 1 und 365/],
+      [{ session: { maxDays: '400' } }, /zwischen 1 und 365/],
+      [{ session: { idleDays: '1,5' } }, /ganze Tage/],
+      [{ session: { idleDays: 40, maxDays: 20 } }, /nicht kürzer/],
+    ];
+    for (const [input, msg] of bad) assert.throws(() => validateSettings(input), (e) => e instanceof SettingsError && msg.test(e.message));
+    // Ältere Datei ohne Abschnitt und kaputte Generation: Standard.
+    assert.deepEqual(validateSettings({ calendars: [] }).session, { idleDays: null, maxDays: null, generation: 0 });
+    assert.equal(validateSettings({ session: { generation: -1 } }).session.generation, 0);
+  }));
+
 test('Einstellungen: onChange meldet jedes Speichern', () => {
   const s = createSettingsStore({ logger: quiet });
   const seen = [];
