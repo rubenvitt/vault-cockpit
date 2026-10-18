@@ -1548,3 +1548,26 @@ test('Entwurfs-Cookie: verschlüsselt, fälschungssicher, läuft ab', () => {
   assert.equal(signer.decrypt('kaputt'), null);
   assert.equal(signer.open(value), null);
 });
+
+test('Offline-Cache: eine Wochenansicht mit wiederhergestelltem Entwurf wird nicht freigegeben', async () => {
+  const clock = { t: Date.now() };
+  const actions = fakeActions();
+  await withServer(
+    async ({ call, login, idp }) => {
+      await login();
+      const fresh = await call('/');
+      assert.equal(fresh.headers.get('x-cockpit-offline'), 'woche');
+      const html = await fresh.text();
+      clock.t += 31 * DAY_MS;
+      const res = await call('/aktion/erfassen', { method: 'POST', form: { text: 'Entwurf, der nicht in den Cache darf', cid: html.match(/name="cid" value="([^"]+)"/)[1], csrf: csrfFrom(html), back: '/' }, origin: 'https://vault.test' });
+      const start = await call(res.headers.get('location'));
+      const { code, state } = idp.authorize(start.headers.get('location'));
+      await call(`/auth/callback?code=${code}&state=${state}`);
+      const page = await call('/');
+      assert.match(await page.text(), /Entwurf, der nicht in den Cache darf/);
+      assert.equal(page.headers.get('x-cockpit-offline'), null);
+    },
+    {},
+    { actions, clock },
+  );
+});

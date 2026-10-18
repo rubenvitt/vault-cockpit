@@ -366,7 +366,7 @@ function inboxSection(model, tz, vaultName, ctx) {
  * Schnelleingabe: eine Zeile, die beim Tippen wächst. `!` vorne macht eine
  * Zunder-Aufgabe daraus. Die Erfassungs-ID verhindert Doppelte beim Neusenden.
  */
-function captureBar(ctx, draft, focus = false) {
+export function captureBar(ctx, draft, focus = false) {
   const task = String(draft ?? '').trimStart().startsWith('!');
   return `<form method="post" action="/aktion/erfassen" class="capture" data-mode="${task ? 'task' : 'note'}">
   <input type="hidden" name="csrf" value="${esc(ctx.write.csrf)}">

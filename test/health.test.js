@@ -359,7 +359,8 @@ test('Zustandsseite: Dienst, Zeitpunkt und Fehlertext, alles escaped', () => {
   assert.match(html, /Ordner &quot;&lt;Vault&gt;&quot; nicht gefunden/);
   assert.match(html, /<time datetime="2026-10-18T11:55:00\.000Z">18\.10\. 13:55 · vor 5 min<\/time>/);
   assert.doesNotMatch(html, /fmu1-geheim-mail|zt_geheim/);
-  assert.doesNotMatch(html, /<script/);
+  // Nur eigene Skripte aus /static (z. B. der Offline-Puffer), nichts eingebettet.
+  assert.doesNotMatch(html, /<script(?! src="\/static\/)/);
 
   const fine = renderHealth(setup().health.services(), { now: NOW });
   assert.match(fine, /Alle eingerichteten Dienste laufen/);

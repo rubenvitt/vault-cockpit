@@ -80,7 +80,7 @@ export function createCockpitActions({ vaultPath, settings, policy, state, zunde
     location: task.location ?? null,
   });
 
-  return {
+  const actions = {
     /** Setzt den Status einer Zunder-Aufgabe und liefert `{ id, ref, title, status }`. */
     async setStatus(id, status) {
       checkId(id);
@@ -144,8 +144,9 @@ export function createCockpitActions({ vaultPath, settings, policy, state, zunde
     },
 
     /**
-     * Erfasst Text aus der Schnelleingabe. `captureId` (vom Formular) macht
-     * doppeltes Absenden harmlos. Liefert das Ergebnis des Capture-Routers.
+     * Erfasst Text aus der Schnelleingabe. `captureId` (vom Formular, beim
+     * Nachsenden aus dem Offline-Puffer die ID des Eintrags) macht doppeltes
+     * Absenden harmlos. Liefert das Ergebnis des Capture-Routers.
      */
     async capture({ text, captureId = null }) {
       const { inboxFolder } = settings.get();
@@ -185,5 +186,24 @@ export function createCockpitActions({ vaultPath, settings, policy, state, zunde
       const router = createCaptureRouter({ capture: null, zunder: zunder(), state, tz: settings.get().tz, now, logger });
       return router.preview({ text: String(text ?? '').slice(0, 2000) });
     },
+  };
+  return { ...actions, capture: singleFlight(actions.capture) };
+}
+
+/**
+ * Eine Erfassung je ID zur selben Zeit: Kommt dieselbe `captureId` noch einmal,
+ * während die erste läuft (zwei Tabs senden den Offline-Puffer nach), wartet die
+ * zweite auf das Ergebnis der ersten und gilt als Doppel, statt in Zunder eine
+ * zweite Aufgabe anzulegen. Danach greift die Idempotenz des Capture-Routers.
+ */
+function singleFlight(capture) {
+  const running = new Map();
+  return async (input) => {
+    const id = input?.captureId || null;
+    if (!id) return capture(input);
+    if (running.has(id)) return { ...(await running.get(id)), duplicate: true };
+    const p = capture(input).finally(() => running.delete(id));
+    running.set(id, p);
+    return p;
   };
 }
