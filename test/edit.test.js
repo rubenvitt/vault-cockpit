@@ -1,6 +1,7 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, unlinkSync } from 'node:fs';
+import fs, { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, unlinkSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildIndex, openIndex } from '../src/vault/index.js';
@@ -187,6 +188,39 @@ test('move: legt eine Notiz in einen anderen Ordner, ohne zu überschreiben', ()
     assert.throws(() => editor.move({ path: 'projects/Alpha.md', folder: bad }), /kein gültiger Ordner/);
   }
   assert.throws(() => editor.move({ path: 'areas/Gesundheit/Werte.md', folder: 'x' }), /vertraulichen/);
+});
+
+test('move: mit name wird umbenannt, .md ergänzt und ungültige Namen abgelehnt', () => {
+  const r = editor.move({ path: 'projects/Ohne.md', folder: 'archiv', name: 'Neuer Name' });
+  assert.deepEqual(r, { path: 'archiv/Neuer Name.md', from: 'projects/Ohne.md', changed: true });
+  assert.match(read('archiv/Neuer Name.md'), /Nur Text/);
+  assert.equal(idx.getNote('archiv/Neuer Name.md').title, 'Ohne Frontmatter');
+
+  // Nur umbenennen, im selben Ordner; eine vorhandene .md-Endung bleibt, wie sie ist.
+  assert.equal(editor.move({ path: 'archiv/Neuer Name.md', folder: 'archiv', name: 'Final.MD' }).path, 'archiv/Final.MD');
+  assert.throws(() => editor.move({ path: 'projects/Alpha.md', folder: 'projects', name: 'Doppelt' }), /schon eine Notiz/);
+  for (const bad of ['', '   ', 'a/b', 'a\\b', '.versteckt', 'Zeile\nzwei', 'Frage?', 'Link [[x]]', 'mit#raute', 'Punkt.', 'x'.repeat(201)]) {
+    assert.throws(() => editor.move({ path: 'projects/Alpha.md', folder: 'archiv', name: bad }), /kein gültiger Dateiname/, JSON.stringify(bad));
+  }
+  assert.match(read('projects/Alpha.md'), /Erster Absatz/);
+});
+
+test('move: bricht ab, wenn der Sync die Notiz zwischendurch ändert', (t) => {
+  // existsSync läuft zwischen dem ersten Lesen und dem Verschieben; dort schreibt hier „der Sync“.
+  const original = fs.existsSync;
+  t.mock.method(fs, 'existsSync', (p) => {
+    if (String(p).endsWith('archiv/Alpha.md')) writeFileSync(join(root, 'projects/Alpha.md'), 'vom Sync geändert\n');
+    return original(p);
+  });
+  syncBuiltinESMExports();
+  try {
+    assert.throws(() => editor.move({ path: 'projects/Alpha.md', folder: 'archiv' }), /anderweitig geändert/);
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  }
+  assert.equal(read('projects/Alpha.md'), 'vom Sync geändert\n');
+  assert.equal(original(join(root, 'archiv/Alpha.md')), false);
 });
 
 test('move: Zielordner per Symlink außerhalb des Vaults wird abgelehnt', () => {

@@ -81,7 +81,7 @@ Drei Stufen, jede mit eigenem Scope:
 |---|---|
 | `vault:read` | suchen, lesen, auflisten |
 | `vault:capture` | neue Dateien in `inbox/` anlegen, nie überschreiben |
-| `vault:edit` | bestehende Notizen ändern: Textstelle ersetzen, anhängen, Frontmatter-Felder |
+| `vault:edit` | bestehende Notizen ändern: Textstelle ersetzen, anhängen, Frontmatter-Felder, in einen Ordner verschieben |
 
 ### Bearbeiten
 
@@ -100,6 +100,11 @@ schreibbaren Vault; die Grenze liegt damit im Code. Ausgeglichen wird das so:
   aus dem Vault zeigt, wird per `realpath` abgewiesen.
 - **Keine verlorenen Sync-Änderungen.** Unmittelbar vor dem Schreiben wird die
   Datei erneut gelesen; weicht sie ab, bricht die Operation ab.
+- **Verschieben ohne Überschreiben.** `vault_move` legt wie das Ablegen im
+  Cockpit nur eigene Notizen ab, nie in oder aus vertraulichen, ausgeschlossenen
+  oder Readwise-Ordnern, und nie auf eine vorhandene Datei. Wikilinks werden
+  nicht umgeschrieben; die Antwort nennt die Notizen, deren Links per Pfad (beim
+  Umbenennen auch per Name) danach ins Leere zeigen.
 - **Index bleibt stimmig.** Nach dem Schreiben wird die eine Notiz neu indexiert
   (Suche, Frontmatter, ausgehende Links); der periodische Komplettaufbau bleibt.
 - **Frontmatter ohne YAML-Bibliothek.** Unbekannte Felder und Formatierungen

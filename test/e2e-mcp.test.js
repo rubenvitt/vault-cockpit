@@ -11,11 +11,12 @@ import { createEditor } from '../src/vault/edit.js';
 import { createVaultMcpHandler } from '../src/mcp/server.js';
 import { toWebRequest, writeWebResponse } from '../src/http/bridge.js';
 import { createGraph } from '../src/graph/graph.js';
+import { compilePolicy } from '../src/vault/policy.js';
 
 const PUBLIC_URL = 'https://mcp.rubeen.dev';
 const RESOURCE = `${PUBLIC_URL}/mcp`;
 
-let root, server, base, readToken, captureToken, editToken, principals;
+let root, server, base, readToken, captureToken, editToken, principals, index;
 
 function issue(scopes, token) {
   principals.put(token, { subject: 'ruben', scopes, aud: RESOURCE, expiresAt: Math.floor(Date.now() / 1000) + 600 });
@@ -29,7 +30,6 @@ before(async () => {
   writeFileSync(join(root, 'wiki/concepts/contract-first.md'),
     '---\ntype: concept\ntags: [ai]\n---\n# Contract First\n\nVertrag vor Prompt.');
 
-  let index;
   buildIndex({ vaultPath: root, dbPath: ':memory:', persist: (db, vp) => (index = openIndex(db, { vaultPath: vp })) });
   const capture = createCapture({ vaultPath: root });
   principals = createPrincipalCache();
@@ -42,6 +42,7 @@ before(async () => {
     index,
     capture,
     editor: createEditor({ vaultPath: root, index }),
+    policy: compilePolicy({ sensitive: { 'areas/Gesundheit': 'gesundheit' } }),
     graph: createGraph({ index, logger: { warn() {} } }),
     verifyToken: (token) => principals.get(token),
   });
@@ -107,7 +108,7 @@ test('tools/list nennt alle Vault-Werkzeuge', async () => {
   const names = r.body.result.tools.map((t) => t.name).sort();
   assert.deepEqual(names, [
     'vault_append', 'vault_capture', 'vault_edit', 'vault_graph', 'vault_links', 'vault_list',
-    'vault_read', 'vault_search', 'vault_set_frontmatter', 'vault_similar', 'vault_stats',
+    'vault_move', 'vault_read', 'vault_search', 'vault_set_frontmatter', 'vault_similar', 'vault_stats',
   ]);
 });
 
@@ -230,6 +231,25 @@ test('vault_set_frontmatter setzt Felder über MCP', async () => {
   assert.equal(r.body.result.isError, undefined);
   const content = readFileSync(join(root, 'wiki/concepts/contract-first.md'), 'utf8');
   assert.match(content, /^---\ntype: concept\nstatus: reviewed\n---\n/);
+});
+
+test('vault_move legt eine Inbox-Notiz in einen Ordner ab, vertrauliche Ziele werden abgelehnt', async () => {
+  writeFileSync(join(root, 'inbox/Ablegen.md'), '# Ablegen\n\nNoch im Posteingang.');
+  index.refresh('inbox/Ablegen.md');
+  const denied = await rpc('tools/call', { name: 'vault_move', arguments: { path: 'inbox/Ablegen.md', folder: 'wiki' } }, readToken);
+  assert.equal(denied.body.result.isError, true);
+  assert.match(denied.body.result.content[0].text, /vault:edit/);
+
+  const secret = await rpc('tools/call', { name: 'vault_move', arguments: { path: 'inbox/Ablegen.md', folder: 'areas/Gesundheit' } }, editToken);
+  assert.equal(secret.body.result.isError, true);
+  assert.match(secret.body.result.content[0].text, /^Die Notiz wurde nicht verschoben: "areas\/Gesundheit" ist ein vertraulicher/);
+  assert.ok(readFileSync(join(root, 'inbox/Ablegen.md'), 'utf8'));
+
+  const r = await rpc('tools/call', { name: 'vault_move', arguments: { path: 'inbox/Ablegen.md', folder: 'wiki/concepts' } }, editToken);
+  assert.equal(r.body.result.isError, undefined);
+  assert.deepEqual(r.body.result.structuredContent, { old_path: 'inbox/Ablegen.md', new_path: 'wiki/concepts/Ablegen.md', changed: true });
+  const found = await rpc('tools/call', { name: 'vault_read', arguments: { path: 'wiki/concepts/Ablegen.md' } });
+  assert.match(found.body.result.structuredContent.content, /Noch im Posteingang/);
 });
 
 test('ein Bearbeitungsfehler kommt als verständliche Meldung zurück', async () => {

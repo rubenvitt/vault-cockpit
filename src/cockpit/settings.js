@@ -30,6 +30,7 @@ const EMPTY = {
   inboxFolder: null,
   zunder: { url: null, token: null },
   bridge: { enabled: null, tag: null },
+  flameNote: { enabled: null },
   mail: { token: null, senders: [], mailbox: null, doneMailbox: null, pollMinutes: null },
   embed: { url: null, model: null },
   calendars: [],
@@ -85,6 +86,8 @@ export function validateSettings(input) {
   const bridgeTag = text(input.bridge?.tag, 60, 'Brücken-Tag')?.replace(/^#/, '') || null;
   if (bridgeTag && !TAG.test(bridgeTag)) throw new SettingsError(`Brücken-Tag „${bridgeTag}“: nur Buchstaben, Ziffern, _, - und /`);
   const bridge = { enabled: typeof enabled === 'boolean' ? enabled : null, tag: bridgeTag };
+  // Flammen in der Feuer-Notiz (VCP-52); `null` = Standard (an).
+  const flameNote = { enabled: typeof input.flameNote?.enabled === 'boolean' ? input.flameNote.enabled : null };
 
   const senders = [...new Set((input.mail?.senders ?? []).map((s) => text(s, 200, 'Absender')?.toLowerCase()).filter(Boolean))].slice(0, 50);
   for (const s of senders) {
@@ -130,7 +133,7 @@ export function validateSettings(input) {
     ? [...new Set(input.hiddenEvents.map((t) => text(t, 200, 'Ausgeblendeter Termin')).filter(Boolean))].slice(0, 50)
     : null;
 
-  return { tz, vaultName: text(input.vaultName, 200, 'Vault-Name'), inboxFolder, zunder: { url: zunderUrl, token: zunderToken }, bridge, mail, embed, calendars, hiddenEvents };
+  return { tz, vaultName: text(input.vaultName, 200, 'Vault-Name'), inboxFolder, zunder: { url: zunderUrl, token: zunderToken }, bridge, flameNote, mail, embed, calendars, hiddenEvents };
 }
 
 export function writePrivate(file, content) {
@@ -164,6 +167,7 @@ export function createSettingsStore({ file = null, defaults = {}, logger = conso
     zunderToken: null,
     bridgeEnabled: true,
     bridgeTag: 'zunder',
+    flameNoteEnabled: true,
     mailToken: null,
     mailSenders: [],
     mailbox: 'Vault',
@@ -194,6 +198,7 @@ export function createSettingsStore({ file = null, defaults = {}, logger = conso
         zunder: ownZunder ? { ...stored.zunder, source: 'einstellungen' } : d.zunderUrl && d.zunderToken ? { url: d.zunderUrl, token: d.zunderToken, source: 'umgebung' } : null,
         // Ohne Zunder-Zugang ruht die Brücke trotzdem; `enabled` sagt nur, ob sie darf.
         bridge: { enabled: stored.bridge.enabled ?? d.bridgeEnabled, tag: stored.bridge.tag ?? d.bridgeTag },
+        flameNote: { enabled: stored.flameNote.enabled ?? d.flameNoteEnabled },
         // Mail-Abruf nur mit Token und freigegebenen Absendern, damit eine fremde Mail nichts anlegt.
         mail:
           mailToken && senders.length

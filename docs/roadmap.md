@@ -65,10 +65,16 @@ Der Service liefert nur Werkzeuge und Zustand. Intelligenz kommt von außen per 
 - **Capture von überall:** Mail-Adresse, iOS-Kurzbefehl, Sprachmemo (transkribiert) → Inbox.
   Mit Präfix (z. B. `!`) direkt als Zunder-Aufgabe.
 - **Inbox-Agent:** verarbeitet die Inbox über MCP-Werkzeuge, schlägt Ablage, Tags und
-  Querverbindungen vor.
+  Querverbindungen vor. Die Werkzeuge dafür gibt es: lesen, taggen
+  (`vault_set_frontmatter`) und ablegen (`vault_move`).
 - **Zunder-Brücke:** markierte Checkboxen → Zunder-Aufgaben, mit Rücklink zur Notiz.
 - **Kalender-Brücke:** Termine sichtbar im Cockpit; Meeting-Notizen nur optional.
 - **Timing-Anreicherung:** Zeiten und erledigte Deep-Work-Blöcke in Tages- bzw. Wochennotiz.
+  Stand (VCP-52): Wochennotiz umgesetzt (`src/cockpit/flammen-notiz.js`). Die Flammen der
+  Woche stehen mit geplantem Tag, gemessenen Minuten und Status in einem markierten,
+  generierten Bereich unter „## Flammen“ der Feuer-Notiz, nach Start/Stopp im Cockpit und
+  im Reindex-Intervall, abschaltbar in den Einstellungen. Offen: Tagesnotizen und
+  Deep-Work-Blöcke ohne Flammen-Markierung.
 - **Semantische Suche** über den Vault.
 - **Graph:** Wikilinks plus semantische Kanten („ähnlich, aber nicht verlinkt“,
   gestrichelt), Aufgaben und Termine als eigene Knotentypen.
@@ -93,7 +99,10 @@ Obsidian selbst zu ersetzen ist kein Ziel — Editor und Apps sind der teure Tei
   immer in die Zunder-Inbox (das Cockpit speichert keine), Funke schickt Notizen
   an `/funke` statt an einen eigenen Relay, Aufgaben weiter direkt an Zunder.
 - **Timing-Anreicherung:** Zunder misst Deep-Work-Blöcke bereits mit Timing — Daten dort
-  abholen, nicht doppelt erfassen.
+  abholen, nicht doppelt erfassen. Umgesetzt so: Die Tabelle in der Feuer-Notiz entsteht
+  bei jedem Lauf neu aus Zunder (`filter_tasks` der Phönix-Woche), das Cockpit speichert
+  keine Zeiten. Zunder kennt keine geplante Dauer, „geplant“ ist deshalb der geplante Tag;
+  gemessen wird je Flamme der letzte Block (Start bis Ende).
 - **Semantische Suche und Graph:** Es gibt bereits eine Hybrid-Suche mit Graph in den
   Vault-Werkzeugen (`mycel.py` in vault-skills). Geklärt am 13.10.2026: `mycel.py` hat
   keinen eigenen Index, es rechnet BM25 pro Aufruf über `wiki/` neu und leiht sich die

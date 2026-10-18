@@ -2,6 +2,7 @@ import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod';
 import { readNote, MAX_RESULT_CHARS } from './read.js';
 import { hybridSearch } from '../semantic/search.js';
+import { moveNote } from './move.js';
 
 const ok = (data) => ({
   content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
@@ -30,6 +31,7 @@ export function createVaultMcpHandler({
   index,
   capture,
   editor,
+  policy,
   sync = null,
   semantic: semanticOrGetter = null,
   graph = null,
@@ -294,7 +296,7 @@ export function createVaultMcpHandler({
     );
 
     /** Gemeinsamer Rahmen der Bearbeitungswerkzeuge: Scope prüfen, Fehler verständlich melden. */
-    const edit = (run) => async (args) => {
+    const edit = (run, failure = 'Die Notiz wurde nicht geändert') => async (args) => {
       if (!scopes.includes('vault:edit')) return fail(EDIT_SCOPE_MISSING);
       try {
         return ok(run(args));
@@ -302,7 +304,7 @@ export function createVaultMcpHandler({
         const message = err.code === 'EROFS' || err.code === 'EACCES'
           ? 'der Vault ist auf dem Server schreibgeschützt eingebunden'
           : err.message;
-        return fail(`Die Notiz wurde nicht geändert: ${message}`);
+        return fail(`${failure}: ${message}`);
       }
     };
 
@@ -363,6 +365,29 @@ export function createVaultMcpHandler({
         annotations: EDITS,
       },
       edit((args) => editor.setFrontmatter({ path: args.path, set: args.set })),
+    );
+
+    server.registerTool(
+      'vault_move',
+      {
+        title: 'Notiz in einen Ordner verschieben',
+        description:
+          'Verschiebt eine bestehende Notiz in einen anderen Ordner, auf Wunsch unter neuem Dateinamen. ' +
+          `Gedacht vor allem zum Aufräumen des Posteingangs (${captureFolder}/): Notiz mit vault_read lesen, passenden Ordner mit ` +
+          'vault_list oder vault_search finden, dann ablegen, z.B. "inbox/2026-10-18 - Idee.md" nach "projects/Alpha" oder ' +
+          '"areas/Haushalt" (mit name z.B. "Idee Wärmepumpe"). Bestehende Ordner bevorzugen; ein fehlender wird angelegt (new_folder: true). ' +
+          'Eine vorhandene Notiz am Ziel wird nie überschrieben. Vertrauliche und ausgeschlossene Ordner sind als Quelle und Ziel gesperrt, ' +
+          'Readwise-Importe ebenso. Die Antwort nennt alten und neuen Pfad und in links_to_update die Notizen, deren Wikilinks danach ' +
+          'ins Leere zeigen (Links per Pfad wie [[inbox/Idee]] und beim Umbenennen auch per Name); die Links mit vault_edit anpassen.',
+        inputSchema: {
+          path: z.string().describe('Pfad der Notiz relativ zur Vault-Wurzel, z.B. "inbox/2026-10-18 - Idee.md".'),
+          folder: z.string().describe('Zielordner relativ zur Vault-Wurzel, ohne Dateinamen, z.B. "projects/Alpha" oder "wiki/concepts".'),
+          name: z.string().optional()
+            .describe('Neuer Dateiname, z.B. "Idee Wärmepumpe"; ".md" wird ergänzt. Ohne Angabe bleibt der Dateiname.'),
+        },
+        annotations: EDITS,
+      },
+      edit((args) => moveNote({ index, editor, policy }, { path: args.path, folder: args.folder, name: args.name ?? null }), 'Die Notiz wurde nicht verschoben'),
     );
 
     return server;

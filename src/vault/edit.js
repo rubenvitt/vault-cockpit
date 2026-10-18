@@ -77,18 +77,19 @@ export function createEditor({ vaultPath, index }) {
 
   return {
     /**
-     * Verschiebt eine Notiz in einen anderen Ordner (gleicher Dateiname). Ob
-     * der Zielordner erlaubt ist (Policy), prüft der Aufrufer; hier geht es um
-     * Pfad-Sicherheit: kein `..`, nichts außerhalb des Vaults, nichts
-     * überschreiben.
+     * Verschiebt eine Notiz in einen anderen Ordner, mit `name` auch unter
+     * neuem Dateinamen. Ob der Zielordner erlaubt ist (Policy), prüft der
+     * Aufrufer; hier geht es um Pfad-Sicherheit: kein `..`, nichts außerhalb
+     * des Vaults, nichts überschreiben.
      */
-    move({ path, folder }) {
+    move({ path, folder, name: rename = null }) {
       const { relPath, absolute } = resolveTarget(path);
+      const before = readFileSync(absolute, 'utf8');
       const target = String(folder ?? '').replace(/^\/+|\/+$/g, '');
       if (!target || target.split('/').some((p) => !p.trim() || p === '.' || p === '..' || p.startsWith('.')) || CTRL_OR_NEWLINE.test(target) || target.includes('\\')) {
         throw new Error(`„${folder}“ ist kein gültiger Ordner`);
       }
-      const name = relPath.split('/').pop();
+      const name = rename == null ? relPath.split('/').pop() : noteFileName(rename);
       const to = `${target}/${name}`;
       if (to === relPath) return { path: relPath, from: relPath, changed: false };
       const destination = join(vaultPath, to);
@@ -99,6 +100,10 @@ export function createEditor({ vaultPath, index }) {
       while (!existsSync(existing)) existing = dirname(existing);
       const real = realpathSync(existing);
       if (real !== vaultReal && !real.startsWith(vaultReal + sep)) throw new Error(`„${target}“ zeigt aus dem Vault heraus`);
+      // Wie bei modify: Hat der Sync die Notiz seit dem Lesen geändert, lieber abbrechen.
+      if (readFileSync(absolute, 'utf8') !== before) {
+        throw new Error(`"${relPath}" wurde gerade anderweitig geändert. Bitte neu lesen und erneut versuchen.`);
+      }
       mkdirSync(dirname(destination), { recursive: true });
       renameSync(absolute, destination);
       reindex([relPath, to]);
@@ -294,6 +299,26 @@ export function createEditor({ vaultPath, index }) {
       });
     },
   };
+}
+
+// Was Obsidian im Dateinamen nicht zulässt oder was Wikilinks bricht.
+const BAD_FILENAME = /[\\/:*?"<>|#^[\]]/;
+
+/**
+ * Dateiname für eine umbenannte Notiz: `.md` wird ergänzt, wenn es fehlt;
+ * ungültige Namen werden abgelehnt.
+ */
+export function noteFileName(raw) {
+  const name = String(raw ?? '').trim();
+  const file = /\.md$/i.test(name) ? name : `${name}.md`;
+  const stem = file.slice(0, -3);
+  if (!stem.trim() || stem.length > 200 || stem.startsWith('.') || /[\s.]$/.test(stem) || BAD_FILENAME.test(stem) || CTRL_OR_NEWLINE.test(stem)) {
+    throw new Error(
+      `„${raw ?? ''}“ ist kein gültiger Dateiname. Nicht erlaubt sind / \\ : * ? " < > | # ^ [ ], Zeilenumbrüche, ` +
+        'ein Punkt am Anfang sowie Punkt oder Leerzeichen am Ende; höchstens 200 Zeichen.',
+    );
+  }
+  return file;
 }
 
 /** Index der ersten Zeile nach dem Frontmatter, 0 wenn es keins gibt. */

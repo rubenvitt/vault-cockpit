@@ -25,6 +25,7 @@ Alle Lesewerkzeuge verlangen den Scope `vault:read`.
 | `vault_edit` | Exakte Textstelle in einer Notiz ersetzen oder löschen (Scope `vault:edit`) |
 | `vault_append` | Text am Notizende oder unter einer Überschrift anhängen (Scope `vault:edit`) |
 | `vault_set_frontmatter` | Einzelne Frontmatter-Felder setzen oder entfernen (Scope `vault:edit`) |
+| `vault_move` | Notiz in einen Ordner verschieben, optional umbenennen, etwa zum Leeren der Inbox; nie in oder aus vertraulichen Ordnern, nennt Links, die danach ins Leere zeigen (Scope `vault:edit`) |
 
 ## Betrieb
 
@@ -235,7 +236,8 @@ Einrichtung:
    App-Passwort; optional nur bestimmte Kalender). Daneben Zeitzone, Vault-Name
    für „In Obsidian öffnen“ und der Inbox-Ordner.
 
-   Außerdem: Zunder-Zugang, Zunder-Brücke (an/aus, Tag), Mail-Abruf (Fastmail-Token,
+   Außerdem: Zunder-Zugang, Zunder-Brücke (an/aus, Tag), Flammen in der Feuer-Notiz
+   (an/aus), Mail-Abruf (Fastmail-Token,
    freigegebene Absender, Ordner, Abstand), Embeddings (Ollama-Adresse, Modell)
    und unter **API-Tokens** die Tokens für Suche und Capture.
 
@@ -279,6 +281,22 @@ unter `/rueckblick` (in der Navigation, `?woche=` für frühere Wochen) zeigt je
 Bereich, was erledigt war und was geplant war (Phönix-Schritte und in der Woche
 Fälliges), was außerdem erledigt wurde, die Flammen-Zeit der Woche und was offen
 blieb.
+
+**Flammen in der Feuer-Notiz:** Das Cockpit trägt die Flammen der Woche aus
+Zunder in den Abschnitt „## Flammen“ der Feuer-Notiz ein (Tag, Flamme mit Link,
+geplanter Tag aus der Fälligkeit, gemessene Minuten, Status), damit Obsidian
+und Claude über MCP die Zahlen sehen. Das passiert nach Start oder Stopp einer
+Flamme im Cockpit und im Reindex-Intervall (laufende und vorige Woche, also
+auch für Flammen, die in Zunder oder per MCP gestoppt wurden). Geschrieben wird
+nur zwischen den Markern `<!-- cockpit:flammen:start … -->` und
+`<!-- cockpit:flammen:ende … -->` und nur, wenn sich etwas geändert hat. Fehlen
+die Marker, kommen sie ans Ende des Abschnitts; was dort schon steht, bleibt.
+Der Endmarker trägt eine Prüfsumme: Wer im Bereich von Hand schreibt, hält das
+Cockpit davon ab, ihn zu überschreiben (zum Neuschreiben den Bereich zwischen
+den Markern leeren). Ändert der Sync die Notiz gleichzeitig, bricht der
+Schreibvorgang ab und der nächste Lauf versucht es wieder. Ohne Feuer-Notiz der
+Woche legt das Cockpit keine an, in vertraulichen Ordnern schreibt es nicht.
+Abschalten unter **Einstellungen → Feuer-Notiz**.
 Oben auf der Seite liegt eine
 **Schnelleingabe** mit derselben Logik wie `/capture`: Text wird eine Notiz im
 Inbox-Ordner, mit `!` vorne eine Aufgabe in der Zunder-Inbox. `/` oder `n` springt
@@ -356,7 +374,7 @@ npm ci && npm test
 - `src/http/` — HTTP-Schicht, Protected Resource Metadata, Host-Prüfung
 - `src/sync/` — Sync-Adapter: Dateibeobachtung, inkrementeller Reindex, Sync-Status
 - `src/capture/` — Capture von außen: Endpunkte, Mail-Abruf, Zunder-Weiterleitung und -Brücke
-- `src/cockpit/` — Wochenmodell: ISO-Wochen, Feuer-Notiz, Kalender (iCal mit Serienauflösung, CalDAV), Einstellungen, Zusammenstellung aus Zunder
+- `src/cockpit/` — Wochenmodell: ISO-Wochen, Feuer-Notiz (mit Flammen aus Zunder), Kalender (iCal mit Serienauflösung, CalDAV), Einstellungen, Zusammenstellung aus Zunder
 - `src/semantic/` — Embeddings (Ollama), Abschnitte, Vektorspeicher, hybride Suche
 - `src/search/` — lesender Such-Endpunkt `/api/search` mit eigenem Token
 - `src/graph/` — Graph um eine Notiz mit Aufgaben- und Termin-Knoten

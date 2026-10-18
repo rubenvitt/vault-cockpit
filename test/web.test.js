@@ -1154,3 +1154,16 @@ test('Kurzbefehle: in den Einstellungen verlinkt, nur angemeldet zu laden', asyn
     { shortcuts },
   );
 });
+
+test('Einstellungen: Flammen in der Feuer-Notiz abschalten (VCP-52)', async () => {
+  await withServer(async ({ call, login, settings }) => {
+    await login();
+    const html = await (await call('/einstellungen')).text();
+    assert.match(html, /<section id="feuer-notiz">[^]*<select name="flameNote\.enabled">[^]*Standard \(an\)/);
+    assert.equal(settings.get().flameNote.enabled, true);
+    await call('/einstellungen', { method: 'POST', form: { 'flameNote.enabled': 'aus', csrf: csrfFrom(html) } });
+    assert.equal(settings.stored().flameNote.enabled, false);
+    assert.equal(settings.get().flameNote.enabled, false);
+    assert.match(await (await call('/einstellungen')).text(), /<option value="aus" selected>aus<\/option>\s*<\/select><\/label>\s*<\/div>\s*<\/section>\s*<section id="mail">/);
+  });
+});
