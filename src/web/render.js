@@ -1,6 +1,7 @@
 import { localTime, zonedParts } from '../cockpit/week.js';
 import { DEFAULT_HIDDEN_EVENTS } from '../cockpit/settings.js';
 import { esc, head, appHeader, icon } from './layout.js';
+import { backupSection, backupHint } from './backup-render.js';
 
 export { esc };
 
@@ -534,7 +535,7 @@ function shortcutSection(shortcuts, captureEnabled) {
  * zurückgegeben: Ein leeres Feld behält den gespeicherten Wert. Links eine
  * Sprungleiste mit dem Stand jedes Abschnitts, auf dem iPhone oben als Leiste.
  */
-export function renderSettings({ stored, defaults, checks = {}, notice = null, error = null, tokens = null, created = null, shortcuts = [], captureEnabled = false, tz = 'Europe/Berlin', user = null, csrf = '' }) {
+export function renderSettings({ stored, defaults, checks = {}, notice = null, error = null, tokens = null, created = null, shortcuts = [], captureEnabled = false, tz = 'Europe/Berlin', user = null, csrf = '', backup = null }) {
   const d = defaults;
   const token = `<input type="hidden" name="csrf" value="${esc(csrf)}">`;
   const zunder = stored.zunder.url && stored.zunder.token
@@ -566,6 +567,7 @@ export function renderSettings({ stored, defaults, checks = {}, notice = null, e
     ['anzeige', 'Anzeige', null],
     ...(tokens ? [['tokens', 'API-Tokens', null]] : []),
     ...(shortcuts.length ? [['kurzbefehle', 'Kurzbefehle', null]] : []),
+    ...(backup ? [['sicherung', 'Sicherung', null]] : []),
   ];
   const head2 = (title, state) => `<h2>${title}${state ? ` ${pill(state[0], state[1])}` : ''}</h2>`;
   return `<!doctype html>
@@ -581,6 +583,7 @@ ${appHeader({ current: 'einstellungen', user })}
 <div class="settings-body">
 ${notice ? `<p class="notice">${esc(notice)}</p>` : ''}
 ${error ? `<p class="problem">${esc(error)}</p>` : ''}
+${backupHint(backup)}
 <form method="post" action="/einstellungen">${token}
 <button type="submit" class="sr-only" tabindex="-1" aria-hidden="true">Speichern</button>
 <input type="hidden" name="cal.auth" value="1">
@@ -653,6 +656,7 @@ ${error ? `<p class="problem">${esc(error)}</p>` : ''}
 </form>
 ${tokens ? tokenSection(tokens, created, tz, token) : ''}
 ${shortcuts.length ? shortcutSection(shortcuts, captureEnabled) : ''}
+${backup ? backupSection(backup, token) : ''}
 </div>
 </main>
 </body>

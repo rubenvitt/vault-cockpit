@@ -78,6 +78,55 @@ Einstellungen leer ist; die Einstellungsseite zeigt dann „aus der Umgebung“.
 Einstellungen eingetragen (und die Kurzbefehle mit einem neuen Capture-Token
 importiert), können die Variablen aus dem Deployment raus.
 
+### Sicherung von `/data`
+
+Unter `/data` liegen zwei Sorten Dateien. `index.db` und `vectors.db` baut das
+Cockpit beim Start selbst neu auf (die Vektoren dauern auf der CPU eine Weile).
+Die übrigen lassen sich nicht neu bauen, ohne sie ist alles neu einzurichten:
+
+| Datei | Inhalt |
+|---|---|
+| `cockpit-settings.json` | alle Einstellungen: Kalender mit Adressen und Passwörtern, Zunder-Zugang, Brücke, Mail-Token, Embeddings, Anzeige |
+| `api-tokens.json` | API-Tokens für Kurzbefehle, Funke und Suche (nur Hashes; fehlen sie, müssen alle Kurzbefehle neue Tokens bekommen) |
+| `capture-state.json` | Merkzettel von Capture und Brücke (keine doppelten Aufgaben, zuletzt gesehene Checkbox-Stände) |
+| `session-secret` | Secret des Sitzungs-Cookies (bei gesetztem `SESSION_SECRET` ohne Bedeutung) |
+
+Die Obsidian-Anmeldung des Sync-Sidecars liegt nicht hier, sondern in
+`./sync-config`; fehlt sie, einmal neu anmelden (siehe [Sync](#sync)).
+
+**Am einfachsten** sichert der Host das Verzeichnis `./data` mit seinem
+Backup-Job (restic, Kopia, Snapshots des Volumes). Wiederherstellen heißt dann:
+Dateien zurückkopieren, `chown 1000:1000`, Container starten.
+
+**Ohne Host-Backup** gibt es die Sicherung im Cockpit: **Einstellungen →
+Sicherung**, eine Passphrase mit mindestens 12 Zeichen zweimal eingeben,
+„Sicherung herunterladen“. Die Datei `cockpit-sicherung-JJJJ-MM-TT.json` enthält
+die vier Dateien oben, verschlüsselt mit AES-256-GCM und einem Schlüssel aus der
+Passphrase (scrypt, N = 2^17, r = 8, p = 1, zufälliges Salt). Im Klartext stehen
+nur Format, Version, Zeitpunkt und die Parameter; eine Änderung daran fällt beim
+Öffnen auf. Ohne die Passphrase ist die Datei wertlos, also beides getrennt
+aufbewahren (Passphrase im Passwortmanager). Die Sicherung ist ein Schnappschuss:
+nach neuen Kalendern oder Tokens eine neue ziehen.
+
+Nach einem Verlust von `/data`:
+
+1. Leeres `data` anlegen und uid 1000 geben (wie bei der Einrichtung). `.env`,
+   Policy und Pocket ID bleiben, wie sie sind.
+2. `docker compose up -d`, im Web-Cockpit anmelden. Das Cockpit ist jetzt
+   **leer**: keine Einstellungen gespeichert, keine API-Tokens. Die
+   Einstellungsseite weist dann auf die Sicherung hin.
+3. **Einstellungen → Sicherung → Wiederherstellen**: Datei wählen, Passphrase
+   eingeben. In ein leeres Cockpit geht das direkt; ist schon etwas eingestellt,
+   nur mit dem Haken „Vorhandenes ersetzen“. Erst wird die ganze Sicherung
+   geprüft, dann jede Datei atomar und nur für den Dienst lesbar geschrieben;
+   was die Sicherung nicht enthält, bleibt liegen.
+4. Das Cockpit fährt danach herunter und wird von Docker neu gestartet
+   (`restart: unless-stopped` wie in `docker-compose.example.yml`; ohne diese
+   Regel den Container von Hand starten). Weil das Sitzungs-Secret aus der
+   Sicherung kommt, gilt die Anmeldung nicht mehr: neu anmelden. Kalender,
+   Zunder, Mail, Brücke und Kurzbefehle laufen mit dem alten Stand weiter,
+   Index und Vektoren baut das Cockpit im Hintergrund neu auf.
+
 ### Sync
 
 Den Vault-Ordner hält der Sidecar `vault-sync` aktuell: [Obsidian Headless](https://www.npmjs.com/package/obsidian-headless)
@@ -251,6 +300,7 @@ Gespeichert wird in `/data/cockpit-settings.json` (nur für den Dienst lesbar).
 Passwörter, Tokens und Kalenderadressen zeigt die Seite nie wieder an; ein leeres
 Feld behält den gespeicherten Wert. Das Secret für das Sitzungs-Cookie liegt in
 `/data/session-secret` und entsteht beim ersten Start (alternativ `SESSION_SECRET`).
+Wie man diese Dateien sichert und wiederherstellt: [Sicherung von `/data`](#sicherung-von-data).
 
 **Handeln statt nur schauen:** Aufgaben in Flammen, Big Rocks, Aufgaben und
 Zunder-Inbox hakt man direkt ab (Zunder-Status `done`, ein zweiter Klick öffnet

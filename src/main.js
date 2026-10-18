@@ -20,6 +20,7 @@ import { createCockpit } from './cockpit/data.js';
 import { createCalendarSources, calendarForGraph } from './cockpit/calendars.js';
 import { createSettingsStore, loadOrCreateSecret } from './cockpit/settings.js';
 import { createTokenStore } from './cockpit/tokens.js';
+import { createBackup } from './cockpit/backup.js';
 import { createOidcLogin } from './web/oidc.js';
 import { createWebHttp } from './web/http.js';
 import { loadShortcuts } from './web/shortcuts.js';
@@ -276,6 +277,21 @@ const webHttp = process.env.WEB_CLIENT_ID
       }),
       // Ohne SESSION_SECRET erzeugt der Dienst eins und legt es unter /data ab.
       sessionSecret: loadOrCreateSecret(process.env.SESSION_SECRET_FILE ?? '/data/session-secret', process.env.SESSION_SECRET || null),
+      // Sicherung der Dateien unter /data (Einstellungen → Sicherung). Nach dem
+      // Wiederherstellen fährt der Dienst herunter, Docker startet ihn neu
+      // (`restart: unless-stopped`), und alle Teile lesen den neuen Stand.
+      backup: createBackup({
+        dir: dirname(COCKPIT_SETTINGS_FILE),
+        paths: {
+          'cockpit-settings.json': COCKPIT_SETTINGS_FILE,
+          'capture-state.json': process.env.CAPTURE_STATE_FILE ?? '/data/capture-state.json',
+          'session-secret': process.env.SESSION_SECRET_FILE ?? '/data/session-secret',
+        },
+      }),
+      restart: () => {
+        setTimeout(() => process.exit(0), 5000).unref();
+        process.kill(process.pid, 'SIGTERM');
+      },
       publicUrl: PUBLIC_URL,
       allowedSubjects: ALLOWED_SUBJECTS,
     })
