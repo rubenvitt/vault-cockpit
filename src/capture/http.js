@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { CaptureError } from './router.js';
+import { placement } from './syntax.js';
 
 const HTTP_SOURCES = ['api', 'ios-kurzbefehl', 'sprachmemo'];
 const FUNKE_PREFIX = /^\d{4}-\d{2}-\d{2} \d{4}(?: |$)/;
@@ -26,7 +27,11 @@ const sha256 = (s) => createHash('sha256').update(s).digest();
  *   landet immer im Capture-Ordner.
  */
 function successMessage(result) {
-  if (result.kind === 'task') return `Aufgabe ${result.ref ?? result.id} liegt in der Zunder-Inbox.`;
+  // Nennt Ziel und Fälligkeit und, was nicht erkannt wurde, damit der Kurzbefehl es anzeigt.
+  if (result.kind === 'task') {
+    const where = `Aufgabe ${result.ref ?? result.id} ${placement(result)}`;
+    return [where.endsWith('.') ? where : `${where}.`, ...(result.notes ?? [])].join(' ');
+  }
   return `Notiz angelegt: ${result.path}`;
 }
 

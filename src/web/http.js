@@ -15,6 +15,7 @@ import { ActionError, SETTABLE } from '../cockpit/actions.js';
 import { BackupError, MAX_BACKUP } from '../cockpit/backup.js';
 import { readMultipart, FormError } from './multipart.js';
 import { restoredMessage } from './backup-render.js';
+import { placement } from '../capture/syntax.js';
 
 const staticFile = (name, enc) => readFileSync(new URL(`./static/${name}`, import.meta.url), enc);
 const CLIENT_JS = staticFile('cockpit.js', 'utf8');
@@ -124,7 +125,7 @@ const HTML_HEADERS = {
  *   hakt eine Checkbox ab (Vorschau unter `GET /notiz?pfad=…`),
  *   `POST /aktion/verlinken` hängt einen Wikilink zu einer ähnlichen Notiz an,
  *   `POST /aktion/erfassen` ist die Schnelleingabe (Notiz, mit `!` eine
- *   Zunder-Aufgabe). Alle brauchen Sitzung, gleiche Herkunft und das CSRF-Token
+ *   Zunder-Aufgabe; `GET /api/erfassen/vorschau?text=…` zeigt vorher, wo sie landet). Alle brauchen Sitzung, gleiche Herkunft und das CSRF-Token
  *   der Sitzung. Mit `Accept: application/json` antworten sie mit JSON (für
  *   `/static/cockpit.js`), sonst mit einer Weiterleitung und einer Meldung.
  *   Ist die Sitzung abgelaufen, geht es über den Login zurück, ein Text aus
@@ -320,7 +321,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     return `Flamme gestoppt: ${taskName(t)}${minutes != null ? ` · ${minutes} min` : ''}${failed}`;
   };
   const captureMessage = (r) => {
-    if (r.kind === 'task') return `${r.duplicate ? 'Schon erfasst' : 'Aufgabe angelegt'}: ${r.ref ?? 'neue Aufgabe'} liegt in der Zunder-Inbox`;
+    if (r.kind === 'task') return `${r.duplicate ? 'Schon erfasst' : 'Aufgabe angelegt'}: ${r.ref ?? 'neue Aufgabe'} ${placement(r)}${r.notes?.length ? ` · ${r.notes.join(' ')}` : ''}`;
     return `${r.duplicate ? 'Schon erfasst' : 'Notiz angelegt'}: ${r.path}`;
   };
 
@@ -688,6 +689,16 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     return json(res, 200, { query: q, results, total: r.total, degraded: r.degraded ?? null });
   }
 
+  /** Vorschau der Schnelleingabe („Aufgabe · morgen · Gesundheit“), dieselbe Logik wie beim Anlegen. */
+  async function capturePreviewApi(req, res, url) {
+    try {
+      return json(res, 200, await actions.previewCapture(url.searchParams.get('text') ?? ''));
+    } catch (err) {
+      if (!(err instanceof ActionError)) throw err;
+      return json(res, err.status, { error: 'preview_failed', message: err.message });
+    }
+  }
+
   async function graphApi(req, res, url) {
     const g = graph ? await graph.around(url.searchParams.get('pfad') ?? '') : null;
     if (!g) return json(res, 404, { error: 'not_found', error_description: 'Notiz nicht im Index' });
@@ -698,7 +709,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   const BACKUP_ROUTES = backup ? { '/einstellungen/sicherung': downloadBackup, '/einstellungen/sicherung/wiederherstellen': restoreBackup } : {};
   const ACTION_ROUTES = new Set(Object.keys(ACTIONS));
   const SHORTCUT_ROUTES = new Map(shortcuts.map((s) => [`/kurzbefehle/${s.slug}.shortcut`, s]));
-  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...PUBLIC.keys(), '/', '/api/woche', '/api/suche', '/rueckblick', ...(notes ? ['/notiz'] : []), ...(plan ? ['/planen'] : []), '/graph', '/api/graph', '/einstellungen', ...(tokens ? Object.keys(TOKEN_ROUTES) : []), ...Object.keys(BACKUP_ROUTES), '/einstellungen/abmelden', '/login', '/auth/callback', '/logout']);
+  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...PUBLIC.keys(), '/', '/api/woche', '/api/suche', ...(actions ? ['/api/erfassen/vorschau'] : []), '/rueckblick', ...(notes ? ['/notiz'] : []), ...(plan ? ['/planen'] : []), '/graph', '/api/graph', '/einstellungen', ...(tokens ? Object.keys(TOKEN_ROUTES) : []), ...Object.keys(BACKUP_ROUTES), '/einstellungen/abmelden', '/login', '/auth/callback', '/logout']);
 
   return {
     matches: (path) => ROUTES.has(path),
@@ -782,6 +793,10 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       if (path === '/api/suche') {
         if (!session) return json(res, 401, { error: 'unauthorized', error_description: 'Anmeldung unter /login nötig' });
         return searchApi(req, res, url);
+      }
+      if (path === '/api/erfassen/vorschau') {
+        if (!session) return json(res, 401, { error: 'unauthorized', error_description: 'Anmeldung unter /login nötig' });
+        return capturePreviewApi(req, res, url);
       }
       if (!session) return redirect(res, `/login?next=${encodeURIComponent(url.pathname + url.search)}`);
       if (path === '/graph') return graphPage(req, res, url, session);

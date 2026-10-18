@@ -630,7 +630,17 @@ function fakeActions() {
         fail = null;
         throw e;
       }
+      if (text.includes('#gesundheit')) {
+        return { kind: 'task', id: 'z8', ref: 'ZUN-8', url: 'https://zunder.test/#/aufgabe/z8', title: 'Zahnarzt anrufen', due: '2026-10-15', dueLabel: 'morgen', location: { kind: 'area', id: 'a1', name: 'Gesundheit' }, phoenix: null, notes: [] };
+      }
+      if (text.includes('#weiter')) {
+        return { kind: 'task', id: 'z7', ref: 'ZUN-7', url: 'https://zunder.test/#/aufgabe/z7', title: 'Kurs #weiter', due: null, dueLabel: '', location: { kind: 'inbox' }, phoenix: null, notes: ['#weiter passt zu mehreren Zielen (A, B).'] };
+      }
       return text.startsWith('!') ? { kind: 'task', id: 'z9', ref: 'ZUN-9', url: 'https://zunder.test/#/aufgabe/z9' } : { kind: 'note', path: 'inbox/2026-10-14 0900 - Idee.md' };
+    },
+    async previewCapture(text) {
+      calls.push(['preview', text]);
+      return text.startsWith('!') ? { kind: 'task', title: 'Zahnarzt anrufen', summary: 'Aufgabe · morgen · Gesundheit', notes: [] } : { kind: 'note', summary: 'Notiz' };
     },
   };
 }
@@ -826,6 +836,37 @@ test('Fälligkeit verschieben: JSON mit Rückgängig, ohne JavaScript per Weiter
     {},
     { actions },
   );
+});
+
+test('Schnelleingabe: Meldung nennt Ziel und Fälligkeit, Vorschau nur angemeldet', async () => {
+  const actions = fakeActions();
+  await withServer(
+    async ({ call, login }) => {
+      assert.equal((await call('/api/erfassen/vorschau?text=!x')).status, 401);
+      await login();
+      const html = await (await call('/')).text();
+      assert.match(html, /<p class="capture-preview" data-capture-preview aria-live="polite" hidden><\/p>/);
+      const csrf = csrfFrom(html);
+
+      const placed = await call('/aktion/erfassen', { method: 'POST', form: { text: '!Zahnarzt anrufen morgen #gesundheit', csrf }, accept: 'application/json' });
+      assert.equal((await placed.json()).message, 'Aufgabe angelegt: ZUN-8 liegt in Gesundheit, fällig morgen');
+      const amb = await call('/aktion/erfassen', { method: 'POST', form: { text: '!Kurs #weiter', csrf }, accept: 'application/json' });
+      assert.equal((await amb.json()).message, 'Aufgabe angelegt: ZUN-7 liegt in der Zunder-Inbox · #weiter passt zu mehreren Zielen (A, B).');
+
+      const res = await call(`/api/erfassen/vorschau?text=${encodeURIComponent('!Zahnarzt anrufen morgen #gesundheit')}`);
+      assert.equal(res.status, 200);
+      assert.equal((await res.json()).summary, 'Aufgabe · morgen · Gesundheit');
+      assert.deepEqual(actions.calls.at(-1), ['preview', '!Zahnarzt anrufen morgen #gesundheit']);
+      assert.equal((await call('/api/erfassen/vorschau?text=x', { method: 'POST' })).status, 405);
+    },
+    {},
+    { actions },
+  );
+  // Ohne Aktionen gibt es die Vorschau nicht.
+  await withServer(async ({ call, login }) => {
+    await login();
+    assert.equal((await call('/api/erfassen/vorschau?text=!x')).status, 404);
+  });
 });
 
 test('Zunder-Inbox: Zuordnen, Phönix-Schritt und Verwerfen im Menü', async () => {
