@@ -24,6 +24,7 @@ import { createOidcLogin } from './web/oidc.js';
 import { createWebHttp } from './web/http.js';
 import { loadShortcuts } from './web/shortcuts.js';
 import { createCockpitActions } from './cockpit/actions.js';
+import { createWeekPlanner } from './cockpit/plan.js';
 import { createNoteDesk } from './cockpit/notes.js';
 import { createOllamaEmbedder } from './semantic/embedder.js';
 import { createSemanticIndex } from './semantic/index.js';
@@ -258,6 +259,8 @@ const webHttp = process.env.WEB_CLIENT_ID
         zunder,
         index,
       }),
+      // Woche planen: Zunder-Aufgaben holen, Flammen einplanen (VCP-47).
+      plan: createWeekPlanner({ settings: cockpitSettings, zunder }),
       // Vault-Notizen ansehen und verarbeiten, über denselben Editor wie vault_edit.
       notes: createNoteDesk({ index, editor, policy: POLICY, settings: cockpitSettings }),
       settings: cockpitSettings,

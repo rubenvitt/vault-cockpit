@@ -279,6 +279,20 @@ unter `/rueckblick` (in der Navigation, `?woche=` für frühere Wochen) zeigt je
 Bereich, was erledigt war und was geplant war (Phönix-Schritte und in der Woche
 Fälliges), was außerdem erledigt wurde, die Flammen-Zeit der Woche und was offen
 blieb.
+
+**Woche planen** (`/planen?woche=…`, verlinkt als „Woche planen“ bei den Big
+Rocks und „Einplanen“ bei den Flammen): Zunder-Aufgaben per Volltext oder
+Kennung (`VCP-47`) suchen, nach Bereich filtern oder alle offenen eines Bereichs
+auflisten, Dev-Projekte bleiben außen vor. **Holen** macht eine Aufgabe zum
+Phönix-Schritt der Woche oder setzt ihre Fälligkeit auf einen Tag der Woche;
+danach steht sie unter ihrem Bereich in den Big Rocks. Je Bereich der Big Rocks
+zeigt die Seite bis zu fünf offene Aufgaben ohne Termin zum Übernehmen.
+**Flamme einplanen** legt eine Zunder-Aufgabe mit Rolle `flamme` für die Woche
+an, fällig am gewählten Tag (optional mit Uhrzeit), in einem Bereich oder über
+„Als Flamme“ als Unteraufgabe einer bestehenden Aufgabe. **Aus der Woche**
+entfernt die Phönix-Markierung (auch im Menü einer Flamme im Wochenblick). Jede
+dieser Aktionen bietet „Rückgängig“; eine neu eingeplante Flamme wird dabei
+verworfen. Alles sind Formulare, ohne JavaScript mit Weiterleitung.
 Oben auf der Seite liegt eine
 **Schnelleingabe** mit derselben Logik wie `/capture`: Text wird eine Notiz im
 Inbox-Ordner, mit `!` vorne eine Aufgabe in der Zunder-Inbox. `/` oder `n` springt

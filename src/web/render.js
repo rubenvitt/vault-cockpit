@@ -102,7 +102,7 @@ function taskMenu(t, ctx, { inbox = false } = {}) {
   const week = ctx.week;
   const phoenix =
     t.phoenix === 'flamme' || !week
-      ? ''
+      ? flameOut(t, ctx)
       : `${formHead(ctx, '/aktion/phoenix', { id: t.id, prev: step })}
           <p class="menu-label">Phönix${step ? ` <span class="hint">Schritt KW ${Number(step.slice(6))}</span>` : ''}</p>
           <div class="chips">${
@@ -130,6 +130,18 @@ function taskMenu(t, ctx, { inbox = false } = {}) {
       </div>
     </details>`;
 }
+
+/** Flammen aus der Woche nehmen (Planung, VCP-47); Rückgängig stellt die Markierung wieder her. */
+function flameOut(t, ctx) {
+  if (t.phoenix !== 'flamme' || !ctx.write?.plan) return '';
+  return `${formHead(ctx, '/aktion/woche/raus', { id: t.id })}
+          <p class="menu-label">Woche</p><div class="chips"><button type="submit" class="chip quiet">Aus der Woche nehmen</button></div>
+        </form>`;
+}
+
+/** Link zur Planungsseite der angezeigten Woche, wenn das Cockpit planen kann. */
+const planLink = (ctx, label, hash = '') =>
+  ctx.write?.plan ? ` <a href="/planen?woche=${esc(ctx.week.id)}${hash}" class="h2-link">${label}</a>` : '';
 
 /** „Zuordnen“ für Aufgaben in der Zunder-Inbox: Bereich oder Projekt wählen. */
 function assignForm(t, ctx) {
@@ -253,7 +265,7 @@ function feuerSection(model, tz, vaultName, ctx) {
 
   return `<section class="feuer">
     <div><h2>Feuer-Ziel</h2>${goal}</div>
-    <div><h2>Flammen</h2>${flames}</div>
+    <div><h2>Flammen${planLink(ctx, 'Einplanen', '#flamme')}</h2>${flames}</div>
   </section>`;
 }
 
@@ -274,7 +286,7 @@ function rocksSection(model, tz, ctx) {
       .join('')}</div>`;
     if (r.partial) body += '<p class="problem">Nicht alle Zunder-Abfragen haben geantwortet; die Liste ist unvollständig.</p>';
   }
-  return `<section><h2>Big Rocks</h2>${body}</section>`;
+  return `<section><h2>Big Rocks${planLink(ctx, 'Woche planen')}</h2>${body}</section>`;
 }
 
 function calendarSection(model, tz) {

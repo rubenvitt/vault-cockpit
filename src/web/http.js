@@ -6,6 +6,7 @@ import { versionAssets, THEME } from './layout.js';
 import { renderGraph, renderSearch, GRAPH_CSS } from './graph-render.js';
 import { renderNote, NOTE_CSS } from './note-render.js';
 import { renderReview, REVIEW_CSS } from './review-render.js';
+import { renderPlan, planRoutes, PLAN_CSS } from './plan-page.js';
 import { SettingsError, MAX_CALENDARS } from '../cockpit/settings.js';
 import { describeWeek, weekOf } from '../cockpit/week.js';
 import { ActionError, SETTABLE } from '../cockpit/actions.js';
@@ -16,7 +17,7 @@ const GRAPH_JS = staticFile('graph.js', 'utf8');
 // sigma + graphology + ForceAtlas2, gebündelt mit `npm run vendor` und eingecheckt.
 const GRAPH_LIB = staticFile('vendor/graph-lib.js', 'utf8');
 // Design-System (Tokens, Bausteine, Wochenansicht) plus die Teile der übrigen Seiten.
-const CSS = staticFile('cockpit.css', 'utf8') + GRAPH_CSS + NOTE_CSS + REVIEW_CSS;
+const CSS = staticFile('cockpit.css', 'utf8') + GRAPH_CSS + NOTE_CSS + REVIEW_CSS + PLAN_CSS;
 const hash = (s) => createHash('sha256').update(s).digest('base64url').slice(0, 10);
 const VERSION = { css: hash(CSS), js: hash(CLIENT_JS), graph: hash(GRAPH_JS), graphLib: hash(GRAPH_LIB) };
 versionAssets(VERSION);
@@ -94,6 +95,10 @@ const HTML_HEADERS = {
  *
  * - `GET /` und `GET /api/woche` — `?woche=2026-W42`, ohne Angabe die laufende Woche.
  * - `GET /rueckblick?woche=…` — Wochenrückblick (erledigt gegen geplant, Flammen-Zeit).
+ * - `GET /planen?woche=…&q=…&bereich=…&aus=…` — Woche planen (VCP-47): Zunder-Aufgaben
+ *   suchen und holen (`POST /aktion/woche/holen`), aus der Woche nehmen
+ *   (`POST /aktion/woche/raus`, Rückgängig über `/aktion/woche/zuruecksetzen`),
+ *   Flamme einplanen (`POST /aktion/woche/flamme`).
  * - `GET /graph?q=…` sucht (hybrid), `GET /graph?pfad=…` zeigt den Graphen um
  *   eine Notiz; `GET /api/graph?pfad=…` liefert ihn als JSON, `GET /api/suche?q=…`
  *   die besten Treffer für die Live-Suche. Mit JavaScript wird der Graph
@@ -123,7 +128,7 @@ const HTML_HEADERS = {
  * Die Sitzung ist ein signiertes Cookie und nur für diese Routen gültig; die
  * MCP-Schnittstelle prüft weiter ausschließlich Bearer-Tokens.
  */
-export function createWebHttp({ cockpit, settings, actions = null, notes = null, tokens = null, shortcuts = [], captureEnabled = false, calendars = null, graph = null, search = null, oidc, sessionSecret, publicUrl, allowedSubjects = [], sessionHours = 12, logger = console, now = () => Date.now() }) {
+export function createWebHttp({ cockpit, settings, actions = null, notes = null, plan = null, tokens = null, shortcuts = [], captureEnabled = false, calendars = null, graph = null, search = null, oidc, sessionSecret, publicUrl, allowedSubjects = [], sessionHours = 12, logger = console, now = () => Date.now() }) {
   const signer = createCookieSigner(sessionSecret);
   const secure = publicUrl.startsWith('https://');
 
@@ -196,7 +201,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   }
 
   /** Was die Seite zum Schreiben braucht; ohne `actions` bleibt sie lesend. */
-  const writeContext = (req) => (actions ? { csrf: csrfOf(req), captureId: randomUUID(), notes: Boolean(notes) } : null);
+  const writeContext = (req) => (actions ? { csrf: csrfOf(req), captureId: randomUUID(), notes: Boolean(notes), plan: Boolean(plan) } : null);
 
   async function page(req, res, url, session, { status = 200, flash = null, draft = null } = {}) {
     const id = url.searchParams.get('woche');
@@ -235,11 +240,21 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     return send(res, 200, renderReview(model, { user: session.name ?? session.sub }));
   }
 
+  /** Planungsseite `/planen?woche=…`: Aufgaben in die Woche holen, Flammen einplanen. */
+  async function planPage(req, res, url, session, { status = 200, flash = null } = {}) {
+    const id = url.searchParams.get('woche');
+    const p = (k) => url.searchParams.get(k) ?? '';
+    const model = await plan.view(id || null, { q: p('q'), area: p('bereich'), from: p('aus') });
+    if (!model) return send(res, 400, renderMessage('Unbekannte Woche', `„${id}“ ist keine Kalenderwoche wie 2026-W42.`, { link: { href: '/planen', label: 'Zur laufenden Woche' } }));
+    return send(res, status, renderPlan(model, { user: session.name ?? session.sub, write: writeContext(req), back: url.pathname + url.search, flash: flash ?? takeFlash(req, res) }));
+  }
+
   /** Seite hinter `back` mit Meldung (Weg ohne JavaScript, wenn eine Aktion scheitert). */
   const backPage = (req, res, back, session, opts) => {
     const url = new URL(back, publicUrl);
     // Die Graphseite rendert sich aus der Meldung im Cookie neu.
     if (url.pathname === '/graph') return redirect(res, back, [flashCookie(opts.flash)]);
+    if (url.pathname === '/planen' && plan) return planPage(req, res, url, session, opts);
     return url.pathname === '/notiz' && notes ? notePage(req, res, url, session, opts) : page(req, res, url, session, opts);
   };
   /** Nach dem Verschieben gibt es die alte Notizseite nicht mehr. */
@@ -360,6 +375,8 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
               },
             }
           : {}),
+        // Wochenplanung; leert danach einen Zwischenspeicher der Wochenansicht, falls es einen gibt.
+        ...(plan ? planRoutes(plan, { tz: () => settings.get().tz, logger, changed: () => cockpit.invalidate?.() }) : {}),
         async '/aktion/erfassen'(form) {
           const result = await actions.capture({ text: form.get('text') ?? '', captureId: form.get('cid') });
           return { message: captureMessage(result), result };
@@ -579,7 +596,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   const TOKEN_ROUTES = { '/einstellungen/tokens': createToken, '/einstellungen/tokens/widerrufen': revokeToken };
   const ACTION_ROUTES = new Set(Object.keys(ACTIONS));
   const SHORTCUT_ROUTES = new Map(shortcuts.map((s) => [`/kurzbefehle/${s.slug}.shortcut`, s]));
-  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...PUBLIC.keys(), '/', '/api/woche', '/api/suche', '/rueckblick', ...(notes ? ['/notiz'] : []), '/graph', '/api/graph', '/einstellungen', ...(tokens ? Object.keys(TOKEN_ROUTES) : []), '/login', '/auth/callback', '/logout']);
+  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...PUBLIC.keys(), '/', '/api/woche', '/api/suche', '/rueckblick', ...(notes ? ['/notiz'] : []), ...(plan ? ['/planen'] : []), '/graph', '/api/graph', '/einstellungen', ...(tokens ? Object.keys(TOKEN_ROUTES) : []), '/login', '/auth/callback', '/logout']);
 
   return {
     matches: (path) => ROUTES.has(path),
@@ -657,6 +674,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       if (path === '/graph') return graphPage(req, res, url, session);
       if (path === '/notiz') return notePage(req, res, url, session);
       if (path === '/rueckblick') return reviewPage(req, res, url, session);
+      if (path === '/planen' && plan) return planPage(req, res, url, session);
       return page(req, res, url, session);
     },
   };
