@@ -88,6 +88,26 @@ export function createZunderClient({ url, token, fetch = globalThis.fetch, timeo
       return callTool('stop_flame', { task_id: id });
     },
 
+    /**
+     * Volltextsuche (`search`) über Titel, Beschreibung und Plan, für die
+     * Wochenplanung. Findet auch Projekte und Bereiche; geliefert werden nur Aufgaben.
+     */
+    async search(query, { limit = 20 } = {}) {
+      const out = await callTool('search', { query, limit });
+      // Treffer kommen als `hits` mit `entity` (task, project, area).
+      return (out?.hits ?? []).filter((h) => h.entity === 'task');
+    },
+
+    /**
+     * Legt eine Aufgabe mit beliebigen Feldern an (`create_task`, z. B. `phoenix`,
+     * `due`, `location`, `parent_id`) und liefert sie; für Flammen aus der Wochenplanung.
+     */
+    async addTask(fields) {
+      const out = await callTool('create_task', { ...fields, title: clampTitle(fields.title) });
+      if (!out?.task?.id) throw new Error('Zunder hat keine Aufgabe zurückgegeben');
+      return out.task;
+    },
+
     /** Legt eine Aufgabe in der Zunder-Inbox an und liefert `{ id, ref, url }`. */
     async createTask({ title, description, vaultLinks }) {
       const args = { title: clampTitle(title) };
