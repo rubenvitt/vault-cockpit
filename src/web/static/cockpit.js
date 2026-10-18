@@ -36,7 +36,8 @@
         credentials: 'same-origin',
       });
     } catch {
-      throw new Error('Keine Verbindung zum Cockpit. Nichts gespeichert.');
+      // `offline`: Die Anfrage kam nicht durch; die Schnelleingabe gibt dann an den Puffer ab (offline.js).
+      throw Object.assign(new Error('Keine Verbindung zum Cockpit. Nichts gespeichert.'), { offline: true });
     }
     let data = null;
     try {
@@ -314,8 +315,9 @@
         prepend(data.result, sent);
         toast(data.message, data.result.kind === 'task' && data.result.url ? { action: { label: 'Öffnen', run: () => window.open(data.result.url, '_blank', 'noopener') } } : {});
       } catch (err) {
-        // Der Text bleibt im Feld; dieselbe Erfassungs-ID verhindert Doppelte beim erneuten Senden.
-        toast(err.message, { kind: 'error' });
+        // Ohne Verbindung nimmt der Offline-Puffer den Text mit derselben Erfassungs-ID und sendet ihn später.
+        // Sonst bleibt der Text im Feld; dieselbe Erfassungs-ID verhindert Doppelte beim erneuten Senden.
+        if (!(err.offline && (await window.cockpitPuffer?.take(capture)))) toast(err.message, { kind: 'error' });
       } finally {
         capture.classList.remove('busy');
         button.disabled = false;

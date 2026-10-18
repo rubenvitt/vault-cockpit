@@ -6,6 +6,7 @@ import { versionAssets, THEME } from './layout.js';
 import { renderGraph, renderSearch, GRAPH_CSS } from './graph-render.js';
 import { renderNote, NOTE_CSS } from './note-render.js';
 import { renderReview, REVIEW_CSS } from './review-render.js';
+import { offlineFiles, OFFLINE_CSS, OFFLINE_MARK } from './offline.js';
 import { SettingsError, MAX_CALENDARS } from '../cockpit/settings.js';
 import { describeWeek, weekOf } from '../cockpit/week.js';
 import { ActionError, SETTABLE } from '../cockpit/actions.js';
@@ -13,12 +14,13 @@ import { ActionError, SETTABLE } from '../cockpit/actions.js';
 const staticFile = (name, enc) => readFileSync(new URL(`./static/${name}`, import.meta.url), enc);
 const CLIENT_JS = staticFile('cockpit.js', 'utf8');
 const GRAPH_JS = staticFile('graph.js', 'utf8');
+const OFFLINE_JS = staticFile('offline.js', 'utf8');
 // sigma + graphology + ForceAtlas2, gebündelt mit `npm run vendor` und eingecheckt.
 const GRAPH_LIB = staticFile('vendor/graph-lib.js', 'utf8');
 // Design-System (Tokens, Bausteine, Wochenansicht) plus die Teile der übrigen Seiten.
-const CSS = staticFile('cockpit.css', 'utf8') + GRAPH_CSS + NOTE_CSS + REVIEW_CSS;
+const CSS = staticFile('cockpit.css', 'utf8') + GRAPH_CSS + NOTE_CSS + REVIEW_CSS + OFFLINE_CSS;
 const hash = (s) => createHash('sha256').update(s).digest('base64url').slice(0, 10);
-const VERSION = { css: hash(CSS), js: hash(CLIENT_JS), graph: hash(GRAPH_JS), graphLib: hash(GRAPH_LIB) };
+const VERSION = { css: hash(CSS), js: hash(CLIENT_JS), graph: hash(GRAPH_JS), graphLib: hash(GRAPH_LIB), offline: hash(OFFLINE_JS) };
 versionAssets(VERSION);
 
 /** Web-App-Manifest: Das Cockpit startet auf dem iPhone und unter Android wie eine App. */
@@ -50,6 +52,7 @@ const PUBLIC = new Map([
   ['/static/cockpit.js', { type: 'text/javascript; charset=utf-8', body: CLIENT_JS, version: VERSION.js }],
   ['/static/graph.js', { type: 'text/javascript; charset=utf-8', body: GRAPH_JS, version: VERSION.graph }],
   ['/static/vendor/graph-lib.js', { type: 'text/javascript; charset=utf-8', body: GRAPH_LIB, version: VERSION.graphLib }],
+  ['/static/offline.js', { type: 'text/javascript; charset=utf-8', body: OFFLINE_JS, version: VERSION.offline }],
   ['/manifest.webmanifest', { type: 'application/manifest+json; charset=utf-8', body: MANIFEST }],
   ['/static/icon.svg', { type: 'image/svg+xml', body: staticFile('icon.svg') }],
   ...['apple-touch-icon', 'icon-192', 'icon-512', 'icon-maskable-512'].map((n) => [`/static/icons/${n}.png`, { type: 'image/png', body: staticFile(`icons/${n}.png`) }]),
@@ -83,10 +86,13 @@ const HTML_HEADERS = {
   'content-type': 'text/html; charset=utf-8',
   'cache-control': 'no-store',
   'content-security-policy':
-    "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+    "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; manifest-src 'self'; worker-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
   'x-content-type-options': 'nosniff',
   'referrer-policy': 'same-origin',
 };
+
+// Service Worker `/sw.js` und App-Hülle `/offline`, beide ohne Sitzung (src/web/offline.js).
+for (const [path, file] of offlineFiles(PUBLIC, { html: HTML_HEADERS }).entries) PUBLIC.set(path, file);
 
 /**
  * Das Web-Cockpit: Wochenansicht unter `/`, dieselben Daten als JSON unter
@@ -119,6 +125,9 @@ const HTML_HEADERS = {
  *   `/api/search` oder `capture` für `/capture` und `/funke`) und zeigt ihn einmal, `POST /einstellungen/tokens/widerrufen` löscht einen.
  * - `GET /kurzbefehle/<slug>.shortcut` liefert die signierten iOS-Kurzbefehle
  *   (verlinkt in den Einstellungen).
+ * - `GET /sw.js` (Service Worker) und `GET /offline` (App-Hülle ohne Netz) gibt
+ *   es ohne Sitzung; `GET /api/sitzung` liefert das CSRF-Token der Sitzung, mit
+ *   dem der Offline-Puffer die Schnelleingabe nachsendet (401 ohne Sitzung).
  *
  * Die Sitzung ist ein signiertes Cookie und nur für diese Routen gültig; die
  * MCP-Schnittstelle prüft weiter ausschließlich Bearer-Tokens.
@@ -203,7 +212,9 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     const model = await cockpit.week(id || null);
     if (!model) return send(res, 400, renderMessage('Unbekannte Woche', `„${id}“ ist keine Kalenderwoche wie 2026-W42.`, { link: { href: '/', label: 'Zur laufenden Woche' } }));
     const back = url.pathname + url.search;
-    return send(res, status, renderWeek(model, { user: session.name ?? session.sub, write: writeContext(req), back, flash: flash ?? takeFlash(req, res), draft, focus: url.searchParams.has('erfassen') }));
+    // Nur die laufende Woche darf der Service Worker für offline behalten.
+    const offline = !id && status === 200 ? { [OFFLINE_MARK]: 'woche' } : {};
+    return send(res, status, renderWeek(model, { user: session.name ?? session.sub, write: writeContext(req), back, flash: flash ?? takeFlash(req, res), draft, focus: url.searchParams.has('erfassen') }), offline);
   }
 
   /** Notizseite `/notiz?pfad=…`: Vorschau und Verarbeiten. */
@@ -579,7 +590,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   const TOKEN_ROUTES = { '/einstellungen/tokens': createToken, '/einstellungen/tokens/widerrufen': revokeToken };
   const ACTION_ROUTES = new Set(Object.keys(ACTIONS));
   const SHORTCUT_ROUTES = new Map(shortcuts.map((s) => [`/kurzbefehle/${s.slug}.shortcut`, s]));
-  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...PUBLIC.keys(), '/', '/api/woche', '/api/suche', '/rueckblick', ...(notes ? ['/notiz'] : []), '/graph', '/api/graph', '/einstellungen', ...(tokens ? Object.keys(TOKEN_ROUTES) : []), '/login', '/auth/callback', '/logout']);
+  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...PUBLIC.keys(), '/', '/api/woche', '/api/sitzung', '/api/suche', '/rueckblick', ...(notes ? ['/notiz'] : []), '/graph', '/api/graph', '/einstellungen', ...(tokens ? Object.keys(TOKEN_ROUTES) : []), '/login', '/auth/callback', '/logout']);
 
   return {
     matches: (path) => ROUTES.has(path),
@@ -596,6 +607,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
           'content-type': file.type,
           'cache-control': pinned ? 'public, max-age=31536000, immutable' : file.version ? 'no-cache' : 'public, max-age=86400',
           'x-content-type-options': 'nosniff',
+          ...file.headers,
         });
         return res.end(file.body);
       }
@@ -648,6 +660,10 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       if (path === '/api/graph') {
         if (!session) return json(res, 401, { error: 'unauthorized', error_description: 'Anmeldung unter /login nötig' });
         return graphApi(req, res, url);
+      }
+      if (path === '/api/sitzung') {
+        if (!session) return json(res, 401, { error: 'unauthorized', message: 'Die Anmeldung ist abgelaufen. Bitte neu anmelden.' });
+        return json(res, 200, { ok: true, csrf: csrfOf(req) });
       }
       if (path === '/api/suche') {
         if (!session) return json(res, 401, { error: 'unauthorized', error_description: 'Anmeldung unter /login nötig' });

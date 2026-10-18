@@ -142,7 +142,7 @@ Aufgaben mit `!` bleibt die erste Zeile der Titel.
 
 `POST /capture` nimmt Klartext oder JSON `{"text", "title"?, "source"?, "id"?}`.
 Mit `id` ist das Anlegen idempotent (dieselbe ID → `200` mit dem Ergebnis von
-damals). Antworten: `201 {"kind":"note","path"}` bzw.
+damals; erlaubt sind Buchstaben, Ziffern und `_ . : -`, höchstens 128 Zeichen). Antworten: `201 {"kind":"note","path"}` bzw.
 `201 {"kind":"task","id","ref","url"}`, `400` bei falscher Eingabe, `401` ohne
 gültigen Token, `502` wenn Zunder ablehnt, `503` bei `!` ohne Zunder.
 Jede Antwort trägt zusätzlich `message`, einen fertigen Satz für die Mitteilung, und
@@ -295,6 +295,26 @@ Design-System ohne Build-Schritt in `src/web/static/cockpit.css` (Tokens für Fa
 hell/dunkel, Abstände, Schrift, dazu Bausteine wie Karte, Knopf, Chip, Menü,
 Meldung, leerer Zustand und Ladeleiste). Das Stylesheet wird mit Inhalts-Hash
 ausgeliefert (`cockpit.css?v=…`), nach einem Deploy lädt der Browser es neu.
+
+**Ohne Netz** (Funkloch, Zug, Flugmodus) öffnet die App trotzdem: Ein Service
+Worker (`/sw.js`) hält die App-Hülle (Stylesheet, Skripte, Manifest, Icons und
+die Seite `/offline`) und die zuletzt geladene Wochenansicht der laufenden Woche
+auf dem Gerät. Ohne Netz zeigt das Cockpit diese Woche mit dem Hinweis „Offline,
+Stand von …“, andere Seiten zeigen die App-Hülle. Abhaken, Menüs und alle
+anderen Formulare sind dann gesperrt, nur die **Schnelleingabe** geht: Notizen
+und `!`-Aufgaben landen in einem Puffer im Browser (IndexedDB), darunter steht
+„n Einträge warten auf Netz“. Sobald das Cockpit wieder erreichbar ist (beim
+Öffnen, beim Zurückholen der App, sonst alle 30 Sekunden), sendet die Seite den
+Puffer über `/aktion/erfassen` nach, mit der ID des Eintrags als Erfassungs-ID:
+Kommt eine Antwort nicht an, legt das erneute Senden nichts doppelt an. Ist die
+Anmeldung inzwischen abgelaufen, bleiben die Einträge stehen und gehen nach dem
+nächsten Login raus. Was der Server ablehnt (z. B. Zunder antwortet nicht),
+bleibt mit Fehler in der Liste, bis man es erneut sendet, ins Feld zurückholt
+oder verwirft. Notizvorschau, Suche, Einstellungen und die JSON-Schnittstellen
+speichert der Service Worker nie; Abmelden und jeder neue Login löschen die
+gespeicherte Woche (der Puffer bleibt und geht mit der nächsten Anmeldung raus).
+Nach einem Deploy bringt `/sw.js` eine neue Cache-Version mit (Inhalts-Hash der
+App-Hülle) und räumt die alte weg.
 
 Fällt eine Quelle aus (Zunder nicht erreichbar, ein Kalender antwortet nicht),
 zeigt nur ihr Abschnitt bzw. nur dieser Kalender den Fehler; die Einstellungsseite

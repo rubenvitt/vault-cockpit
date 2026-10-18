@@ -15,6 +15,12 @@ export const SOURCES = {
 
 const TITLE_MAX = 80;
 
+/**
+ * Erlaubte Erfassungs-IDs (`id` bei `/capture`, `cid` der Schnelleingabe im
+ * Web-Cockpit, Funke, Mail): dieselbe Form wie `capture_id` im Frontmatter.
+ */
+export const CAPTURE_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
+
 export class CaptureError extends Error {
   constructor(message, status = 400) {
     super(message);
@@ -94,6 +100,10 @@ export function createCaptureRouter({ capture, zunder = null, state, logger = co
      */
     async route({ text, title = null, source, captureId = null, created = null, allowTask = true }) {
       if (!SOURCES[source]) throw new CaptureError(`Unbekannte Quelle "${source}"`);
+      // Gilt für Notizen und Aufgaben gleich, damit der Schlüssel im Merkzettel sauber bleibt.
+      if (captureId !== null && !CAPTURE_ID.test(String(captureId))) {
+        throw new CaptureError('Ungültige Capture-ID (Buchstaben, Ziffern und _ . : -, höchstens 128 Zeichen)');
+      }
       const body = String(text ?? '').trim();
       if (!body) throw new CaptureError('Text darf nicht leer sein');
 
