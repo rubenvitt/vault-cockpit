@@ -117,7 +117,9 @@ test('Wiederherstellen: nur ins leere Cockpit oder mit Ersetzen, atomar und nur 
     const r = await backup.restore(Buffer.from(body), PASS);
     assert.deepEqual(r.files.sort(), ['api-tokens.json', 'cockpit-settings.json', 'session-secret']);
     assert.deepEqual(r.skipped, []);
-    assert.equal(readFileSync(join(target, 'cockpit-settings.json'), 'utf8'), SETTINGS);
+    // Die Einstellungen kommen zurück, die Sitzungs-Generation zählt dabei hoch.
+    const restored = () => JSON.parse(readFileSync(join(target, 'cockpit-settings.json'), 'utf8'));
+    assert.deepEqual(restored(), { ...JSON.parse(SETTINGS), session: { generation: 1 } });
     assert.equal(readFileSync(join(target, 'session-secret'), 'utf8'), 'n'.repeat(64));
     assert.equal(statSync(join(target, 'cockpit-settings.json')).mode & 0o777, 0o600);
     // Was die Sicherung nicht kennt (hier der Merkzettel), bleibt unberührt.
@@ -126,9 +128,11 @@ test('Wiederherstellen: nur ins leere Cockpit oder mit Ersetzen, atomar und nur 
     // Jetzt ist es eingerichtet: Überschreiben nur ausdrücklich.
     assert.equal(backup.isEmpty(), false);
     await assert.rejects(backup.restore(body, PASS), /schon eingerichtet/);
-    writeFileSync(join(target, 'cockpit-settings.json'), '{"tz":"UTC"}');
+    // Seit der Sicherung wurde dreimal „Überall abmelden“ gedrückt: Deren Cookies
+    // dürfen mit der älteren Generation aus der Sicherung nicht wieder gelten.
+    writeFileSync(join(target, 'cockpit-settings.json'), '{"tz":"UTC","session":{"generation":3}}');
     await backup.restore(body, PASS, { replace: true });
-    assert.equal(readFileSync(join(target, 'cockpit-settings.json'), 'utf8'), SETTINGS);
+    assert.deepEqual(restored(), { ...JSON.parse(SETTINGS), session: { generation: 4 } });
   } finally {
     rmSync(source, { recursive: true, force: true });
     rmSync(target, { recursive: true, force: true });
@@ -189,6 +193,12 @@ test('Multipart: Textfelder und eine Datei, binär unverändert, Fehler mit Stat
   await assert.rejects(readMultipart(req(body, 'application/x-www-form-urlencoded'), { limit: 10_000 }), (err) => err.status === 415);
 });
 
+/** Inhalt eines gültigen Sitzungs-Cookies (Format aus `src/web/sessions.js`). */
+function sessionPayload() {
+  const t = Math.floor(Date.now() / 1000);
+  return { sub: 'ruben', sid: 's1', gen: 0, iat: t, seen: t, exp: t + 3600 };
+}
+
 /** Cockpit mit echten Dateien unter `dir`, angemeldet über ein selbst signiertes Sitzungs-Cookie. */
 async function withCockpit(dir, run) {
   const settings = createSettingsStore({ file: join(dir, 'cockpit-settings.json'), logger: quiet });
@@ -218,7 +228,7 @@ async function withCockpit(dir, run) {
   app.listen(0, '127.0.0.1');
   await new Promise((res) => app.once('listening', res));
   const base = `http://127.0.0.1:${app.address().port}`;
-  const session = createCookieSigner(SECRET).seal({ sub: 'ruben', sid: 's1', exp: Math.floor(Date.now() / 1000) + 3600 });
+  const session = createCookieSigner(SECRET).seal(sessionPayload());
   const call = (path, { method = 'GET', form = null, body = undefined, cookie = true, origin = null } = {}) => {
     const headers = { 'x-forwarded-host': 'vault.test', ...(cookie ? { cookie: `vc_session=${session}` } : {}), ...(origin ? { origin } : {}) };
     if (form) headers['content-type'] = 'application/x-www-form-urlencoded';

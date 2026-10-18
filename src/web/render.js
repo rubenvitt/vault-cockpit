@@ -2,6 +2,7 @@ import { localTime, zonedParts } from '../cockpit/week.js';
 import { DEFAULT_HIDDEN_EVENTS } from '../cockpit/settings.js';
 import { esc, head, appHeader, icon } from './layout.js';
 import { backupSection, backupHint } from './backup-render.js';
+import { sessionSection, revokeForm } from './session-render.js';
 
 export { esc };
 
@@ -580,6 +581,7 @@ export function renderSettings({ stored, defaults, checks = {}, notice = null, e
     ['mail', 'Mail', mail],
     ['embeddings', 'Embeddings', embed],
     ['anzeige', 'Anzeige', null],
+    ['anmeldung', 'Anmeldung', null],
     ...(tokens ? [['tokens', 'API-Tokens', null]] : []),
     ...(shortcuts.length ? [['kurzbefehle', 'Kurzbefehle', null]] : []),
     ...(backup ? [['sicherung', 'Sicherung', null]] : []),
@@ -678,8 +680,10 @@ ${backupHint(backup)}
     <label>Inbox-Ordner im Vault<input name="inboxFolder" value="${esc(stored.inboxFolder ?? '')}" placeholder="${esc(d.inboxFolder)}"></label>
   </div>
 </section>
+${sessionSection(stored, d)}
 <p class="save-bar"><span class="meta">Leere Geheimnisfelder behalten den gespeicherten Wert.</span><button type="submit" class="primary">Speichern</button></p>
 </form>
+${revokeForm(token)}
 ${tokens ? tokenSection(tokens, created, tz, token) : ''}
 ${shortcuts.length ? shortcutSection(shortcuts, captureEnabled) : ''}
 ${backup ? backupSection(backup, token) : ''}

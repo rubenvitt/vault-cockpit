@@ -319,8 +319,9 @@ async function withPlan(run) {
   server.listen(0, '127.0.0.1');
   await new Promise((r) => server.once('listening', r));
   const signer = createCookieSigner(SECRET);
-  const session = signer.seal({ sub: 'ruben', name: 'Ruben', sid: 's1', exp: Math.floor(Date.now() / 1000) + 3600 });
-  const csrf = signer.mac(`csrf\n${session}`);
+  const t = Math.floor(Date.now() / 1000);
+  const session = signer.seal({ sub: 'ruben', name: 'Ruben', sid: 's1', gen: 0, iat: t, seen: t, exp: t + 3600 });
+  const csrf = signer.mac('csrf\ns1');
   const base = `http://127.0.0.1:${server.address().port}`;
   let flash = null;
   const call = async (path, { form = null, json = false, auth = true } = {}) => {

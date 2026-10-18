@@ -146,6 +146,25 @@ function holdsState(path) {
  * `dir`: Ordner der Dateien (`/data`), `paths`: abweichende Pfade je Name
  * (z. B. `CAPTURE_STATE_FILE`). `cost` nur für Tests kleiner.
  */
+/**
+ * Eine ältere Sicherung bringt eine ältere Sitzungs-Generation mit; Cookies,
+ * die „Überall abmelden“ seither beendet hat, gälten damit wieder. Deshalb
+ * zählt das Wiederherstellen die Generation über beide Stände hinaus hoch:
+ * danach meldet sich jedes Gerät neu an.
+ */
+function withNewGeneration(content, currentPath) {
+  const generation = (s) => (Number.isInteger(s?.session?.generation) ? s.session.generation : 0);
+  let current = null;
+  try {
+    current = JSON.parse(readFileSync(currentPath, 'utf8'));
+  } catch {
+    // keine oder kaputte Einstellungen: zählt als Generation 0
+  }
+  const restored = JSON.parse(content.toString('utf8'));
+  const session = { ...(restored.session ?? {}), generation: Math.max(generation(current), generation(restored)) + 1 };
+  return Buffer.from(JSON.stringify({ ...restored, session }, null, 2) + '\n');
+}
+
 export function createBackup({ dir, paths = {}, files = DATA_FILES, cost = COST, now = () => Date.now() }) {
   const entries = files.map((f) => ({ ...f, path: paths[f.name] ?? join(dir, f.name) }));
   const byName = new Map(entries.map((e) => [e.name, e]));
@@ -196,6 +215,9 @@ export function createBackup({ dir, paths = {}, files = DATA_FILES, cost = COST,
         } catch {
           throw new BackupError(`${n} in der Sicherung ist kein gültiges JSON`);
         }
+      }
+      if (files['cockpit-settings.json'] && byName.has('cockpit-settings.json')) {
+        files['cockpit-settings.json'] = withNewGeneration(files['cockpit-settings.json'], byName.get('cockpit-settings.json').path);
       }
       for (const n of known) writePrivate(byName.get(n).path, files[n]);
       return { createdAt, files: known, skipped };

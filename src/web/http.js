@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { timingSafeEqual, randomUUID, createHash } from 'node:crypto';
 import { createCookieSigner, parseCookies, cookie } from './session.js';
+import { createSessions } from './sessions.js';
+import { renderDraftRescue } from './session-render.js';
 import { renderWeek, renderMessage, renderSettings, dueLabel } from './render.js';
 import { versionAssets, THEME } from './layout.js';
 import { renderGraph, renderSearch, GRAPH_CSS } from './graph-render.js';
@@ -79,7 +81,6 @@ function readBody(req) {
   });
 }
 
-const SESSION = 'vc_session';
 const LOGIN = 'vc_login';
 const FLASH = 'vc_flash';
 
@@ -107,8 +108,11 @@ const HTML_HEADERS = {
  *   die besten Treffer für die Live-Suche. Mit JavaScript wird der Graph
  *   interaktiv (`/static/graph.js` mit sigma aus `/static/vendor/graph-lib.js`),
  *   ohne bleibt das SVG.
- * - `GET /login` → Pocket ID → `GET /auth/callback` setzt die Sitzung (12 h).
+ * - `GET /login` → Pocket ID → `GET /auth/callback` setzt die Sitzung. Sie
+ *   verlängert sich bei Nutzung und endet nach 30 Tagen ohne Nutzung, spätestens
+ *   nach 90 (einstellbar, siehe `sessions.js`).
  * - `POST /logout` löscht sie. SameSite=Lax hält fremde Seiten davon ab.
+ *   `POST /einstellungen/abmelden` beendet alle Sitzungen auf allen Geräten.
  * - `GET`/`POST /einstellungen` — Kalender, Zunder-Zugang und -Brücke, Mail-Abruf,
  *   Embeddings und Anzeige pflegen.
  * - `POST /aktion/status` setzt den Status einer Zunder-Aufgabe (abhaken, in
@@ -123,6 +127,8 @@ const HTML_HEADERS = {
  *   Zunder-Aufgabe). Alle brauchen Sitzung, gleiche Herkunft und das CSRF-Token
  *   der Sitzung. Mit `Accept: application/json` antworten sie mit JSON (für
  *   `/static/cockpit.js`), sonst mit einer Weiterleitung und einer Meldung.
+ *   Ist die Sitzung abgelaufen, geht es über den Login zurück, ein Text aus
+ *   Schnelleingabe oder Anhängen steht danach wieder im Feld.
  * - `POST /einstellungen/tokens` legt einen API-Token an (Recht `search` für
  *   `/api/search` oder `capture` für `/capture` und `/funke`) und zeigt ihn einmal, `POST /einstellungen/tokens/widerrufen` löscht einen.
  * - `POST /einstellungen/sicherung` liefert die verschlüsselte Sicherung von
@@ -135,9 +141,10 @@ const HTML_HEADERS = {
  * Die Sitzung ist ein signiertes Cookie und nur für diese Routen gültig; die
  * MCP-Schnittstelle prüft weiter ausschließlich Bearer-Tokens.
  */
-export function createWebHttp({ cockpit, settings, actions = null, notes = null, plan = null, tokens = null, shortcuts = [], captureEnabled = false, calendars = null, graph = null, search = null, backup = null, restart = () => {}, oidc, sessionSecret, publicUrl, allowedSubjects = [], sessionHours = 12, logger = console, now = () => Date.now() }) {
+export function createWebHttp({ cockpit, settings, actions = null, notes = null, plan = null, tokens = null, shortcuts = [], captureEnabled = false, calendars = null, graph = null, search = null, backup = null, restart = () => {}, oidc, sessionSecret, publicUrl, allowedSubjects = [], logger = console, now = () => Date.now() }) {
   const signer = createCookieSigner(sessionSecret);
   const secure = publicUrl.startsWith('https://');
+  const sessions = createSessions({ signer, settings, allowedSubjects, secure, now });
 
   const send = (res, status, body, headers = {}) => {
     res.writeHead(status, { ...HTML_HEADERS, ...headers });
@@ -147,26 +154,26 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
     res.end(JSON.stringify(body));
   };
+  // Angehängt statt gesetzt, damit ein verlängertes Sitzungs-Cookie mitgeht.
   const redirect = (res, location, cookies = []) => {
-    res.writeHead(303, { location, 'cache-control': 'no-store', 'set-cookie': cookies });
+    for (const c of cookies) res.appendHeader('set-cookie', c);
+    res.writeHead(303, { location, 'cache-control': 'no-store' });
     res.end();
   };
 
-  // Das Subject wird erneut geprüft, damit ein aus ALLOWED_SUBJECTS gestrichener
-  // Account nicht bis zum Ablauf seines Cookies weiter hineinkommt.
-  const sessionOf = (req) => {
-    const s = signer.open(parseCookies(req.headers.cookie)[SESSION], now());
-    return s && typeof s.sub === 'string' && (!allowedSubjects.length || allowedSubjects.includes(s.sub)) ? s : null;
-  };
+  // Prüft Signatur, Ablauf, Generation und das Subject gegen ALLOWED_SUBJECTS.
+  const sessionOf = (req) => sessions.read(req);
 
   // CSRF: zusätzlich zu SameSite=Lax und der Herkunftsprüfung ein Token, das an
-  // genau dieses Sitzungs-Cookie gebunden ist. Ohne Speicher auf dem Server.
-  const rawSession = (req) => parseCookies(req.headers.cookie)[SESSION] ?? '';
-  const csrfOf = (req) => signer.mac(`csrf\n${rawSession(req)}`);
+  // den Login dieser Sitzung gebunden ist. Ohne Speicher auf dem Server.
+  const csrfOf = (req) => {
+    const s = sessionOf(req);
+    return s ? sessions.csrf(s) : '';
+  };
   const csrfOk = (req, given) => {
     const a = Buffer.from(String(given ?? ''));
     const b = Buffer.from(csrfOf(req));
-    return a.length === b.length && timingSafeEqual(a, b);
+    return b.length > 0 && a.length === b.length && timingSafeEqual(a, b);
   };
 
   /** Meldung für die nächste Seite (ohne JavaScript): signiert, eine Minute gültig. */
@@ -174,7 +181,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   const takeFlash = (req, res) => {
     const raw = parseCookies(req.headers.cookie)[FLASH];
     if (!raw) return null;
-    res.setHeader('set-cookie', [cookie(FLASH, '', { secure, maxAge: 0 })]);
+    res.appendHeader('set-cookie', cookie(FLASH, '', { secure, maxAge: 0 }));
     return signer.open(raw, now());
   };
 
@@ -202,9 +209,30 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       res.setHeader('set-cookie', [clear]);
       return send(res, 403, renderMessage('Kein Zugang', 'Die Anmeldung wurde nicht angenommen.', { link: { href: '/login', label: 'Noch einmal anmelden' } }));
     }
-    // `sid` macht jede Anmeldung einzigartig, damit auch das CSRF-Token wechselt.
-    const session = signer.seal({ sub: user.subject, name: user.name, sid: randomUUID(), exp: Math.floor(now() / 1000) + sessionHours * 3600 });
-    redirect(res, safeNext(pending.next), [clear, cookie(SESSION, session, { secure, maxAge: sessionHours * 3600 })]);
+    // Jede Anmeldung bekommt eine eigene `sid`, damit auch das CSRF-Token wechselt.
+    redirect(res, safeNext(pending.next), [clear, sessions.issue(user)]);
+  }
+
+  /** Aktionen, deren Text eine abgelaufene Sitzung überlebt (Feld `text`). */
+  const DRAFT_ACTIONS = new Set(['/aktion/erfassen', '/aktion/notiz/anhaengen']);
+  const DRAFT_FLASH = { kind: 'error', message: 'Nicht gespeichert: Die Anmeldung war abgelaufen. Der Text steht wieder im Feld.' };
+
+  /**
+   * Aktion ohne gültige Sitzung (ohne JavaScript): über den Login zurück auf
+   * die Seite. Den Text nimmt ein verschlüsseltes Cookie mit, aber nur bei
+   * einem Formular nachweislich von dieser Seite, damit niemand einen Entwurf
+   * unterschieben kann. Passt er nicht hinein, zeigt die Seite ihn zum Kopieren.
+   */
+  async function expiredAction(req, res, path) {
+    const form = await readForm(req, res);
+    if (!form) return;
+    const back = safeNext(form.get('back'));
+    const loginHref = `/login?next=${encodeURIComponent(back)}`;
+    const text = DRAFT_ACTIONS.has(path) ? (form.get('text') ?? '') : '';
+    if (!text.trim()) return redirect(res, loginHref);
+    const sameOrigin = req.headers.origin === new URL(publicUrl).origin || req.headers['sec-fetch-site'] === 'same-origin';
+    if (sameOrigin && sessions.keepDraft(res, { action: path, back, text })) return redirect(res, loginHref);
+    return send(res, 401, renderDraftRescue(text, loginHref));
   }
 
   /** Was die Seite zum Schreiben braucht; ohne `actions` bleibt sie lesend. */
@@ -215,7 +243,8 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     const model = await cockpit.week(id || null);
     if (!model) return send(res, 400, renderMessage('Unbekannte Woche', `„${id}“ ist keine Kalenderwoche wie 2026-W42.`, { link: { href: '/', label: 'Zur laufenden Woche' } }));
     const back = url.pathname + url.search;
-    return send(res, status, renderWeek(model, { user: session.name ?? session.sub, write: writeContext(req), back, flash: flash ?? takeFlash(req, res), draft, focus: url.searchParams.has('erfassen') }));
+    const kept = draft === null && actions ? sessions.takeDraft(req, res, (d) => d.action === '/aktion/erfassen') : null;
+    return send(res, status, renderWeek(model, { user: session.name ?? session.sub, write: writeContext(req), back, flash: flash ?? takeFlash(req, res) ?? (kept ? DRAFT_FLASH : null), draft: draft ?? kept?.text ?? null, focus: url.searchParams.has('erfassen') || Boolean(kept) }));
   }
 
   /** Notizseite `/notiz?pfad=…`: Vorschau und Verarbeiten. */
@@ -226,12 +255,14 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       return send(res, 404, renderMessage('Notiz nicht verfügbar', `„${path}“ gibt es nicht, oder sie liegt in einem vertraulichen oder ausgeschlossenen Ordner.`, { link: { href: '/', label: 'Zur Woche' } }));
     }
     const { vaultName } = settings.get();
+    const back = url.pathname + url.search;
+    const kept = draft === null && actions ? sessions.takeDraft(req, res, (d) => d.action === '/aktion/notiz/anhaengen' && d.back === back) : null;
     const html = renderNote(note, {
       user: session.name ?? session.sub,
       write: actions ? writeContext(req) : null,
-      back: url.pathname + url.search,
-      flash: flash ?? takeFlash(req, res),
-      draft,
+      back,
+      flash: flash ?? takeFlash(req, res) ?? (kept ? DRAFT_FLASH : null),
+      draft: draft ?? kept?.text ?? null,
       targets: notes.targets(note.path),
       archive: notes.archiveFolder(),
       vaultName,
@@ -419,7 +450,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     const flash = flashCookie({ kind: 'ok', message: body.message, undo: body.undo ?? null });
     // Muss die Seite wechseln (Notiz verschoben), kommt die Meldung per Cookie mit.
     if (wantsJson) {
-      if (body.redirect) res.setHeader('set-cookie', [flash]);
+      if (body.redirect) res.appendHeader('set-cookie', flash);
       return json(res, 200, body);
     }
     return redirect(res, body.redirect ?? back, [flash]);
@@ -506,6 +537,8 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       embed: { url: field('embed.url'), model: field('embed.model') },
       calendars: calendarsIn,
       hiddenEvents: form.has('hiddenEvents') ? field('hiddenEvents').split(',') : stored.hiddenEvents,
+      // Die Generation ändert nur „Überall abmelden“.
+      session: { idleDays: field('session.idleDays'), maxDays: field('session.maxDays'), generation: stored.session.generation },
     };
   }
 
@@ -617,8 +650,18 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     const msg = restoredMessage(result, settings.get().tz);
     res.once('finish', () => restart());
     // Mit dem Sitzungs-Secret der Sicherung gilt das Cookie nach dem Neustart ohnehin nicht mehr.
-    const cookies = result.files.includes('session-secret') ? { 'set-cookie': [cookie(SESSION, '', { secure, maxAge: 0 })] } : {};
+    const cookies = result.files.includes('session-secret') ? { 'set-cookie': [sessions.clear()] } : {};
     return send(res, 200, renderMessage(msg.title, msg.text, { link: msg.link }), cookies);
+  }
+
+  /** „Überall abmelden“: neue Generation, auch diese Sitzung endet. */
+  async function revokeSessions(req, res, session) {
+    const form = await readSettingsForm(req, res);
+    if (!form) return;
+    sessions.revokeAll();
+    logger.info?.(`Cockpit: alle Sitzungen beendet von ${session.sub}`);
+    res.appendHeader('set-cookie', sessions.clear());
+    return send(res, 200, renderMessage('Überall abgemeldet', 'Die Anmeldung ist auf allen Geräten beendet, auch hier.', { link: { href: '/login?next=%2Feinstellungen', label: 'Neu anmelden' } }));
   }
 
 
@@ -655,7 +698,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   const BACKUP_ROUTES = backup ? { '/einstellungen/sicherung': downloadBackup, '/einstellungen/sicherung/wiederherstellen': restoreBackup } : {};
   const ACTION_ROUTES = new Set(Object.keys(ACTIONS));
   const SHORTCUT_ROUTES = new Map(shortcuts.map((s) => [`/kurzbefehle/${s.slug}.shortcut`, s]));
-  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...PUBLIC.keys(), '/', '/api/woche', '/api/suche', '/rueckblick', ...(notes ? ['/notiz'] : []), ...(plan ? ['/planen'] : []), '/graph', '/api/graph', '/einstellungen', ...(tokens ? Object.keys(TOKEN_ROUTES) : []), ...Object.keys(BACKUP_ROUTES), '/login', '/auth/callback', '/logout']);
+  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...PUBLIC.keys(), '/', '/api/woche', '/api/suche', '/rueckblick', ...(notes ? ['/notiz'] : []), ...(plan ? ['/planen'] : []), '/graph', '/api/graph', '/einstellungen', ...(tokens ? Object.keys(TOKEN_ROUTES) : []), ...Object.keys(BACKUP_ROUTES), '/einstellungen/abmelden', '/login', '/auth/callback', '/logout']);
 
   return {
     matches: (path) => ROUTES.has(path),
@@ -678,9 +721,10 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       if (path === '/login' && method === 'GET') return login(req, res, url);
       if (path === '/auth/callback' && method === 'GET') return callback(req, res, url);
       if (path === '/logout' && method === 'POST') {
-        return redirect(res, '/login', [cookie(SESSION, '', { secure, maxAge: 0 })]);
+        return redirect(res, '/login', [sessions.clear()]);
       }
       const session = sessionOf(req);
+      if (session) sessions.renew(res, session);
       if (path === '/einstellungen') {
         if (!session) return redirect(res, '/login?next=%2Feinstellungen');
         if (method === 'POST') return saveSettings(req, res, session);
@@ -695,9 +739,14 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
           if (String(req.headers.accept ?? '').includes('application/json')) {
             return json(res, 401, { error: 'unauthorized', message: 'Die Anmeldung ist abgelaufen. Bitte neu anmelden.' });
           }
-          return redirect(res, '/login');
+          return expiredAction(req, res, path);
         }
         return action(req, res, path, session);
+      }
+      if (path === '/einstellungen/abmelden') {
+        if (!session) return redirect(res, '/login?next=%2Feinstellungen');
+        if (method === 'POST') return revokeSessions(req, res, session);
+        return redirect(res, '/einstellungen');
       }
       if (tokens && TOKEN_ROUTES[path]) {
         if (!session) return redirect(res, '/login?next=%2Feinstellungen');

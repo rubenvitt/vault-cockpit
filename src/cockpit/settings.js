@@ -13,7 +13,8 @@ import { randomBytes, randomUUID } from 'node:crypto';
  * sonst auf feste Standardwerte. Im Deployment muss dafür nichts stehen.
  * Alles hier wirkt ohne Neustart: Wochenansicht, `!`-Capture, Brücke, Mail,
  * Embeddings und Graph lesen den Stand bei jedem Aufruf bzw. bauen sich nach
- * dem Speichern neu auf (`onChange`).
+ * dem Speichern neu auf (`onChange`). Auch die Dauer der Web-Sitzung und ihre
+ * Generation („Überall abmelden“) stehen hier, siehe `src/web/sessions.js`.
  */
 
 export class SettingsError extends Error {}
@@ -35,6 +36,7 @@ const EMPTY = {
   embed: { url: null, model: null },
   calendars: [],
   hiddenEvents: null,
+  session: { idleDays: null, maxDays: null, generation: 0 },
 };
 
 const SENDER = /^(?:[^@\s]+@|@)[^@\s]+\.[^@\s]+$/;
@@ -133,7 +135,23 @@ export function validateSettings(input) {
     ? [...new Set(input.hiddenEvents.map((t) => text(t, 200, 'Ausgeblendeter Termin')).filter(Boolean))].slice(0, 50)
     : null;
 
-  return { tz, vaultName: text(input.vaultName, 200, 'Vault-Name'), inboxFolder, zunder: { url: zunderUrl, token: zunderToken }, bridge, flameNote, mail, embed, calendars, hiddenEvents };
+  return { tz, vaultName: text(input.vaultName, 200, 'Vault-Name'), inboxFolder, zunder: { url: zunderUrl, token: zunderToken }, bridge, flameNote, mail, embed, calendars, hiddenEvents, session: validateSession(input.session) };
+}
+
+const days = (v, what) => {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  if (!(Number.isInteger(n) && n >= 1 && n <= 365)) throw new SettingsError(`${what}: ganze Tage zwischen 1 und 365`);
+  return n;
+};
+
+/** Sitzungsdauer in Tagen (`null` = Standard) und die Generation, die „Überall abmelden“ hochzählt. */
+function validateSession(input) {
+  const idleDays = days(input?.idleDays, 'Abmelden nach Inaktivität');
+  const maxDays = days(input?.maxDays, 'Längste Sitzung');
+  if (idleDays && maxDays && maxDays < idleDays) throw new SettingsError('Die längste Sitzung darf nicht kürzer sein als die Zeit bis zum Abmelden ohne Nutzung');
+  const g = input?.generation;
+  return { idleDays, maxDays, generation: Number.isInteger(g) && g >= 0 ? g : 0 };
 }
 
 export function writePrivate(file, content) {
@@ -175,6 +193,8 @@ export function createSettingsStore({ file = null, defaults = {}, logger = conso
     mailPollMinutes: 5,
     embedUrl: null,
     embedModel: 'bge-m3',
+    sessionIdleDays: 30,
+    sessionMaxDays: 90,
     ...defaults,
   };
 
@@ -214,6 +234,12 @@ export function createSettingsStore({ file = null, defaults = {}, logger = conso
         embed: embedUrl ? { url: embedUrl, model: stored.embed.model ?? d.embedModel, source: stored.embed.url ? 'einstellungen' : 'umgebung' } : null,
         calendars: stored.calendars,
         hiddenEvents: stored.hiddenEvents ?? DEFAULT_HIDDEN_EVENTS,
+        // Ohne Nutzung nie länger als die Obergrenze.
+        session: {
+          idleDays: Math.min(stored.session.idleDays ?? d.sessionIdleDays, stored.session.maxDays ?? d.sessionMaxDays),
+          maxDays: stored.session.maxDays ?? d.sessionMaxDays,
+          generation: stored.session.generation,
+        },
         version,
       };
     },
