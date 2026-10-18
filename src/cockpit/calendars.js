@@ -38,9 +38,21 @@ const titleKey = (t) => String(t ?? '').trim().toLowerCase();
  */
 export function createCalendarSources({ settings, fetch = globalThis.fetch, now = () => Date.now() }) {
   const clients = new Map();
+  // Letzter Abruf je Kalender (gleicher Schlüssel wie die Clients), für die Zustandsseite.
+  const seen = new Map();
+  const keyOf = (cal, tz) => JSON.stringify([cal, tz]);
+
+  function note(calendars, tz, results) {
+    results.forEach((r, i) => {
+      const key = keyOf(calendars[i], tz);
+      const s = seen.get(key) ?? {};
+      if (r.status === 'fulfilled') seen.set(key, { ...s, okAt: now(), count: r.value.length, failing: false });
+      else seen.set(key, { ...s, errorAt: now(), error: r.reason?.message ?? String(r.reason), failing: true });
+    });
+  }
 
   function clientFor(cal, tz) {
-    const key = JSON.stringify([cal, tz]);
+    const key = keyOf(cal, tz);
     if (!clients.has(key)) {
       const common = { url: cal.url, username: cal.username || null, password: cal.password || null, tz, fetch, now };
       clients.set(key, cal.kind === 'caldav' ? createCalDavClient({ ...common, calendars: cal.filter ?? [] }) : createIcsClient(common));
@@ -49,6 +61,20 @@ export function createCalendarSources({ settings, fetch = globalThis.fetch, now 
   }
 
   return {
+    /**
+     * Letzter Abruf je eingestelltem Kalender, ohne neu abzurufen: `lastOkAt`
+     * mit Anzahl Termine, `lastErrorAt` mit Fehlertext, `failing`, wenn der
+     * jüngste Abruf scheiterte. Ein geänderter Kalender beginnt von vorn.
+     */
+    status() {
+      const { calendars, tz } = settings.get();
+      const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
+      return calendars.map((c) => {
+        const s = seen.get(keyOf(c, tz)) ?? {};
+        return { id: c.id, name: c.name, kind: c.kind, lastOkAt: iso(s.okAt), count: s.count ?? null, lastErrorAt: iso(s.errorAt), lastError: s.error ?? null, failing: Boolean(s.failing) };
+      });
+    },
+
     /** Ob überhaupt ein Kalender eingestellt ist. */
     configured: () => settings.get().calendars.length > 0,
 
@@ -56,6 +82,7 @@ export function createCalendarSources({ settings, fetch = globalThis.fetch, now 
     async check(start, end) {
       const { calendars, tz } = settings.get();
       const results = await Promise.allSettled(calendars.map((c) => clientFor(c, tz).events(start, end)));
+      note(calendars, tz, results);
       return Object.fromEntries(
         results.map((r, i) => [
           calendars[i].id,
@@ -72,10 +99,12 @@ export function createCalendarSources({ settings, fetch = globalThis.fetch, now 
     async events(start, end) {
       const { calendars, tz, hiddenEvents = [] } = settings.get();
       const hidden = new Set(hiddenEvents.map(titleKey));
-      const live = new Set(calendars.map((c) => JSON.stringify([c, tz])));
+      const live = new Set(calendars.map((c) => keyOf(c, tz)));
       for (const key of clients.keys()) if (!live.has(key)) clients.delete(key);
+      for (const key of seen.keys()) if (!live.has(key)) seen.delete(key);
 
       const results = await Promise.allSettled(calendars.map((c) => clientFor(c, tz).events(start, end)));
+      note(calendars, tz, results);
       const events = [];
       const errors = [];
       results.forEach((r, i) => {

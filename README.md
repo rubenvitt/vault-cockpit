@@ -456,6 +456,27 @@ der Text aus Schnelleingabe oder „Anhängen“ steht dann wieder im Feld (15
 Minuten lang, verschlüsselt in einem Cookie, nie in einer URL). Ist er dafür zu
 lang, zeigt die Seite ihn zum Kopieren.
 
+**Zustand der Dienste:** Die Seite `/zustand` (aus **Einstellungen → Zustand der
+Dienste**) zeigt je Hintergrunddienst, ob er läuft, einen Fehler meldet oder aus
+ist, mit letztem erfolgreichem Lauf und letztem Fehler samt Zeitpunkt und Text:
+Sync (Status, letzter Abgleich, Lebenszeichen des Sidecars), Index (Notizen,
+letzter Aufbau), Embeddings (Modell, Fortschritt), Mail-Abruf, Zunder-Brücke (neue
+Checkboxen und Abgleich getrennt), Zunder-Zugang (nimmt Zunder den Token an?) und
+Kalender (je Kalender). Die Daten sind dieselben wie in `vault_stats`; Mail-Abruf,
+Brücke, Kalender und Zunder-Zugang merken sich ihren letzten Lauf im Speicher, nach
+einem Neustart also erst ab dem nächsten Lauf. Beim Laden der Seite werden Zunder
+und Kalender einmal frisch geprüft. Fehlertexte erscheinen maskiert: Adressen nur
+mit Host, Tokens und Passwörter als `•••`. Meldet ein Dienst einen Fehler (etwa
+Sync `error`/`stale` oder ein gescheiterter Mail-Abruf), steht in der Kopfzeile der
+Wochenansicht ein roter Punkt „Störung“ mit Link auf die Seite.
+
+Für ein externes Monitoring liefert `GET /health` (ohne Login) `{"status":"ok"}`
+oder `{"status":"degraded"}`, beides mit HTTP 200, damit der Docker-Health-Check
+das Cockpit nicht neu startet, wenn der Fehler draußen liegt (Sidecar, Zunder,
+Fastmail). Wer bei `degraded` anschlagen will, prüft den Text oder ruft
+`/health?strict=1` auf, das dann mit 503 antwortet. Welcher Dienst betroffen ist,
+steht nur auf `/zustand`.
+
 ### Semantische Suche und Graph
 
 Das Cockpit bettet alle eigenen Notizen (ohne Readwise-Importe) abschnittsweise mit
@@ -514,6 +535,7 @@ npm ci && npm test
 - `src/semantic/` — Embeddings (Ollama), Abschnitte, Vektorspeicher, hybride Suche
 - `src/search/` — lesender Such-Endpunkt `/api/search` mit eigenem Token
 - `src/graph/` — Graph um eine Notiz mit Aufgaben- und Termin-Knoten
+- `src/health/` — Zustand der Hintergrunddienste für `/zustand` und `/health`, Maskieren von Fehlertexten
 - `src/web/` — Web-Cockpit: OIDC-Login mit PKCE, signiertes Sitzungs-Cookie, HTML der Wochenansicht, Einstellungen, Suche und Graph
 - `sync/` — Image des Sidecars `vault-sync` (Obsidian Headless mit Status-Wrapper)
 
