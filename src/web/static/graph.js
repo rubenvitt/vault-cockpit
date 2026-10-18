@@ -67,13 +67,14 @@
       if (!data.results.length) {
         box.append(el('p', { class: 'empty', text: `Nichts gefunden für „${q}“.` }));
       } else {
+        // Mit Notizseite öffnet ein Treffer die Notiz, der Graph steht daneben.
+        const notes = form.dataset.notes === '1';
         for (const r of data.results) {
-          box.append(
-            el('a', { href: graphHref(r.path), role: 'option', 'aria-selected': 'false' },
-              el('span', { class: 'title', text: r.title }),
-              el('span', { class: 'meta', text: r.path }),
-              r.snippet ? el('p', { class: 'snippet meta', text: r.snippet }) : null),
-          );
+          const option = el('a', { href: notes ? noteHref(r.path) : graphHref(r.path), role: 'option', 'aria-selected': 'false' },
+            el('span', { class: 'title', text: r.title }),
+            el('span', { class: 'meta', text: r.path }),
+            r.snippet ? el('p', { class: 'snippet meta', text: r.snippet }) : null);
+          box.append(notes ? el('div', { class: 'hit' }, option, el('a', { href: graphHref(r.path), class: 'graph-link', tabindex: '-1', text: 'Graph' })) : option);
         }
         if (data.total > data.results.length) box.append(el('a', { href: `/graph?q=${encodeURIComponent(q)}`, class: 'all', text: `Alle ${data.total} Treffer zeigen` }));
       }

@@ -21,6 +21,7 @@ const STATUS_MARK = { done: '✓', in_progress: '◐', blocked: '⏸', review: '
 
 const short = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 const graphHref = (path) => `/graph?pfad=${encodeURIComponent(path)}`;
+const noteHref = (path) => `/notiz?pfad=${encodeURIComponent(path)}`;
 
 function obsidianLink(path, vaultName) {
   if (!vaultName) return null;
@@ -127,7 +128,8 @@ function linkForm(ctx, center, target) {
   return `${formHead(ctx, '/aktion/verlinken', { pfad: center.path, ziel: target.path }).replace('class="act"', 'class="link-similar"')}<button type="submit" class="chip quiet" title="[[…]] an ${esc(center.label ?? center.path)} anhängen">Verlinken</button></form>`;
 }
 
-function page({ title, query = '', body, user, write = null, graph = false, flash = null, back = '/graph' }) {
+/** `notes`: Treffer der Live-Suche öffnen die Notizseite statt des Graphen. */
+function page({ title, query = '', body, user, write = null, graph = false, flash = null, back = '/graph', notes = false }) {
   return `<!doctype html>
 <html lang="de">
 ${head(title, { script: Boolean(write), scripts: [...(graph ? [assets.graphLib] : []), assets.graph] })}
@@ -135,7 +137,7 @@ ${head(title, { script: Boolean(write), scripts: [...(graph ? [assets.graphLib] 
 ${appHeader({ current: 'graph', user })}
 <div class="page-head">
   <h1>${esc(title)}</h1>
-  <form method="get" action="/graph" class="search" role="search"><input type="search" name="q" value="${esc(query)}" placeholder="Vault durchsuchen" aria-label="Vault durchsuchen" enterkeyhint="search" autocomplete="off" spellcheck="false"><button type="submit" class="btn">Suchen</button></form>
+  <form method="get" action="/graph" class="search" role="search"${notes ? ' data-notes="1"' : ''}><input type="search" name="q" value="${esc(query)}" placeholder="Vault durchsuchen" aria-label="Vault durchsuchen" enterkeyhint="search" autocomplete="off" spellcheck="false"><button type="submit" class="btn">Suchen</button></form>
 </div>
 <main>
 ${body}
@@ -150,7 +152,7 @@ ${body}
  * @param {string} [opts.back]   Rücksprung nach einer Aktion ohne JavaScript
  * @param {object} [opts.flash]  Meldung aus der letzten Aktion
  */
-export function renderGraph(graph, { vaultName = null, user = null, tz = 'Europe/Berlin', write = null, back = '/graph', flash = null } = {}) {
+export function renderGraph(graph, { vaultName = null, user = null, tz = 'Europe/Berlin', write = null, back = '/graph', flash = null, notes = false } = {}) {
   const center = graph.nodes.find((n) => n.id === graph.center);
   const link = obsidianLink(center.path, vaultName);
   const problems = graph.problems.length ? graph.problems.map((p) => `<p class="problem">${esc(p)}</p>`).join('') : '';
@@ -163,6 +165,7 @@ export function renderGraph(graph, { vaultName = null, user = null, tz = 'Europe
     graph: true,
     flash,
     back,
+    notes,
     body: `<section class="graph-panel">
       <p class="meta">${esc(center.path)}${write?.notes ? ` · <a href="/notiz?pfad=${esc(encodeURIComponent(center.path))}">Notiz ansehen</a>` : ''}${link ? ` · <a href="${esc(link)}">In Obsidian öffnen</a>` : ''}</p>
       <div class="graph-stage" ${attrs}>${svg(graph)}</div>
@@ -180,21 +183,22 @@ export function renderGraph(graph, { vaultName = null, user = null, tz = 'Europe
 
 const STREAM_LABEL = { text: 'Volltext', semantic: 'Bedeutung', graph: 'Graph' };
 
-export function renderSearch(query, result, { user = null } = {}) {
+/** Mit `notes` öffnet ein Treffer die Notiz, der Graph steht als Link daneben. */
+export function renderSearch(query, result, { user = null, notes = false } = {}) {
   let body;
-  if (!query) body = '<section><p class="empty">Suchbegriff oder Frage eingeben. Ein Treffer öffnet seinen Graphen.</p></section>';
+  if (!query) body = `<section><p class="empty">Suchbegriff oder Frage eingeben. Ein Treffer öffnet ${notes ? 'die Notiz' : 'seinen Graphen'}.</p></section>`;
   else if (!result.results.length) body = `<section><p class="empty">Nichts gefunden für „${esc(query)}“.</p></section>`;
   else {
     body = `<section><h2>${result.total} Treffer</h2><ul class="results">${result.results
       .map(
-        (r) => `<li><a href="${esc(graphHref(r.path))}">${esc(r.title ?? r.path)}</a>
-          <span class="meta">${esc(r.path)} · ${r.streams.map((s) => STREAM_LABEL[s] ?? s).join(' + ')}</span>
+        (r) => `<li><a href="${esc(notes ? noteHref(r.path) : graphHref(r.path))}">${esc(r.title ?? r.path)}</a>
+          <span class="meta">${esc(r.path)} · ${r.streams.map((s) => STREAM_LABEL[s] ?? s).join(' + ')}${notes ? ` · <a href="${esc(graphHref(r.path))}">Graph</a>` : ''}</span>
           ${r.snippet ? `<p class="snippet">${esc(r.snippet)}</p>` : ''}</li>`,
       )
       .join('')}</ul></section>`;
   }
   if (result?.degraded) body = `<p class="problem">${esc(result.degraded)}</p>${body}`;
-  return page({ title: query ? `Suche: ${query}` : 'Suche', query, body, user });
+  return page({ title: query ? `Suche: ${query}` : 'Suche', query, body, user, notes });
 }
 
 export const GRAPH_CSS = `
@@ -272,6 +276,10 @@ export const GRAPH_CSS = `
 .live-results .snippet { margin: 2px 0 0; font-size: 13px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .live-results .empty { padding: 8px 10px; }
 .live-results .all { color: var(--muted); font-size: 13px; }
+.live-results .hit { position: relative; }
+.live-results .hit > a[role=option] { padding-right: 64px; }
+.live-results .hit > .graph-link { position: absolute; top: 8px; right: 8px; padding: 2px 8px; font-size: 12px; color: var(--muted); border-radius: var(--r-sm); }
+.live-results .hit > .graph-link:hover { color: var(--accent); background: none; }
 @media (max-width: 700px) {
   .graph-stage.interactive { height: 60vh; min-height: 340px; margin: 0 calc(-1 * var(--s-4)); }
   .live-results { left: 0; right: auto; }

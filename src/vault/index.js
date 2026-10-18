@@ -141,34 +141,60 @@ export function buildIndex({ vaultPath, dbPath, persist, policy = DEFAULT_POLICY
   return { db, count };
 }
 
+/** Aliase aus dem Frontmatter (`aliases` oder `alias`, Liste oder einzelner Wert). */
+function aliasesOf(frontmatter) {
+  const raw = frontmatter?.aliases ?? frontmatter?.alias;
+  const list = Array.isArray(raw) ? raw : raw == null ? [] : [raw];
+  return list.map((a) => String(a).trim()).filter(Boolean);
+}
+
+/** Nachschlagetabellen für die Link-Auflösung: Pfade, Basenamen und Aliase (klein geschrieben). */
+function linkMaps(db) {
+  const byPath = new Set();
+  const byBasename = new Map();
+  const byAlias = new Map();
+  const add = (map, key, path) => {
+    if (!map.has(key)) map.set(key, []);
+    if (!map.get(key).includes(path)) map.get(key).push(path);
+  };
+  for (const row of db.prepare('SELECT path, basename, frontmatter FROM notes').all()) {
+    byPath.add(row.path);
+    add(byBasename, row.basename.toLowerCase(), row.path);
+    if (!row.frontmatter.includes('alias')) continue;
+    for (const alias of aliasesOf(JSON.parse(row.frontmatter))) add(byAlias, alias.toLowerCase(), row.path);
+  }
+  return { byPath, byBasename, byAlias };
+}
+
+/** Ein Linkziel (ohne `#Überschrift` und `|Anzeige`) auf einen Pfad auflösen, sonst null. */
+function resolveWith({ byPath, byBasename, byAlias }, raw) {
+  const target = String(raw ?? '').trim();
+  if (!target) return null;
+  const asPath = target.endsWith('.md') ? target : `${target}.md`;
+  if (byPath.has(asPath)) return asPath;
+  const candidates = byBasename.get(target.toLowerCase().replace(/\.md$/, '')) ?? [];
+  if (candidates.length === 1) return candidates[0];
+  if (candidates.length) return null;
+  const aliased = byAlias.get(target.toLowerCase()) ?? [];
+  return aliased.length === 1 ? aliased[0] : null;
+}
+
 /**
- * Löst Wikilink-Ziele auf Pfade auf: erst exakter Pfad, dann eindeutiger Basename.
+ * Löst Wikilink-Ziele auf Pfade auf: erst exakter Pfad, dann eindeutiger
+ * Basename, dann eindeutiger Alias aus dem Frontmatter (`aliases`).
  * Mehrdeutige Basenamen (etwa SKILL.md in jedem Skill-Ordner) bleiben bewusst unaufgelöst,
  * statt willkürlich auf eine der Kandidatendateien zu zeigen.
  */
 function resolveLinks(db, { source = null } = {}) {
-  const byBasename = new Map();
-  for (const row of db.prepare('SELECT path, basename FROM notes').all()) {
-    const key = row.basename.toLowerCase();
-    if (!byBasename.has(key)) byBasename.set(key, []);
-    byBasename.get(key).push(row.path);
-  }
-  const byPath = new Set(db.prepare('SELECT path FROM notes').all().map((r) => r.path));
-
+  const maps = linkMaps(db);
   const update = db.prepare('UPDATE links SET target_path = ? WHERE rowid = ?');
   db.exec('BEGIN');
   const pending = source
     ? db.prepare('SELECT rowid, target_raw FROM links WHERE source = ?').all(source)
     : db.prepare('SELECT rowid, target_raw FROM links').all();
   for (const link of pending) {
-    const raw = link.target_raw;
-    const asPath = raw.endsWith('.md') ? raw : `${raw}.md`;
-    if (byPath.has(asPath)) {
-      update.run(asPath, link.rowid);
-      continue;
-    }
-    const candidates = byBasename.get(raw.toLowerCase().replace(/\.md$/, '')) ?? [];
-    if (candidates.length === 1) update.run(candidates[0], link.rowid);
+    const path = resolveWith(maps, link.target_raw);
+    if (path) update.run(path, link.rowid);
   }
   db.exec('COMMIT');
 }
@@ -185,6 +211,8 @@ function toMatchQuery(query, { any = false } = {}) {
 
 export function openIndex(dbOrPath, { vaultPath = process.env.VAULT_PATH ?? '/vault', policy = DEFAULT_POLICY } = {}) {
   const db = typeof dbOrPath === 'string' ? new DatabaseSync(dbOrPath, { readOnly: false }) : dbOrPath;
+  // Nachschlagetabellen für resolveLink, neu gebaut nach jeder Änderung am Index.
+  let maps = null;
 
   return {
     db,
@@ -360,6 +388,20 @@ export function openIndex(dbOrPath, { vaultPath = process.env.VAULT_PATH ?? '/va
       return db.prepare("SELECT path FROM notes WHERE class = 'core' ORDER BY path").all().map((r) => r.path);
     },
 
+    /** Linkziel wie bei der Link-Auflösung des Index auf einen Pfad auflösen (Pfad, Basename, Alias), sonst null. */
+    resolveLink(target) {
+      maps ??= linkMaps(db);
+      return resolveWith(maps, target);
+    },
+
+    /** Tags (Frontmatter und inline) mehrerer Notizen, als Map path → Tags. */
+    tagsOf(paths) {
+      const out = new Map();
+      const stmt = db.prepare('SELECT tag FROM note_tags WHERE path = ? ORDER BY tag');
+      for (const p of new Set(paths)) out.set(p, [...new Set(stmt.all(p).map((r) => r.tag))]);
+      return out;
+    },
+
     /** Wie viele Notizen diesen Basename tragen (ohne `.md`, Groß-/Kleinschreibung egal), wie bei der Link-Auflösung. */
     basenameCount(basename) {
       const key = String(basename ?? '').toLowerCase();
@@ -423,6 +465,7 @@ export function openIndex(dbOrPath, { vaultPath = process.env.VAULT_PATH ?? '/va
         throw err;
       }
       resolveLinks(db, { source: relPath });
+      maps = null;
       const exists = Boolean(db.prepare('SELECT 1 FROM notes WHERE path = ?').get(relPath));
       return { existed, exists };
     },
@@ -435,6 +478,7 @@ export function openIndex(dbOrPath, { vaultPath = process.env.VAULT_PATH ?? '/va
     relinkAll() {
       db.exec('UPDATE links SET target_path = NULL');
       resolveLinks(db);
+      maps = null;
     },
 
     close() {

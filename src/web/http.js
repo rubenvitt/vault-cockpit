@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, createReadStream, closeSync } from 'node:fs';
 import { timingSafeEqual, randomUUID, createHash } from 'node:crypto';
 import { createCookieSigner, parseCookies, cookie } from './session.js';
 import { renderWeek, renderMessage, renderSettings, dueLabel } from './render.js';
@@ -109,7 +109,8 @@ const HTML_HEADERS = {
  *   Bereich oder ein Projekt, `POST /aktion/phoenix` markiert einen Phönix-Schritt,
  *   `POST /aktion/flamme` startet (`an=1`) oder stoppt eine Flamme,
  *   `POST /aktion/notiz/…` legt eine Notiz ab, setzt Tags, hängt Text an oder
- *   hakt eine Checkbox ab (Vorschau unter `GET /notiz?pfad=…`),
+ *   hakt eine Checkbox ab (Vorschau unter `GET /notiz?pfad=…`, Bilder daraus
+ *   unter `GET /notiz/bild?pfad=…`),
  *   `POST /aktion/verlinken` hängt einen Wikilink zu einer ähnlichen Notiz an,
  *   `POST /aktion/erfassen` ist die Schnelleingabe (Notiz, mit `!` eine
  *   Zunder-Aufgabe). Alle brauchen Sitzung, gleiche Herkunft und das CSRF-Token
@@ -223,8 +224,37 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       targets: notes.targets(note.path),
       archive: notes.archiveFolder(),
       vaultName,
+      related: notes.related?.(note.path) ?? null,
+      graph: Boolean(graph),
     });
     return send(res, status, html);
+  }
+
+  /**
+   * Bild aus dem Vault für die Notizseite (`/notiz/bild?pfad=…`): nur
+   * angemeldet, nur Bildformate ohne SVG, nichts aus vertraulichen oder
+   * ausgeschlossenen Ordnern, kein Symlink. Nie im Cache.
+   */
+  function noteImage(req, res, url) {
+    const file = notes.openImage?.(url.searchParams.get('pfad'));
+    if (!file) {
+      res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+      return res.end('Bild nicht verfügbar');
+    }
+    res.writeHead(200, {
+      'content-type': file.type,
+      'content-length': file.size,
+      'cache-control': 'private, no-store',
+      'x-content-type-options': 'nosniff',
+      'content-security-policy': "default-src 'none'; sandbox",
+      'content-disposition': 'inline',
+      'cross-origin-resource-policy': 'same-origin',
+    });
+    if (req.method === 'HEAD') {
+      closeSync(file.fd);
+      return res.end();
+    }
+    createReadStream(null, { fd: file.fd }).on('error', () => res.destroy()).pipe(res);
   }
 
   /** Wochenrückblick `/rueckblick?woche=…`: erledigt gegen geplant, Flammen-Zeit je Bereich. */
@@ -553,12 +583,12 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     if (!path) {
       const q = (url.searchParams.get('q') ?? '').trim().slice(0, 500);
       const result = q && search ? await search(q) : { results: [], total: 0 };
-      return send(res, 200, renderSearch(q, result, { user }));
+      return send(res, 200, renderSearch(q, result, { user, notes: Boolean(notes) }));
     }
     const g = graph ? await graph.around(path) : null;
     if (!g) return send(res, 404, renderMessage('Notiz nicht gefunden', `„${path}“ gibt es nicht im Index.`, { link: { href: '/graph', label: 'Zur Suche' } }));
     const { vaultName, tz } = settings.get();
-    return send(res, 200, renderGraph(g, { vaultName, user, tz, write: writeContext(req), back: url.pathname + url.search, flash: takeFlash(req, res) }));
+    return send(res, 200, renderGraph(g, { vaultName, user, tz, write: writeContext(req), back: url.pathname + url.search, flash: takeFlash(req, res), notes: Boolean(notes) }));
   }
 
   /** Live-Suche: die besten Treffer, knapp. */
@@ -579,7 +609,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   const TOKEN_ROUTES = { '/einstellungen/tokens': createToken, '/einstellungen/tokens/widerrufen': revokeToken };
   const ACTION_ROUTES = new Set(Object.keys(ACTIONS));
   const SHORTCUT_ROUTES = new Map(shortcuts.map((s) => [`/kurzbefehle/${s.slug}.shortcut`, s]));
-  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...PUBLIC.keys(), '/', '/api/woche', '/api/suche', '/rueckblick', ...(notes ? ['/notiz'] : []), '/graph', '/api/graph', '/einstellungen', ...(tokens ? Object.keys(TOKEN_ROUTES) : []), '/login', '/auth/callback', '/logout']);
+  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...PUBLIC.keys(), '/', '/api/woche', '/api/suche', '/rueckblick', ...(notes ? ['/notiz', '/notiz/bild'] : []), '/graph', '/api/graph', '/einstellungen', ...(tokens ? Object.keys(TOKEN_ROUTES) : []), '/login', '/auth/callback', '/logout']);
 
   return {
     matches: (path) => ROUTES.has(path),
@@ -652,6 +682,13 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       if (path === '/api/suche') {
         if (!session) return json(res, 401, { error: 'unauthorized', error_description: 'Anmeldung unter /login nötig' });
         return searchApi(req, res, url);
+      }
+      if (path === '/notiz/bild') {
+        if (!session) {
+          res.writeHead(401, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+          return res.end('Anmeldung nötig');
+        }
+        return noteImage(req, res, url);
       }
       if (!session) return redirect(res, `/login?next=${encodeURIComponent(url.pathname + url.search)}`);
       if (path === '/graph') return graphPage(req, res, url, session);

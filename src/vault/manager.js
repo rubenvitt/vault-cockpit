@@ -104,5 +104,8 @@ export function createIndexManager({ vaultPath, dbPath, policy = DEFAULT_POLICY,
     filterPaths: (...a) => current.filterPaths(...a),
     embeddablePaths: (...a) => current.embeddablePaths(...a),
     describe: (...a) => current.describe(...a),
+    basenameCount: (...a) => current.basenameCount(...a),
+    resolveLink: (...a) => current.resolveLink(...a),
+    tagsOf: (...a) => current.tagsOf(...a),
   };
 }

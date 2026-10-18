@@ -9,6 +9,9 @@ import { createCookieSigner, parseCookies } from '../src/web/session.js';
 import { createSettingsStore } from '../src/cockpit/settings.js';
 import { createTokenStore } from '../src/cockpit/tokens.js';
 import { ActionError } from '../src/cockpit/actions.js';
+import { mkdtempSync, writeFileSync, openSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const ISSUER = 'https://id.test';
 const CLIENT = 'cockpit-web';
@@ -1000,6 +1003,78 @@ test('Notiz ablegen: JSON führt zur neuen Adresse, Meldung kommt per Cookie mit
     {},
     { actions: fakeActions(), notes },
   );
+});
+
+/** Notiz-Attrappe mit Verweisen, Backlinks, ähnlichen Notizen und einem Bild. */
+function previewNotes(dir) {
+  const base = fakeNotes();
+  const png = join(dir, 'foto.png');
+  writeFileSync(png, Buffer.from('89504e470d0a1a0a', 'hex'));
+  const links = {
+    wikilink: (t) => (t === 'Hund' ? { kind: 'note', path: 'wiki/Hund.md', title: 'Hund' } : t === 'foto.png' ? { kind: 'image', path: 'bilder/foto.png' } : null),
+    image: () => null,
+    markdownLink: () => null,
+  };
+  return {
+    ...base,
+    get: (p) => {
+      const n = base.get(p);
+      return n && { ...n, frontmatter: { source: 'cockpit', projekt: '[[Hund]]' }, body: '[[Hund]] [[Geheim]] ![[foto.png]]\n\n| a | b |\n|---|---|\n| <x> | 2 |\n\n> [!tip] Merken\n> Text', links };
+    },
+    related: (p) => ({
+      backlinks: [{ path: 'wiki/Hund.md', title: 'Hund <B>' }],
+      similar: { source: 'text', hits: [{ path: 'wiki/Training.md', title: 'Training', folder: 'wiki', score: null, linked: false }], problem: 'Ohne Embeddings (Einstellungen → Embeddings) ähnlich nach Volltext' },
+    }),
+    openImage: (p) => (p === 'bilder/foto.png' ? { fd: openSync(png, 'r'), size: 8, type: 'image/png' } : null),
+  };
+}
+
+test('Notizvorschau: Wikilinks, Backlinks, Ähnlich und Bilder hinter der Anmeldung', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'web-preview-'));
+  const notes = previewNotes(dir);
+  try {
+    await withServer(
+      async ({ call, login }) => {
+        assert.equal((await call('/notiz/bild?pfad=bilder%2Ffoto.png')).status, 401);
+        await login();
+        const html = await (await call('/notiz?pfad=00-inbox%2FIdee.md')).text();
+        assert.match(html, /<a href="\/notiz\?pfad=wiki%2FHund\.md" class="wikilink" title="wiki\/Hund\.md">Hund<\/a>/);
+        assert.match(html, /<span class="wikilink missing" title="Fehlt: Geheim">Geheim<span class="missing-mark"> \(fehlt\)<\/span><\/span>/);
+        assert.match(html, /<img src="\/notiz\/bild\?pfad=bilder%2Ffoto\.png" alt="foto\.png" loading="lazy">/);
+        assert.match(html, /<td>&lt;x&gt;<\/td>/);
+        assert.match(html, /<div class="callout callout-ok" data-callout="tip"><p class="callout-title">Merken<\/p>/);
+        // Frontmatter kompakt, Wikilinks darin als Link.
+        assert.match(html, /<details class="fm"><summary>source: cockpit · projekt: Hund<\/summary><dl>[^]*?<dd><a href="\/notiz\?pfad=wiki%2FHund\.md"/);
+        assert.match(html, /<h2>Verweist hierher<\/h2><ul><li><a href="\/notiz\?pfad=wiki%2FHund\.md">Hund &lt;B&gt;<\/a>/);
+        assert.match(html, /<h2>Ähnlich<\/h2><ul><li><a href="\/notiz\?pfad=wiki%2FTraining\.md">Training<\/a>[^]*?ähnlich nach Volltext/);
+        assert.match(html, /<a href="\/graph\?pfad=00-inbox%2FIdee\.md">Graph<\/a>/);
+
+        const img = await call('/notiz/bild?pfad=bilder%2Ffoto.png');
+        assert.equal(img.status, 200);
+        assert.equal(img.headers.get('content-type'), 'image/png');
+        assert.equal(img.headers.get('cache-control'), 'private, no-store');
+        assert.equal(img.headers.get('x-content-type-options'), 'nosniff');
+        assert.match(img.headers.get('content-security-policy'), /sandbox/);
+        assert.equal(Buffer.from(await img.arrayBuffer()).toString('hex'), '89504e470d0a1a0a');
+        const head = await call('/notiz/bild?pfad=bilder%2Ffoto.png', { method: 'HEAD' });
+        assert.equal(head.status, 200);
+        const denied = await call('/notiz/bild?pfad=..%2Fetc%2Fpasswd');
+        assert.equal(denied.status, 404);
+        assert.equal(denied.headers.get('cache-control'), 'no-store');
+        assert.equal((await call('/notiz?pfad=00-inbox%2FIdee.md')).headers.get('cache-control'), 'no-store');
+
+        // Suchtreffer öffnen die Notiz, der Graph steht daneben; die Live-Suche weiß davon.
+        const found = await (await call('/graph?q=hund')).text();
+        assert.match(found, /<li><a href="\/notiz\?pfad=wiki%2Fa\.md">A<\/a>[^]*?<a href="\/graph\?pfad=wiki%2Fa\.md">Graph<\/a>/);
+        assert.match(found, /class="search" role="search" data-notes="1"/);
+        assert.match(await (await call('/graph?pfad=wiki%2Fa.md')).text(), /class="search" role="search" data-notes="1"/);
+      },
+      {},
+      { actions: fakeActions(), notes },
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('Feuer-Ziel bearbeiten: Formular an der Feuer-Notiz, Speichern mit Rückgängig', async () => {

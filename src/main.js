@@ -258,8 +258,9 @@ const webHttp = process.env.WEB_CLIENT_ID
         zunder,
         index,
       }),
-      // Vault-Notizen ansehen und verarbeiten, über denselben Editor wie vault_edit.
-      notes: createNoteDesk({ index, editor, policy: POLICY, settings: cockpitSettings }),
+      // Vault-Notizen ansehen und verarbeiten, über denselben Editor wie vault_edit;
+      // Bilder aus dem Vault und ähnliche Notizen für die Vorschau.
+      notes: createNoteDesk({ index, editor, policy: POLICY, settings: cockpitSettings, vaultPath: VAULT_PATH, semantic: currentSemantic }),
       settings: cockpitSettings,
       tokens: apiTokens,
       shortcuts: loadShortcuts(),

@@ -2,6 +2,8 @@ import { parseNote } from '../vault/markdown.js';
 import { ActionError } from './actions.js';
 import { FEUER_TYPE, findFeuer, planFeuer } from './feuer.js';
 import { describeWeek, parseWeekId } from './week.js';
+import { createAttachments, createLinkResolver } from './note-links.js';
+import { createRelated } from './related.js';
 
 /** Abschnitte der Feuer-Notiz, die das Cockpit bearbeitet. */
 export const FEUER_FIELDS = { ziel: 'Feuer-Ziel', zug: 'Erster Zug' };
@@ -17,8 +19,13 @@ const TAG = /^[\p{L}\p{N}_/-]+$/u;
  * aus dem Index, die weder vertraulich noch ausgeschlossen sind; vertrauliche
  * oder ausgeschlossene Ordner werden auch nie als Ziel angeboten oder
  * angenommen.
+ *
+ * Für die Vorschau löst der Schreibtisch Wikilinks und Bilder auf (`links` an
+ * der Notiz, `openImage`) und kennt Backlinks und ähnliche Notizen (`related`),
+ * alles nur unter den Notizen, die er auch zeigen darf. Bilder brauchen
+ * `vaultPath`, ähnliche Notizen nach Bedeutung `semantic` (Index oder Getter).
  */
-export function createNoteDesk({ index, editor, policy, settings }) {
+export function createNoteDesk({ index, editor, policy, settings, vaultPath = null, semantic = null }) {
   /** Die Notiz, wenn das Cockpit sie zeigen darf, sonst null. */
   function visible(path) {
     const p = String(path ?? '');
@@ -63,9 +70,26 @@ export function createNoteDesk({ index, editor, policy, settings }) {
     return tops.find((f) => /^(\d+[-_ ]?)?archiv(e)?$/i.test(f)) ?? null;
   }
 
+  /** Wie `visible`, aber nur aus dem Index, ohne die Datei zu lesen (für Listen und Links). */
+  function listed(path) {
+    const p = String(path ?? '');
+    if (!p || policy.isExcluded(p) || policy.sensitivityOf(p)) return null;
+    const row = index.describe([p]).get(p);
+    return row && !row.sensitivity && row.class === 'core' ? row : null;
+  }
+
+  const attachments = vaultPath ? createAttachments({ vaultPath, policy }) : null;
+  const related = createRelated({ index, semantic, visible: listed });
+
   return {
     visible: (path) => Boolean(visible(path)),
     archiveFolder,
+
+    /** Backlinks und ähnliche Notizen (siehe `createRelated`); null für unsichtbare Notizen. */
+    related: (path, opts) => (visible(path) ? related.of(String(path), opts) : null),
+
+    /** Bild aus dem Vault zum Ausliefern öffnen, siehe `createAttachments().open`. */
+    openImage: (path) => attachments?.open(path) ?? null,
 
     /** Alles für die Notizseite; null, wenn das Cockpit die Notiz nicht zeigen darf. */
     get(path) {
@@ -82,6 +106,7 @@ export function createNoteDesk({ index, editor, policy, settings }) {
         tags: parsed.tags,
         body: parsed.body,
         inInbox: folder === inboxFolder || folder.startsWith(`${inboxFolder}/`),
+        links: createLinkResolver({ index, visible: listed, attachments }, row.path),
       };
     },
 
