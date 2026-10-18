@@ -112,13 +112,23 @@ const seenKey = (path, id) => `${SEEN}${path}\n${id}`;
 
 const getter = (v) => (typeof v === 'function' ? v : () => v);
 
-export function createZunderBridge({ index, editor, zunder, state, tag = 'zunder', vaultName = null, enabled = true, logger = console }) {
+export function createZunderBridge({ index, editor, zunder, state, tag = 'zunder', vaultName = null, enabled = true, logger = console, now = () => Date.now() }) {
   const currentTag = getter(tag);
   const normalized = () => String(currentTag() || 'zunder').replace(/^#/, '').toLowerCase();
   const currentVaultName = getter(vaultName);
   const isEnabled = getter(enabled);
   const currentZunder = typeof zunder === 'function' ? zunder : () => zunder;
   let queue = Promise.resolve();
+
+  // Letzter Lauf je Richtung, nur im Speicher (Zustandsseite): Übertragen
+  // neuer Checkboxen und Abgleich des Erledigt-Stands. Ein Rücklink, der erst
+  // beim nächsten Durchlauf gelingt, ist kein Fehler; Zunder-Fehler schon.
+  const runs = { transfer: {}, sync: {} };
+  function record(run, errors) {
+    const at = now();
+    if (!errors.length) Object.assign(run, { okAt: at, failing: false });
+    else Object.assign(run, { errorAt: at, error: errors.length > 1 ? `${errors[0]} (und ${errors.length - 1} weitere)` : errors[0], failing: true });
+  }
 
   function backlink(path) {
     const name = path.replace(/\.md$/i, '');
@@ -163,13 +173,16 @@ export function createZunderBridge({ index, editor, zunder, state, tag = 'zunder
     const zunder = isEnabled() ? currentZunder() : null;
     if (!zunder) return 0;
     let created = 0;
+    const errors = [];
     for (const path of paths) {
       try {
         created += await processNote(zunder, path);
       } catch (err) {
+        errors.push(`${path}: ${err.message}`);
         logger.error?.(`Zunder-Brücke: ${path} übersprungen: ${err.message}`);
       }
     }
+    record(runs.transfer, errors);
     return created;
   }
 
@@ -180,6 +193,7 @@ export function createZunderBridge({ index, editor, zunder, state, tag = 'zunder
   async function syncBack() {
     const zunder = isEnabled() ? currentZunder() : null;
     if (!zunder) return { closed: 0, reported: 0 };
+    const errors = [];
     const prefix = zunder.taskUrl ? zunder.taskUrl('') : null;
     // Je Notiz und Aufgabe: offene Zeilen und die Markierung des Paars
     // (offen, sobald eine Zeile offen ist, sonst die der ersten Zeile).
@@ -210,6 +224,7 @@ export function createZunderBridge({ index, editor, zunder, state, tag = 'zunder
       try {
         status.set(id, (await zunder.getTask(id))?.status ?? null);
       } catch (err) {
+        errors.push(`Status von ${id} nicht abrufbar: ${err.message}`);
         logger.warn?.(`Zunder-Brücke: Status von ${id} nicht abrufbar (${err.message})`);
       }
     }
@@ -231,6 +246,7 @@ export function createZunderBridge({ index, editor, zunder, state, tag = 'zunder
         logger.info?.(`Zunder-Brücke: ${p.path} → ${p.id} ${next}`);
       } catch (err) {
         retry.add(key);
+        errors.push(`${p.id} nicht als ${next} gemeldet: ${err.message}`);
         logger.warn?.(`Zunder-Brücke: ${p.id} nicht als ${next} gemeldet, nächster Durchlauf (${err.message})`);
       }
     }
@@ -258,11 +274,18 @@ export function createZunderBridge({ index, editor, zunder, state, tag = 'zunder
     }
     for (const key of state.keys(SEEN)) if (!pairs.has(key)) state.delete(key);
 
+    record(runs.sync, errors);
     return { closed, reported };
   }
 
+  /** Bricht ein Lauf ganz ab, zählt das als Fehler dieser Richtung. */
+  const failed = (run) => (err) => {
+    record(run, [err.message]);
+    throw err;
+  };
+
   /** Durchläufe nacheinander, damit keine Zeile doppelt übertragen wird. */
-  const enqueue = (paths) => enqueueJob(() => run(paths));
+  const enqueue = (paths) => enqueueJob(() => run(paths).catch(failed(runs.transfer)));
   const enqueueJob = (job) => {
     const next = queue.then(job);
     queue = next.catch(() => 0);
@@ -283,6 +306,12 @@ export function createZunderBridge({ index, editor, zunder, state, tag = 'zunder
     /** Alle Notizen mit dem Tag prüfen (Start, periodisch). */
     scanAll: () => enqueue(index.pathsWithTag(normalized())),
     /** Erledigt-Stand in beide Richtungen abgleichen (Start, periodisch). */
-    syncBack: () => enqueueJob(syncBack),
+    syncBack: () => enqueueJob(() => syncBack().catch(failed(runs.sync))),
+    /** Letzter Lauf je Richtung: `{ transfer, sync }` mit `okAt`, `errorAt`, `error`, `failing`. */
+    status() {
+      const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
+      const view = (r) => ({ okAt: iso(r.okAt), errorAt: iso(r.errorAt), error: r.error ?? null, failing: Boolean(r.failing) });
+      return { transfer: view(runs.transfer), sync: view(runs.sync) };
+    },
   };
 }

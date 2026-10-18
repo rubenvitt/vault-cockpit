@@ -385,8 +385,9 @@ export function flashToast(flash, ctx) {
  * @param {string} [opts.back]   Rücksprung nach einer Aktion ohne JavaScript
  * @param {object} [opts.flash]  `{ kind, message, undo }` aus der letzten Aktion
  * @param {string} [opts.draft]  Text, der nach einem Fehler wieder ins Eingabefeld kommt
+ * @param {string} [opts.alert]  Hinweis auf gestörte Dienste für die Kopfzeile (health-render.js)
  */
-export function renderWeek(model, { user = null, write = null, back = '/', flash = null, draft = null, focus = false } = {}) {
+export function renderWeek(model, { user = null, write = null, back = '/', flash = null, draft = null, focus = false, alert = '' } = {}) {
   const { tz, vaultName } = model;
   const w = model.week;
   const title = weekTitle(w);
@@ -397,7 +398,7 @@ export function renderWeek(model, { user = null, write = null, back = '/', flash
 <html lang="de">
 ${head(title.short, { script: Boolean(write) })}
 <body class="page-week">
-${appHeader({ current: 'woche', user, links: { rueckblick: `/rueckblick?woche=${w.id}` } })}
+${appHeader({ current: 'woche', user, links: { rueckblick: `/rueckblick?woche=${w.id}` }, alert })}
 <div class="page-head">
   <h1>${esc(title.short)} <span class="range">${esc(title.range)}</span></h1>
   <nav class="pager" aria-label="Wochen">
@@ -573,7 +574,7 @@ export function renderSettings({ stored, defaults, checks = {}, notice = null, e
 ${head('Einstellungen')}
 <body class="page-settings">
 ${appHeader({ current: 'einstellungen', user })}
-<div class="page-head"><h1>Einstellungen</h1></div>
+<div class="page-head"><h1>Einstellungen</h1><a href="/zustand" class="btn">Zustand der Dienste</a></div>
 <main class="settings">
 <nav class="settings-nav" aria-label="Abschnitte">${nav
     .map(([id, label, state]) => `<a href="#${id}">${state ? `<span class="dot ${state[1]}" aria-hidden="true"></span>` : '<span class="dot" aria-hidden="true"></span>'}${label}</a>`)

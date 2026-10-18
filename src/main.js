@@ -29,6 +29,7 @@ import { createOllamaEmbedder } from './semantic/embedder.js';
 import { createSemanticIndex } from './semantic/index.js';
 import { hybridSearch } from './semantic/search.js';
 import { createGraph } from './graph/graph.js';
+import { createHealth, createRunLog } from './health/collect.js';
 
 function required(name) {
   const v = process.env[name];
@@ -144,11 +145,17 @@ function applyEmbed() {
 const currentSemantic = () => semantic;
 index.onChange(({ full, paths }) => semantic?.schedule(full ? null : paths));
 const calendars = createCalendarSources({ settings: cockpitSettings });
+// Ob Zunder den Zugang annimmt, merkt sich der Client bei jedem Aufruf (Seite
+// „Zustand“); ein neuer Zugang fängt von vorn an.
+const zunderAccess = createRunLog();
 const cockpit = createCockpit({
   index,
   settings: cockpitSettings,
   calendars,
-  zunderFor: ({ url, token }) => createZunderClient({ url, token }),
+  zunderFor: ({ url, token }) => {
+    zunderAccess.reset();
+    return createZunderClient({ url, token, monitor: zunderAccess });
+  },
 });
 const zunder = () => cockpit.zunder();
 const zunderSource = () => {
@@ -174,12 +181,15 @@ const searchHttp = createSearchHttp({ tokens: apiTokens, index, semantic: curren
 // jede Änderung dort startet ihn mit dem neuen Stand neu.
 let mail = null;
 let mailKey = null;
+// Scheitert schon der Start, zeigt die Zustandsseite das statt eines Abrufs.
+let mailStartError = null;
 function applyMail() {
   const m = cockpitSettings.get().mail;
   const key = m ? JSON.stringify([m.token, m.senders, m.mailbox, m.doneMailbox, m.pollMinutes]) : null;
   if (key === mailKey) return;
   mail?.stop();
   mail = null;
+  mailStartError = null;
   mailKey = key;
   if (!m) return;
   try {
@@ -194,6 +204,7 @@ function applyMail() {
     mail.start(m.pollMinutes);
     console.log(`Mail-Capture: „${m.mailbox}“ alle ${m.pollMinutes} Minuten`);
   } catch (err) {
+    mailStartError = { state: 'error', mailbox: m.mailbox, lastError: `Start fehlgeschlagen: ${err.message}`, lastErrorAt: new Date().toISOString() };
     console.error(`Mail-Capture aus: ${err.message}`);
   }
 }
@@ -242,6 +253,20 @@ sync.start({
   },
 });
 
+// Zustand der Hintergrunddienste: Seite /zustand, Hinweis in der Kopfzeile und
+// `degraded` in /health. Dieselben Quellen wie vault_stats.
+const health = createHealth({
+  settings: cockpitSettings,
+  sync,
+  index,
+  semantic: currentSemantic,
+  mail: () => mail?.status() ?? mailStartError,
+  bridge,
+  zunder,
+  zunderAccess,
+  calendars,
+});
+
 const graph = createGraph({ index, semantic: currentSemantic, zunder, calendar: calendarForGraph(calendars), tz: () => cockpitSettings.get().tz });
 
 // Web-Cockpit (Schritt 3): Wochenansicht mit eigenem Browser-Login. Aus, bis
@@ -267,6 +292,7 @@ const webHttp = process.env.WEB_CLIENT_ID
       calendars,
       graph,
       search: (query) => hybridSearch({ index, semantic: currentSemantic, query, limit: 30 }),
+      health,
       oidc: createOidcLogin({
         issuer: ISSUER,
         clientId: process.env.WEB_CLIENT_ID,
@@ -309,6 +335,7 @@ const app = createApp({
   captureHttp,
   searchHttp,
   webHttp,
+  degraded: () => health.degraded(),
   mcpHandler: async (req, res, principal, body) => {
     await writeWebResponse(res, await mcpHttp.fetch(toWebRequest(req, body, PUBLIC_URL)));
   },

@@ -6,6 +6,7 @@ import { versionAssets, THEME } from './layout.js';
 import { renderGraph, renderSearch, GRAPH_CSS } from './graph-render.js';
 import { renderNote, NOTE_CSS } from './note-render.js';
 import { renderReview, REVIEW_CSS } from './review-render.js';
+import { renderHealth, healthAlert, HEALTH_CSS } from './health-render.js';
 import { SettingsError, MAX_CALENDARS } from '../cockpit/settings.js';
 import { describeWeek, weekOf } from '../cockpit/week.js';
 import { ActionError, SETTABLE } from '../cockpit/actions.js';
@@ -16,7 +17,7 @@ const GRAPH_JS = staticFile('graph.js', 'utf8');
 // sigma + graphology + ForceAtlas2, gebündelt mit `npm run vendor` und eingecheckt.
 const GRAPH_LIB = staticFile('vendor/graph-lib.js', 'utf8');
 // Design-System (Tokens, Bausteine, Wochenansicht) plus die Teile der übrigen Seiten.
-const CSS = staticFile('cockpit.css', 'utf8') + GRAPH_CSS + NOTE_CSS + REVIEW_CSS;
+const CSS = staticFile('cockpit.css', 'utf8') + GRAPH_CSS + NOTE_CSS + REVIEW_CSS + HEALTH_CSS;
 const hash = (s) => createHash('sha256').update(s).digest('base64url').slice(0, 10);
 const VERSION = { css: hash(CSS), js: hash(CLIENT_JS), graph: hash(GRAPH_JS), graphLib: hash(GRAPH_LIB) };
 versionAssets(VERSION);
@@ -119,11 +120,14 @@ const HTML_HEADERS = {
  *   `/api/search` oder `capture` für `/capture` und `/funke`) und zeigt ihn einmal, `POST /einstellungen/tokens/widerrufen` löscht einen.
  * - `GET /kurzbefehle/<slug>.shortcut` liefert die signierten iOS-Kurzbefehle
  *   (verlinkt in den Einstellungen).
+ * - `GET /zustand` zeigt den Zustand der Hintergrunddienste (`health`, siehe
+ *   src/health/collect.js); meldet einer einen Fehler, trägt die Kopfzeile der
+ *   Wochenansicht einen Hinweis dorthin.
  *
  * Die Sitzung ist ein signiertes Cookie und nur für diese Routen gültig; die
  * MCP-Schnittstelle prüft weiter ausschließlich Bearer-Tokens.
  */
-export function createWebHttp({ cockpit, settings, actions = null, notes = null, tokens = null, shortcuts = [], captureEnabled = false, calendars = null, graph = null, search = null, oidc, sessionSecret, publicUrl, allowedSubjects = [], sessionHours = 12, logger = console, now = () => Date.now() }) {
+export function createWebHttp({ cockpit, settings, actions = null, notes = null, tokens = null, shortcuts = [], captureEnabled = false, calendars = null, graph = null, search = null, health = null, oidc, sessionSecret, publicUrl, allowedSubjects = [], sessionHours = 12, logger = console, now = () => Date.now() }) {
   const signer = createCookieSigner(sessionSecret);
   const secure = publicUrl.startsWith('https://');
 
@@ -203,7 +207,13 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     const model = await cockpit.week(id || null);
     if (!model) return send(res, 400, renderMessage('Unbekannte Woche', `„${id}“ ist keine Kalenderwoche wie 2026-W42.`, { link: { href: '/', label: 'Zur laufenden Woche' } }));
     const back = url.pathname + url.search;
-    return send(res, status, renderWeek(model, { user: session.name ?? session.sub, write: writeContext(req), back, flash: flash ?? takeFlash(req, res), draft, focus: url.searchParams.has('erfassen') }));
+    return send(res, status, renderWeek(model, { user: session.name ?? session.sub, write: writeContext(req), back, flash: flash ?? takeFlash(req, res), draft, focus: url.searchParams.has('erfassen'), alert: health ? healthAlert(health.failing()) : '' }));
+  }
+
+  /** Zustand der Hintergrunddienste; Zunder und Kalender werden dabei frisch geprüft. */
+  async function healthPage(req, res, session) {
+    const services = await health.check();
+    return send(res, 200, renderHealth(services, { tz: settings.get().tz, user: session.name ?? session.sub, now: now() }));
   }
 
   /** Notizseite `/notiz?pfad=…`: Vorschau und Verarbeiten. */
@@ -579,7 +589,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   const TOKEN_ROUTES = { '/einstellungen/tokens': createToken, '/einstellungen/tokens/widerrufen': revokeToken };
   const ACTION_ROUTES = new Set(Object.keys(ACTIONS));
   const SHORTCUT_ROUTES = new Map(shortcuts.map((s) => [`/kurzbefehle/${s.slug}.shortcut`, s]));
-  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...PUBLIC.keys(), '/', '/api/woche', '/api/suche', '/rueckblick', ...(notes ? ['/notiz'] : []), '/graph', '/api/graph', '/einstellungen', ...(tokens ? Object.keys(TOKEN_ROUTES) : []), '/login', '/auth/callback', '/logout']);
+  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...PUBLIC.keys(), '/', '/api/woche', '/api/suche', '/rueckblick', ...(notes ? ['/notiz'] : []), '/graph', '/api/graph', '/einstellungen', ...(health ? ['/zustand'] : []), ...(tokens ? Object.keys(TOKEN_ROUTES) : []), '/login', '/auth/callback', '/logout']);
 
   return {
     matches: (path) => ROUTES.has(path),
@@ -657,6 +667,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       if (path === '/graph') return graphPage(req, res, url, session);
       if (path === '/notiz') return notePage(req, res, url, session);
       if (path === '/rueckblick') return reviewPage(req, res, url, session);
+      if (path === '/zustand') return healthPage(req, res, session);
       return page(req, res, url, session);
     },
   };
