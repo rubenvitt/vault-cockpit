@@ -355,6 +355,8 @@
     const update = async () => {
       const text = field.value.trimStart();
       if (!text.startsWith('!') || !text.slice(1).trim()) return hide();
+      // Ohne Netz rechnet niemand die Vorschau; der Puffer wertet den Text später aus.
+      if (!navigator.onLine) return hide();
       const mine = ++seq;
       let data;
       try {
