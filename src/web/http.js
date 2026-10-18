@@ -9,6 +9,9 @@ import { renderReview, REVIEW_CSS } from './review-render.js';
 import { SettingsError, MAX_CALENDARS } from '../cockpit/settings.js';
 import { describeWeek, weekOf } from '../cockpit/week.js';
 import { ActionError, SETTABLE } from '../cockpit/actions.js';
+import { BackupError, MAX_BACKUP } from '../cockpit/backup.js';
+import { readMultipart, FormError } from './multipart.js';
+import { restoredMessage } from './backup-render.js';
 
 const staticFile = (name, enc) => readFileSync(new URL(`./static/${name}`, import.meta.url), enc);
 const CLIENT_JS = staticFile('cockpit.js', 'utf8');
@@ -117,13 +120,17 @@ const HTML_HEADERS = {
  *   `/static/cockpit.js`), sonst mit einer Weiterleitung und einer Meldung.
  * - `POST /einstellungen/tokens` legt einen API-Token an (Recht `search` für
  *   `/api/search` oder `capture` für `/capture` und `/funke`) und zeigt ihn einmal, `POST /einstellungen/tokens/widerrufen` löscht einen.
+ * - `POST /einstellungen/sicherung` liefert die verschlüsselte Sicherung von
+ *   `/data` als Datei, `POST /einstellungen/sicherung/wiederherstellen`
+ *   (`multipart/form-data`) schreibt eine zurück und startet das Cockpit neu
+ *   (`restart`); ist es nicht leer, nur mit `ersetzen=1`.
  * - `GET /kurzbefehle/<slug>.shortcut` liefert die signierten iOS-Kurzbefehle
  *   (verlinkt in den Einstellungen).
  *
  * Die Sitzung ist ein signiertes Cookie und nur für diese Routen gültig; die
  * MCP-Schnittstelle prüft weiter ausschließlich Bearer-Tokens.
  */
-export function createWebHttp({ cockpit, settings, actions = null, notes = null, tokens = null, shortcuts = [], captureEnabled = false, calendars = null, graph = null, search = null, oidc, sessionSecret, publicUrl, allowedSubjects = [], sessionHours = 12, logger = console, now = () => Date.now() }) {
+export function createWebHttp({ cockpit, settings, actions = null, notes = null, tokens = null, shortcuts = [], captureEnabled = false, calendars = null, graph = null, search = null, backup = null, restart = () => {}, oidc, sessionSecret, publicUrl, allowedSubjects = [], sessionHours = 12, logger = console, now = () => Date.now() }) {
   const signer = createCookieSigner(sessionSecret);
   const secure = publicUrl.startsWith('https://');
 
@@ -428,6 +435,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       tz: settings.get().tz,
       user: session.name ?? session.sub,
       csrf: csrfOf(req),
+      backup: backup?.status() ?? null,
     });
     return send(res, status, html);
   }
@@ -547,6 +555,55 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     return redirect(res, '/einstellungen?widerrufen=1');
   }
 
+  /** Sicherung als Datei; bei einem Fehler wieder die Seite mit Meldung. */
+  async function downloadBackup(req, res, session) {
+    const form = await readSettingsForm(req, res);
+    if (!form) return;
+    let file;
+    try {
+      file = await backup.create(form.get('passphrase') ?? '', { repeat: form.get('passphrase2') ?? '' });
+    } catch (err) {
+      if (err instanceof BackupError) return settingsPage(req, res, session, { status: 400, error: err.message });
+      throw err;
+    }
+    logger.info?.(`Sicherung heruntergeladen von ${session.sub} (${file.files.join(', ')})`);
+    res.writeHead(200, {
+      'content-type': 'application/json; charset=utf-8',
+      'content-disposition': `attachment; filename="${file.filename}"`,
+      'cache-control': 'no-store',
+      'x-content-type-options': 'nosniff',
+    });
+    return res.end(file.body);
+  }
+
+  /** Wiederherstellen; danach Neustart, damit alle Teile den neuen Stand lesen. */
+  async function restoreBackup(req, res, session) {
+    if (foreignOrigin(req)) return json(res, 403, { error: 'forbidden', error_description: 'fremde Herkunft' });
+    let form;
+    try {
+      form = await readMultipart(req, { limit: MAX_BACKUP + 64 * 1024 });
+    } catch (err) {
+      if (!(err instanceof FormError)) throw err;
+      return res.destroyed ? undefined : settingsPage(req, res, session, { status: err.status, error: err.message });
+    }
+    if (!csrfOk(req, form.fields.get('csrf'))) {
+      return send(res, 403, renderMessage('Nicht wiederhergestellt', 'Die Seite ist veraltet. Bitte neu laden und noch einmal versuchen.', { link: { href: '/einstellungen', label: 'Neu laden' } }));
+    }
+    let result;
+    try {
+      result = await backup.restore(form.files.get('datei')?.data ?? null, form.fields.get('passphrase') ?? '', { replace: form.fields.get('ersetzen') === '1' });
+    } catch (err) {
+      if (err instanceof BackupError) return settingsPage(req, res, session, { status: 400, error: err.message });
+      throw err;
+    }
+    logger.info?.(`Sicherung vom ${result.createdAt} wiederhergestellt von ${session.sub} (${result.files.join(', ')}), Neustart`);
+    const msg = restoredMessage(result, settings.get().tz);
+    res.once('finish', () => restart());
+    // Mit dem Sitzungs-Secret der Sicherung gilt das Cookie nach dem Neustart ohnehin nicht mehr.
+    const cookies = result.files.includes('session-secret') ? { 'set-cookie': [cookie(SESSION, '', { secure, maxAge: 0 })] } : {};
+    return send(res, 200, renderMessage(msg.title, msg.text, { link: msg.link }), cookies);
+  }
+
 
   async function graphPage(req, res, url, session) {
     const path = url.searchParams.get('pfad');
@@ -578,9 +635,10 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   }
 
   const TOKEN_ROUTES = { '/einstellungen/tokens': createToken, '/einstellungen/tokens/widerrufen': revokeToken };
+  const BACKUP_ROUTES = backup ? { '/einstellungen/sicherung': downloadBackup, '/einstellungen/sicherung/wiederherstellen': restoreBackup } : {};
   const ACTION_ROUTES = new Set(Object.keys(ACTIONS));
   const SHORTCUT_ROUTES = new Map(shortcuts.map((s) => [`/kurzbefehle/${s.slug}.shortcut`, s]));
-  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...PUBLIC.keys(), '/', '/api/woche', '/api/suche', '/rueckblick', ...(notes ? ['/notiz'] : []), '/graph', '/api/graph', '/einstellungen', ...(tokens ? Object.keys(TOKEN_ROUTES) : []), '/login', '/auth/callback', '/logout']);
+  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...PUBLIC.keys(), '/', '/api/woche', '/api/suche', '/rueckblick', ...(notes ? ['/notiz'] : []), '/graph', '/api/graph', '/einstellungen', ...(tokens ? Object.keys(TOKEN_ROUTES) : []), ...Object.keys(BACKUP_ROUTES), '/login', '/auth/callback', '/logout']);
 
   return {
     matches: (path) => ROUTES.has(path),
@@ -628,6 +686,11 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
         if (!session) return redirect(res, '/login?next=%2Feinstellungen');
         if (method === 'POST') return TOKEN_ROUTES[path](req, res, session);
         return redirect(res, '/einstellungen');
+      }
+      if (BACKUP_ROUTES[path]) {
+        if (!session) return redirect(res, '/login?next=%2Feinstellungen');
+        if (method === 'POST') return BACKUP_ROUTES[path](req, res, session);
+        return redirect(res, '/einstellungen#sicherung');
       }
       if (method !== 'GET') return json(res, 405, { error: 'method_not_allowed' });
 
