@@ -215,6 +215,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       return send(res, 404, renderMessage('Notiz nicht verfügbar', `„${path}“ gibt es nicht, oder sie liegt in einem vertraulichen oder ausgeschlossenen Ordner.`, { link: { href: '/', label: 'Zur Woche' } }));
     }
     const { vaultName } = settings.get();
+    const related = notes.related?.(note.path) ?? null;
     const html = renderNote(note, {
       user: session.name ?? session.sub,
       write: actions ? writeContext(req) : null,
@@ -224,8 +225,10 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       targets: notes.targets(note.path),
       archive: notes.archiveFolder(),
       vaultName,
-      related: notes.related?.(note.path) ?? null,
+      related,
       graph: Boolean(graph),
+      // Vorschläge zum Ablegen nur für Inbox-Notizen und nur, wenn die Seite schreiben darf.
+      suggestions: actions && note.inInbox ? (notes.suggest?.(note.path, related) ?? null) : null,
     });
     return send(res, status, html);
   }

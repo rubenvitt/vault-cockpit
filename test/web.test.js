@@ -1026,6 +1026,14 @@ function previewNotes(dir) {
       similar: { source: 'text', hits: [{ path: 'wiki/Training.md', title: 'Training', folder: 'wiki', score: null, linked: false }], problem: 'Ohne Embeddings (Einstellungen → Embeddings) ähnlich nach Volltext' },
     }),
     openImage: (p) => (p === 'bilder/foto.png' ? { fd: openSync(png, 'r'), size: 8, type: 'image/png' } : null),
+    suggest: (p, related) => ({
+      source: related.similar.source,
+      problem: related.similar.problem,
+      of: 1,
+      folders: [{ folder: '10-projekte/Hund', count: 1 }],
+      tags: [{ tag: 'hund', count: 1 }],
+      unlinked: related.similar.hits,
+    }),
   };
 }
 
@@ -1048,6 +1056,15 @@ test('Notizvorschau: Wikilinks, Backlinks, Ähnlich und Bilder hinter der Anmeld
         assert.match(html, /<h2>Verweist hierher<\/h2><ul><li><a href="\/notiz\?pfad=wiki%2FHund\.md">Hund &lt;B&gt;<\/a>/);
         assert.match(html, /<h2>Ähnlich<\/h2><ul><li><a href="\/notiz\?pfad=wiki%2FTraining\.md">Training<\/a>[^]*?ähnlich nach Volltext/);
         assert.match(html, /<a href="\/graph\?pfad=00-inbox%2FIdee\.md">Graph<\/a>/);
+
+        // Vorschläge der Inbox-Notiz: ein Klick je Vorschlag, über die bestehenden Aktionen.
+        assert.match(html, /<section class="suggest">[^]*?name="tags" value="alt, hund"[^]*?name="ordner" value="10-projekte\/Hund"[^]*?name="ziel" value="wiki\/Training\.md"/);
+        const csrf = csrfFrom(html);
+        const tagged = await (await call('/aktion/notiz/tags', { method: 'POST', form: { pfad: '00-inbox/Idee.md', tags: 'alt, hund', csrf }, accept: 'application/json' })).json();
+        assert.equal(tagged.message, 'Tags: #alt #hund');
+        const filed = await (await call('/aktion/notiz/ablegen', { method: 'POST', form: { pfad: '00-inbox/Idee.md', ordner: '10-projekte/Hund', back: '/notiz?pfad=00-inbox%2FIdee.md', csrf }, accept: 'application/json' })).json();
+        assert.equal(filed.redirect, '/notiz?pfad=10-projekte%2FHund%2FIdee.md');
+        assert.deepEqual(notes.calls.map((c) => c[0]), ['tags', 'move']);
 
         const img = await call('/notiz/bild?pfad=bilder%2Ffoto.png');
         assert.equal(img.status, 200);

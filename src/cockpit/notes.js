@@ -4,6 +4,7 @@ import { FEUER_TYPE, findFeuer, planFeuer } from './feuer.js';
 import { describeWeek, parseWeekId } from './week.js';
 import { createAttachments, createLinkResolver } from './note-links.js';
 import { createRelated } from './related.js';
+import { suggestFiling } from './suggest.js';
 
 /** Abschnitte der Feuer-Notiz, die das Cockpit bearbeitet. */
 export const FEUER_FIELDS = { ziel: 'Feuer-Ziel', zug: 'Erster Zug' };
@@ -87,6 +88,21 @@ export function createNoteDesk({ index, editor, policy, settings, vaultPath = nu
 
     /** Backlinks und ähnliche Notizen (siehe `createRelated`); null für unsichtbare Notizen. */
     related: (path, opts) => (visible(path) ? related.of(String(path), opts) : null),
+
+    /**
+     * Vorschläge zum Ablegen einer Inbox-Notiz (Ordner, Tags, Verlinken), siehe
+     * `suggestFiling`; null außerhalb der Inbox. `rel` ist ein schon
+     * berechnetes `related(path)`, damit die Seite nur einmal sucht.
+     */
+    suggest(path, rel = null) {
+      const row = visible(path);
+      const { inboxFolder, bridge } = settings.get();
+      const folder = row ? folderOf(row.path) : '';
+      if (!row || !(folder === inboxFolder || folder.startsWith(`${inboxFolder}/`))) return null;
+      const note = { path: row.path, folder, tags: row.tags };
+      const similar = (rel ?? related.of(note.path)).similar;
+      return suggestFiling({ index, policy, inboxFolder, bridgeTag: bridge?.tag ?? null }, note, similar);
+    },
 
     /** Bild aus dem Vault zum Ausliefern öffnen, siehe `createAttachments().open`. */
     openImage: (path) => attachments?.open(path) ?? null,

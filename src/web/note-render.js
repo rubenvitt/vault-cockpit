@@ -36,14 +36,44 @@ function relatedSection(related) {
 }
 
 /**
+ * Vorschläge für eine Inbox-Notiz (`notes.suggest`): Tags, Zielordner und
+ * ähnliche, noch nicht verlinkte Notizen, jeweils als Knopf auf die
+ * bestehenden Aktionen. Tags kommen zuerst, weil die Notiz nach dem Ablegen
+ * nicht mehr in der Inbox liegt: „Alle übernehmen“ und ein Ordner sind zwei Klicks.
+ */
+function suggestSection(s, note, ctx) {
+  if (!s) return '';
+  const button = (action, fields, label, title = '') =>
+    `${formHead(ctx, action, { pfad: note.path, ...fields })}<button type="submit" class="chip"${title ? ` title="${esc(title)}"` : ''}>${label}</button></form>`;
+  const withTags = (extra) => [...note.tags, ...extra].join(', ');
+  const rows = [];
+  if (s.tags.length) {
+    rows.push(`<div class="suggest-row"><h3>Tags</h3><div class="chips">${s.tags.map((t) => button('/aktion/notiz/tags', { tags: withTags([t.tag]) }, `+ #${esc(t.tag)}`, `bei ${t.count} von ${s.of} ähnlichen`)).join('')}${s.tags.length > 1 ? button('/aktion/notiz/tags', { tags: withTags(s.tags.map((t) => t.tag)) }, 'Alle übernehmen') : ''}</div></div>`);
+  }
+  if (s.folders.length) {
+    rows.push(`<div class="suggest-row"><h3>Ablegen in</h3><div class="chips">${s.folders.map((f) => button('/aktion/notiz/ablegen', { ordner: f.folder }, `${esc(f.folder)}/ <span class="hint">${f.count} von ${s.of}</span>`)).join('')}</div></div>`);
+  }
+  if (s.unlinked.length) {
+    rows.push(`<div class="suggest-row"><h3>Ähnlich, nicht verlinkt</h3><ul>${s.unlinked.map((h) => `<li><a href="${esc(noteHref(h.path))}">${esc(h.title)}</a>${h.score == null ? '' : ` <span class="score">${Math.round(h.score * 100)} %</span>`}${button('/aktion/verlinken', { ziel: h.path }, 'Verlinken', `[[…]] an ${note.title} anhängen`)}</li>`).join('')}</ul></div>`);
+  }
+  const why = s.source === 'text' && s.problem ? `<p class="hint">${esc(s.problem)}</p>` : '';
+  const empty = rows.length ? '' : `<p class="empty">${s.of ? 'Aus den ähnlichen Notizen ergibt sich kein Vorschlag.' : `Keine Vorschläge: keine ähnlichen Notizen gefunden${s.problem ? ` (${esc(s.problem)})` : ''}.`}</p>`;
+  return `<section class="suggest">
+      <h2>Vorschläge${s.of ? ` <span class="hint">aus ${s.of} ähnlichen Notizen</span>` : ''}</h2>
+      ${rows.join('\n      ')}${empty}${rows.length ? why : ''}
+    </section>`;
+}
+
+/**
  * Notizseite: Vorschau links, Verarbeiten rechts (auf dem iPhone darunter).
  * Jede Aktion ist ein Formular; `/static/cockpit.js` schickt sie ohne
  * Seitenwechsel. Checkboxen in der Vorschau sind Knöpfe zum Abhaken.
  * Wikilinks und Backlinks führen zu weiteren Notizseiten, so lässt sich im
  * Vault lesen, ohne Obsidian zu öffnen. `related` kommt von `notes.related`,
- * `graph` verlinkt den Graphen der Notiz.
+ * `graph` verlinkt den Graphen der Notiz, `suggestions` (nur Inbox) kommt von
+ * `notes.suggest`.
  */
-export function renderNote(note, { user = null, write = null, back = '/', flash = null, draft = null, targets = [], archive = null, vaultName = null, related = null, graph = false } = {}) {
+export function renderNote(note, { user = null, write = null, back = '/', flash = null, draft = null, targets = [], archive = null, vaultName = null, related = null, graph = false, suggestions = null } = {}) {
   const ctx = { write, back };
   const obsidian = obsidianLink(note.path, vaultName);
   const checkbox = write
@@ -53,6 +83,7 @@ export function renderNote(note, { user = null, write = null, back = '/', flash 
   const fm = Object.entries(note.frontmatter ?? {}).filter(([k]) => k !== 'tags' && k !== 'tag');
   const panel = write
     ? `<aside class="note-actions">
+    ${suggestSection(suggestions, note, ctx)}
     <section>
       <h2>Ablegen</h2>
       ${formHead(ctx, '/aktion/notiz/ablegen', { pfad: note.path })}
@@ -114,6 +145,16 @@ export const NOTE_CSS = `
 .note-actions textarea { resize: vertical; }
 .note-actions p { margin: 8px 0 0; }
 .note-actions .archive { margin-top: 10px; }
+.suggest h2 .hint { font-size: 12px; }
+.suggest-row + .suggest-row { margin-top: 12px; }
+.suggest-row h3 { margin: 0 0 6px; font-size: 13px; color: var(--text-2); }
+.suggest .chips form { display: inline; }
+.suggest .chip { min-height: 30px; padding: 3px 10px; font-size: 13px; }
+.suggest ul { margin: 0; padding: 0; list-style: none; }
+.suggest li { padding: 3px 0; overflow-wrap: anywhere; }
+.suggest li form { display: inline; margin: 0 0 0 6px; }
+.suggest li .chip { min-height: 26px; padding: 2px 10px; font-size: 12px; }
+.suggest > .hint { margin: 10px 0 0; font-size: 12px; }
 header .meta a { color: inherit; }
 .tags { margin: 0 0 10px; }
 .tag { color: var(--accent); font-size: 14px; }

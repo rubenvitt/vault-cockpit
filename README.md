@@ -278,7 +278,14 @@ PNG, JPEG, GIF, WebP, AVIF, kein SVG) liefert `/notiz/bild?pfad=…` nur angemel
 und nie aus vertraulichen, ausgeschlossenen oder versteckten Ordnern oder über
 Symlinks aus; Bilder von außen lädt die Vorschau nicht, sie werden ein Link.
 Tabellen und Callouts (`> [!note]`, aufklappbar mit `+`/`-`) werden dargestellt,
-das Frontmatter steht eingeklappt in einer Zeile. Feuer-Ziel und
+das Frontmatter steht eingeklappt in einer Zeile. Bei Inbox-Notizen schlägt
+das Cockpit oben im Verarbeiten-Bereich **Tags** (häufig bei den ähnlichsten
+Notizen), die drei wahrscheinlichsten **Zielordner** (Mehrheit der ähnlichsten
+Notizen) und ähnliche, noch nicht verlinkte Notizen zum **Verlinken** vor; ein
+Klick übernimmt einen Vorschlag, „Alle übernehmen“ und ein Ordner reichen also
+zum Taggen und Ablegen. Ohne Embeddings kommen die Vorschläge aus dem Volltext
+(mit Hinweis), vertrauliche Ordner und die Inbox selbst sind nie dabei, der Tag
+der Zunder-Brücke auch nicht. Feuer-Ziel und
 Ersten Zug der Feuer-Notiz bearbeitet man direkt im Wochenblick (✎ neben dem
 Text, ersetzt den ersten Absatz unter der Überschrift). Fehlt die Feuer-Notiz
 einer Woche, legt **Feuer anlegen** sie mit Feuer-Ziel und (optional) Erstem Zug
