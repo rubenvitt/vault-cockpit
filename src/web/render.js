@@ -550,6 +550,8 @@ export function renderSettings({ stored, defaults, checks = {}, notice = null, e
   const embed = stored.embed.url ? ['eigener Server', 'ok'] : d.embedUrl ? [`aus der Umgebung (${esc(d.embedUrl)})`, 'ok'] : ['aus, nur Volltextsuche', 'off'];
   const bridgeOn = stored.bridge.enabled ?? d.bridgeEnabled;
   const bridge = bridgeOn ? ['an', 'ok'] : ['aus', 'off'];
+  const flameNoteOn = stored.flameNote?.enabled ?? d.flameNoteEnabled ?? true;
+  const flameNote = flameNoteOn ? ['an', 'ok'] : ['aus', 'off'];
   const problems = stored.calendars.filter((c) => checks[c.id] && !checks[c.id].ok).length;
   const cal = !stored.calendars.length
     ? ['keine', 'off']
@@ -561,6 +563,7 @@ export function renderSettings({ stored, defaults, checks = {}, notice = null, e
     ['kalender', 'Kalender', cal],
     ['zunder', 'Zunder', zunder],
     ['bruecke', 'Zunder-Brücke', bridge],
+    ['feuer-notiz', 'Feuer-Notiz', flameNote],
     ['mail', 'Mail', mail],
     ['embeddings', 'Embeddings', embed],
     ['anzeige', 'Anzeige', null],
@@ -613,6 +616,17 @@ ${error ? `<p class="problem">${esc(error)}</p>` : ''}
       <option value="aus"${stored.bridge.enabled === false ? ' selected' : ''}>aus</option>
     </select></label>
     <label><span>Tag <span class="hint">ohne #</span></span><input name="bridge.tag" value="${esc(stored.bridge.tag ?? '')}" placeholder="${esc(d.bridgeTag)}"></label>
+  </div>
+</section>
+<section id="feuer-notiz">
+  ${head2('Feuer-Notiz', flameNote)}
+  <p class="meta">Trägt die Flammen der Woche mit den in Zunder gemessenen Minuten in den Abschnitt „Flammen“ der Feuer-Notiz ein, nach jedem Stopp und im Reindex-Intervall. Geschrieben wird nur zwischen den Markern <code>cockpit:flammen</code>.</p>
+  <div class="grid">
+    <label>Flammen eintragen<select name="flameNote.enabled">
+      <option value=""${stored.flameNote?.enabled == null ? ' selected' : ''}>Standard (${(d.flameNoteEnabled ?? true) ? 'an' : 'aus'})</option>
+      <option value="an"${stored.flameNote?.enabled === true ? ' selected' : ''}>an</option>
+      <option value="aus"${stored.flameNote?.enabled === false ? ' selected' : ''}>aus</option>
+    </select></label>
   </div>
 </section>
 <section id="mail">

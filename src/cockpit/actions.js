@@ -49,7 +49,7 @@ export class ActionError extends Error {
  * Zunder-Zugang und Inbox-Ordner werden bei jedem Aufruf frisch gelesen, damit
  * eine Änderung unter `/einstellungen` sofort gilt.
  */
-export function createCockpitActions({ vaultPath, settings, policy, state, zunder, index = null, now = () => new Date(), logger = console }) {
+export function createCockpitActions({ vaultPath, settings, policy, state, zunder, index = null, onFlame = null, now = () => new Date(), logger = console }) {
   const zunderOrFail = () => {
     const z = zunder();
     if (!z) throw new ActionError('Zunder ist nicht eingerichtet (Einstellungen → Zunder)', 503);
@@ -122,6 +122,9 @@ export function createCockpitActions({ vaultPath, settings, policy, state, zunde
         return out?.task;
       });
       const t = out.timing ?? {};
+      // Feuer-Notiz der Woche nachziehen (im Hintergrund, VCP-52): beim Stopp die Zeit,
+      // beim Start die Flamme, die Zunder dabei beendet hat.
+      onFlame?.(task, on);
       return {
         ...summary(task),
         running: Boolean(out.running),

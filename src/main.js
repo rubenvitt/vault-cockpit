@@ -25,6 +25,7 @@ import { createWebHttp } from './web/http.js';
 import { loadShortcuts } from './web/shortcuts.js';
 import { createCockpitActions } from './cockpit/actions.js';
 import { createNoteDesk } from './cockpit/notes.js';
+import { createFlameNote } from './cockpit/flammen-notiz.js';
 import { createOllamaEmbedder } from './semantic/embedder.js';
 import { createSemanticIndex } from './semantic/index.js';
 import { hybridSearch } from './semantic/search.js';
@@ -242,6 +243,12 @@ sync.start({
   },
 });
 
+// Flammen der Woche mit gemessener Zeit in die Feuer-Notiz (VCP-52): nach
+// Start/Stopp im Cockpit und im Reindex-Intervall, abschaltbar in den Einstellungen.
+const flameNote = createFlameNote({ vaultPath: VAULT_PATH, index, editor, policy: POLICY, settings: cockpitSettings, zunder });
+setInterval(() => flameNote.round(), Number(process.env.REINDEX_INTERVAL_MIN ?? 15) * 60_000).unref();
+flameNote.round();
+
 const graph = createGraph({ index, semantic: currentSemantic, zunder, calendar: calendarForGraph(calendars), tz: () => cockpitSettings.get().tz });
 
 // Web-Cockpit (Schritt 3): Wochenansicht mit eigenem Browser-Login. Aus, bis
@@ -257,6 +264,7 @@ const webHttp = process.env.WEB_CLIENT_ID
         state: captureState,
         zunder,
         index,
+        onFlame: (task) => flameNote.afterFlame(task),
       }),
       // Vault-Notizen ansehen und verarbeiten, über denselben Editor wie vault_edit.
       notes: createNoteDesk({ index, editor, policy: POLICY, settings: cockpitSettings }),
