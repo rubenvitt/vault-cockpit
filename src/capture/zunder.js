@@ -88,11 +88,17 @@ export function createZunderClient({ url, token, fetch = globalThis.fetch, timeo
       return callTool('stop_flame', { task_id: id });
     },
 
-    /** Legt eine Aufgabe in der Zunder-Inbox an und liefert `{ id, ref, url }`. */
-    async createTask({ title, description, vaultLinks }) {
+    /**
+     * Legt eine Aufgabe an und liefert `{ id, ref, url }`. Ohne `location`
+     * landet sie in der Zunder-Inbox; `due` (JJJJ-MM-TT) und `phoenix` sind optional.
+     */
+    async createTask({ title, description, vaultLinks, due = null, location = null, phoenix = null }) {
       const args = { title: clampTitle(title) };
       if (description) args.description = description;
       if (vaultLinks?.length) args.vault_links = vaultLinks;
+      if (due) args.due = due;
+      if (location) args.location = location;
+      if (phoenix) args.phoenix = phoenix;
       const out = await callTool('create_task', args);
       const task = out?.task;
       if (!task?.id) throw new Error('Zunder hat keine Aufgabe zurückgegeben');

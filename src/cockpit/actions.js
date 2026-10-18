@@ -156,6 +156,8 @@ export function createCockpitActions({ vaultPath, settings, policy, state, zunde
         capture: createCapture({ vaultPath, folder: inboxFolder }),
         zunder: zunder(),
         state,
+        tz: settings.get().tz,
+        now,
         logger,
       });
       let result;
@@ -170,6 +172,15 @@ export function createCockpitActions({ vaultPath, settings, policy, state, zunde
       }
       if (result.kind === 'note' && !result.duplicate) index?.applyChanges([result.path]);
       return result;
+    },
+
+    /**
+     * Vorschau der Schnelleingabe, mit derselben Logik wie beim Anlegen:
+     * `{ kind, summary, title?, due?, location?, phoenix?, notes? }`. Legt nichts an.
+     */
+    async previewCapture(text) {
+      const router = createCaptureRouter({ capture: null, zunder: zunder(), state, tz: settings.get().tz, now, logger });
+      return router.preview({ text: String(text ?? '').slice(0, 2000) });
     },
   };
 }

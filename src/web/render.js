@@ -366,7 +366,8 @@ function captureBar(ctx, draft, focus = false) {
     <kbd class="capture-key" title="Mit / oder n hierher springen">/</kbd>
   </label>
   <button type="submit" class="primary"><svg viewBox="0 0 24 24" class="icon send" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg><span class="capture-label">${task ? 'Aufgabe anlegen' : 'Notiz anlegen'}</span></button>
-</form>`;
+</form>
+<p class="capture-preview" data-capture-preview aria-live="polite" hidden></p>`;
 }
 
 /** Meldung nach einer Aktion ohne JavaScript, mit Rückgängig als Formular. */

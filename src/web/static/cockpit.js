@@ -334,11 +334,64 @@
     });
   }
 
+  // --- Vorschau der Schnelleingabe ------------------------------------------
+
+  // Zeigt unter dem Feld, wo eine Aufgabe landet („Aufgabe · morgen ·
+  // Gesundheit“), bevor Enter sie anlegt. Gerechnet wird auf dem Server, mit
+  // derselben Logik wie beim Anlegen; Notizen bekommen keine Vorschau.
+  const preview = document.querySelector('[data-capture-preview]');
+  const previewForm = preview && document.querySelector('form.capture');
+  if (preview && previewForm) {
+    const field = previewForm.elements.text;
+    let timer = null;
+    let seq = 0;
+    const hide = () => {
+      seq++;
+      preview.hidden = true;
+      preview.textContent = '';
+    };
+    const update = async () => {
+      const text = field.value.trimStart();
+      if (!text.startsWith('!') || !text.slice(1).trim()) return hide();
+      const mine = ++seq;
+      let data;
+      try {
+        const res = await fetch(`/api/erfassen/vorschau?text=${encodeURIComponent(text.slice(0, 500))}`, { headers: { accept: 'application/json' }, credentials: 'same-origin' });
+        if (!res.ok) throw new Error();
+        data = await res.json();
+      } catch {
+        if (mine === seq) hide();
+        return;
+      }
+      if (mine !== seq || data.kind !== 'task') return;
+      const line = document.createElement('span');
+      line.textContent = data.summary;
+      preview.replaceChildren(line);
+      if (data.notes?.length) {
+        const hint = document.createElement('span');
+        hint.className = 'hint';
+        hint.textContent = ` · ${data.notes.join(' ')}`;
+        preview.append(hint);
+      }
+      preview.hidden = false;
+    };
+    field.addEventListener('input', () => {
+      clearTimeout(timer);
+      timer = setTimeout(update, 250);
+    });
+    // Nach dem Absenden ist das Feld leer (oder hat bei einem Fehler noch den Text).
+    new MutationObserver(() => {
+      if (!previewForm.classList.contains('busy')) update();
+    }).observe(previewForm, { attributes: true, attributeFilter: ['class'] });
+    update();
+  }
+
   // Für `/static/graph.js`: Meldungen und Aktionen im gleichen Stil.
   window.cockpit = { toast, send, csrf };
 
   function prepend(result, sent) {
-    if (!result || result.duplicate) return;
+    // Eine Aufgabe mit Ziel (`#gesundheit`) liegt nicht in der Inbox.
+    if (!result || result.duplicate || (result.kind === 'task' && result.location && result.location.kind !== 'inbox')) return;
     const list = document.querySelector(`ul[data-list="${result.kind === 'task' ? 'zunder-inbox' : 'vault-inbox'}"]`);
     if (!list) return;
     list.parentElement.querySelector(`[data-empty="${list.dataset.list}"]`)?.remove();
@@ -348,7 +401,7 @@
     const li = document.createElement('li');
     li.className = result.kind === 'task' ? 'task status-open fresh' : 'note fresh';
     const firstLine = sent.trim().replace(/^!\s*/, '').split(/\r?\n/)[0].trim();
-    const label = result.kind === 'task' ? firstLine || 'Neue Aufgabe' : result.path.split('/').pop().replace(/\.md$/i, '').replace(/^\d{4}-\d{2}-\d{2} \d{4} - /, '');
+    const label = result.kind === 'task' ? result.title || firstLine || 'Neue Aufgabe' : result.path.split('/').pop().replace(/\.md$/i, '').replace(/^\d{4}-\d{2}-\d{2} \d{4} - /, '');
     if (result.kind === 'task') {
       const mark = document.createElement('span');
       mark.className = 'mark';

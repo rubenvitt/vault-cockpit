@@ -159,7 +159,7 @@ const zunderSource = () => {
 // Capture von außen (Schritt 2): Weiterleitung an Zunder, Capture-Endpunkte,
 // Mail-Abruf und Zunder-Brücke. Eingerichtet wird alles in den Einstellungen.
 const captureState = createStateStore(process.env.CAPTURE_STATE_FILE ?? '/data/capture-state.json');
-const captureRouter = createCaptureRouter({ capture, zunder, state: captureState });
+const captureRouter = createCaptureRouter({ capture, zunder, state: captureState, tz: () => cockpitSettings.get().tz });
 
 // API-Tokens werden im Web-Cockpit unter Einstellungen → API-Tokens angelegt und
 // liegen neben den Einstellungen: Recht „Suche“ für /api/search, „Capture“ für

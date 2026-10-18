@@ -180,6 +180,22 @@ test('capture: mit ! eine Aufgabe in der Zunder-Inbox, einmal je Erfassungs-ID',
   assert.equal(existsSync(join(root, '00-inbox')), false);
 });
 
+test('capture: Syntax für Fälligkeit und Bereich, Vorschau ohne Anlegen', async () => {
+  zunder.listStructure = async () => [{ id: 'a-ges', name: 'Gesundheit', state: 'active', projects: [] }];
+  // Montag, 19.10.2026, kurz nach Mitternacht in Berlin (Zeitzone aus den Einstellungen).
+  const a = actions({ now: () => new Date('2026-10-18T22:30:00Z') });
+  const preview = await a.previewCapture('!Zahnarzt anrufen morgen #gesundheit');
+  assert.equal(preview.summary, 'Aufgabe · morgen · Gesundheit');
+  assert.equal(calls.length, 0, 'Vorschau legt nichts an');
+  assert.deepEqual(await a.previewCapture('Notiz #gesundheit'), { kind: 'note', summary: 'Notiz' });
+
+  const r = await a.capture({ text: '!Zahnarzt anrufen morgen #gesundheit', captureId: 'c-9' });
+  assert.equal(calls[0][1].title, 'Zahnarzt anrufen');
+  assert.equal(calls[0][1].due, '2026-10-20');
+  assert.deepEqual(calls[0][1].location, { kind: 'area', id: 'a-ges' });
+  assert.equal(r.location.name, 'Gesundheit');
+});
+
 test('capture: ! ohne Zunder und leerer Text werden verständlich abgewiesen', async () => {
   zunder = null;
   await assert.rejects(actions().capture({ text: '! Aufgabe' }), (e) => e.status === 503 && /Zunder-Zugang/.test(e.message));

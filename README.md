@@ -133,6 +133,38 @@ erfasste Text steht vollständig im Inhalt. Einen Titel setzen nur ein
 ausdrückliches `title`, der Mail-Betreff und der Dateiname aus Funke. Bei
 Aufgaben mit `!` bleibt die erste Zeile der Titel.
 
+**Fälligkeit und Ziel gleich mitgeben.** Am Ende der Titelzeile einer Aufgabe
+(Schnelleingabe, Kurzbefehl, Sprachmemo, Mail-Betreff) versteht das Cockpit ein
+paar Kürzel und nimmt sie aus dem Titel:
+
+```text
+!Zahnarzt anrufen morgen #gesundheit   → „Zahnarzt anrufen“, fällig morgen, Bereich Gesundheit
+!Bericht abgeben bis Freitag #vcp      → fällig am nächsten Freitag, Projekt mit Schlüssel VCP
+!Folien bauen +woche                   → Phönix-Schritt der laufenden Woche
+```
+
+| Kürzel | Bedeutung |
+|---|---|
+| `heute`, `morgen`, `übermorgen` | Fälligkeit; `morgen` nur klein geschrieben („Morgen“ kann der Morgen sein) |
+| `Montag` … `Sonntag` | das nächste Vorkommen **ab morgen**: am Montag ist „Montag“ der Montag in einer Woche, für heute gibt es `heute` |
+| `14.10.`, `14.10.2026`, `14.10.26` | Datum; ohne Jahr dieses Jahr, liegt der Tag schon zurück, das nächste |
+| `bis …`, `am …` | `bis` vor jeder Fälligkeit und `am` vor Wochentag oder Datum fallen mit weg („bis Freitag“, „am 20.10.“) |
+| `#name` | Bereich oder Projekt aus Zunder, unscharf: gleicher Name oder Projektschlüssel, Anfang des Namens oder eines Wortes darin, ein Tippfehler (ab 5 Zeichen, ab 9 zwei). Groß/klein und Umlaute egal, `-` trennt Wörter (`#gruppe-ik`). `#bereich #projekt` zusammen ergibt das Projekt. |
+| `+woche` | Phönix-Schritt der laufenden ISO-Woche |
+
+Die Regel gegen Fehldeutungen: Erkannt wird nur am **Ende der Titelzeile**, von
+hinten, solange die Wörter Kürzel sind; das erste Wort bleibt immer Titel. „Termin
+für morgen vorbereiten“ bleibt also, wie es ist. Auch am Ende bleibt eine
+Datumsangabe Text, wenn ein Wort davor sie zum Satzteil macht („für morgen“,
+„ab Montag“, „jeden Freitag“, „am morgen“). Zwei Fälligkeiten („Freitag morgen“)
+setzen keine. Passt ein `#name` zu keinem oder zu mehreren Zielen, wird nicht
+geraten: Es bleibt im Titel, die Aufgabe kommt in die Zunder-Inbox und die
+Meldung sagt warum. Ohne Kürzel ist alles wie bisher. Notizen (ohne `!`) bleiben
+immer unverändert. „Heute“ und die laufende Woche gelten in der Zeitzone aus den
+Einstellungen (Standard Europe/Berlin). Die Bereiche und Projekte fragt das
+Cockpit nur bei einem `#name` ab und merkt sie sich eine Minute; ist Zunder dafür
+nicht erreichbar, entsteht die Aufgabe trotzdem, in der Inbox.
+
 | Weg | So geht's |
 |---|---|
 | iOS-Kurzbefehl | Unter **Einstellungen → API-Tokens** einen Token mit dem Recht **Capture** anlegen, dann „Notiz ins Cockpit“ unter **Einstellungen → Kurzbefehle** laden und importieren und beim Import den Token eintragen. Läuft aus dem Share-Sheet oder fragt den Text ab. Von Hand: `POST <PUBLIC_URL>/capture?source=ios-kurzbefehl` mit dem Text als Body, Header `Authorization: Bearer vct_…` |
@@ -143,9 +175,11 @@ Aufgaben mit `!` bleibt die erste Zeile der Titel.
 `POST /capture` nimmt Klartext oder JSON `{"text", "title"?, "source"?, "id"?}`.
 Mit `id` ist das Anlegen idempotent (dieselbe ID → `200` mit dem Ergebnis von
 damals). Antworten: `201 {"kind":"note","path"}` bzw.
-`201 {"kind":"task","id","ref","url"}`, `400` bei falscher Eingabe, `401` ohne
+`201 {"kind":"task","id","ref","url","title","due","location","phoenix","notes"}`, `400` bei falscher Eingabe, `401` ohne
 gültigen Token, `502` wenn Zunder ablehnt, `503` bei `!` ohne Zunder.
-Jede Antwort trägt zusätzlich `message`, einen fertigen Satz für die Mitteilung, und
+Jede Antwort trägt zusätzlich `message`, einen fertigen Satz für die Mitteilung
+(bei Aufgaben mit Ziel und Fälligkeit, z. B. „Aufgabe ZUN-12 liegt in Gesundheit,
+fällig morgen.“, und dem Grund, wenn ein Kürzel nicht passte), und
 Fehler ihren `status` im Body (`{"error","status","message"}`), weil ein Kurzbefehl den
 HTTP-Status nicht sieht.
 
@@ -281,7 +315,11 @@ Fälliges), was außerdem erledigt wurde, die Flammen-Zeit der Woche und was off
 blieb.
 Oben auf der Seite liegt eine
 **Schnelleingabe** mit derselben Logik wie `/capture`: Text wird eine Notiz im
-Inbox-Ordner, mit `!` vorne eine Aufgabe in der Zunder-Inbox. `/` oder `n` springt
+Inbox-Ordner, mit `!` vorne eine Aufgabe in der Zunder-Inbox (oder mit den Kürzeln
+aus [Capture](#capture) gleich im Bereich, mit Fälligkeit). Unter dem Feld steht
+bei einer Aufgabe vorab, wo sie landet („Aufgabe · morgen · Gesundheit“), berechnet
+vom Server mit derselben Logik (`GET /api/erfassen/vorschau?text=…`, nur angemeldet).
+`/` oder `n` springt
 hinein, Enter legt an, Shift+Enter macht eine neue Zeile. Beides läuft ohne
 Seitenwechsel; ohne JavaScript funktionieren dieselben Formulare mit
 Weiterleitung. Schlägt etwas fehl, bleibt die Meldung stehen und der Text im Feld.
