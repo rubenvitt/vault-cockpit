@@ -34,7 +34,9 @@ export function createMailCapture({
   let session = null;
   let timer = null;
   let running = null;
-  let last = { at: null, processed: 0, error: null };
+  // Letzter Abruf für die Zustandsseite: `state` ist idle (noch keiner), ok oder
+  // error; `error` bleibt nach einem Erfolg als „letzter Fehler“ stehen.
+  let last = { state: 'idle', at: null, okAt: null, processed: 0, error: null, errorAt: null };
 
   async function ensureSession() {
     if (session) return session;
@@ -96,6 +98,7 @@ export function createMailCapture({
     const emails = responses.find(([name]) => name === 'Email/get')?.[1]?.list ?? [];
 
     let processed = 0;
+    const failures = [];
     for (const email of emails) {
       const sender = String(email.from?.[0]?.email ?? '').toLowerCase();
       try {
@@ -109,21 +112,27 @@ export function createMailCapture({
           ['Email/set', { accountId, update: { [email.id]: { mailboxIds: { [ids.done]: true }, 'keywords/$seen': true } } }, 's'],
         ]);
       } catch (err) {
+        failures.push(err.message);
         logger.error?.(`Mail-Capture: Mail ${email.id} bleibt liegen: ${err.message}`);
       }
     }
-    return processed;
+    return { processed, failures };
   }
 
   async function runOnce() {
     if (running) return running;
     running = poll()
-      .then((processed) => {
-        last = { at: new Date().toISOString(), processed, error: null };
+      .then(({ processed, failures }) => {
+        const at = new Date().toISOString();
+        // Liegengebliebene Mails zählen als Fehler, auch wenn der Abruf selbst ging.
+        last = failures.length
+          ? { ...last, state: 'error', at, processed, error: `${failures.length === 1 ? '1 Mail bleibt' : `${failures.length} Mails bleiben`} liegen: ${failures[0]}`, errorAt: at }
+          : { ...last, state: 'ok', at, okAt: at, processed };
         return processed;
       })
       .catch((err) => {
-        last = { at: new Date().toISOString(), processed: 0, error: err.message };
+        const at = new Date().toISOString();
+        last = { ...last, state: 'error', at, processed: 0, error: err.message, errorAt: at };
         logger.error?.(`Mail-Capture: Abruf fehlgeschlagen: ${err.message}`);
         return 0;
       })
@@ -143,7 +152,15 @@ export function createMailCapture({
     stop() {
       if (timer) clearInterval(timer);
     },
-    status: () => ({ mailbox, lastPollAt: last.at, lastProcessed: last.processed, lastError: last.error }),
+    status: () => ({
+      state: last.state,
+      mailbox,
+      lastPollAt: last.at,
+      lastOkAt: last.okAt,
+      lastProcessed: last.processed,
+      lastError: last.error,
+      lastErrorAt: last.errorAt,
+    }),
   };
 }
 

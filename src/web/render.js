@@ -1,6 +1,8 @@
 import { localTime, zonedParts } from '../cockpit/week.js';
 import { DEFAULT_HIDDEN_EVENTS } from '../cockpit/settings.js';
 import { esc, head, appHeader, icon } from './layout.js';
+import { backupSection, backupHint } from './backup-render.js';
+import { sessionSection, revokeForm } from './session-render.js';
 
 export { esc };
 
@@ -102,7 +104,7 @@ function taskMenu(t, ctx, { inbox = false } = {}) {
   const week = ctx.week;
   const phoenix =
     t.phoenix === 'flamme' || !week
-      ? ''
+      ? flameOut(t, ctx)
       : `${formHead(ctx, '/aktion/phoenix', { id: t.id, prev: step })}
           <p class="menu-label">Phönix${step ? ` <span class="hint">Schritt KW ${Number(step.slice(6))}</span>` : ''}</p>
           <div class="chips">${
@@ -130,6 +132,18 @@ function taskMenu(t, ctx, { inbox = false } = {}) {
       </div>
     </details>`;
 }
+
+/** Flammen aus der Woche nehmen (Planung, VCP-47); Rückgängig stellt die Markierung wieder her. */
+function flameOut(t, ctx) {
+  if (t.phoenix !== 'flamme' || !ctx.write?.plan) return '';
+  return `${formHead(ctx, '/aktion/woche/raus', { id: t.id })}
+          <p class="menu-label">Woche</p><div class="chips"><button type="submit" class="chip quiet">Aus der Woche nehmen</button></div>
+        </form>`;
+}
+
+/** Link zur Planungsseite der angezeigten Woche, wenn das Cockpit planen kann. */
+const planLink = (ctx, label, hash = '') =>
+  ctx.write?.plan ? ` <a href="/planen?woche=${esc(ctx.week.id)}${hash}" class="h2-link">${label}</a>` : '';
 
 /** „Zuordnen“ für Aufgaben in der Zunder-Inbox: Bereich oder Projekt wählen. */
 function assignForm(t, ctx) {
@@ -253,7 +267,7 @@ function feuerSection(model, tz, vaultName, ctx) {
 
   return `<section class="feuer">
     <div><h2>Feuer-Ziel</h2>${goal}</div>
-    <div><h2>Flammen</h2>${flames}</div>
+    <div><h2>Flammen${planLink(ctx, 'Einplanen', '#flamme')}</h2>${flames}</div>
   </section>`;
 }
 
@@ -274,7 +288,7 @@ function rocksSection(model, tz, ctx) {
       .join('')}</div>`;
     if (r.partial) body += '<p class="problem">Nicht alle Zunder-Abfragen haben geantwortet; die Liste ist unvollständig.</p>';
   }
-  return `<section><h2>Big Rocks</h2>${body}</section>`;
+  return `<section><h2>Big Rocks${planLink(ctx, 'Woche planen')}</h2>${body}</section>`;
 }
 
 function calendarSection(model, tz) {
@@ -352,7 +366,7 @@ function inboxSection(model, tz, vaultName, ctx) {
  * Schnelleingabe: eine Zeile, die beim Tippen wächst. `!` vorne macht eine
  * Zunder-Aufgabe daraus. Die Erfassungs-ID verhindert Doppelte beim Neusenden.
  */
-function captureBar(ctx, draft, focus = false) {
+export function captureBar(ctx, draft, focus = false) {
   const task = String(draft ?? '').trimStart().startsWith('!');
   return `<form method="post" action="/aktion/erfassen" class="capture" data-mode="${task ? 'task' : 'note'}">
   <input type="hidden" name="csrf" value="${esc(ctx.write.csrf)}">
@@ -366,7 +380,8 @@ function captureBar(ctx, draft, focus = false) {
     <kbd class="capture-key" title="Mit / oder n hierher springen">/</kbd>
   </label>
   <button type="submit" class="primary"><svg viewBox="0 0 24 24" class="icon send" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg><span class="capture-label">${task ? 'Aufgabe anlegen' : 'Notiz anlegen'}</span></button>
-</form>`;
+</form>
+<p class="capture-preview" data-capture-preview aria-live="polite" hidden></p>`;
 }
 
 /** Meldung nach einer Aktion ohne JavaScript, mit Rückgängig als Formular. */
@@ -385,8 +400,9 @@ export function flashToast(flash, ctx) {
  * @param {string} [opts.back]   Rücksprung nach einer Aktion ohne JavaScript
  * @param {object} [opts.flash]  `{ kind, message, undo }` aus der letzten Aktion
  * @param {string} [opts.draft]  Text, der nach einem Fehler wieder ins Eingabefeld kommt
+ * @param {string} [opts.alert]  Hinweis auf gestörte Dienste für die Kopfzeile (health-render.js)
  */
-export function renderWeek(model, { user = null, write = null, back = '/', flash = null, draft = null, focus = false } = {}) {
+export function renderWeek(model, { user = null, write = null, back = '/', flash = null, draft = null, focus = false, alert = '' } = {}) {
   const { tz, vaultName } = model;
   const w = model.week;
   const title = weekTitle(w);
@@ -397,7 +413,7 @@ export function renderWeek(model, { user = null, write = null, back = '/', flash
 <html lang="de">
 ${head(title.short, { script: Boolean(write) })}
 <body class="page-week">
-${appHeader({ current: 'woche', user, links: { rueckblick: `/rueckblick?woche=${w.id}` } })}
+${appHeader({ current: 'woche', user, links: { rueckblick: `/rueckblick?woche=${w.id}` }, alert })}
 <div class="page-head">
   <h1>${esc(title.short)} <span class="range">${esc(title.range)}</span></h1>
   <nav class="pager" aria-label="Wochen">
@@ -534,7 +550,7 @@ function shortcutSection(shortcuts, captureEnabled) {
  * zurückgegeben: Ein leeres Feld behält den gespeicherten Wert. Links eine
  * Sprungleiste mit dem Stand jedes Abschnitts, auf dem iPhone oben als Leiste.
  */
-export function renderSettings({ stored, defaults, checks = {}, notice = null, error = null, tokens = null, created = null, shortcuts = [], captureEnabled = false, tz = 'Europe/Berlin', user = null, csrf = '' }) {
+export function renderSettings({ stored, defaults, checks = {}, notice = null, error = null, tokens = null, created = null, shortcuts = [], captureEnabled = false, tz = 'Europe/Berlin', user = null, csrf = '', backup = null }) {
   const d = defaults;
   const token = `<input type="hidden" name="csrf" value="${esc(csrf)}">`;
   const zunder = stored.zunder.url && stored.zunder.token
@@ -567,8 +583,10 @@ export function renderSettings({ stored, defaults, checks = {}, notice = null, e
     ['mail', 'Mail', mail],
     ['embeddings', 'Embeddings', embed],
     ['anzeige', 'Anzeige', null],
+    ['anmeldung', 'Anmeldung', null],
     ...(tokens ? [['tokens', 'API-Tokens', null]] : []),
     ...(shortcuts.length ? [['kurzbefehle', 'Kurzbefehle', null]] : []),
+    ...(backup ? [['sicherung', 'Sicherung', null]] : []),
   ];
   const head2 = (title, state) => `<h2>${title}${state ? ` ${pill(state[0], state[1])}` : ''}</h2>`;
   return `<!doctype html>
@@ -576,7 +594,7 @@ export function renderSettings({ stored, defaults, checks = {}, notice = null, e
 ${head('Einstellungen')}
 <body class="page-settings">
 ${appHeader({ current: 'einstellungen', user })}
-<div class="page-head"><h1>Einstellungen</h1></div>
+<div class="page-head"><h1>Einstellungen</h1><a href="/zustand" class="btn">Zustand der Dienste</a></div>
 <main class="settings">
 <nav class="settings-nav" aria-label="Abschnitte">${nav
     .map(([id, label, state]) => `<a href="#${id}">${state ? `<span class="dot ${state[1]}" aria-hidden="true"></span>` : '<span class="dot" aria-hidden="true"></span>'}${label}</a>`)
@@ -584,6 +602,7 @@ ${appHeader({ current: 'einstellungen', user })}
 <div class="settings-body">
 ${notice ? `<p class="notice">${esc(notice)}</p>` : ''}
 ${error ? `<p class="problem">${esc(error)}</p>` : ''}
+${backupHint(backup)}
 <form method="post" action="/einstellungen">${token}
 <button type="submit" class="sr-only" tabindex="-1" aria-hidden="true">Speichern</button>
 <input type="hidden" name="cal.auth" value="1">
@@ -663,10 +682,13 @@ ${error ? `<p class="problem">${esc(error)}</p>` : ''}
     <label>Inbox-Ordner im Vault<input name="inboxFolder" value="${esc(stored.inboxFolder ?? '')}" placeholder="${esc(d.inboxFolder)}"></label>
   </div>
 </section>
+${sessionSection(stored, d)}
 <p class="save-bar"><span class="meta">Leere Geheimnisfelder behalten den gespeicherten Wert.</span><button type="submit" class="primary">Speichern</button></p>
 </form>
+${revokeForm(token)}
 ${tokens ? tokenSection(tokens, created, tz, token) : ''}
 ${shortcuts.length ? shortcutSection(shortcuts, captureEnabled) : ''}
+${backup ? backupSection(backup, token) : ''}
 </div>
 </main>
 </body>

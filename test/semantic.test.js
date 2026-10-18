@@ -308,8 +308,8 @@ test('Graph-Seite: SVG mit Knoten als Links als Fallback, Skripte nur als eigene
   assert.match(html, /href="\/graph\?pfad=wiki%2Fbewegung\.md"/);
   assert.match(html, /obsidian:\/\/open\?vault=r-notes&amp;file=wiki%2Fhund/);
   assert.match(html, /Ähnlich, nicht verlinkt/);
-  // Kein Inline-Skript (CSP `script-src 'self'`), nur die eigenen Dateien.
-  assert.deepEqual([...html.matchAll(/<script[^>]*>/g)].map((m) => m[0]), ['<script src="/static/vendor/graph-lib.js" defer>', '<script src="/static/graph.js" defer>']);
+  // Kein Inline-Skript (CSP `script-src 'self'`), nur die eigenen Dateien (offline.js hängt an jeder Seite).
+  assert.deepEqual([...html.matchAll(/<script[^>]*>/g)].map((m) => m[0]), ['<script src="/static/vendor/graph-lib.js" defer>', '<script src="/static/graph.js" defer>', '<script src="/static/offline.js" defer>']);
   assert.match(html, /class="graph-stage" data-center="wiki\/hund\.md"/);
   assert.doesNotMatch(html, /Verlinken/, 'ohne Schreibrecht keine Knöpfe');
   const writable = renderGraph(g, { user: 'ruben', write: { csrf: 'tok', notes: true }, back: '/graph?pfad=wiki%2Fhund.md' });

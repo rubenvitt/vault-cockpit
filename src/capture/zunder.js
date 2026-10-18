@@ -9,11 +9,33 @@
  * Gebraucht wird ein API-Token (`zt_…`) aus der Zunder-Web-UI. Ein Eingangs-Token
  * (`zi_…`) reicht nicht: Eingänge schreiben nur in ein festes Projekt, nie in die Inbox.
  */
-export function createZunderClient({ url, token, fetch = globalThis.fetch, timeoutMs = 10_000 }) {
+export function createZunderClient({ url, token, fetch = globalThis.fetch, timeoutMs = 10_000, monitor = null }) {
   const base = String(url).replace(/\/+$/, '');
   let nextId = 1;
 
+  /**
+   * `monitor` (Zustandsseite) erfährt, ob Zunder erreichbar ist und den Token
+   * annimmt: Netz-, HTTP- und Protokollfehler zählen als Fehler, eine
+   * fachliche Ablehnung eines Werkzeugs („Aufgabe nicht gefunden“) als Erfolg.
+   */
   async function callTool(name, args) {
+    let msg;
+    try {
+      msg = await post(name, args);
+    } catch (err) {
+      monitor?.fail(err);
+      throw err;
+    }
+    monitor?.ok();
+    const result = msg.result ?? {};
+    if (result.isError) {
+      const text = result.structuredContent?.error?.message ?? result.content?.[0]?.text ?? 'unbekannter Fehler';
+      throw new Error(`Zunder lehnt ab: ${text}`);
+    }
+    return result.structuredContent;
+  }
+
+  async function post(name, args) {
     const res = await fetch(`${base}/mcp`, {
       method: 'POST',
       headers: {
@@ -28,12 +50,7 @@ export function createZunderClient({ url, token, fetch = globalThis.fetch, timeo
     if (!res.ok) throw new Error(`Zunder antwortet mit HTTP ${res.status}`);
     const msg = await res.json();
     if (msg.error) throw new Error(`Zunder: ${msg.error.message ?? 'JSON-RPC-Fehler'}`);
-    const result = msg.result ?? {};
-    if (result.isError) {
-      const text = result.structuredContent?.error?.message ?? result.content?.[0]?.text ?? 'unbekannter Fehler';
-      throw new Error(`Zunder lehnt ab: ${text}`);
-    }
-    return result.structuredContent;
+    return msg;
   }
 
   return {
@@ -88,11 +105,37 @@ export function createZunderClient({ url, token, fetch = globalThis.fetch, timeo
       return callTool('stop_flame', { task_id: id });
     },
 
-    /** Legt eine Aufgabe in der Zunder-Inbox an und liefert `{ id, ref, url }`. */
-    async createTask({ title, description, vaultLinks }) {
+    /**
+     * Volltextsuche (`search`) über Titel, Beschreibung und Plan, für die
+     * Wochenplanung. Findet auch Projekte und Bereiche; geliefert werden nur Aufgaben.
+     */
+    async search(query, { limit = 20 } = {}) {
+      const out = await callTool('search', { query, limit });
+      // Treffer kommen als `hits` mit `entity` (task, project, area).
+      return (out?.hits ?? []).filter((h) => h.entity === 'task');
+    },
+
+    /**
+     * Legt eine Aufgabe mit beliebigen Feldern an (`create_task`, z. B. `phoenix`,
+     * `due`, `location`, `parent_id`) und liefert sie; für Flammen aus der Wochenplanung.
+     */
+    async addTask(fields) {
+      const out = await callTool('create_task', { ...fields, title: clampTitle(fields.title) });
+      if (!out?.task?.id) throw new Error('Zunder hat keine Aufgabe zurückgegeben');
+      return out.task;
+    },
+
+    /**
+     * Legt eine Aufgabe an und liefert `{ id, ref, url }`. Ohne `location`
+     * landet sie in der Zunder-Inbox; `due` (JJJJ-MM-TT) und `phoenix` sind optional.
+     */
+    async createTask({ title, description, vaultLinks, due = null, location = null, phoenix = null }) {
       const args = { title: clampTitle(title) };
       if (description) args.description = description;
       if (vaultLinks?.length) args.vault_links = vaultLinks;
+      if (due) args.due = due;
+      if (location) args.location = location;
+      if (phoenix) args.phoenix = phoenix;
       const out = await callTool('create_task', args);
       const task = out?.task;
       if (!task?.id) throw new Error('Zunder hat keine Aufgabe zurückgegeben');

@@ -16,6 +16,8 @@ export function createIndexManager({ vaultPath, dbPath, policy = DEFAULT_POLICY,
   let current = null;
   let builtAt = 0;
   let changedAt = 0;
+  // Letzter Fehler beim Aufbau oder Nachlesen, für die Zustandsseite.
+  let lastError = null;
   let timer = null;
   const listeners = new Set();
   const notify = (change) => {
@@ -28,7 +30,21 @@ export function createIndexManager({ vaultPath, dbPath, policy = DEFAULT_POLICY,
     }
   };
 
-  function rebuild() {
+  /** Erfolg oder Fehler eines Laufs festhalten; Fehler gehen weiter an den Aufrufer. */
+  function tracked(fn) {
+    return (...args) => {
+      try {
+        const out = fn(...args);
+        if (lastError) lastError.failing = false;
+        return out;
+      } catch (err) {
+        lastError = { at: Date.now(), message: err.message, failing: true };
+        throw err;
+      }
+    };
+  }
+
+  const rebuild = tracked(function rebuild() {
     const started = Date.now();
     const previous = current;
     const { db, count } = buildIndex({ vaultPath, dbPath, policy, logger: { info: () => {}, warn: logger.warn } });
@@ -44,14 +60,14 @@ export function createIndexManager({ vaultPath, dbPath, policy = DEFAULT_POLICY,
     logger.info?.(`Index neu aufgebaut: ${count} Notizen in ${((builtAt - started) / 1000).toFixed(1)} s`);
     notify({ full: true, paths: [] });
     return count;
-  }
+  });
 
   /**
    * Geänderte Notizen (Vault-relative Pfade) einzeln neu einlesen. Ist dabei
    * eine Datei entstanden oder verschwunden, werden alle Linkziele neu
    * aufgelöst, damit Backlinks stimmen.
    */
-  function applyChanges(paths) {
+  const applyChanges = tracked(function applyChanges(paths) {
     let presenceChanged = false;
     for (const path of new Set(paths)) {
       const { existed, exists } = current.refresh(path);
@@ -60,7 +76,7 @@ export function createIndexManager({ vaultPath, dbPath, policy = DEFAULT_POLICY,
     if (presenceChanged) current.relinkAll();
     changedAt = Date.now();
     notify({ full: false, paths: [...new Set(paths)] });
-  }
+  });
 
   rebuild();
 
@@ -80,6 +96,8 @@ export function createIndexManager({ vaultPath, dbPath, policy = DEFAULT_POLICY,
     applyChanges,
     lastBuiltAt: () => builtAt,
     lastChangedAt: () => changedAt,
+    /** `{ at, message, failing }` des letzten Fehlers oder null; `failing`, solange kein Lauf danach gelang. */
+    lastError: () => (lastError ? { ...lastError } : null),
     /** Beobachter für Änderungen am Index: `{ full, paths }`. Liefert eine Abmeldung. */
     onChange(fn) {
       listeners.add(fn);
@@ -105,5 +123,8 @@ export function createIndexManager({ vaultPath, dbPath, policy = DEFAULT_POLICY,
     embeddablePaths: (...a) => current.embeddablePaths(...a),
     describe: (...a) => current.describe(...a),
     basenameCount: (...a) => current.basenameCount(...a),
+    pathsContaining: (...a) => current.pathsContaining(...a),
+    resolveLink: (...a) => current.resolveLink(...a),
+    tagsOf: (...a) => current.tagsOf(...a),
   };
 }

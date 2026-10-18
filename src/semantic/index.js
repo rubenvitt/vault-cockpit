@@ -121,7 +121,7 @@ export function createSemanticIndex({ dbPath, vaultPath, index, embedder, batchS
       }
       status.state = 'idle';
       status.lastRunAt = now();
-      status.lastError = null;
+      // `lastError` bleibt als letzter Fehler stehen; ob es gerade hakt, sagt `state`.
       if (embedded) logger.info?.(`Embeddings: ${embedded} Abschnitte neu eingebettet (${notes.size} Notizen)`);
     } catch (err) {
       status.state = 'error';

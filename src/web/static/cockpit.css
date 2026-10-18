@@ -355,6 +355,9 @@ main.refreshing { transition: opacity var(--mid); }
 .capture.busy button.primary { opacity: .7; cursor: progress; }
 .capture.busy button.primary::before { content: ''; width: 14px; height: 14px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spin .7s linear infinite; }
 .capture.nudge .capture-field { animation: nudge .3s; }
+/* Vorschau einer Aufgabe unter dem Feld: „Aufgabe · morgen · Gesundheit“ (VCP-49). */
+.capture-preview { max-width: calc(var(--page) - 2 * var(--gutter)); margin: 6px auto 0; padding: 0 14px; font-size: var(--t-xs); color: var(--text-2); }
+.capture-preview .hint { color: var(--text-3); }
 @keyframes nudge { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
 
 /* Flamme läuft */
@@ -547,6 +550,7 @@ main.refreshing { transition: opacity var(--mid); }
 .message .brand-name { display: none; }
 .message p { margin: 0; color: var(--text-2); }
 .message p + p { margin-top: var(--s-3); }
+.message textarea { width: 100%; text-align: left; resize: vertical; }
 
 /* --- Schmale Bildschirme ------------------------------------------------- */
 @media (max-width: 900px) {

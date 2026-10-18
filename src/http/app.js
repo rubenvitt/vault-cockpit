@@ -37,7 +37,7 @@ function send(res, status, body, headers = {}) {
  * nur die Protected Resource Metadata (RFC 9728), damit Claude den zuständigen
  * Authorization Server findet, und prüfen eingehende Bearer-Tokens.
  */
-export function createApp({ config, verifyToken, mcpHandler, captureHttp = null, searchHttp = null, webHttp = null, logger = console }) {
+export function createApp({ config, verifyToken, mcpHandler, captureHttp = null, searchHttp = null, webHttp = null, degraded = () => false, logger = console }) {
   const prmUrl = `${config.publicUrl}/.well-known/oauth-protected-resource/mcp`;
 
   const protectedResourceMetadata = () => ({
@@ -99,7 +99,21 @@ export function createApp({ config, verifyToken, mcpHandler, captureHttp = null,
   const server = http.createServer((req, res) => {
     // Der Docker-Health-Check ruft containerintern über 127.0.0.1 auf und kann
     // die Host-Prüfung nicht bestehen — er wird deshalb davor beantwortet.
-    if (req.url === '/health') return send(res, 200, { status: 'ok' });
+    // `degraded` heißt: Der Dienst läuft, aber ein Hintergrunddienst (Sync,
+    // Mail, Zunder …) meldet einen Fehler; Details nur auf /zustand mit Login.
+    // Bewusst weiter 200, sonst startet Docker das Cockpit neu, obwohl der
+    // Fehler draußen liegt. Wer bei `degraded` anschlagen will, prüft den Text
+    // oder fragt `/health?strict=1`, das dann 503 liefert.
+    if (req.url === '/health' || req.url.startsWith('/health?')) {
+      let bad;
+      try {
+        bad = Boolean(degraded());
+      } catch {
+        bad = true;
+      }
+      const strict = new URLSearchParams(req.url.slice(8)).has('strict');
+      return send(res, bad && strict ? 503 : 200, { status: bad ? 'degraded' : 'ok' });
+    }
 
     // X-Forwarded-Host nur auswerten, wenn wir hinter einem vertrauenswürdigen
     // Proxy stehen — sonst könnte der Client die Host-Prüfung selbst aushebeln.

@@ -1,7 +1,12 @@
+import { parseTaskLine, resolveTask, dueText, previewLine } from './syntax.js';
+import { localDate, weekOf, weekId } from '../cockpit/week.js';
+
 /**
  * Ein Eingang für alles, was von außen erfasst wird (Kurzbefehl, Sprachmemo,
  * Mail, Funke): Text mit `!` vorne wird eine Aufgabe in der Zunder-Inbox,
- * alles andere eine neue Notiz im Capture-Ordner des Vaults.
+ * alles andere eine neue Notiz im Capture-Ordner des Vaults. Am Ende der
+ * Titelzeile einer Aufgabe dürfen Fälligkeit, Ziel und `+woche` stehen
+ * (`syntax.js`); dann legt Zunder sie gleich dort an.
  */
 
 export const SOURCES = {
@@ -14,6 +19,12 @@ export const SOURCES = {
 };
 
 const TITLE_MAX = 80;
+
+/**
+ * Erlaubte Erfassungs-IDs (`id` bei `/capture`, `cid` der Schnelleingabe im
+ * Web-Cockpit, Funke, Mail): dieselbe Form wie `capture_id` im Frontmatter.
+ */
+export const CAPTURE_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
 
 export class CaptureError extends Error {
   constructor(message, status = 400) {
@@ -35,12 +46,71 @@ export function cleanTitle(raw) {
 }
 
 /**
+ * Bereiche und Projekte aus Zunder, kurz zwischengespeichert je Client: Nicht
+ * jede Erfassung soll `list_structure` aufrufen. Ein Fehler wird nicht
+ * gemerkt, der nächste Versuch fragt wieder. Ein neuer Zugang in den
+ * Einstellungen ist ein neuer Client und fragt ebenfalls neu.
+ */
+export function createStructureCache({ ttlMs = 60_000, now = () => Date.now() } = {}) {
+  const cache = new WeakMap();
+  return {
+    async get(zunder) {
+      const hit = cache.get(zunder);
+      if (hit && now() - hit.at < ttlMs) return hit.areas;
+      const areas = zunder.listStructure();
+      cache.set(zunder, { at: now(), areas });
+      try {
+        return await areas;
+      } catch (err) {
+        if (cache.get(zunder)?.areas === areas) cache.delete(zunder);
+        throw err;
+      }
+    },
+  };
+}
+
+/** Gilt für alle Router, auch die, die das Web-Cockpit je Erfassung neu baut. */
+const sharedStructure = createStructureCache();
+
+/**
  * `zunder`: Client oder Funktion, die den aktuellen Client liefert (bzw. null).
  * Als Funktion wird sie bei jeder Aufgabe neu gefragt, damit ein in den
- * Einstellungen geänderter Zugang ohne Neustart gilt.
+ * Einstellungen geänderter Zugang ohne Neustart gilt. `tz` (Text oder
+ * Funktion) bestimmt, was „heute“ und die laufende Woche sind.
  */
-export function createCaptureRouter({ capture, zunder = null, state, logger = console }) {
+export function createCaptureRouter({ capture, zunder = null, state, tz = 'Europe/Berlin', now = () => new Date(), structure = sharedStructure, logger = console }) {
   const currentZunder = typeof zunder === 'function' ? zunder : () => zunder;
+  const currentTz = typeof tz === 'function' ? tz : () => tz;
+
+  /** Titelzeile → Plan für `create_task`; die Struktur wird nur bei `#…` gebraucht. */
+  async function plan(line, zunder) {
+    const at = now();
+    const zone = currentTz() || 'Europe/Berlin';
+    const today = localDate(at, zone);
+    const parsed = parseTaskLine(line, { today });
+    let areas = null;
+    let areasError = null;
+    if (parsed.tags.length) {
+      if (!zunder?.listStructure) areasError = 'Zunder ist nicht eingerichtet';
+      else {
+        try {
+          areas = await structure.get(zunder);
+        } catch (err) {
+          logger.warn?.(`Capture: Bereiche aus Zunder nicht abrufbar: ${err.message}`);
+        }
+      }
+    }
+    const p = resolveTask(parsed, { fire: weekId(weekOf(at, zone)), areas, areasError });
+    return { ...p, dueLabel: dueText(p.due, today) };
+  }
+
+  /** Erste nicht leere Zeile als Titel, der Rest als Beschreibung (oder ein ausdrücklicher Titel). */
+  function split(text, title) {
+    if (title && String(title).trim()) return { line: String(title).trim(), rest: text };
+    const lines = text.split(/\r?\n/);
+    const i = lines.findIndex((l) => l.trim());
+    return i === -1 ? { line: '', rest: '' } : { line: lines[i].trim(), rest: lines.slice(i + 1).join('\n').trim() };
+  }
 
   async function toZunder({ text, title, source, captureId }) {
     const zunder = currentZunder();
@@ -51,20 +121,21 @@ export function createCaptureRouter({ capture, zunder = null, state, logger = co
     const known = key ? state.get(key) : null;
     if (known) return { kind: 'task', duplicate: true, ...known };
 
-    const lines = text.split(/\r?\n/);
-    let taskTitle = title ? String(title).trim() : '';
-    let rest = text;
-    if (!taskTitle) {
-      const i = lines.findIndex((l) => l.trim());
-      taskTitle = i === -1 ? '' : lines[i].trim();
-      rest = i === -1 ? '' : lines.slice(i + 1).join('\n').trim();
-    }
-    if (!taskTitle) throw new CaptureError('Nach dem ! fehlt der Text der Aufgabe');
+    const { line, rest } = split(text, title);
+    if (!line) throw new CaptureError('Nach dem ! fehlt der Text der Aufgabe');
+    const p = await plan(line, zunder);
 
     const footer = `_Erfasst über ${SOURCES[source] ?? source} (Vault Cockpit)_`;
-    const task = await zunder.createTask({ title: taskTitle, description: rest ? `${rest}\n\n${footer}` : footer });
+    const created = await zunder.createTask({
+      title: p.title,
+      description: rest ? `${rest}\n\n${footer}` : footer,
+      due: p.due,
+      location: p.location ? { kind: p.location.kind, id: p.location.id } : null,
+      phoenix: p.phoenix,
+    });
+    const task = { ...created, title: p.title, due: p.due, dueLabel: p.dueLabel, location: p.location ?? { kind: 'inbox' }, phoenix: p.phoenix, notes: p.notes };
     if (key) state.set(key, task);
-    logger.info?.(`Capture (${source}) → Zunder ${task.ref ?? task.id}`);
+    logger.info?.(`Capture (${source}) → Zunder ${task.ref ?? task.id}${p.location ? ` in ${p.location.name}` : ''}${p.due ? `, fällig ${p.due}` : ''}`);
     return { kind: 'task', ...task };
   }
 
@@ -84,6 +155,19 @@ export function createCaptureRouter({ capture, zunder = null, state, logger = co
 
   return {
     /**
+     * Was beim Absenden entstünde, ohne etwas anzulegen: für die Vorschau unter
+     * der Schnelleingabe. Notizen bleiben unverändert (`{ kind: 'note' }`).
+     */
+    async preview({ text }) {
+      const body = String(text ?? '').trim();
+      if (!body.startsWith('!')) return { kind: 'note', summary: 'Notiz' };
+      const { line } = split(body.slice(1).trim(), null);
+      if (!line) return { kind: 'task', title: '', due: null, dueLabel: '', location: null, phoenix: null, notes: [], summary: 'Aufgabe' };
+      const p = await plan(line, currentZunder());
+      return { kind: 'task', ...p, summary: previewLine(p) };
+    },
+
+    /**
      * @param {object} input
      * @param {string} input.text      der erfasste Text; `!` vorne → Zunder-Aufgabe
      * @param {string} [input.title]   optionaler Titel; Notizen ohne heißen nach Quelle und Zeit, Aufgaben nach der ersten Zeile
@@ -94,6 +178,10 @@ export function createCaptureRouter({ capture, zunder = null, state, logger = co
      */
     async route({ text, title = null, source, captureId = null, created = null, allowTask = true }) {
       if (!SOURCES[source]) throw new CaptureError(`Unbekannte Quelle "${source}"`);
+      // Gilt für Notizen und Aufgaben gleich, damit der Schlüssel im Merkzettel sauber bleibt.
+      if (captureId !== null && !CAPTURE_ID.test(String(captureId))) {
+        throw new CaptureError('Ungültige Capture-ID (Buchstaben, Ziffern und _ . : -, höchstens 128 Zeichen)');
+      }
       const body = String(text ?? '').trim();
       if (!body) throw new CaptureError('Text darf nicht leer sein');
 

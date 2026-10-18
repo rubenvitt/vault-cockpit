@@ -137,14 +137,15 @@ export function planFlameUpdate(content, inner, { hasRows = true } = {}) {
  * Hintergrunddienst: `update(weekId?)` trägt die Flammen einer Woche (Standard:
  * die laufende) ein, `afterFlame(task)` nach Start oder Stopp einer Flamme im Cockpit, `round()`
  * im Reindex-Intervall. Läufe hintereinander, nie gleichzeitig. `status()`
- * liefert letzten Lauf, letzten Fehler und letzten Schreibvorgang.
+ * liefert letzten Lauf, letzten erfolgreichen Lauf, letzten Fehler und
+ * letzten Schreibvorgang.
  *
  * `zunder` ist eine Funktion, die den aktuellen Client liefert (oder null);
  * `settings.get().flameNote.enabled` schaltet ab.
  */
 export function createFlameNote({ vaultPath, index, editor, policy, settings, zunder, now = () => new Date(), logger = console }) {
   const vaultReal = realpathSync(vaultPath);
-  const status = { lastRun: null, lastError: null, lastWrite: null };
+  const status = { lastRun: null, lastOkAt: null, lastError: null, lastWrite: null };
   let queue = Promise.resolve();
 
   async function run(id) {
@@ -185,7 +186,9 @@ export function createFlameNote({ vaultPath, index, editor, policy, settings, zu
     const next = queue.then(async () => {
       status.lastRun = now().toISOString();
       try {
-        return await run(id);
+        const result = await run(id);
+        status.lastOkAt = status.lastRun;
+        return result;
       } catch (err) {
         status.lastError = { at: status.lastRun, message: err.message };
         logger.warn?.(`Feuer-Notiz: Flammen nicht eingetragen — ${err.message}`);

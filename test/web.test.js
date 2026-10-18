@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { generateKeyPairSync, createSign, createHash } from 'node:crypto';
+import { generateKeyPairSync, createSign, createHash, randomBytes } from 'node:crypto';
 import { createApp } from '../src/http/app.js';
 import { createWebHttp } from '../src/web/http.js';
 import { loadShortcuts } from '../src/web/shortcuts.js';
@@ -9,6 +9,9 @@ import { createCookieSigner, parseCookies } from '../src/web/session.js';
 import { createSettingsStore } from '../src/cockpit/settings.js';
 import { createTokenStore } from '../src/cockpit/tokens.js';
 import { ActionError } from '../src/cockpit/actions.js';
+import { mkdtempSync, writeFileSync, openSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const ISSUER = 'https://id.test';
 const CLIENT = 'cockpit-web';
@@ -118,7 +121,7 @@ const graph = {
 };
 const search = async (q) => ({ results: [{ path: 'wiki/a.md', title: 'A', snippet: `zu ${q}`, streams: ['text', 'semantic'] }], total: 1, degraded: null });
 
-async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSubjects = ['ruben'], calendars = null, actions = null, notes = null, shortcuts = [] } = {}) {
+async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSubjects = ['ruben'], calendars = null, actions = null, notes = null, shortcuts = [], clock = null } = {}) {
   const idp = fakeIdp(idpOptions);
   const settings = createSettingsStore({ defaults: { tz: 'Europe/Berlin', inboxFolder: 'inbox', zunderUrl: 'https://zunder.env', zunderToken: 'zt_env' }, logger: quiet });
   const tokens = createTokenStore({ logger: quiet });
@@ -137,6 +140,8 @@ async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSu
     publicUrl: 'https://vault.test',
     allowedSubjects,
     logger: quiet,
+    // `clock.t` verstellbar, damit Tests Wochen vergehen lassen können.
+    ...(clock ? { now: () => clock.t } : {}),
   });
   const app = createApp({
     config: { publicUrl: 'https://vault.test', resource: 'https://vault.test/mcp', issuer: ISSUER, supportedScopes: [], allowedHosts: ['vault.test'], trustProxy: true },
@@ -285,10 +290,17 @@ test('Sitzung: gefälschte, abgelaufene und gestrichene Cookies gelten nicht', a
   assert.deepEqual(parseCookies('a=1; b=2=3'), { a: '1', b: '2=3' });
 
   await withServer(async ({ call, jar }) => {
-    jar.vc_session = signer.seal({ sub: 'fremd', exp });
+    const t = exp - 600;
+    const session = { sid: 's1', gen: 0, iat: t, seen: t, exp };
+    jar.vc_session = signer.seal({ ...session, sub: 'fremd' });
     assert.equal((await call('/')).status, 303);
-    jar.vc_session = signer.seal({ sub: 'ruben', exp });
+    jar.vc_session = signer.seal({ ...session, sub: 'ruben' });
     assert.equal((await call('/')).status, 200);
+    // Cookies im alten Format (bis VCP-45 nur `sub` und `exp`) gelten nicht mehr.
+    jar.vc_session = signer.seal({ sub: 'ruben', name: 'Ruben', sid: 's1', exp });
+    assert.equal((await call('/')).status, 303);
+    jar.vc_session = signer.seal({ ...session, sub: 'ruben', gen: 1 });
+    assert.equal((await call('/')).status, 303);
   });
 });
 
@@ -621,7 +633,17 @@ function fakeActions() {
         fail = null;
         throw e;
       }
+      if (text.includes('#gesundheit')) {
+        return { kind: 'task', id: 'z8', ref: 'ZUN-8', url: 'https://zunder.test/#/aufgabe/z8', title: 'Zahnarzt anrufen', due: '2026-10-15', dueLabel: 'morgen', location: { kind: 'area', id: 'a1', name: 'Gesundheit' }, phoenix: null, notes: [] };
+      }
+      if (text.includes('#weiter')) {
+        return { kind: 'task', id: 'z7', ref: 'ZUN-7', url: 'https://zunder.test/#/aufgabe/z7', title: 'Kurs #weiter', due: null, dueLabel: '', location: { kind: 'inbox' }, phoenix: null, notes: ['#weiter passt zu mehreren Zielen (A, B).'] };
+      }
       return text.startsWith('!') ? { kind: 'task', id: 'z9', ref: 'ZUN-9', url: 'https://zunder.test/#/aufgabe/z9' } : { kind: 'note', path: 'inbox/2026-10-14 0900 - Idee.md' };
+    },
+    async previewCapture(text) {
+      calls.push(['preview', text]);
+      return text.startsWith('!') ? { kind: 'task', title: 'Zahnarzt anrufen', summary: 'Aufgabe · morgen · Gesundheit', notes: [] } : { kind: 'note', summary: 'Notiz' };
     },
   };
 }
@@ -665,7 +687,7 @@ test('Aktionen: nur angemeldet, mit CSRF-Token und von dieser Seite', async () =
     async ({ call, login }) => {
       const anon = await call('/aktion/status', { method: 'POST', form: { id: 't1', status: 'done' } });
       assert.equal(anon.status, 303);
-      assert.equal(anon.headers.get('location'), '/login');
+      assert.equal(anon.headers.get('location'), '/login?next=%2F');
       const anonJson = await call('/aktion/erfassen', { method: 'POST', form: { text: 'x' }, accept: 'application/json' });
       assert.equal(anonJson.status, 401);
       assert.equal((await call('/aktion/status')).status, 405);
@@ -817,6 +839,37 @@ test('Fälligkeit verschieben: JSON mit Rückgängig, ohne JavaScript per Weiter
     {},
     { actions },
   );
+});
+
+test('Schnelleingabe: Meldung nennt Ziel und Fälligkeit, Vorschau nur angemeldet', async () => {
+  const actions = fakeActions();
+  await withServer(
+    async ({ call, login }) => {
+      assert.equal((await call('/api/erfassen/vorschau?text=!x')).status, 401);
+      await login();
+      const html = await (await call('/')).text();
+      assert.match(html, /<p class="capture-preview" data-capture-preview aria-live="polite" hidden><\/p>/);
+      const csrf = csrfFrom(html);
+
+      const placed = await call('/aktion/erfassen', { method: 'POST', form: { text: '!Zahnarzt anrufen morgen #gesundheit', csrf }, accept: 'application/json' });
+      assert.equal((await placed.json()).message, 'Aufgabe angelegt: ZUN-8 liegt in Gesundheit, fällig morgen');
+      const amb = await call('/aktion/erfassen', { method: 'POST', form: { text: '!Kurs #weiter', csrf }, accept: 'application/json' });
+      assert.equal((await amb.json()).message, 'Aufgabe angelegt: ZUN-7 liegt in der Zunder-Inbox · #weiter passt zu mehreren Zielen (A, B).');
+
+      const res = await call(`/api/erfassen/vorschau?text=${encodeURIComponent('!Zahnarzt anrufen morgen #gesundheit')}`);
+      assert.equal(res.status, 200);
+      assert.equal((await res.json()).summary, 'Aufgabe · morgen · Gesundheit');
+      assert.deepEqual(actions.calls.at(-1), ['preview', '!Zahnarzt anrufen morgen #gesundheit']);
+      assert.equal((await call('/api/erfassen/vorschau?text=x', { method: 'POST' })).status, 405);
+    },
+    {},
+    { actions },
+  );
+  // Ohne Aktionen gibt es die Vorschau nicht.
+  await withServer(async ({ call, login }) => {
+    await login();
+    assert.equal((await call('/api/erfassen/vorschau?text=!x')).status, 404);
+  });
 });
 
 test('Zunder-Inbox: Zuordnen, Phönix-Schritt und Verwerfen im Menü', async () => {
@@ -1002,6 +1055,95 @@ test('Notiz ablegen: JSON führt zur neuen Adresse, Meldung kommt per Cookie mit
   );
 });
 
+/** Notiz-Attrappe mit Verweisen, Backlinks, ähnlichen Notizen und einem Bild. */
+function previewNotes(dir) {
+  const base = fakeNotes();
+  const png = join(dir, 'foto.png');
+  writeFileSync(png, Buffer.from('89504e470d0a1a0a', 'hex'));
+  const links = {
+    wikilink: (t) => (t === 'Hund' ? { kind: 'note', path: 'wiki/Hund.md', title: 'Hund' } : t === 'foto.png' ? { kind: 'image', path: 'bilder/foto.png' } : null),
+    image: () => null,
+    markdownLink: () => null,
+  };
+  return {
+    ...base,
+    get: (p) => {
+      const n = base.get(p);
+      return n && { ...n, frontmatter: { source: 'cockpit', projekt: '[[Hund]]' }, body: '[[Hund]] [[Geheim]] ![[foto.png]]\n\n| a | b |\n|---|---|\n| <x> | 2 |\n\n> [!tip] Merken\n> Text', links };
+    },
+    related: (p) => ({
+      backlinks: [{ path: 'wiki/Hund.md', title: 'Hund <B>' }],
+      similar: { source: 'text', hits: [{ path: 'wiki/Training.md', title: 'Training', folder: 'wiki', score: null, linked: false }], problem: 'Ohne Embeddings (Einstellungen → Embeddings) ähnlich nach Volltext' },
+    }),
+    openImage: (p) => (p === 'bilder/foto.png' ? { fd: openSync(png, 'r'), size: 8, type: 'image/png' } : null),
+    suggest: (p, related) => ({
+      source: related.similar.source,
+      problem: related.similar.problem,
+      of: 1,
+      folders: [{ folder: '10-projekte/Hund', count: 1 }],
+      tags: [{ tag: 'hund', count: 1 }],
+      unlinked: related.similar.hits,
+    }),
+  };
+}
+
+test('Notizvorschau: Wikilinks, Backlinks, Ähnlich und Bilder hinter der Anmeldung', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'web-preview-'));
+  const notes = previewNotes(dir);
+  try {
+    await withServer(
+      async ({ call, login }) => {
+        assert.equal((await call('/notiz/bild?pfad=bilder%2Ffoto.png')).status, 401);
+        await login();
+        const html = await (await call('/notiz?pfad=00-inbox%2FIdee.md')).text();
+        assert.match(html, /<a href="\/notiz\?pfad=wiki%2FHund\.md" class="wikilink" title="wiki\/Hund\.md">Hund<\/a>/);
+        assert.match(html, /<span class="wikilink missing" title="Fehlt: Geheim">Geheim<span class="missing-mark"> \(fehlt\)<\/span><\/span>/);
+        assert.match(html, /<img src="\/notiz\/bild\?pfad=bilder%2Ffoto\.png" alt="foto\.png" loading="lazy">/);
+        assert.match(html, /<td>&lt;x&gt;<\/td>/);
+        assert.match(html, /<div class="callout callout-ok" data-callout="tip"><p class="callout-title">Merken<\/p>/);
+        // Frontmatter kompakt, Wikilinks darin als Link.
+        assert.match(html, /<details class="fm"><summary>source: cockpit · projekt: Hund<\/summary><dl>[^]*?<dd><a href="\/notiz\?pfad=wiki%2FHund\.md"/);
+        assert.match(html, /<h2>Verweist hierher<\/h2><ul><li><a href="\/notiz\?pfad=wiki%2FHund\.md">Hund &lt;B&gt;<\/a>/);
+        assert.match(html, /<h2>Ähnlich<\/h2><ul><li><a href="\/notiz\?pfad=wiki%2FTraining\.md">Training<\/a>[^]*?ähnlich nach Volltext/);
+        assert.match(html, /<a href="\/graph\?pfad=00-inbox%2FIdee\.md">Graph<\/a>/);
+
+        // Vorschläge der Inbox-Notiz: ein Klick je Vorschlag, über die bestehenden Aktionen.
+        assert.match(html, /<section class="suggest">[^]*?name="tags" value="alt, hund"[^]*?name="ordner" value="10-projekte\/Hund"[^]*?name="ziel" value="wiki\/Training\.md"/);
+        const csrf = csrfFrom(html);
+        const tagged = await (await call('/aktion/notiz/tags', { method: 'POST', form: { pfad: '00-inbox/Idee.md', tags: 'alt, hund', csrf }, accept: 'application/json' })).json();
+        assert.equal(tagged.message, 'Tags: #alt #hund');
+        const filed = await (await call('/aktion/notiz/ablegen', { method: 'POST', form: { pfad: '00-inbox/Idee.md', ordner: '10-projekte/Hund', back: '/notiz?pfad=00-inbox%2FIdee.md', csrf }, accept: 'application/json' })).json();
+        assert.equal(filed.redirect, '/notiz?pfad=10-projekte%2FHund%2FIdee.md');
+        assert.deepEqual(notes.calls.map((c) => c[0]), ['tags', 'move']);
+
+        const img = await call('/notiz/bild?pfad=bilder%2Ffoto.png');
+        assert.equal(img.status, 200);
+        assert.equal(img.headers.get('content-type'), 'image/png');
+        assert.equal(img.headers.get('cache-control'), 'private, no-store');
+        assert.equal(img.headers.get('x-content-type-options'), 'nosniff');
+        assert.match(img.headers.get('content-security-policy'), /sandbox/);
+        assert.equal(Buffer.from(await img.arrayBuffer()).toString('hex'), '89504e470d0a1a0a');
+        const head = await call('/notiz/bild?pfad=bilder%2Ffoto.png', { method: 'HEAD' });
+        assert.equal(head.status, 200);
+        const denied = await call('/notiz/bild?pfad=..%2Fetc%2Fpasswd');
+        assert.equal(denied.status, 404);
+        assert.equal(denied.headers.get('cache-control'), 'no-store');
+        assert.equal((await call('/notiz?pfad=00-inbox%2FIdee.md')).headers.get('cache-control'), 'no-store');
+
+        // Suchtreffer öffnen die Notiz, der Graph steht daneben; die Live-Suche weiß davon.
+        const found = await (await call('/graph?q=hund')).text();
+        assert.match(found, /<li><a href="\/notiz\?pfad=wiki%2Fa\.md">A<\/a>[^]*?<a href="\/graph\?pfad=wiki%2Fa\.md">Graph<\/a>/);
+        assert.match(found, /class="search" role="search" data-notes="1"/);
+        assert.match(await (await call('/graph?pfad=wiki%2Fa.md')).text(), /class="search" role="search" data-notes="1"/);
+      },
+      {},
+      { actions: fakeActions(), notes },
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('Feuer-Ziel bearbeiten: Formular an der Feuer-Notiz, Speichern mit Rückgängig', async () => {
   const notes = fakeNotes();
   await withServer(
@@ -1166,4 +1308,266 @@ test('Einstellungen: Flammen in der Feuer-Notiz abschalten (VCP-52)', async () =
     assert.equal(settings.get().flameNote.enabled, false);
     assert.match(await (await call('/einstellungen')).text(), /<option value="aus" selected>aus<\/option>\s*<\/select><\/label>\s*<\/div>\s*<\/section>\s*<section id="mail">/);
   });
+});
+
+const DAY_MS = 86_400_000;
+const sessionCookieOf = (res) => res.headers.getSetCookie().find((c) => c.startsWith('vc_session='));
+
+test('Sitzung: verlängert sich bei Nutzung, endet nach 30 Tagen Pause und spätestens nach 90', async () => {
+  const clock = { t: Date.now() };
+  await withServer(
+    async ({ call, login, jar }) => {
+      const res = await login();
+      assert.match(sessionCookieOf(res), /HttpOnly; SameSite=Lax; Secure; Max-Age=2592000$/);
+      const first = jar.vc_session;
+      // In der ersten Stunde bleibt das Cookie, wie es ist.
+      clock.t += 10 * 60_000;
+      const soon = await call('/');
+      assert.equal(soon.status, 200);
+      assert.equal(sessionCookieOf(soon), undefined);
+      assert.equal(jar.vc_session, first);
+      // Einmal im Monat öffnen reicht, jedes Mal gibt es wieder 30 Tage.
+      for (let i = 0; i < 3; i++) {
+        clock.t += 29 * DAY_MS;
+        const page = await call('/');
+        assert.equal(page.status, 200);
+        assert.match(sessionCookieOf(page), i < 2 ? /Max-Age=2592000$/ : /Max-Age=258600$/);
+      }
+      // 90 Tage nach dem Login ist Schluss, auch wenn die letzte Nutzung drei Tage her ist.
+      clock.t += 3 * DAY_MS;
+      const late = await call('/?woche=2026-W42');
+      assert.equal(late.status, 303);
+      assert.equal(late.headers.get('location'), '/login?next=%2F%3Fwoche%3D2026-W42');
+      assert.equal((await call('/api/woche')).status, 401);
+    },
+    {},
+    { clock },
+  );
+  const idle = { t: Date.now() };
+  await withServer(
+    async ({ call, login }) => {
+      await login();
+      idle.t += 30 * DAY_MS;
+      assert.equal((await call('/')).status, 303);
+    },
+    {},
+    { clock: idle },
+  );
+});
+
+test('Sitzung: CSRF-Token bleibt beim Verlängern gültig', async () => {
+  const clock = { t: Date.now() };
+  const actions = fakeActions();
+  await withServer(
+    async ({ call, login, jar }) => {
+      await login();
+      const csrf = csrfFrom(await (await call('/')).text());
+      const before = jar.vc_session;
+      clock.t += 2 * 3600_000;
+      const renewed = await call('/api/woche');
+      assert.ok(sessionCookieOf(renewed));
+      assert.notEqual(jar.vc_session, before);
+      assert.equal(csrfFrom(await (await call('/')).text()), csrf);
+      const res = await call('/aktion/status', { method: 'POST', form: { id: 't1', status: 'done', csrf }, origin: 'https://vault.test' });
+      assert.equal(res.status, 303);
+      assert.deepEqual(actions.calls, [['status', 't1', 'done']]);
+    },
+    {},
+    { actions, clock },
+  );
+});
+
+test('Überall abmelden: beendet alle Sitzungen, nur mit CSRF-Token und von dieser Seite', async () => {
+  await withServer(async ({ call, login, jar, settings }) => {
+    assert.equal((await call('/einstellungen/abmelden', { method: 'POST', form: {} })).headers.get('location'), '/login?next=%2Feinstellungen');
+    await login();
+    const other = jar.vc_session; // z. B. das iPhone
+    await login();
+    const html = await (await call('/einstellungen')).text();
+    assert.match(html, /<a href="#anmeldung">/);
+    assert.match(html, /<button type="submit" form="abmelden-ueberall" class="btn quiet danger">Überall abmelden<\/button>/);
+    assert.match(html, /<form method="post" action="\/einstellungen\/abmelden" id="abmelden-ueberall" hidden><input type="hidden" name="csrf" value="[^"]+"><\/form>/);
+    const csrf = csrfFrom(html);
+    assert.equal((await call('/einstellungen/abmelden', { method: 'POST', form: {} })).status, 403);
+    assert.equal((await call('/einstellungen/abmelden', { method: 'POST', form: { csrf }, origin: 'https://evil.test' })).status, 403);
+    assert.equal((await call('/einstellungen/abmelden')).status, 303);
+    assert.equal(settings.stored().session.generation, 0);
+
+    const res = await call('/einstellungen/abmelden', { method: 'POST', form: { csrf }, origin: 'https://vault.test' });
+    assert.equal(res.status, 200);
+    assert.match(await res.text(), /Überall abgemeldet/);
+    assert.equal(jar.vc_session, undefined);
+    assert.equal(settings.stored().session.generation, 1);
+    jar.vc_session = other;
+    assert.equal((await call('/')).status, 303);
+
+    // Neu anmelden geht; Speichern der Einstellungen lässt die Generation stehen.
+    await login();
+    const fresh = csrfFrom(await (await call('/einstellungen')).text());
+    assert.equal((await call('/einstellungen', { method: 'POST', form: { tz: 'UTC', csrf: fresh } })).status, 303);
+    assert.equal(settings.stored().session.generation, 1);
+    assert.equal((await call('/')).status, 200);
+  });
+});
+
+test('Einstellungen: Dauer der Anmeldung, leer = Standard, eine kürzere wirkt sofort', async () => {
+  const clock = { t: Date.now() };
+  await withServer(
+    async ({ call, login, settings }) => {
+      await login();
+      const html = await (await call('/einstellungen')).text();
+      assert.match(html, /name="session\.idleDays" inputmode="numeric" value="" placeholder="30"/);
+      assert.match(html, /name="session\.maxDays" inputmode="numeric" value="" placeholder="90"/);
+      const csrf = csrfFrom(html);
+      const zero = await call('/einstellungen', { method: 'POST', form: { 'session.idleDays': '0', csrf } });
+      assert.equal(zero.status, 400);
+      assert.match(await zero.text(), /ganze Tage zwischen 1 und 365/);
+      assert.equal((await call('/einstellungen', { method: 'POST', form: { 'session.idleDays': '40', 'session.maxDays': '20', csrf } })).status, 400);
+      assert.equal((await call('/einstellungen', { method: 'POST', form: { 'session.idleDays': '2', csrf } })).status, 303);
+      assert.deepEqual(settings.get().session, { idleDays: 2, maxDays: 90, generation: 0 });
+      assert.match(await (await call('/einstellungen')).text(), /name="session\.idleDays" inputmode="numeric" value="2"/);
+      clock.t += 3 * DAY_MS;
+      assert.equal((await call('/')).status, 303);
+    },
+    {},
+    { clock },
+  );
+});
+
+test('Abgelaufene Sitzung: Schnelleingabe geht über den Login zurück, der Text steht wieder im Feld', async () => {
+  const clock = { t: Date.now() };
+  const actions = fakeActions();
+  await withServer(
+    async ({ call, login, idp, jar }) => {
+      await login();
+      const html = await (await call('/?woche=2026-W42')).text();
+      const csrf = csrfFrom(html);
+      const cid = html.match(/name="cid" value="([^"]+)"/)[1];
+      clock.t += 31 * DAY_MS;
+
+      const res = await call('/aktion/erfassen', { method: 'POST', form: { text: '! Wichtig <b>', cid, csrf, back: '/?woche=2026-W42' }, origin: 'https://vault.test' });
+      assert.equal(res.status, 303);
+      assert.equal(res.headers.get('location'), '/login?next=%2F%3Fwoche%3D2026-W42');
+      assert.match(res.headers.getSetCookie().find((c) => c.startsWith('vc_draft=')), /HttpOnly; SameSite=Lax; Secure; Max-Age=900$/);
+      // Verschlüsselt: Der Text steht weder im Cookie noch in der Adresse zu Pocket ID.
+      assert.ok(!Buffer.from(jar.vc_draft, 'base64url').toString('latin1').includes('Wichtig'));
+      assert.equal(actions.calls.length, 0);
+      const start = await call(res.headers.get('location'));
+      assert.ok(!start.headers.get('location').includes('Wichtig'));
+      const { code, state } = idp.authorize(start.headers.get('location'));
+      const back = await call(`/auth/callback?code=${code}&state=${state}`);
+      assert.equal(back.headers.get('location'), '/?woche=2026-W42');
+
+      const page = await (await call('/?woche=2026-W42')).text();
+      assert.match(page, /<textarea[^>]*autofocus[^>]*>! Wichtig &lt;b&gt;<\/textarea>/);
+      assert.match(page, /data-mode="task"/);
+      assert.match(page, /class="toast error"[^>]*><span class="toast-text">Nicht gespeichert: Die Anmeldung war abgelaufen/);
+      assert.equal(jar.vc_draft, undefined);
+      assert.ok(!(await (await call('/')).text()).includes('Wichtig'));
+      assert.equal(actions.calls.length, 0);
+    },
+    {},
+    { actions, clock },
+  );
+});
+
+test('Abgelaufene Sitzung: Text zum Anhängen wartet auf seine Notiz', async () => {
+  const clock = { t: Date.now() };
+  const notes = fakeNotes();
+  await withServer(
+    async ({ call, login, jar }) => {
+      await login();
+      const csrf = csrfFrom(await (await call('/notiz?pfad=00-inbox%2FIdee.md')).text());
+      clock.t += 31 * DAY_MS;
+      const back = '/notiz?pfad=00-inbox%2FIdee.md';
+      const res = await call('/aktion/notiz/anhaengen', { method: 'POST', form: { pfad: '00-inbox/Idee.md', text: 'Nachtrag', csrf, back }, origin: 'https://vault.test' });
+      assert.equal(res.headers.get('location'), `/login?next=${encodeURIComponent(back)}`);
+      await login('/');
+      // Die Wochenansicht nimmt den Entwurf nicht, er bleibt für die Notiz liegen.
+      assert.ok(!(await (await call('/')).text()).includes('Nachtrag'));
+      assert.ok(jar.vc_draft);
+      const page = await (await call(back)).text();
+      assert.match(page, /<textarea name="text"[^>]*>Nachtrag<\/textarea>/);
+      assert.equal(jar.vc_draft, undefined);
+      assert.ok(!notes.calls.some((c) => c[0] === 'append'));
+    },
+    {},
+    { actions: fakeActions(), notes, clock },
+  );
+});
+
+test('Abgelaufene Sitzung: zu langer Text oder unklare Herkunft kommt zum Kopieren zurück, andere Aktionen über den Login', async () => {
+  const clock = { t: Date.now() };
+  const actions = fakeActions();
+  await withServer(
+    async ({ call, login, jar }) => {
+      await login();
+      const csrf = csrfFrom(await (await call('/')).text());
+      clock.t += 31 * DAY_MS;
+      const vault = 'https://vault.test';
+
+      // Ohne Origin kein Cookie: Niemand soll einen Entwurf unterschieben können.
+      const unclear = await call('/aktion/erfassen', { method: 'POST', form: { text: 'Idee <i>', csrf, back: '/' } });
+      assert.equal(unclear.status, 401);
+      assert.match(await unclear.text(), /<textarea readonly[^>]*>Idee &lt;i&gt;<\/textarea><p><a href="\/login\?next=%2F" class="btn primary">/);
+      assert.equal(jar.vc_draft, undefined);
+
+      // Passt nicht in ein Cookie.
+      const long = randomBytes(6000).toString('base64');
+      const big = await call('/aktion/erfassen', { method: 'POST', form: { text: long, csrf, back: '/' }, origin: vault });
+      assert.equal(big.status, 401);
+      assert.ok((await big.text()).includes(long));
+      assert.equal(jar.vc_draft, undefined);
+
+      assert.equal((await call('/aktion/erfassen', { method: 'POST', form: { text: 'x', csrf }, origin: 'https://evil.test' })).status, 403);
+      const empty = await call('/aktion/erfassen', { method: 'POST', form: { text: '  ', csrf, back: '/' }, origin: vault });
+      assert.equal(empty.headers.get('location'), '/login?next=%2F');
+      const status = await call('/aktion/status', { method: 'POST', form: { id: 't1', status: 'done', csrf, back: '/?woche=2026-W42' }, origin: vault });
+      assert.equal(status.status, 303);
+      assert.equal(status.headers.get('location'), '/login?next=%2F%3Fwoche%3D2026-W42');
+      assert.equal((await call('/aktion/status', { method: 'POST', form: { id: 't1', status: 'done', back: '//evil.test' }, origin: vault })).headers.get('location'), '/login?next=%2F');
+      assert.equal(jar.vc_draft, undefined);
+      assert.equal(actions.calls.length, 0);
+    },
+    {},
+    { actions, clock },
+  );
+});
+
+test('Entwurfs-Cookie: verschlüsselt, fälschungssicher, läuft ab', () => {
+  const signer = createCookieSigner(SECRET);
+  const exp = Math.floor(Date.now() / 1000) + 60;
+  const value = signer.encrypt({ text: 'Geheimer Gedanke', exp });
+  assert.equal(signer.decrypt(value).text, 'Geheimer Gedanke');
+  assert.notEqual(signer.encrypt({ text: 'Geheimer Gedanke', exp }), value);
+  const raw = Buffer.from(value, 'base64url');
+  raw[raw.length - 1] ^= 1;
+  assert.equal(signer.decrypt(raw.toString('base64url')), null);
+  assert.equal(signer.decrypt(value, (exp + 1) * 1000), null);
+  assert.equal(createCookieSigner('y'.repeat(40)).decrypt(value), null);
+  assert.equal(signer.decrypt('kaputt'), null);
+  assert.equal(signer.open(value), null);
+});
+
+test('Offline-Cache: eine Wochenansicht mit wiederhergestelltem Entwurf wird nicht freigegeben', async () => {
+  const clock = { t: Date.now() };
+  const actions = fakeActions();
+  await withServer(
+    async ({ call, login, idp }) => {
+      await login();
+      const fresh = await call('/');
+      assert.equal(fresh.headers.get('x-cockpit-offline'), 'woche');
+      const html = await fresh.text();
+      clock.t += 31 * DAY_MS;
+      const res = await call('/aktion/erfassen', { method: 'POST', form: { text: 'Entwurf, der nicht in den Cache darf', cid: html.match(/name="cid" value="([^"]+)"/)[1], csrf: csrfFrom(html), back: '/' }, origin: 'https://vault.test' });
+      const start = await call(res.headers.get('location'));
+      const { code, state } = idp.authorize(start.headers.get('location'));
+      await call(`/auth/callback?code=${code}&state=${state}`);
+      const page = await call('/');
+      assert.match(await page.text(), /Entwurf, der nicht in den Cache darf/);
+      assert.equal(page.headers.get('x-cockpit-offline'), null);
+    },
+    {},
+    { actions, clock },
+  );
 });

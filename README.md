@@ -79,6 +79,58 @@ Einstellungen leer ist; die Einstellungsseite zeigt dann „aus der Umgebung“.
 Einstellungen eingetragen (und die Kurzbefehle mit einem neuen Capture-Token
 importiert), können die Variablen aus dem Deployment raus.
 
+### Sicherung von `/data`
+
+Unter `/data` liegen zwei Sorten Dateien. `index.db` und `vectors.db` baut das
+Cockpit beim Start selbst neu auf (die Vektoren dauern auf der CPU eine Weile).
+Die übrigen lassen sich nicht neu bauen, ohne sie ist alles neu einzurichten:
+
+| Datei | Inhalt |
+|---|---|
+| `cockpit-settings.json` | alle Einstellungen: Kalender mit Adressen und Passwörtern, Zunder-Zugang, Brücke, Mail-Token, Embeddings, Anzeige |
+| `api-tokens.json` | API-Tokens für Kurzbefehle, Funke und Suche (nur Hashes; fehlen sie, müssen alle Kurzbefehle neue Tokens bekommen) |
+| `capture-state.json` | Merkzettel von Capture und Brücke (keine doppelten Aufgaben, zuletzt gesehene Checkbox-Stände) |
+| `session-secret` | Secret des Sitzungs-Cookies (bei gesetztem `SESSION_SECRET` ohne Bedeutung) |
+
+Die Obsidian-Anmeldung des Sync-Sidecars liegt nicht hier, sondern in
+`./sync-config`; fehlt sie, einmal neu anmelden (siehe [Sync](#sync)).
+
+**Am einfachsten** sichert der Host das Verzeichnis `./data` mit seinem
+Backup-Job (restic, Kopia, Snapshots des Volumes). Wiederherstellen heißt dann:
+Dateien zurückkopieren, `chown 1000:1000`, Container starten.
+
+**Ohne Host-Backup** gibt es die Sicherung im Cockpit: **Einstellungen →
+Sicherung**, eine Passphrase mit mindestens 12 Zeichen zweimal eingeben,
+„Sicherung herunterladen“. Die Datei `cockpit-sicherung-JJJJ-MM-TT.json` enthält
+die vier Dateien oben, verschlüsselt mit AES-256-GCM und einem Schlüssel aus der
+Passphrase (scrypt, N = 2^17, r = 8, p = 1, zufälliges Salt). Im Klartext stehen
+nur Format, Version, Zeitpunkt und die Parameter; eine Änderung daran fällt beim
+Öffnen auf. Ohne die Passphrase ist die Datei wertlos, also beides getrennt
+aufbewahren (Passphrase im Passwortmanager). Die Sicherung ist ein Schnappschuss:
+nach neuen Kalendern oder Tokens eine neue ziehen.
+
+Nach einem Verlust von `/data`:
+
+1. Leeres `data` anlegen und uid 1000 geben (wie bei der Einrichtung). `.env`,
+   Policy und Pocket ID bleiben, wie sie sind.
+2. `docker compose up -d`, im Web-Cockpit anmelden. Das Cockpit ist jetzt
+   **leer**: keine Einstellungen gespeichert, keine API-Tokens. Die
+   Einstellungsseite weist dann auf die Sicherung hin.
+3. **Einstellungen → Sicherung → Wiederherstellen**: Datei wählen, Passphrase
+   eingeben. In ein leeres Cockpit geht das direkt; ist schon etwas eingestellt,
+   nur mit dem Haken „Vorhandenes ersetzen“. Erst wird die ganze Sicherung
+   geprüft, dann jede Datei atomar und nur für den Dienst lesbar geschrieben;
+   was die Sicherung nicht enthält, bleibt liegen.
+4. Das Cockpit fährt danach herunter und wird von Docker neu gestartet
+   (`restart: unless-stopped` wie in `docker-compose.example.yml`; ohne diese
+   Regel den Container von Hand starten). Weil das Sitzungs-Secret aus der
+   Sicherung kommt, gilt die Anmeldung nicht mehr: neu anmelden. Das
+   Wiederherstellen zählt außerdem die Generation von „Überall abmelden“ hoch,
+   damit Sitzungen, die seit der Sicherung beendet wurden, nicht zurückkommen;
+   jedes Gerät meldet sich also einmal neu an. Kalender,
+   Zunder, Mail, Brücke und Kurzbefehle laufen mit dem alten Stand weiter,
+   Index und Vektoren baut das Cockpit im Hintergrund neu auf.
+
 ### Sync
 
 Den Vault-Ordner hält der Sidecar `vault-sync` aktuell: [Obsidian Headless](https://www.npmjs.com/package/obsidian-headless)
@@ -134,6 +186,38 @@ erfasste Text steht vollständig im Inhalt. Einen Titel setzen nur ein
 ausdrückliches `title`, der Mail-Betreff und der Dateiname aus Funke. Bei
 Aufgaben mit `!` bleibt die erste Zeile der Titel.
 
+**Fälligkeit und Ziel gleich mitgeben.** Am Ende der Titelzeile einer Aufgabe
+(Schnelleingabe, Kurzbefehl, Sprachmemo, Mail-Betreff) versteht das Cockpit ein
+paar Kürzel und nimmt sie aus dem Titel:
+
+```text
+!Zahnarzt anrufen morgen #gesundheit   → „Zahnarzt anrufen“, fällig morgen, Bereich Gesundheit
+!Bericht abgeben bis Freitag #vcp      → fällig am nächsten Freitag, Projekt mit Schlüssel VCP
+!Folien bauen +woche                   → Phönix-Schritt der laufenden Woche
+```
+
+| Kürzel | Bedeutung |
+|---|---|
+| `heute`, `morgen`, `übermorgen` | Fälligkeit; `morgen` nur klein geschrieben („Morgen“ kann der Morgen sein) |
+| `Montag` … `Sonntag` | das nächste Vorkommen **ab morgen**: am Montag ist „Montag“ der Montag in einer Woche, für heute gibt es `heute` |
+| `14.10.`, `14.10.2026`, `14.10.26` | Datum; ohne Jahr dieses Jahr, liegt der Tag schon zurück, das nächste |
+| `bis …`, `am …` | `bis` vor jeder Fälligkeit und `am` vor Wochentag oder Datum fallen mit weg („bis Freitag“, „am 20.10.“) |
+| `#name` | Bereich oder Projekt aus Zunder, unscharf: gleicher Name oder Projektschlüssel, Anfang des Namens oder eines Wortes darin, ein Tippfehler (ab 5 Zeichen, ab 9 zwei). Groß/klein und Umlaute egal, `-` trennt Wörter (`#gruppe-ik`). `#bereich #projekt` zusammen ergibt das Projekt. |
+| `+woche` | Phönix-Schritt der laufenden ISO-Woche |
+
+Die Regel gegen Fehldeutungen: Erkannt wird nur am **Ende der Titelzeile**, von
+hinten, solange die Wörter Kürzel sind; das erste Wort bleibt immer Titel. „Termin
+für morgen vorbereiten“ bleibt also, wie es ist. Auch am Ende bleibt eine
+Datumsangabe Text, wenn ein Wort davor sie zum Satzteil macht („für morgen“,
+„ab Montag“, „jeden Freitag“, „am morgen“). Zwei Fälligkeiten („Freitag morgen“)
+setzen keine. Passt ein `#name` zu keinem oder zu mehreren Zielen, wird nicht
+geraten: Es bleibt im Titel, die Aufgabe kommt in die Zunder-Inbox und die
+Meldung sagt warum. Ohne Kürzel ist alles wie bisher. Notizen (ohne `!`) bleiben
+immer unverändert. „Heute“ und die laufende Woche gelten in der Zeitzone aus den
+Einstellungen (Standard Europe/Berlin). Die Bereiche und Projekte fragt das
+Cockpit nur bei einem `#name` ab und merkt sie sich eine Minute; ist Zunder dafür
+nicht erreichbar, entsteht die Aufgabe trotzdem, in der Inbox.
+
 | Weg | So geht's |
 |---|---|
 | iOS-Kurzbefehl | Unter **Einstellungen → API-Tokens** einen Token mit dem Recht **Capture** anlegen, dann „Notiz ins Cockpit“ unter **Einstellungen → Kurzbefehle** laden und importieren und beim Import den Token eintragen. Läuft aus dem Share-Sheet oder fragt den Text ab. Von Hand: `POST <PUBLIC_URL>/capture?source=ios-kurzbefehl` mit dem Text als Body, Header `Authorization: Bearer vct_…` |
@@ -143,10 +227,12 @@ Aufgaben mit `!` bleibt die erste Zeile der Titel.
 
 `POST /capture` nimmt Klartext oder JSON `{"text", "title"?, "source"?, "id"?}`.
 Mit `id` ist das Anlegen idempotent (dieselbe ID → `200` mit dem Ergebnis von
-damals). Antworten: `201 {"kind":"note","path"}` bzw.
-`201 {"kind":"task","id","ref","url"}`, `400` bei falscher Eingabe, `401` ohne
+damals; erlaubt sind Buchstaben, Ziffern und `_ . : -`, höchstens 128 Zeichen). Antworten: `201 {"kind":"note","path"}` bzw.
+`201 {"kind":"task","id","ref","url","title","due","location","phoenix","notes"}`, `400` bei falscher Eingabe, `401` ohne
 gültigen Token, `502` wenn Zunder ablehnt, `503` bei `!` ohne Zunder.
-Jede Antwort trägt zusätzlich `message`, einen fertigen Satz für die Mitteilung, und
+Jede Antwort trägt zusätzlich `message`, einen fertigen Satz für die Mitteilung
+(bei Aufgaben mit Ziel und Fälligkeit, z. B. „Aufgabe ZUN-12 liegt in Gesundheit,
+fällig morgen.“, und dem Grund, wenn ein Kürzel nicht passte), und
 Fehler ihren `status` im Body (`{"error","status","message"}`), weil ein Kurzbefehl den
 HTTP-Status nicht sieht.
 
@@ -237,9 +323,9 @@ Einrichtung:
    für „In Obsidian öffnen“ und der Inbox-Ordner.
 
    Außerdem: Zunder-Zugang, Zunder-Brücke (an/aus, Tag), Flammen in der Feuer-Notiz
-   (an/aus), Mail-Abruf (Fastmail-Token,
-   freigegebene Absender, Ordner, Abstand), Embeddings (Ollama-Adresse, Modell)
-   und unter **API-Tokens** die Tokens für Suche und Capture.
+   (an/aus), Mail-Abruf (Fastmail-Token, freigegebene Absender, Ordner, Abstand),
+   Embeddings (Ollama-Adresse, Modell), Dauer der Anmeldung samt „Überall
+   abmelden“ und unter **API-Tokens** die Tokens für Suche und Capture.
 
 Der Zunder-Zugang aus den Einstellungen gilt für das ganze Cockpit:
 Wochenansicht, `!`-Capture (Kurzbefehl, Mail, Funke), Zunder-Brücke und Graph.
@@ -253,6 +339,7 @@ Gespeichert wird in `/data/cockpit-settings.json` (nur für den Dienst lesbar).
 Passwörter, Tokens und Kalenderadressen zeigt die Seite nie wieder an; ein leeres
 Feld behält den gespeicherten Wert. Das Secret für das Sitzungs-Cookie liegt in
 `/data/session-secret` und entsteht beim ersten Start (alternativ `SESSION_SECRET`).
+Wie man diese Dateien sichert und wiederherstellt: [Sicherung von `/data`](#sicherung-von-data).
 
 **Handeln statt nur schauen:** Aufgaben in Flammen, Big Rocks, Aufgaben und
 Zunder-Inbox hakt man direkt ab (Zunder-Status `done`, ein zweiter Klick öffnet
@@ -270,7 +357,24 @@ oben eine Leiste mit Timer und „Stopp“. Notizen der Vault-Inbox öffnen sich
 abhaken, Tags setzen, Text anhängen und in einen Ordner **ablegen** (Vorschläge
 aus dem Index, Eingabe frei) oder mit einem Klick ins Archiv (der oberste Ordner
 namens `archiv`, auch `40-archiv`). Vertrauliche und ausgeschlossene Ordner der
-Policy zeigt das Cockpit weder an noch nimmt es sie als Ziel. Feuer-Ziel und
+Policy zeigt das Cockpit weder an noch nimmt es sie als Ziel. Die Vorschau
+taugt auch zum Lesen im ganzen Vault: Wikilinks (über Pfad, Dateiname oder
+Alias aus `aliases`, auch `[[Notiz#Überschrift]]`) führen zur nächsten
+Notizseite, nicht auflösbare oder vertrauliche Ziele stehen als „fehlt“ da.
+Unter der Notiz stehen **Verweist hierher** (Backlinks) und **Ähnlich** (aus den
+Embeddings, ohne sie per Volltext). Bilder (`![[bild.png]]`, `![](anhang/bild.png)`;
+PNG, JPEG, GIF, WebP, AVIF, kein SVG) liefert `/notiz/bild?pfad=…` nur angemeldet
+und nie aus vertraulichen, ausgeschlossenen oder versteckten Ordnern oder über
+Symlinks aus; Bilder von außen lädt die Vorschau nicht, sie werden ein Link.
+Tabellen und Callouts (`> [!note]`, aufklappbar mit `+`/`-`) werden dargestellt,
+das Frontmatter steht eingeklappt in einer Zeile. Bei Inbox-Notizen schlägt
+das Cockpit oben im Verarbeiten-Bereich **Tags** (häufig bei den ähnlichsten
+Notizen), die drei wahrscheinlichsten **Zielordner** (Mehrheit der ähnlichsten
+Notizen) und ähnliche, noch nicht verlinkte Notizen zum **Verlinken** vor; ein
+Klick übernimmt einen Vorschlag, „Alle übernehmen“ und ein Ordner reichen also
+zum Taggen und Ablegen. Ohne Embeddings kommen die Vorschläge aus dem Volltext
+(mit Hinweis), vertrauliche Ordner und die Inbox selbst sind nie dabei, der Tag
+der Zunder-Brücke auch nicht. Feuer-Ziel und
 Ersten Zug der Feuer-Notiz bearbeitet man direkt im Wochenblick (✎ neben dem
 Text, ersetzt den ersten Absatz unter der Überschrift). Fehlt die Feuer-Notiz
 einer Woche, legt **Feuer anlegen** sie mit Feuer-Ziel und (optional) Erstem Zug
@@ -297,9 +401,28 @@ den Markern leeren). Ändert der Sync die Notiz gleichzeitig, bricht der
 Schreibvorgang ab und der nächste Lauf versucht es wieder. Ohne Feuer-Notiz der
 Woche legt das Cockpit keine an, in vertraulichen Ordnern schreibt es nicht.
 Abschalten unter **Einstellungen → Feuer-Notiz**.
+
+**Woche planen** (`/planen?woche=…`, verlinkt als „Woche planen“ bei den Big
+Rocks und „Einplanen“ bei den Flammen): Zunder-Aufgaben per Volltext oder
+Kennung (`VCP-47`) suchen, nach Bereich filtern oder alle offenen eines Bereichs
+auflisten, Dev-Projekte bleiben außen vor. **Holen** macht eine Aufgabe zum
+Phönix-Schritt der Woche oder setzt ihre Fälligkeit auf einen Tag der Woche;
+danach steht sie unter ihrem Bereich in den Big Rocks. Je Bereich der Big Rocks
+zeigt die Seite bis zu fünf offene Aufgaben ohne Termin zum Übernehmen.
+**Flamme einplanen** legt eine Zunder-Aufgabe mit Rolle `flamme` für die Woche
+an, fällig am gewählten Tag (optional mit Uhrzeit), in einem Bereich oder über
+„Als Flamme“ als Unteraufgabe einer bestehenden Aufgabe. **Aus der Woche**
+entfernt die Phönix-Markierung (auch im Menü einer Flamme im Wochenblick). Jede
+dieser Aktionen bietet „Rückgängig“; eine neu eingeplante Flamme wird dabei
+verworfen. Alles sind Formulare, ohne JavaScript mit Weiterleitung.
+
 Oben auf der Seite liegt eine
 **Schnelleingabe** mit derselben Logik wie `/capture`: Text wird eine Notiz im
-Inbox-Ordner, mit `!` vorne eine Aufgabe in der Zunder-Inbox. `/` oder `n` springt
+Inbox-Ordner, mit `!` vorne eine Aufgabe in der Zunder-Inbox (oder mit den Kürzeln
+aus [Capture](#capture) gleich im Bereich, mit Fälligkeit). Unter dem Feld steht
+bei einer Aufgabe vorab, wo sie landet („Aufgabe · morgen · Gesundheit“), berechnet
+vom Server mit derselben Logik (`GET /api/erfassen/vorschau?text=…`, nur angemeldet).
+`/` oder `n` springt
 hinein, Enter legt an, Shift+Enter macht eine neue Zeile. Beides läuft ohne
 Seitenwechsel; ohne JavaScript funktionieren dieselben Formulare mit
 Weiterleitung. Schlägt etwas fehl, bleibt die Meldung stehen und der Text im Feld.
@@ -314,11 +437,65 @@ hell/dunkel, Abstände, Schrift, dazu Bausteine wie Karte, Knopf, Chip, Menü,
 Meldung, leerer Zustand und Ladeleiste). Das Stylesheet wird mit Inhalts-Hash
 ausgeliefert (`cockpit.css?v=…`), nach einem Deploy lädt der Browser es neu.
 
+**Ohne Netz** (Funkloch, Zug, Flugmodus) öffnet die App trotzdem: Ein Service
+Worker (`/sw.js`) hält die App-Hülle (Stylesheet, Skripte, Manifest, Icons und
+die Seite `/offline`) und die zuletzt geladene Wochenansicht der laufenden Woche
+auf dem Gerät. Ohne Netz zeigt das Cockpit diese Woche mit dem Hinweis „Offline,
+Stand von …“, andere Seiten zeigen die App-Hülle. Abhaken, Menüs und alle
+anderen Formulare sind dann gesperrt, nur die **Schnelleingabe** geht: Notizen
+und `!`-Aufgaben landen in einem Puffer im Browser (IndexedDB), darunter steht
+„n Einträge warten auf Netz“. Sobald das Cockpit wieder erreichbar ist (beim
+Öffnen, beim Zurückholen der App, sonst alle 30 Sekunden), sendet die Seite den
+Puffer über `/aktion/erfassen` nach, mit der ID des Eintrags als Erfassungs-ID:
+Kommt eine Antwort nicht an, legt das erneute Senden nichts doppelt an. Ist die
+Anmeldung inzwischen abgelaufen, bleiben die Einträge stehen und gehen nach dem
+nächsten Login raus. Was der Server ablehnt (z. B. Zunder antwortet nicht),
+bleibt mit Fehler in der Liste, bis man es erneut sendet, ins Feld zurückholt
+oder verwirft. Notizvorschau, Suche, Einstellungen und die JSON-Schnittstellen
+speichert der Service Worker nie; Abmelden und jeder neue Login löschen die
+gespeicherte Woche (der Puffer bleibt und geht mit der nächsten Anmeldung raus).
+Nach einem Deploy bringt `/sw.js` eine neue Cache-Version mit (Inhalts-Hash der
+App-Hülle) und räumt die alte weg.
+
 Fällt eine Quelle aus (Zunder nicht erreichbar, ein Kalender antwortet nicht),
 zeigt nur ihr Abschnitt bzw. nur dieser Kalender den Fehler; die Einstellungsseite
-zeigt je Kalender, ob er erreichbar ist. Die Sitzung gilt 12 Stunden und nur für
-das Web-Cockpit; `/mcp` nimmt weiter ausschließlich Bearer-Tokens. Alle Formulare,
-auch Einstellungen und API-Tokens, verlangen das CSRF-Token der Sitzung.
+zeigt je Kalender, ob er erreichbar ist. Die Sitzung gilt nur für das Web-Cockpit;
+`/mcp` nimmt weiter ausschließlich Bearer-Tokens. Alle Formulare, auch
+Einstellungen und API-Tokens, verlangen das CSRF-Token der Sitzung.
+
+**Angemeldet bleiben:** Jede Nutzung verlängert die Sitzung (das Cookie wird
+höchstens stündlich erneuert). Sie endet erst nach 30 Tagen ohne Nutzung oder
+spätestens 90 Tage nach dem Login; wer das Cockpit mindestens einmal im Monat
+öffnet, meldet sich also höchstens alle drei Monate bei Pocket ID an. Beide
+Dauern lassen sich unter **Einstellungen → Anmeldung** ändern (leer = Standard,
+eine kürzere wirkt sofort). Dort beendet **Überall abmelden** alle Sitzungen auf
+allen Geräten, auch die eigene: Die Einstellungen zählen eine Generation hoch,
+die in jedem Sitzungs-Cookie steht. Läuft die Sitzung ab, während man ohne
+JavaScript etwas abschickt, geht es über den Login zurück auf dieselbe Seite;
+der Text aus Schnelleingabe oder „Anhängen“ steht dann wieder im Feld (15
+Minuten lang, verschlüsselt in einem Cookie, nie in einer URL). Ist er dafür zu
+lang, zeigt die Seite ihn zum Kopieren.
+
+**Zustand der Dienste:** Die Seite `/zustand` (aus **Einstellungen → Zustand der
+Dienste**) zeigt je Hintergrunddienst, ob er läuft, einen Fehler meldet oder aus
+ist, mit letztem erfolgreichem Lauf und letztem Fehler samt Zeitpunkt und Text:
+Sync (Status, letzter Abgleich, Lebenszeichen des Sidecars), Index (Notizen,
+letzter Aufbau), Embeddings (Modell, Fortschritt), Mail-Abruf, Zunder-Brücke (neue
+Checkboxen und Abgleich getrennt), Zunder-Zugang (nimmt Zunder den Token an?) und
+Kalender (je Kalender). Die Daten sind dieselben wie in `vault_stats`; Mail-Abruf,
+Brücke, Kalender und Zunder-Zugang merken sich ihren letzten Lauf im Speicher, nach
+einem Neustart also erst ab dem nächsten Lauf. Beim Laden der Seite werden Zunder
+und Kalender einmal frisch geprüft. Fehlertexte erscheinen maskiert: Adressen nur
+mit Host, Tokens und Passwörter als `•••`. Meldet ein Dienst einen Fehler (etwa
+Sync `error`/`stale` oder ein gescheiterter Mail-Abruf), steht in der Kopfzeile der
+Wochenansicht ein roter Punkt „Störung“ mit Link auf die Seite.
+
+Für ein externes Monitoring liefert `GET /health` (ohne Login) `{"status":"ok"}`
+oder `{"status":"degraded"}`, beides mit HTTP 200, damit der Docker-Health-Check
+das Cockpit nicht neu startet, wenn der Fehler draußen liegt (Sidecar, Zunder,
+Fastmail). Wer bei `degraded` anschlagen will, prüft den Text oder ruft
+`/health?strict=1` auf, das dann mit 503 antwortet. Welcher Dienst betroffen ist,
+steht nur auf `/zustand`.
 
 ### Semantische Suche und Graph
 
@@ -340,7 +517,7 @@ zeigt `vault_stats` unter `semantic`. Bis dahin und wenn Ollama ausfällt, sucht
   („ähnlich, aber nicht verlinkt“, gestrichelt), Zunder-Aufgaben aus Links in der
   Notiz (Status aus Zunder) und bei Tagesnotizen die Termine des Tages. Die Seite
   `/graph` ist zugleich die Suche des Web-Cockpits, mit Treffern beim Tippen
-  (`/api/suche?q=…`). Im Browser ist der Graph interaktiv (sigma.js mit
+  (`/api/suche?q=…`); ein Treffer öffnet die Notiz, der Graph steht als Link daneben. Im Browser ist der Graph interaktiv (sigma.js mit
   ForceAtlas2-Physik): zoomen, Knoten ziehen, Klick klappt die Nachbarn einer
   Notiz auf, Doppelklick macht sie zur Mitte, Filter nach Art, und „Verlinken“
   hängt `- [[Ziel]]` an eine ähnliche Notiz an. Ohne JavaScript bleibt das
@@ -378,6 +555,7 @@ npm ci && npm test
 - `src/semantic/` — Embeddings (Ollama), Abschnitte, Vektorspeicher, hybride Suche
 - `src/search/` — lesender Such-Endpunkt `/api/search` mit eigenem Token
 - `src/graph/` — Graph um eine Notiz mit Aufgaben- und Termin-Knoten
+- `src/health/` — Zustand der Hintergrunddienste für `/zustand` und `/health`, Maskieren von Fehlertexten
 - `src/web/` — Web-Cockpit: OIDC-Login mit PKCE, signiertes Sitzungs-Cookie, HTML der Wochenansicht, Einstellungen, Suche und Graph
 - `sync/` — Image des Sidecars `vault-sync` (Obsidian Headless mit Status-Wrapper)
 
@@ -406,7 +584,8 @@ npm ci && npm test
 - **Web-Login getrennt von MCP:** Das Web-Cockpit hat einen eigenen OIDC-Client
   und prüft das ID-Token (Signatur, `iss`, `aud` = Client-ID, `nonce`, PKCE,
   Subject). Das Sitzungs-Cookie ist `HttpOnly`, `Secure`, `SameSite=Lax` und gilt
-  nicht für `/mcp`. Die Content-Security-Policy erlaubt nur eigene Dateien
+  nicht für `/mcp`; das Subject wird bei jedem Request erneut gegen
+  `ALLOWED_SUBJECTS` geprüft, „Überall abmelden“ widerruft alle Sitzungen. Die Content-Security-Policy erlaubt nur eigene Dateien
   (Stylesheet und `/static/cockpit.js`, kein Inline-Script). Schreibende Aktionen
   (`/aktion/…`) brauchen Sitzung, gleiche Herkunft und ein CSRF-Token, das an das
   Sitzungs-Cookie gebunden ist; die Schnelleingabe schreibt nie in einen

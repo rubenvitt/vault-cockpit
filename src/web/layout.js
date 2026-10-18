@@ -11,7 +11,7 @@ export const esc = (s) =>
  * Adressen der eigenen Dateien. `createWebHttp` hängt beim Start einen
  * Inhalts-Hash an, damit nach einem Deploy kein altes CSS aus dem Cache kommt.
  */
-export const assets = { css: '/static/cockpit.css', js: '/static/cockpit.js', graph: '/static/graph.js', graphLib: '/static/vendor/graph-lib.js' };
+export const assets = { css: '/static/cockpit.css', js: '/static/cockpit.js', graph: '/static/graph.js', graphLib: '/static/vendor/graph-lib.js', offline: '/static/offline.js' };
 
 export function versionAssets(versions) {
   for (const [key, v] of Object.entries(versions)) if (v && assets[key]) assets[key] = `${assets[key].split('?')[0]}?v=${v}`;
@@ -20,7 +20,10 @@ export function versionAssets(versions) {
 /** Farbe der Statusleiste, passend zu `--bg` in cockpit.css. */
 export const THEME = { light: '#f7f5f1', dark: '#141311' };
 
-/** `script` lädt `/static/cockpit.js`, `scripts` weitere eigene Dateien (z. B. den Graphen). */
+/**
+ * `script` lädt `/static/cockpit.js`, `scripts` weitere eigene Dateien (z. B. den Graphen).
+ * `/static/offline.js` (Service Worker, Offline-Puffer) hängt an jeder Seite, nach den anderen.
+ */
 export function head(title, { script = false, scripts = [] } = {}) {
   return `<head>
 <meta charset="utf-8">
@@ -39,6 +42,7 @@ export function head(title, { script = false, scripts = [] } = {}) {
 <link rel="stylesheet" href="${esc(assets.css)}">
 ${script ? `<script src="${esc(assets.js)}" defer></script>` : ''}
 ${scripts.map((src) => `<script src="${esc(src)}" defer></script>`).join('\n')}
+<script src="${esc(assets.offline)}" defer></script>
 </head>`;
 }
 
@@ -64,15 +68,16 @@ const NAV = [
 /**
  * Kopfzeile mit Marke und Hauptnavigation, darunter (in `body`) dieselbe
  * Navigation als Leiste für schmale Bildschirme. `links` überschreibt Ziele,
- * z. B. den Rückblick der angezeigten Woche.
+ * z. B. den Rückblick der angezeigten Woche. `alert` (fertiges HTML, siehe
+ * health-render.js) steht vor dem Abmelden, etwa der Hinweis auf gestörte Dienste.
  */
-export function appHeader({ current = null, user = null, links = {} } = {}) {
+export function appHeader({ current = null, user = null, links = {}, alert = '' } = {}) {
   const items = NAV.map(([key, href, label, ic]) => ({ key, href: links[key] ?? href, label, ic }));
   const link = (i, cls) =>
     `<a href="${esc(i.href)}" class="${cls}"${i.key === current ? ' aria-current="page"' : ''}>${icon(i.ic)}<span>${i.label}</span></a>`;
   return `<header class="app-header">
   <a href="/" class="brand" aria-label="Cockpit, zur Woche">${icon('flame', 'brand-mark')}<span class="brand-name">Cockpit</span></a>
-  <nav class="app-nav" aria-label="Hauptnavigation">${items.map((i) => link(i, 'nav-link')).join('')}</nav>
+  <nav class="app-nav" aria-label="Hauptnavigation">${items.map((i) => link(i, 'nav-link')).join('')}</nav>${alert}
   <form method="post" action="/logout" class="logout"><button type="submit" class="nav-link quiet" title="${esc(user ? `Abmelden (${user})` : 'Abmelden')}">${icon('logout')}<span>Abmelden</span></button></form>
 </header>
 <nav class="tabbar" aria-label="Hauptnavigation unten">${items.map((i) => link(i, 'tab')).join('')}</nav>`;
