@@ -384,6 +384,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     return `Flamme gestoppt: ${taskName(t)}${minutes != null ? ` · ${minutes} min` : ''}${failed}`;
   };
   const captureMessage = (r) => {
+    if (r.kind === 'article') return `${r.duplicate ? 'Schon im Lesestapel' : 'Im Lesestapel'}: ${r.title}`;
     if (r.kind === 'task') return `${r.duplicate ? 'Schon erfasst' : 'Aufgabe angelegt'}: ${r.ref ?? 'neue Aufgabe'} ${placement(r)}${r.notes?.length ? ` · ${r.notes.join(' ')}` : ''}`;
     return `${r.duplicate ? 'Schon erfasst' : 'Notiz angelegt'}: ${r.path}`;
   };

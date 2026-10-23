@@ -29,7 +29,8 @@
     return `${Date.now().toString(36)}-${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}`;
   };
   const CID = /^[A-Za-z0-9_.:-]{1,128}$/;
-  const kindOf = (text) => (text.trimStart().startsWith('!') ? 'Aufgabe' : 'Notiz');
+  // Wie articleUrl in src/capture/syntax.js: `> https://…` allein wird ein Artikel.
+  const kindOf = (text) => (text.trimStart().startsWith('!') ? 'Aufgabe' : /^\s*>\s*https?:\/\/\S+\s*$/i.test(text) ? 'Artikel' : 'Notiz');
   const when = (t) => {
     const d = new Date(t);
     return Number.isNaN(d.getTime()) ? 'unbekannt' : d.toLocaleString('de-DE', { weekday: 'short', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -303,7 +304,7 @@
   }
 
   async function discard(entry) {
-    if (!window.confirm(`${kindOf(entry.text)} verwerfen? Sie wird nicht gesendet.`)) return;
+    if (!window.confirm(`${kindOf(entry.text)} verwerfen? Der Eintrag wird nicht gesendet.`)) return;
     await drop(entry.id).catch(() => {});
     await reload();
     render();

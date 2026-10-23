@@ -282,3 +282,12 @@ export function previewLine(r) {
   const place = r.location && r.location.kind !== 'inbox' ? targetName(r.location) : 'Inbox';
   return ['Aufgabe', r.dueLabel, place, phoenixText(r.phoenix)].filter(Boolean).join(' · ');
 }
+
+/**
+ * `> https://…` (genau eine http(s)-Adresse nach `>`, sonst nichts) ist ein
+ * Artikel für den Lesestapel; liefert die Adresse, sonst null. Ein Markdown-Zitat
+ * wie `> Ein kluger Satz` bleibt eine Notiz.
+ */
+export function articleUrl(text) {
+  return /^\s*>\s*(https?:\/\/\S+)\s*$/i.exec(String(text ?? ''))?.[1] ?? null;
+}

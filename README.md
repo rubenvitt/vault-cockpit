@@ -556,6 +556,7 @@ Artikel kommen über dieselben Wege wie Notizen in den Eingang (VCP-69):
 | Weg | So geht's |
 |---|---|
 | iOS-Kurzbefehl | Unter **Einstellungen → API-Tokens** einen Token mit dem Recht **Lesestapel** anlegen, „Zum Lesestapel“ unter **Einstellungen → Kurzbefehle** laden, importieren und beim Import den Token eintragen. Dann in Safari teilen → „Zum Lesestapel“; die Mitteilung nennt den Titel. |
+| Schnelleingabe | `> https://…` (nur die Adresse nach `>`) wird ein Artikel statt einer Notiz, die Vorschau zeigt „Artikel · Lesestapel“. Ein Markdown-Zitat wie `> Ein kluger Satz` bleibt eine Notiz. Ohne Netz puffert das Cockpit den Eintrag wie jede Schnelleingabe und sendet ihn mit derselben ID nach; doppelt kommt er nicht an. |
 
 `POST <PUBLIC_URL>/lesestapel/speichern` mit Header `Authorization: Bearer vct_…`
 nimmt die Adresse als Text (die erste `http(s)`-Adresse darin) oder JSON

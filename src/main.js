@@ -24,6 +24,7 @@ import { createBackup } from './cockpit/backup.js';
 import { createReadingStore } from './lesen/store.js';
 import { readingRoutes } from './lesen/http.js';
 import { createReadingApi } from './lesen/api.js';
+import { saveUrl } from './lesen/save.js';
 import { createOidcLogin } from './web/oidc.js';
 import { createWebHttp } from './web/http.js';
 import { loadShortcuts } from './web/shortcuts.js';
@@ -300,6 +301,8 @@ const webHttp = process.env.WEB_CLIENT_ID
         state: captureState,
         zunder,
         index,
+        // `> https://…` in der Schnelleingabe geht in den Lesestapel.
+        saveArticle: ({ url, clientId }) => saveUrl({ store: reading, url, origin: 'schnelleingabe', clientId }),
         onFlame: (task) => flameNote.afterFlame(task),
       }),
       // Woche planen: Zunder-Aufgaben holen, Flammen einplanen (VCP-47).
