@@ -772,6 +772,87 @@ Der Kurzbefehl muss wie die anderen auf einem Mac signiert werden
 (`node scripts/kurzbefehle/build.js`, dann `scripts/kurzbefehle/sign.sh`, siehe
 [Capture](#capture)); bis dahin fehlt er unter **Einstellungen → Kurzbefehle**.
 
+### iOS-App: Login und App-API
+
+Die iOS-App (`dev.rubeen.cockpit`, Ordner `ios/`) zeigt das Cockpit in einem
+WKWebView. Passkeys gehen dort nicht, deshalb meldet sie sich über das
+Login-Blatt des Systems an (`ASWebAuthenticationSession`, Callback-Schema
+`cockpit`) und bekommt danach ein Sitzungs-Cookie für den WKWebView und einen
+**Geräte-Token** für Share Extension und Vorlese-Player (VCP-91, Code in
+`src/web/app-access.js`). Dafür muss das Web-Cockpit eingerichtet sein
+(`WEB_CLIENT_ID`); in Pocket ID ändert sich nichts, der Callback bleibt
+`<PUBLIC_URL>/auth/callback`.
+
+**Ablauf**
+
+1. Die App erzeugt `verifier` (43–128 Zeichen aus `A–Z a–z 0–9 - . _ ~`, z. B.
+   32 Zufallsbytes base64url), `challenge = base64url(sha256(verifier))` ohne
+   `=` (genau 43 Zeichen) und einen zufälligen `state` (8–128 Zeichen, gleicher
+   Zeichenvorrat).
+2. Login-Blatt öffnen: `GET <PUBLIC_URL>/login?app=1&state=…&challenge=…`.
+   Das läuft wie der Web-Login über Pocket ID (nur `ALLOWED_SUBJECTS`) und endet
+   mit `303` auf `cockpit://login?code=…&state=…`. Bei Abbruch oder abgelehntem
+   Konto `cockpit://login?error=access_denied&state=…`. Fehlen `state` oder
+   `challenge` oder passen sie nicht, `400` (HTML). Das Ziel ist fest, kein
+   Parameter ändert es; im Login-Blatt entsteht keine Sitzung.
+3. `state` prüfen, dann innerhalb von 60 Sekunden einlösen:
+
+```http
+POST /api/app/einloesen
+Content-Type: application/json
+
+{"code": "…", "verifier": "…", "device": "Rubens iPhone"}
+```
+
+```json
+{
+  "ok": true,
+  "cookie": {
+    "name": "vc_session", "value": "…", "domain": "cockpit.example.org", "path": "/",
+    "expires": "2026-11-22T10:00:00.000Z", "secure": true, "httpOnly": true, "sameSite": "Lax"
+  },
+  "token": { "token": "vct_…", "id": "…", "name": "Rubens iPhone", "scopes": ["app", "lesestapel"] }
+}
+```
+
+Der Code gilt für genau einen Versuch: Auch ein falscher Verifier verbraucht ihn.
+Ungültig, abgelaufen oder schon eingelöst gibt `400`, ein leerer oder zu langer
+Gerätename (höchstens 80 Zeichen) und mehr als 20 Tokens ebenfalls `400`. Mehr
+als 10 Versuche pro Minute (für alle zusammen) geben `429`.
+
+Das Cookie setzt die App mit diesen Werten in den `WKHTTPCookieStore`
+(`domain` ohne Punkt: nur dieser Host). Es ist dieselbe Sitzung wie im Browser:
+Sie verlängert sich bei Nutzung (der Server schickt höchstens stündlich ein
+frisches `Set-Cookie`, das der WKWebView selbst übernimmt), endet nach den
+Tagen ohne Nutzung und spätestens nach der längsten Sitzung aus
+**Einstellungen → Anmeldung** (Standard 30 und 90 Tage). „Überall abmelden“
+beendet sie auch in der App, den Geräte-Token nicht. Ist sie abgelaufen, leitet
+das Cockpit im WKWebView auf `/login`; die App fängt diese Navigation ab und
+startet den Login oben neu.
+
+Den Geräte-Token legt die App sicher ab (Keychain, mit der Share Extension
+geteilt). Er steht unter **Einstellungen → API-Tokens** mit dem Recht **App**
+und dem Gerätenamen und lässt sich dort widerrufen; danach gibt jeder Endpunkt
+sofort `401`. Er darf alles, was **Lesestapel** darf: Die Share Extension
+speichert über `POST /lesestapel/speichern` (siehe oben).
+
+**App-API** (Header `Authorization: Bearer vct_…`, kein Cookie, kein CSRF):
+
+| Route | Antwort |
+|---|---|
+| `GET /api/app/ich` | `{"ok", "name", "scopes": ["app","lesestapel"], "version": "0.1.0"}` — Token prüfen |
+| `GET /api/app/stapel?zeit=15` | `{"ok", "zeit", "items": [{"id","title","url","site","kind","minutes","remaining","progress"}]}` — Wiedergabeliste wie `/lesen/hoeren` (`zeit` 5, 15, 30 oder 60, sonst 15) |
+| `GET /api/app/text?id=…` | `{"ok", "id", "title", "text", "sentences": [[start, end], …], "progress", "anchor"}` wie `/lesen/hoeren/text`; `404` ohne Artikel |
+| `POST /api/app/fortschritt` | Body `{"id", "fortschritt": 0.42, "anker": 1234}` (Anker = Zeichen im Text, optional) → `{"ok", "progress"}` |
+| `POST /api/app/markierung` | Body `{"id", "quote", "prefix"?, "suffix"?, "start"?, "cid"?}` → `201 {"ok", "id", "duplicate": false, "message"}`; dieselbe `cid` noch einmal → `200` mit `"duplicate": true` |
+
+Fehler: `{"error", "status", "message"}` mit `400` (fehlendes oder falsches
+Feld, kein JSON), `401` (kein, unbekannter oder widerrufener Token), `403`
+(gültiger Token ohne Recht **App**), `404`, `405` (falsche Methode), `409`
+(`cid` gehört zu einem anderen Artikel), `413` (Body über 16 KB).
+Fortschritt und Markierungen laufen durch dieselben Aktionen wie im Browser,
+samt Lesestapel-Notiz im Vault.
+
 ### Semantische Suche und Graph
 
 Das Cockpit bettet alle eigenen Notizen (ohne Readwise-Importe) abschnittsweise mit
@@ -866,6 +947,15 @@ npm ci && npm test
   (`/aktion/…`) brauchen Sitzung, gleiche Herkunft und ein CSRF-Token, das an das
   Sitzungs-Cookie gebunden ist; die Schnelleingabe schreibt nie in einen
   vertraulichen oder ausgeschlossenen Ordner der Policy.
+- **App-Login mit Einmal-Code:** Die iOS-App bekommt nach Pocket ID
+  nur einen Code auf das feste Schema `cockpit://login`, 60 Sekunden gültig, nur
+  im Speicher, einmal einlösbar und an ihre Challenge gebunden (wie PKCE). Wer
+  das Schema abfängt, hat den Verifier nicht. Der Geräte-Token ist ein normaler
+  API-Token (nur Hash gespeichert, widerrufbar), das Einlösen ist begrenzt.
+  Nicht abgedeckt: Eine fremde App mit demselben Schema kann einen eigenen Login
+  mit eigener Challenge starten; bei noch offener Sitzung in Pocket ID geht der
+  ohne Rückfrage durch. Dagegen hilft später ein Universal Link statt
+  `cockpit://` oder `prompt=login`.
 - **Readwise-Importe** sind eine eigene Indexklasse und standardmäßig aus der Suche
   ausgenommen, damit importierte Fremdtexte die eigenen Notizen nicht verdrängen.
 

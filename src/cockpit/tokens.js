@@ -6,8 +6,11 @@ import { SettingsError, writePrivate } from './settings.js';
  * API-Tokens, erzeugt auf der Seite `/einstellungen`. Jeder Token hat genau ein
  * Recht (`scope`): `search` für `GET /api/search`, `capture` für `/capture` und
  * `/funke` (iOS-Kurzbefehle, Funke), `lesestapel` für `/lesestapel/speichern`
- * (Artikel und PDFs in den Lesestapel). Tokens aus der Zeit vor den Rechten
- * gelten als `search`; ein Token bekommt nie nachträglich ein weiteres Recht.
+ * (Artikel und PDFs in den Lesestapel), `app` für `/api/app/…` (Geräte-Token
+ * der iOS-App, src/web/app-access.js). Ein `app`-Token darf zusätzlich alles,
+ * was `lesestapel` darf, weil die Share Extension der App darüber speichert.
+ * Tokens aus der Zeit vor den Rechten gelten als `search`; ein Token bekommt
+ * nie nachträglich ein weiteres Recht.
  *
  * Gespeichert wird nur der SHA-256 eines Tokens, nie der Klartext; den sieht
  * man genau einmal direkt nach dem Anlegen. Eigene Datei neben den
@@ -15,8 +18,13 @@ import { SettingsError, writePrivate } from './settings.js';
  */
 
 export const MAX_TOKENS = 20;
-export const SCOPES = ['search', 'capture', 'lesestapel'];
+export const SCOPES = ['search', 'capture', 'lesestapel', 'app'];
+/** Rechte, die ein Recht mit einschließt. */
+const INCLUDES = { app: ['lesestapel'] };
 const PREFIX = 'vct_';
+
+/** Alle Rechte eines Tokens mit diesem `scope`. */
+export const grantsOf = (scope) => [scope, ...(INCLUDES[scope] ?? [])];
 
 const sha256 = (s) => createHash('sha256').update(s).digest();
 
@@ -36,6 +44,15 @@ export function createTokenStore({ file = null, logger = console, now = () => Da
     if (file) writePrivate(file, `${JSON.stringify(next, null, 2)}\n`);
     tokens = next;
   };
+
+  /** Der gespeicherte Token zum vorgelegten (ohne Hash) oder null; prüft alle Hashes, ohne früh abzubrechen. */
+  function find(presented) {
+    if (typeof presented !== 'string' || !presented.startsWith(PREFIX)) return null;
+    const h = sha256(presented);
+    let found = null;
+    for (const t of tokens) if (timingSafeEqual(h, Buffer.from(t.hash, 'hex'))) found = t;
+    return found && { id: found.id, name: found.name, scope: found.scope, createdAt: found.createdAt };
+  }
 
   return {
     /** Gespeicherte Tokens ohne Hash, für die Einstellungsseite. */
@@ -65,13 +82,12 @@ export function createTokenStore({ file = null, logger = console, now = () => Da
       return true;
     },
 
-    /** Prüft einen vorgelegten Token mit diesem Recht gegen alle Hashes, ohne früh abzubrechen. */
+    find,
+
+    /** Ob der vorgelegte Token dieses Recht hat. */
     verify(presented, scope = 'search') {
-      if (typeof presented !== 'string' || !presented.startsWith(PREFIX)) return false;
-      const h = sha256(presented);
-      let ok = false;
-      for (const t of tokens) ok = (timingSafeEqual(h, Buffer.from(t.hash, 'hex')) && t.scope === scope) || ok;
-      return ok;
+      const t = find(presented);
+      return Boolean(t && grantsOf(t.scope).includes(scope));
     },
   };
 }

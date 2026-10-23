@@ -93,28 +93,42 @@ function listenBody(items, zeit, ctx) {
   <ol class="lesen-list hoeren-list">${list}</ol>`;
 }
 
+/**
+ * Wiedergabeliste für `zeit` Minuten (ohne gültige Angabe 15), auch für die
+ * iOS-App (`/api/app/stapel`). Zu Ende gehörte oder gelesene Texte fängt sie
+ * nicht noch einmal an.
+ */
+export function listenQueue(store, zeit) {
+  const n = Number(zeit);
+  const minutes = WINDOWS.includes(n) ? n : 15;
+  return { zeit: minutes, items: fitToWindow(store.list({ status: 'stapel', limit: -1 }).filter((d) => d.progress < 1), minutes).items };
+}
+
+/** Lesetext und Sätze eines Dokuments für die Sprachausgabe, null ohne Dokument; auch für `/api/app/text`. */
+export function listenText(store, id) {
+  const doc = store.get(id);
+  if (!doc) return null;
+  return {
+    id: doc.id,
+    title: doc.title || doc.url,
+    text: htmlText(doc.content_html ?? ''),
+    sentences: sentences(doc.content_html ?? '').map((s) => [s.start, s.end]),
+    progress: doc.progress,
+    anchor: Number(doc.scroll_anchor) || 0,
+  };
+}
+
 export function listenRoutes({ store }) {
   return {
     pages: {
       async '/lesen/hoeren'(ctx) {
-        const n = Number(ctx.url.searchParams.get('zeit'));
-        const zeit = WINDOWS.includes(n) ? n : 15;
-        // Zu Ende gehörte oder gelesene Texte nicht noch einmal anfangen.
-        const { items } = fitToWindow(store.list({ status: 'stapel', limit: -1 }).filter((d) => d.progress < 1), zeit);
+        const { zeit, items } = listenQueue(store, ctx.url.searchParams.get('zeit'));
         return { html: readingPage(ctx, { key: 'stapel', title: 'Unterwegs hören', body: `<section>${listenBody(items, zeit, ctx)}</section>`, scripts: [assets.lesenHoeren] }) };
       },
       /** Lesetext und Sätze eines Dokuments für die Sprachausgabe. */
       async '/lesen/hoeren/text'(ctx) {
-        const doc = store.get(ctx.url.searchParams.get('id'));
-        if (!doc) return { status: 404, body: JSON.stringify({ error: 'Diesen Artikel gibt es nicht' }), headers: JSON_HEADERS };
-        const body = {
-          id: doc.id,
-          title: doc.title || doc.url,
-          text: htmlText(doc.content_html ?? ''),
-          sentences: sentences(doc.content_html ?? '').map((s) => [s.start, s.end]),
-          progress: doc.progress,
-          anchor: Number(doc.scroll_anchor) || 0,
-        };
+        const body = listenText(store, ctx.url.searchParams.get('id'));
+        if (!body) return { status: 404, body: JSON.stringify({ error: 'Diesen Artikel gibt es nicht' }), headers: JSON_HEADERS };
         return { body: JSON.stringify(body), headers: JSON_HEADERS };
       },
     },
