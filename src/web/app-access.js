@@ -63,7 +63,7 @@ export function createAppAccess({ sessions, tokens, reading, publicUrl, logger =
     res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
     res.end(JSON.stringify(body));
   };
-  const fail = (res, status, message) => json(res, status, { error: ERRORS[status] ?? 'bad_request', status, message });
+  const fail = (res, status, message, error = ERRORS[status] ?? 'bad_request') => json(res, status, { error, status, message });
 
   async function readJson(req) {
     let input;
@@ -100,9 +100,10 @@ export function createAppAccess({ sessions, tokens, reading, publicUrl, logger =
     const given = Buffer.from(b64sha256(typeof verifier === 'string' && VERIFIER.test(verifier) ? verifier : ''));
     const expected = Buffer.from(entry?.challenge ?? '');
     if (!entry || entry.exp <= t || given.length !== expected.length || !timingSafeEqual(given, expected)) {
-      return fail(res, 400, 'Code ungültig, abgelaufen oder schon eingelöst. Bitte neu anmelden.');
+      return fail(res, 400, 'Code ungültig, abgelaufen oder schon eingelöst. Bitte neu anmelden.', 'invalid_code');
     }
     let created;
+    // shortcut: jeder App-Login legt einen neuen Geräte-Token an, der alte bleibt bis zum Widerruf (alle zählen gegen MAX_TOKENS); bei Bedarf schickt die App den alten mit und das Einlösen widerruft ihn.
     try {
       created = tokens.create(device, 'app');
     } catch (err) {

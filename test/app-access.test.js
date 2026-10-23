@@ -186,6 +186,7 @@ test('App-Login: cockpit://login, Einlösen, Cookie öffnet /lesen/eingang, Toke
     assert.equal((await p.json()).progress, 0.5);
     assert.equal(store.get(doc.id).scroll_anchor, '18');
     assert.equal((await call('/api/app/fortschritt', { method: 'POST', bearer, body: { id: doc.id } })).status, 400);
+    assert.equal((await call('/api/app/fortschritt', { method: 'POST', bearer, body: { id: 'gibtsnicht', fortschritt: 0.5 } })).status, 400);
 
     const mark = { id: doc.id, quote: 'Zweiter Satz dort.', prefix: 'Erster Satz hier. ', suffix: '', start: 18, cid: 'app-1' };
     const m1 = await call('/api/app/markierung', { method: 'POST', bearer, body: mark });
@@ -214,7 +215,7 @@ test('App-Login: falscher Verifier verbraucht den Code, abgelaufener gilt nicht'
     const code = (await appLogin({ challenge })).searchParams.get('code');
     const wrong = await redeem({ code, verifier: pkce().verifier, device: 'iPhone' });
     assert.equal(wrong.status, 400);
-    assert.equal((await wrong.json()).error, 'bad_request');
+    assert.equal((await wrong.json()).error, 'invalid_code');
     // Nach einem Fehlversuch ist der Code verbraucht, auch für den richtigen Verifier.
     assert.equal((await redeem({ code, verifier, device: 'iPhone' })).status, 400);
 

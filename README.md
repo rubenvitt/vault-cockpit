@@ -816,9 +816,12 @@ Content-Type: application/json
 ```
 
 Der Code gilt für genau einen Versuch: Auch ein falscher Verifier verbraucht ihn.
-Ungültig, abgelaufen oder schon eingelöst gibt `400`, ein leerer oder zu langer
-Gerätename (höchstens 80 Zeichen) und mehr als 20 Tokens ebenfalls `400`. Mehr
-als 10 Versuche pro Minute (für alle zusammen) geben `429`.
+Ungültig, abgelaufen oder schon eingelöst gibt `400` mit `"error": "invalid_code"`
+(dann den ganzen Login neu starten, nie mit demselben Code wiederholen), ein
+leerer oder zu langer Gerätename (höchstens 80 Zeichen) und mehr als 20 Tokens
+`400` mit `"error": "bad_request"`. Mehr als 10 Versuche pro Minute (für alle
+zusammen) geben `429`. Jeder Login legt einen neuen Geräte-Token an; alte
+widerruft man unter **Einstellungen → API-Tokens**.
 
 Das Cookie setzt die App mit diesen Werten in den `WKHTTPCookieStore`
 (`domain` ohne Punkt: nur dieser Host). Es ist dieselbe Sitzung wie im Browser:
