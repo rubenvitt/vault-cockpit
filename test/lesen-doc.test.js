@@ -110,6 +110,17 @@ test('Leseansicht: Archivieren ohne JavaScript mit Meldung und Rückgängig, For
     assert.match(html, /Zurück auf den Stapel/);
     assert.equal((await call('/aktion/lesen/doc/status', { method: 'POST', form: { csrf, id: doc.id, status: 'quatsch' }, json: true })).status, 400);
 
+    // „Fertig, weg“ (VCP-96) ohne JavaScript: Weiterleitung, Meldung, Rückgängig, „Zurück auf den Stapel“.
+    const done = await call('/aktion/lesen/doc/fertig', { method: 'POST', form: { csrf, back, id: doc.id } });
+    assert.equal(done.status, 303);
+    assert.equal(done.headers.get('location'), back);
+    assert.equal(store.get(doc.id).status, 'weg');
+    assert.ok(store.get(doc.id).read_at);
+    const after = await page();
+    assert.match(after, /<span class="toast-text">Fertig, weg: Vom &lt;Lesen&gt;[^]*?name="status" value="archiv"[^]*?Rückgängig/);
+    assert.match(after, /data-decide="zurueck">[^]*?Zurück auf den Stapel/);
+    assert.ok(!after.includes('data-decide="fertig"'));
+
     const saved = await call('/aktion/lesen/doc/fortschritt', { method: 'POST', form: { csrf, id: doc.id, fortschritt: '0.42', anker: '17' }, json: true });
     assert.equal(saved.status, 200);
     assert.equal((await saved.json()).progress, 0.42);

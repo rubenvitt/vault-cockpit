@@ -35,13 +35,21 @@ function markers(name) {
 }
 
 /**
+ * Inhalt eines Bereichs, wie er in der Notiz steht: `\n`, getrimmt, und keine
+ * Zeile, die wie ein Marker aussieht (Fremdtext wie ein Artikel könnte sonst
+ * Bereiche öffnen oder schließen). Ein unsichtbares Zeichen davor (U+200B)
+ * nimmt ihr die Wirkung und lässt sie auch in Code-Blöcken lesbar.
+ */
+export const sectionText = (inner) => String(inner).replace(/\r\n/g, '\n').trim().replace(/^([ \t]*)(<!--\s*cockpit:)/gm, '$1​$2');
+
+/**
  * Der ganze Bereich mit Markern; `label` steht im Startmarker, `eol` wie in der
  * Notiz. `spaced` setzt Leerzeilen innen an die Marker (Markdown-Blöcke wie
  * Zitate oder Block-IDs kleben dann nicht am Kommentar).
  */
 export function sectionBlock(name, inner, { label = null, eol = '\n', spaced = false } = {}) {
   markers(name);
-  const text = String(inner).replace(/\r\n/g, '\n').trim();
+  const text = sectionText(inner);
   const body = spaced ? `\n${text}\n` : text;
   return [`<!-- cockpit:${name}:start${label ? ` · ${label}` : ''} -->`, body, `<!-- cockpit:${name}:ende ${sectionChecksum(text)} -->`].join('\n').replaceAll('\n', eol);
 }
@@ -71,7 +79,7 @@ export function findSection(content, name) {
  */
 export function planSection(content, name, inner, { label = null, spaced = false, heading = null, createHeading = false, create = true } = {}) {
   const eol = content.includes('\r\n') ? '\r\n' : '\n';
-  const text = String(inner).replace(/\r\n/g, '\n').trim();
+  const text = sectionText(inner);
   const found = findSection(content, name);
   if (!found) {
     if (!create) return { action: 'keep' };

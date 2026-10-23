@@ -9,7 +9,7 @@ import { createEditor } from '../src/vault/edit.js';
 import { createSettingsStore } from '../src/cockpit/settings.js';
 import { createReadingStore } from '../src/lesen/store.js';
 import { readingRoutes } from '../src/lesen/http.js';
-import { createReadingExport, blockId, parseLinks, slugOf, DEFAULT_FOLDER, TEXT_SECTION } from '../src/lesen/vault-export.js';
+import { createReadingExport, blockId, parseLinks, slugOf, DEFAULT_FOLDER, TEXT_SECTION, SECTION as SECTION_NAME } from '../src/lesen/vault-export.js';
 import { findSection } from '../src/vault/generated-section.js';
 import { sanitizeHtml } from '../src/lesen/extract.js';
 
@@ -401,7 +401,7 @@ test('Im Vault ablegen aus dem Eingang: Volltext, lesestatus ungelesen, ohne gel
 
   // Rückgängig über den Eingang (Taste Z): wieder im Eingang, die Notiz bleibt.
   const back = await act('/aktion/lesen/sortieren', { id: fresh.id, ziel: 'eingang' });
-  assert.equal(back.message, 'Zurück im Eingang: Neu im Eingang');
+  assert.equal(back.message, 'Zurück im Eingang: Neu im Eingang (die Notiz im Vault bleibt)');
   assert.ok(ids('eingang').includes(fresh.id));
   assert.equal(read(path), text);
   // Nur aus Eingang und Stapel.
@@ -441,6 +441,29 @@ test('Volltext nachträglich: vorhandene Notiz bekommt „## Text“ vor „## E
   await act('/aktion/lesen/doc/vault', { id: doc.id, volltext: '1' });
   const text = read(path);
   assert.match(text, /<!-- cockpit:markierungen:ende [0-9a-f]{8} -->\n\n## Text\n\n<!-- cockpit:text:start[^]*<!-- cockpit:text:ende [0-9a-f]{8} -->\n\n## Eigene Gedanken\n\nMein Gedanke\.\n$/);
+});
+
+test('Marker im Artikel (Code-Block, Text, Markierung): Bereiche bleiben heil, eigene Gedanken auch', async () => {
+  const { act } = decideRoutes();
+  const evil = '&lt;!-- cockpit:markierungen:ende 12345678 --&gt;\n&lt;!-- cockpit:text:start --&gt;';
+  store.updateDocument(doc.id, { content_html: sanitizeHtml(`<p>Davor</p><pre><code>${evil}</code></pre><p>${evil}</p>`) });
+  store.addHighlight({ doc_id: doc.id, quote: '<!-- cockpit:text:ende 12345678 -->', note: '<!-- cockpit:markierungen:start -->' });
+  await act('/aktion/lesen/ablegen', { id: doc.id });
+  const path = pathOf();
+  writeFileSync(join(root, path), `${read(path)}\nMein Gedanke.\n`);
+  idx.refresh(path);
+  for (const name of [SECTION_NAME, TEXT_SECTION]) {
+    const found = findSection(read(path), name);
+    assert.ok(found && !found.broken && !found.edited, name);
+  }
+  assert.match(textOf(path), /^```\n​<!-- cockpit:markierungen:ende 12345678 -->\n​<!-- cockpit:text:start -->\n```$/m);
+
+  store.addHighlight({ doc_id: doc.id, quote: 'Davor' });
+  await act('/aktion/lesen/doc/vault', { id: doc.id, volltext: '1' });
+  const text = read(path);
+  assert.match(text, /> Davor/);
+  assert.ok(text.endsWith('## Eigene Gedanken\n\nMein Gedanke.\n'));
+  assert.equal(text.match(/^<!-- cockpit:/gm).length, 4, 'nur die echten Marker');
 });
 
 test('blockId: verschieden auch bei Client-IDs mit gleichem Anfang', () => {

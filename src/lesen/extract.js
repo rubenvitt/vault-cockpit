@@ -154,15 +154,17 @@ function wrap(mark, s) {
 /** Zaun aus `ch`, länger als jede Folge von `ch` im Text, mindestens `min`. */
 const fenceFor = (text, ch, min) => ch.repeat(Math.max(min, ...[...text.matchAll(new RegExp(`\\${ch}+`, 'g'))].map((m) => m[0].length + 1)));
 
-function inlineMd(node) {
+function inlineMd(node, cell = false) {
   if (node.nodeType === 3) return escapeText(node.textContent.replace(/\s+/g, ' '));
   if (node.nodeType !== 1) return '';
   const tag = node.localName;
-  const inner = () => [...node.childNodes].map(inlineMd).join('');
+  const inner = () => [...node.childNodes].map((c) => inlineMd(c, cell)).join('');
   if (tag === 'br') return '\n';
   if (MD_WRAP[tag]) return wrap(MD_WRAP[tag], inner());
   if (tag === 'code' || tag === 'kbd' || tag === 'samp') {
-    const text = node.textContent.replace(/\s+/g, ' ');
+    let text = node.textContent.replace(/\s+/g, ' ');
+    // In einer Tabellenzelle trennt `|` sonst auch im Code die Spalten.
+    if (cell) text = text.replaceAll('|', '\\|');
     if (!text.trim()) return text;
     const pad = /^`|`$/.test(text) ? ' ' : '';
     const fence = fenceFor(text, '`', 1);
@@ -172,7 +174,7 @@ function inlineMd(node) {
     const text = inner().replace(/\s+/g, ' ').trim();
     const href = node.getAttribute('href');
     if (!href) return text;
-    return `[${text || escapeText(href)}](<${href.replace(/[<>\s]/g, encodeURIComponent)}>)`;
+    return `[${text || escapeText(href)}](<${href.replace(/[<>\s|]/g, encodeURIComponent)}>)`;
   }
   // Ein Block mitten im Fließtext (etwa ein Absatz in einem Link) wird Text.
   return MD_BLOCKS.has(tag) ? ` ${inner()} ` : inner();
@@ -214,7 +216,7 @@ function listMd(el) {
 function tableMd(el) {
   const rows = [...el.querySelectorAll('tr')]
     .filter((tr) => tr.closest('table') === el)
-    .map((tr) => [...tr.children].map((cell) => blocksMd(cell).join(' ').replace(/\n/g, ' ')));
+    .map((tr) => [...tr.children].map((cell) => [...cell.childNodes].map((c) => inlineMd(c, true)).join('').replace(/\s+/g, ' ').trim()));
   if (!rows.length) return '';
   const width = Math.max(...rows.map((r) => r.length));
   const line = (cells) => `| ${Array.from({ length: width }, (_, i) => cells[i] ?? '').join(' | ')} |`;
@@ -251,5 +253,6 @@ export function htmlToMarkdown(html) {
   const { document } = parseHTML(`<!doctype html><html><body>${html ?? ''}</body></html>`);
   // linkedom teilt Text an Entitäten (`&amp;copy;` → „&“ + „copy;“); zusammengefügt greift das Maskieren.
   document.body.normalize();
-  return blocksMd(document.body).join('\n\n').trim();
+  // Außerhalb von Code ist `<` schon maskiert; eine Marker-Zeile im Code entschärft ein unsichtbares Zeichen davor.
+  return blocksMd(document.body).join('\n\n').trim().replace(/^([ \t]*)(<!--\s*cockpit:)/gm, '$1​$2');
 }
