@@ -69,6 +69,12 @@ make test      # Unit-Tests auf dem ersten verfügbaren iPhone-Simulator
   bis zum Schließen mit der Gerätestimme weiter. Gerätestimme: beste installierte `de-DE`-Stimme
   (Premium vor Enhanced, ohne Spaß- und eigene Stimme), sonst die Standardstimme. `AVAudioSession` `.playback`/`.spokenAudio`, aktiv ab dem
   ersten Satz; bei Pause bleibt sie aktiv, damit Sperrbildschirm und AirPods bei der App bleiben.
+- **Offline:** Je Text in der Liste ein Knopf (Pfeil nach unten) lädt den Text auf das Gerät
+  (`OfflineStore`, Application Support/Offline, nicht im Backup), mit Stimme vom Server auch jeden
+  Satz als MP3; weil das den ganzen Text auf einmal kostet, fragt die App vorher. Wischen löscht
+  die Kopie. `OfflineListenService` fragt erst den Server und nimmt ohne Netz (oder bei 5xx) die
+  Kopien: Wiedergabeliste aus den nicht fertigen Kopien, Text samt mitgeführter Lesestelle, Audio
+  gespeicherter Sätze immer von der Platte. Ein abgelehnter Token (401) bleibt ein Fehler.
 - **Sperrbildschirm:** `MPNowPlayingInfoCenter` mit Titel, Quelle, Dauer und Stelle als Schätzung
   (15 Zeichen pro Sekunde bei Tempo 1) und Tempo. `MPRemoteCommandCenter`: Play, Pause, Umschalten,
   nächster Titel = nächster Text, vorheriger Titel = Satz zurück (einen vorigen Text gibt es nicht),

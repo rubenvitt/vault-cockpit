@@ -29,8 +29,15 @@ final class Player {
     }
     /// Hinweis oder Fehler unter den Knöpfen.
     var message: String?
+    /// Texte mit Offline-Kopie (`OfflineStore`).
+    private(set) var offlineIDs: Set<String> = []
+    /// Laufendes Offline-Laden je Text, 0…1.
+    private(set) var downloads: [String: Double] = [:]
+    /// Stimme vom Server laut letzter Wiedergabeliste; offline geladen werden dann auch die Sätze.
+    private(set) var serverVoice: String?
 
     private let service: (any ListenService)?
+    private let offline: OfflineStore?
     private let speech: any SpeechOutput
     private let defaults: UserDefaults
     private var pending: PendingListening {
@@ -44,10 +51,11 @@ final class Player {
     @ObservationIgnored private var pathMonitor: NWPathMonitor?
     private let log = Logger(subsystem: "dev.rubeen.cockpit", category: "player")
 
-    /// `service` nil: nicht angemeldet (kein Geräte-Token).
-    init(minutes: Int, service: (any ListenService)?, speech: any SpeechOutput, defaults: UserDefaults) {
+    /// `service` nil: nicht angemeldet (kein Geräte-Token). `offline`: Offline-Kopien, nil = ohne.
+    init(minutes: Int, service: (any ListenService)?, speech: any SpeechOutput, defaults: UserDefaults, offline: OfflineStore? = nil) {
         self.minutes = Self.windows.contains(minutes) ? minutes : 15
         self.service = service
+        self.offline = offline
         self.speech = speech
         self.defaults = defaults
         let saved = defaults.double(forKey: Self.tempoKey)
@@ -62,8 +70,9 @@ final class Player {
         let config = AppConfiguration()
         let defaults = config.appGroup.isEmpty ? .standard : UserDefaults(suiteName: config.appGroup) ?? .standard
         var service: (any ListenService)?
+        let offline = OfflineStore(root: OfflineStore.defaultRoot)
         if let token = (try? KeychainStore(accessGroup: config.keychainGroup).token()) ?? nil {
-            service = APIClient(baseURL: config.serverURL, token: token)
+            service = OfflineListenService(online: APIClient(baseURL: config.serverURL, token: token), offline: offline)
         }
         #if DEBUG
         if DemoListenService.isRequested { service = DemoListenService() }
@@ -71,7 +80,7 @@ final class Player {
         // Stimme vom Server, wenn die Wiedergabeliste eine nennt; sonst und bei Ausfall die des Geräts.
         var speech: any SpeechOutput = SystemSpeech()
         if let service { speech = ServerSpeech(service: service, fallback: SystemSpeech()) }
-        return Player(minutes: minutes, service: service, speech: speech, defaults: defaults)
+        return Player(minutes: minutes, service: service, speech: speech, defaults: defaults, offline: offline)
     }
 
     // MARK: Ablauf
@@ -85,6 +94,7 @@ final class Player {
         }
         isStarted = true
         setUpSystem()
+        if let offline { offlineIDs = Set(await offline.entries().map(\.item.id)) }
         // Erst den Puffer nachsenden: Sonst liefern Liste und Text den alten Stand, und der nächste
         // Satz überschreibt den höheren Fortschritt aus dem Puffer.
         await flush()
@@ -97,6 +107,7 @@ final class Player {
         do {
             let queue = try await service.queue(minutes: minutes)
             message = nil
+            serverVoice = queue.voice
             speech.use(serverVoice: queue.voice)
             send(.queue(queue.items))
         } catch {
@@ -142,6 +153,47 @@ final class Player {
                 message = pending.contains(cid: cid) ? "Gemerkt. Wird gesendet, sobald wieder Netz da ist." : "Gemerkt."
             }
         }
+    }
+
+    /// Lädt Text und, mit Stimme vom Server, alle Sätze als Audio auf das Gerät. Schon geladene
+    /// Sätze (abgebrochener Versuch, gerade gehört) holt es nicht noch einmal.
+    func download(_ item: QueueItem) {
+        guard let service, let offline, downloads[item.id] == nil else { return }
+        downloads[item.id] = 0
+        let voice = serverVoice
+        Task {
+            // Weiterladen, auch wenn die App kurz in den Hintergrund geht.
+            let task = UIApplication.shared.beginBackgroundTask(withName: "Offline laden")
+            defer {
+                UIApplication.shared.endBackgroundTask(task)
+                downloads[item.id] = nil
+            }
+            do {
+                let listen = try await service.text(id: item.id)
+                let text = SpeechText(listen)
+                if voice != nil {
+                    for (i, s) in text.sentences.enumerated() {
+                        if await offline.audio(id: item.id, start: s.start, end: s.end) == nil {
+                            let data = try await service.audio(id: item.id, start: s.start, end: s.end)
+                            try await offline.saveAudio(data, id: item.id, start: s.start, end: s.end)
+                        }
+                        downloads[item.id] = Double(i + 1) / Double(max(text.sentences.count, 1))
+                    }
+                }
+                try await offline.save(.init(item: item, text: listen, voice: voice, savedAt: Date()))
+                offlineIDs.insert(item.id)
+                message = "Offline gespeichert: \(item.title)"
+            } catch {
+                log.error("Offline laden: \(error.localizedDescription, privacy: .public)")
+                message = "Offline laden fehlgeschlagen: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    func removeOffline(_ item: QueueItem) {
+        guard let offline else { return }
+        offlineIDs.remove(item.id)
+        Task { await offline.remove(id: item.id) }
     }
 
     /// Beim Schließen: anhalten und alles beim System abmelden.

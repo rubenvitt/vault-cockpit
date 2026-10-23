@@ -5,6 +5,8 @@ import SwiftUI
 /// gleich los und läuft bei gesperrtem Bildschirm weiter (Hintergrundmodus `audio`).
 struct PlayerView: View {
     @State private var player: Player
+    /// Text, für den „Offline laden“ noch bestätigt werden muss (kostet Zeichen bei der Stimme vom Server).
+    @State private var confirmDownload: QueueItem?
     @Environment(\.dismiss) private var dismiss
 
     init(minutes: Int) {
@@ -41,8 +43,13 @@ struct PlayerView: View {
                                     .foregroundStyle(.tint)
                                     .accessibilityLabel("Läuft gerade")
                             }
+                            offlineButton(item)
                         }
-                        .accessibilityElement(children: .combine)
+                        .swipeActions {
+                            if player.offlineIDs.contains(item.id) {
+                                Button("Offline löschen", role: .destructive) { player.removeOffline(item) }
+                            }
+                        }
                     }
                 }
             }
@@ -50,6 +57,16 @@ struct PlayerView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 Button("Fertig") { dismiss() }
+            }
+            .confirmationDialog(
+                "Offline laden?",
+                isPresented: Binding(get: { confirmDownload != nil }, set: { if !$0 { confirmDownload = nil } }),
+                titleVisibility: .visible,
+                presenting: confirmDownload
+            ) { item in
+                Button("Offline laden") { player.download(item) }
+            } message: { item in
+                Text("\(player.serverVoice ?? "Die Stimme vom Server") liest dafür den ganzen Text (\(item.minutes) Min.) auf einmal vor. Das kostet Zeichen, auch für Teile, die du nicht hörst.")
             }
         }
         .task { await player.start() }
@@ -93,6 +110,28 @@ struct PlayerView: View {
             }
         }
         .padding(.vertical, 8)
+    }
+
+    /// Laden, Fortschritt oder „liegt offline“; ohne Stimme vom Server ohne Rückfrage (nur Text).
+    @ViewBuilder
+    private func offlineButton(_ item: QueueItem) -> some View {
+        if let progress = player.downloads[item.id] {
+            ProgressView(value: progress)
+                .progressViewStyle(.circular)
+                .accessibilityLabel("Wird offline geladen")
+        } else if player.offlineIDs.contains(item.id) {
+            Image(systemName: "arrow.down.circle.fill")
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Offline verfügbar, zum Löschen wischen")
+        } else {
+            Button {
+                if player.serverVoice == nil { player.download(item) } else { confirmDownload = item }
+            } label: {
+                Image(systemName: "arrow.down.circle")
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Offline laden")
+        }
     }
 
     private func control(_ label: String, _ image: String, size: CGFloat = 28, action: @escaping () -> Void) -> some View {
