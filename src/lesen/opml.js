@@ -16,7 +16,7 @@ const isOutline = (el) => el?.tagName?.toLowerCase() === 'outline';
  * Ungültige Adressen fallen still weg.
  */
 export function parseOpml(text) {
-  const root = new DOMParser().parseFromString(String(text ?? '').replace(/^﻿/, ''), 'text/xml').documentElement;
+  const root = new DOMParser().parseFromString(String(text ?? '').replace(/^\uFEFF/, ''), 'text/xml').documentElement;
   if (root?.tagName?.toLowerCase() !== 'opml') throw new ReadingError('Keine OPML-Datei');
   const feeds = new Map();
   for (const o of root.getElementsByTagName('outline')) {
