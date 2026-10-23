@@ -47,10 +47,16 @@ final class LoginTests: XCTestCase {
     func testLoginSheetThatNeverOpenedShowsAMessage() {
         let canceled = ASWebAuthenticationSessionError(.canceledLogin)
         XCTAssertNil(LoginError.shown(canceled, elapsed: 4, host: "vault.test"), "Abbrechen durch den Nutzer: nichts zeigen")
-        XCTAssertEqual(LoginError.shown(canceled, elapsed: 0.1, host: "vault.test") as? LoginError, .notStarted(host: "vault.test"), "sofort abgebrochen: Associated Domain fehlt")
-        XCTAssertEqual(LoginError.shown(ASWebAuthenticationSessionError(.presentationContextInvalid), elapsed: 4, host: "vault.test") as? LoginError, .notStarted(host: "vault.test"))
-        XCTAssertEqual(LoginError.shown(LoginError.notStarted(host: "vault.test"), elapsed: 0, host: "x") as? LoginError, .notStarted(host: "vault.test"), "start() false")
+        func notStarted(_ error: Error?) -> (host: String, detail: String)? {
+            if case .notStarted(let host, let detail)? = error as? LoginError { return (host, detail) }
+            return nil
+        }
+        let quick = notStarted(LoginError.shown(canceled, elapsed: 0.1, host: "vault.test"))
+        XCTAssertEqual(quick?.host, "vault.test", "sofort abgebrochen: Associated Domain fehlt")
+        XCTAssertTrue(quick?.detail.contains("WebAuthenticationSession 1 nach") == true, quick?.detail ?? "")
+        XCTAssertEqual(notStarted(LoginError.shown(ASWebAuthenticationSessionError(.presentationContextInvalid), elapsed: 4, host: "vault.test"))?.host, "vault.test")
+        XCTAssertEqual(notStarted(LoginError.shown(LoginError.notStarted(host: "vault.test", detail: "start() = false"), elapsed: 0, host: "x"))?.detail, "start() = false", "start() false")
         XCTAssertEqual(LoginError.shown(URLError(.notConnectedToInternet), elapsed: 4, host: "vault.test") as? URLError, URLError(.notConnectedToInternet))
-        XCTAssertTrue(LoginError.notStarted(host: "vault.test").localizedDescription.contains("Associated Domains für vault.test"))
+        XCTAssertTrue(LoginError.notStarted(host: "vault.test", detail: "x").localizedDescription.contains("Associated Domains für vault.test"))
     }
 }
