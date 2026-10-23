@@ -98,6 +98,7 @@ export function highlightRoutes({ store, asAction, capture = null, logger = cons
         const cid = form.get('cid') || null;
         if (cid && !CAPTURE_ID.test(cid)) throw new ActionError('Ungültige Markierungs-ID');
         // Nachsenden aus dem Offline-Puffer: Kam die erste Antwort nicht an, gibt es die Markierung schon.
+        // shortcut: eine inzwischen gelöschte Markierung entsteht beim Nachsenden derselben cid neu; bei Bedarf eine Tabelle benutzter cids.
         const known = cid ? store.getHighlight(cid) : null;
         if (known) {
           if (known.doc_id !== doc.id) throw new ActionError('Diese Markierungs-ID gehört zu einem anderen Artikel', 409);

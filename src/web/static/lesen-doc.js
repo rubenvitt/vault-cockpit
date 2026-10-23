@@ -219,6 +219,8 @@
   });
 
   // Archivieren ohne Netz: in den Puffer, Knopf schaltet um (noch einmal drücken nimmt es zurück).
+  // shortcut: Im Funkloch mit `navigator.onLine` true geht Archivieren über cockpit.js und meldet nur den Fehler;
+  // „Entfernen“ und „In Inbox“ puffern gar nicht. Bei Bedarf dort auf `err.offline` hin puffern.
   document.addEventListener(
     'submit',
     async (e) => {

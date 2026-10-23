@@ -98,6 +98,8 @@ function fill() {
   return filling;
 }
 
+// shortcut: Die Abrufe laufen mit der Sitzung und können eine Meldung oder einen Entwurf (Cookie) der
+// offenen Seite verbrauchen; bei Bedarf ein Header, mit dem der Server dabei nichts davon einlöst.
 async function fillReading() {
   const gen = generation;
   let res;
