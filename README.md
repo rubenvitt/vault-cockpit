@@ -673,7 +673,10 @@ Stapels, im Hintergrund erzeugt. Auf `/lesen/folgen/neu?zeit=30` stehen die Text
 des Zeitfensters zum Abhaken, die Art und die geschätzten Zeichen bei ElevenLabs.
 
 - **Vorlesen**: die ganzen Texte nacheinander mit der Stimme vom Vorlesen, je Text
-  Titel und Quelle vorweg. Ohne Claude; kostet so viele Zeichen, wie die Texte lang sind.
+  Titel und Quelle vorweg. Ohne Claude. Satz für Satz mit denselben Anfragen wie
+  beim Streamen, also über denselben Cache: Was schon gehört oder in der App
+  offline geladen wurde, kostet nichts mehr (die Schätzung rechnet es heraus),
+  und was die Folge erzeugt, ist danach beim Streamen gratis.
 - **Podcast** (5, 10 oder 20 Minuten): Claude schreibt ein Gespräch, A moderiert,
   B ordnet ein; ElevenLabs spricht es mit Text-to-Dialogue (`eleven_v3`, höchstens
   1800 Zeichen je Anfrage, die Abschnitte hängen in einer MP3 hintereinander).
