@@ -1,3 +1,4 @@
+import CockpitShared
 import SwiftUI
 
 /// Nativer Vorlese-Player „Unterwegs hören“ (VCP-94). Öffnet sich, wenn `/lesen/hoeren` in der App
