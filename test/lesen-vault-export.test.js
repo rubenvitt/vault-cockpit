@@ -304,3 +304,9 @@ test('Lesedatum: vorzeitig angelegte Notiz hat kein „gelesen“, beim Abschlus
   assert.match(read(r.path), /^gelesen: 2026-10-2\d$/m);
   assert.match(read(r.path), /Verknüpft: \[\[Start\]\]/);
 });
+
+test('blockId: verschieden auch bei Client-IDs mit gleichem Anfang', () => {
+  const ids = ['mh2x3k1a-00aa', 'mh2x3k1a-00ab', 'cap-1', 'cap-2'].map(blockId);
+  assert.equal(new Set(ids).size, ids.length);
+  for (const id of ids) assert.match(id, /^hl-[0-9a-f]{8}$/);
+});

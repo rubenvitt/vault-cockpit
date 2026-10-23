@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { localDate } from '../cockpit/week.js';
@@ -45,7 +46,8 @@ const BLOCK_LINE = /^\^(hl-[0-9a-z]+)[ \t]*$/;
 const WIKILINK = /\[\[([^[\]\n]+)\]\]/g;
 
 /** Block-ID einer Markierung: `hl-` und die ersten 8 Zeichen ihrer ID. */
-export const blockId = (highlightId) => `hl-${String(highlightId).toLowerCase().replace(/[^0-9a-z]/g, '').slice(0, 8)}`;
+// Aus einem Hash: Markierungs-IDs kommen auch vom Client (`cid`) und müssen vorn nicht zufällig sein.
+export const blockId = (highlightId) => `hl-${createHash('sha256').update(String(highlightId)).digest('hex').slice(0, 8)}`;
 
 /** Wikilinks je Block-ID aus dem Bereich (Zeilen „Verknüpft: …“ unter einer Markierung). */
 export function parseLinks(inner) {
