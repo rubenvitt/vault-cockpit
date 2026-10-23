@@ -502,7 +502,7 @@ ist, mit letztem erfolgreichem Lauf und letztem Fehler samt Zeitpunkt und Text:
 Sync (Status, letzter Abgleich, Lebenszeichen des Sidecars), Index (Notizen,
 letzter Aufbau), Embeddings (Modell, Fortschritt), Mail-Abruf, Zunder-Brücke (neue
 Checkboxen und Abgleich getrennt), Zunder-Zugang (nimmt Zunder den Token an?) und
-Kalender (je Kalender). Die Daten sind dieselben wie in `vault_stats`; Mail-Abruf,
+Kalender (je Kalender) und Feeds (je Feed). Die Daten sind dieselben wie in `vault_stats`; Mail-Abruf,
 Brücke, Kalender und Zunder-Zugang merken sich ihren letzten Lauf im Speicher, nach
 einem Neustart also erst ab dem nächsten Lauf. Beim Laden der Seite werden Zunder
 und Kalender einmal frisch geprüft. Fehlertexte erscheinen maskiert: Adressen nur
@@ -520,7 +520,7 @@ steht nur auf `/zustand`.
 ### Lesen
 
 Der Lesestapel ist ein Bereich im Cockpit (VCP-77): **Lesen** in der Kopfzeile
-und in der Leiste unten, darunter **Eingang · Stapel · Markiert · Wissen**. In der
+und in der Leiste unten, darunter **Eingang · Stapel · Markiert · Wissen · Feeds**. In der
 Leiste unten nimmt „Lesen“ den Platz der Suche ein; die Suche erreicht man dort
 über Lesen → Wissen → „Ganzen Vault durchsuchen“, im Kopf steht sie weiter.
 
@@ -548,6 +548,27 @@ von fremden Servern.
 
 Abhängigkeiten dafür: `@mozilla/readability` und `linkedom` (reines JavaScript,
 feste Versionen).
+
+**Feeds** (`/lesen/feeds`, VCP-78): Eine Feed-Adresse abonnieren oder einfach die
+Website, das Cockpit findet den Feed dann über `<link rel="alternate">`. Gelesen
+werden RSS 2.0 (auch 1.0), Atom und JSON Feed. Je Feed lässt sich einstellen:
+pausieren, „direkt auf den Stapel“ statt in den Eingang, ein Stichwort-Filter
+(durch Komma getrennt, eins davon muss in Titel oder Text stehen) und der Abstand
+(Standard 30 Minuten, 5 bis 1440). Ein Hintergrundlauf sieht jede Minute nach,
+welche Feeds dran sind, und holt sie mit `ETag`/`Last-Modified`, höchstens drei
+gleichzeitig. Jeder neue Eintrag (erkannt an der GUID, sonst an der Adresse) wird
+genau einmal ein Dokument mit Herkunft `feed:<id>`; der erste Abruf eines neuen
+Feeds holt nur die letzten fünf. Ist der Text im Feed lang genug (ab 150 Wörtern),
+wird er genommen, sonst holt das Cockpit die Seite und extrahiert den Artikel wie
+beim Speichern; klappt das nicht, bleibt der Feed-Text. Alles geht durch
+`sanitizeHtml` und den SSRF-geschützten Abruf (5 MB, 15 Sekunden). XML liest
+`linkedom`, das keine Entitäten aus einer DTD auflöst (kein XXE). Scheitert ein
+Abruf, wartet der Feed doppelt so lange wie üblich, nach jedem weiteren Fehler
+wieder doppelt so lange (höchstens einen Tag); die anderen Feeds laufen weiter,
+und auf `/zustand` steht der Fehler beim Feed. Icons werden einmal geholt und als
+`data:`-Adresse gespeichert, weil die Content-Security-Policy keine fremden Bilder
+lädt. Unten auf der Seite: OPML importieren (Datei aus einem anderen Reader,
+Ordner werden flach übernommen) und exportieren.
 
 ### Semantische Suche und Graph
 

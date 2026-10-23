@@ -5,19 +5,23 @@ import { saveUrl } from './save.js';
 import { renderHighlights } from './pages.js';
 import { stackRoutes } from './stack.js';
 import { inboxRoutes } from './inbox.js';
+import { feedRoutes } from './feeds-page.js';
 
 /**
  * Routen des Bereichs „Lesen“, eingebunden in src/web/http.js (Sitzung, CSRF,
  * Meldungen und Rückgängig kommen von dort).
  *
- * - `pages`: Pfad → `async (ctx) => ({ html, status? } | { redirect })`, nur
- *   angemeldet, nur GET. `ctx` siehe src/lesen/pages.js.
+ * - `pages`: Pfad → `async (ctx) => ({ html, status? } | { redirect } | { body, headers })`,
+ *   nur angemeldet, nur GET. `ctx` siehe src/lesen/pages.js; `body` mit
+ *   `headers` für Downloads (OPML-Export).
  * - `actions`: Pfad → `async (form, session) => ({ message, undo?, redirect? })`
- *   wie die übrigen `/aktion/…`; Fehler als `ActionError`.
+ *   wie die übrigen `/aktion/…`; Fehler als `ActionError`. Mit Datei
+ *   (`multipart/form-data`) liegen die Dateien unter `form.files`.
  *
  * Eine neue Seite oder Aktion ist ein Eintrag hier (gern aus einer eigenen Datei).
  */
-export function readingRoutes({ store, fetchPage = undefined, logger = console }) {
+export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefined, logger = console }) {
+  const feeds = feedRoutes({ store, fetchFeed, logger });
   /** Fehler aus Abruf und Speicher als Meldung für die Seite. */
   const asAction = async (run) => {
     try {
@@ -37,6 +41,7 @@ export function readingRoutes({ store, fetchPage = undefined, logger = console }
       ...inbox.pages,
       ...stackRoutes({ store }).pages,
       '/lesen/markiert': async (ctx) => ({ html: renderHighlights(store.listHighlights(), ctx) }),
+      ...feeds.pages,
     },
     actions: {
       ...inbox.actions,
@@ -47,6 +52,7 @@ export function readingRoutes({ store, fetchPage = undefined, logger = console }
         if (!duplicate) logger.info?.(`Lesestapel: ${doc.url} gespeichert (${session.sub})`);
         return { message: `${duplicate ? 'Schon im Lesestapel' : 'Gespeichert'}: ${doc.title ?? doc.url}`, doc: { id: doc.id, title: doc.title, status: doc.status } };
       },
+      ...feeds.actions,
     },
   };
 }

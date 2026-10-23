@@ -73,13 +73,17 @@ const defaultResolve = (hostname) => dnsLookup(hostname, { all: true, verbatim: 
  * `resolve(hostname)` → `[{ address, family }]` (Tests setzen eine eigene),
  * `isAllowed(ip)` entscheidet je Adresse (Tests lassen 127.0.0.1 für den
  * Testserver zu). Liefert `{ url, status, contentType, body }` mit `url` nach
- * allen Weiterleitungen und `body` als Text.
+ * allen Weiterleitungen und `body` als Text, dazu `bytes` (roh) und `headers`
+ * der Antwort. `headers` gehen zusätzlich mit (bedingte Anfragen der Feeds);
+ * `304 Not Modified` kommt dann ohne Inhalt zurück. `accept: null` nimmt jeden
+ * Inhaltstyp an.
  */
-export async function safeFetch(input, { resolve = defaultResolve, isAllowed = isPublicAddress, maxBytes = 5 * 1024 * 1024, timeoutMs = 15_000, maxRedirects = 5, accept = ['text/html', 'application/xhtml+xml'] } = {}) {
+export async function safeFetch(input, { resolve = defaultResolve, isAllowed = isPublicAddress, maxBytes = 5 * 1024 * 1024, timeoutMs = 15_000, maxRedirects = 5, accept = ['text/html', 'application/xhtml+xml'], headers = {} } = {}) {
   const deadline = Date.now() + timeoutMs;
   let url = parseTarget(input);
   for (let hop = 0; ; hop++) {
-    const res = await request(url, { resolve, isAllowed, maxBytes, deadline });
+    const res = await request(url, { resolve, isAllowed, maxBytes, deadline, headers });
+    if (res.status === 304) return { url: url.href, status: 304, contentType: null, body: '', bytes: res.body, headers: res.headers };
     if (res.status >= 300 && res.status < 400 && res.location) {
       if (hop >= maxRedirects) throw new FetchError('Zu viele Weiterleitungen');
       url = parseTarget(res.location, url);
@@ -88,7 +92,7 @@ export async function safeFetch(input, { resolve = defaultResolve, isAllowed = i
     if (res.status >= 400) throw new FetchError(`Die Seite antwortet mit HTTP ${res.status}`);
     const type = String(res.contentType ?? '').split(';')[0].trim().toLowerCase();
     if (accept && !accept.includes(type)) throw new FetchError(`Kein Artikel (${type || 'ohne Inhaltstyp'})`, 415);
-    return { url: url.href, status: res.status, contentType: res.contentType, body: decode(res.body, res.contentType) };
+    return { url: url.href, status: res.status, contentType: res.contentType, body: decode(res.body, res.contentType), bytes: res.body, headers: res.headers };
   }
 }
 
@@ -128,7 +132,7 @@ async function checkHost(hostname, { resolve, isAllowed }) {
   return addresses;
 }
 
-function request(url, { resolve, isAllowed, maxBytes, deadline }) {
+function request(url, { resolve, isAllowed, maxBytes, deadline, headers }) {
   return new Promise((done, fail) => {
     const left = deadline - Date.now();
     if (left <= 0) return fail(new FetchError('Zeitlimit überschritten', 504));
@@ -164,11 +168,11 @@ function request(url, { resolve, isAllowed, maxBytes, deadline }) {
       req = (url.protocol === 'https:' ? https : http).request(url, {
         method: 'GET',
         lookup,
-        headers: { 'user-agent': 'vault-cockpit-lesestapel/1', accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.1' },
+        headers: { 'user-agent': 'vault-cockpit-lesestapel/1', accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.1', ...headers },
       });
       req.on('error', (err) => finish(fail, err instanceof FetchError ? err : new FetchError(`Abruf fehlgeschlagen: ${err.message}`)));
       req.on('response', (res) => {
-        const base = { status: res.statusCode, location: res.headers.location ?? null, contentType: res.headers['content-type'] ?? null };
+        const base = { status: res.statusCode, location: res.headers.location ?? null, contentType: res.headers['content-type'] ?? null, headers: res.headers };
         if (res.statusCode >= 300 && res.statusCode < 400) {
           res.resume();
           return finish(done, { ...base, body: Buffer.alloc(0) });

@@ -71,6 +71,7 @@ const PUBLIC = new Map([
 ]);
 
 const MAX_FORM = 64 * 1024;
+const MAX_UPLOAD = 2 * 1024 * 1024;
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -629,9 +630,15 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       return null;
     }
     try {
+      // Formular mit Datei (OPML-Import): Felder wie sonst, Dateien unter `form.files`.
+      if (/^multipart\/form-data/i.test(req.headers['content-type'] ?? '')) {
+        const { fields, files } = await readMultipart(req, { limit: MAX_UPLOAD });
+        return Object.assign(fields, { files });
+      }
       return new URLSearchParams(await readBody(req));
-    } catch {
-      json(res, 413, { error: 'too_large' });
+    } catch (err) {
+      if (!(err instanceof FormError)) json(res, 413, { error: 'too_large' });
+      else if (!res.destroyed) json(res, err.status, { error: 'invalid_form', message: err.message });
       return null;
     }
   }
@@ -785,7 +792,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   async function readingPage(req, res, url, session) {
     const r = await READING_PAGES[url.pathname]({ url, user: session.name ?? session.sub, tz: settings.get().tz, write: { csrf: csrfOf(req), back: url.pathname + url.search }, flash: takeFlash(req, res) });
     if (r.redirect) return redirect(res, r.redirect);
-    return send(res, r.status ?? 200, r.html);
+    return send(res, r.status ?? 200, r.html ?? r.body, r.headers);
   }
 
   const TOKEN_ROUTES = { '/einstellungen/tokens': createToken, '/einstellungen/tokens/widerrufen': revokeToken };
