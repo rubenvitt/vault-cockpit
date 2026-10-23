@@ -181,3 +181,10 @@ test('setFeuer: schreibt Feuer-Ziel und Ersten Zug, nur in Feuer-Notizen', () =>
   assert.throws(() => desk.setFeuer('10-projekte/Feuer KW42.md', 'titel', 'x'), /Unbekanntes Feld/);
   assert.throws(() => desk.setFeuer('10-projekte/Feuer KW42.md', 'ziel', ' '), /leer/);
 });
+
+test('renderMarkdown: Marker generierter Bereiche (HTML-Kommentare) bleiben unsichtbar', () => {
+  const html = renderMarkdown('## Flammen\n\n<!-- cockpit:flammen:start -->\n- Block\n<!-- cockpit:flammen:ende 1a2b3c4d -->\n\nText mit <!-- inline --> bleibt');
+  assert.doesNotMatch(html, /cockpit:flammen/);
+  assert.match(html, /<li>Block<\/li>/);
+  assert.match(html, /Text mit/);
+});

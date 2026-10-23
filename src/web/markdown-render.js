@@ -55,6 +55,9 @@ export function renderMarkdown(body, { checkbox = null, links = null, ids = new 
       out.push(`<pre><code>${esc(code.join('\n'))}</code></pre>`);
       continue;
     }
+    // Wie Obsidian: HTML-Kommentare nicht zeigen (etwa die Marker generierter Bereiche).
+    // shortcut: nur einzeilige Kommentare; mehrzeilige erst, wenn sie im Vault vorkommen.
+    if (/^\s*<!--.*-->\s*$/.test(line)) continue;
     const heading = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
     if (heading) {
       flush();
