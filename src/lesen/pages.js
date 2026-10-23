@@ -4,13 +4,14 @@ import { hidden, flashToast } from '../web/render.js';
 
 /**
  * Seiten des Bereichs „Lesen“. Jede Seite bekommt `ctx` aus src/web/http.js:
- * `{ url, user, tz, write: { csrf, back }, flash }`.
+ * `{ url, range, user, tz, write: { csrf, back }, flash }` (`range`: `Range`-Header für Audio).
  */
 
 /** Unternavigation unter der Kopfzeile; `/wissen` ist die Suche im Vault (VCP-76). */
 const SUB = [
   ['eingang', '/lesen/eingang', 'Eingang'],
   ['stapel', '/lesen/stapel', 'Stapel'],
+  ['folgen', '/lesen/folgen', 'Folgen'],
   ['markiert', '/lesen/markiert', 'Markiert'],
   ['wiedersehen', '/lesen/wiedersehen', 'Wiedersehen'],
   ['wissen', '/wissen', 'Wissen'],

@@ -20,8 +20,14 @@ import { createHash } from 'node:crypto';
  */
 
 export const ELEVENLABS_MODEL = 'eleven_multilingual_v2';
+// Mehrere Stimmen in einem Gespräch (Folgen „Podcast“, src/lesen/folgen.js).
+export const ELEVENLABS_DIALOGUE_MODEL = 'eleven_v3';
+/** Höchstens so viele Zeichen je Gesprächs-Anfrage, laut ElevenLabs zuverlässig bis 2000. */
+export const DIALOGUE_CHARS = 1800;
 // „George“, eine der Standardstimmen; mit dem mehrsprachigen Modell spricht sie auch Deutsch.
 export const ELEVENLABS_VOICE = 'JBFqnCBsd6RMkjVDRZzb';
+// „Sarah“, zweite Standardstimme für den Podcast, deutlich anders als George.
+export const ELEVENLABS_GUEST_VOICE = 'EXAVITQu4vr4xnSDxMaL';
 const API = 'https://api.elevenlabs.io';
 const FORMAT = 'mp3_44100_128';
 // Kontext für den Tonfall: so viel vom Satz davor und danach geht mit, ohne dass es extra kostet.
@@ -45,20 +51,20 @@ function elevenLabsMessage(status, body) {
   return `ElevenLabs antwortet mit HTTP ${status}${text ? `: ${String(text).slice(0, 200)}` : ''}`;
 }
 
-/** Client für `POST /v1/text-to-speech/{voice}`; `fetch` nur für Tests. */
+/**
+ * Client für `POST /v1/text-to-speech/{voice}` und `POST /v1/text-to-dialogue`;
+ * `fetch` nur für Tests. `voice` und `model` gelten, solange ein Aufruf keine
+ * eigenen nennt.
+ */
 export function createElevenLabs({ key, voice = ELEVENLABS_VOICE, model = ELEVENLABS_MODEL, fetch = globalThis.fetch, timeoutMs = 60_000 }) {
-  async function synthesize({ text, previous = null, next = null }) {
-    const body = { text, model_id: model };
-    // Ohne `language_code`: Im Stapel liegen auch englische Texte, das Modell erkennt die Sprache selbst.
-    if (previous) body.previous_text = previous.slice(-CONTEXT);
-    if (next) body.next_text = next.slice(0, CONTEXT);
+  async function post(path, body, timeout = timeoutMs) {
     let res;
     try {
-      res = await fetch(`${API}/v1/text-to-speech/${encodeURIComponent(voice)}?output_format=${FORMAT}`, {
+      res = await fetch(`${API}${path}?output_format=${FORMAT}`, {
         method: 'POST',
         headers: { 'xi-api-key': key, 'content-type': 'application/json', accept: 'audio/mpeg' },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: AbortSignal.timeout(timeout),
       });
     } catch (err) {
       throw new SpeechError(`ElevenLabs nicht erreichbar (${err.cause?.code ?? err.message})`);
@@ -71,7 +77,22 @@ export function createElevenLabs({ key, voice = ELEVENLABS_VOICE, model = ELEVEN
     }
   }
 
-  return { name: 'ElevenLabs', id: ['elevenlabs', model, voice, FORMAT].join('\n'), synthesize };
+  async function synthesize({ text, previous = null, next = null, voice: as = voice }) {
+    const body = { text, model_id: model };
+    // Ohne `language_code`: Im Stapel liegen auch englische Texte, das Modell erkennt die Sprache selbst.
+    if (previous) body.previous_text = previous.slice(-CONTEXT);
+    if (next) body.next_text = next.slice(0, CONTEXT);
+    return post(`/v1/text-to-speech/${encodeURIComponent(as)}`, body);
+  }
+
+  /** Gespräch: `inputs` = `[{ text, voice }]`, zusammen höchstens `DIALOGUE_CHARS` Zeichen. */
+  async function dialogue({ inputs, model: dialogueModel = ELEVENLABS_DIALOGUE_MODEL }) {
+    const body = { model_id: dialogueModel, inputs: inputs.map((i) => ({ text: i.text, voice_id: i.voice })) };
+    // Ganze Gesprächsabschnitte brauchen länger als ein Satz.
+    return post('/v1/text-to-dialogue', body, timeoutMs * 3);
+  }
+
+  return { name: 'ElevenLabs', id: ['elevenlabs', model, voice, FORMAT].join('\n'), voice, synthesize, dialogue };
 }
 
 /**
