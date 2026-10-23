@@ -11,16 +11,21 @@ import { readLimited, FormError } from './multipart.js';
  * über das Login-Blatt des Systems an (`ASWebAuthenticationSession`):
  *
  * 1. `GET /login?app=1&state=…&challenge=…` läuft wie der Web-Login über
- *    Pocket ID (src/web/http.js), endet aber mit einem Redirect auf
- *    `cockpit://login?code=…&state=…` statt mit einer Sitzung.
- *    `challenge` = base64url(sha256(verifier)), wie PKCE.
+ *    Pocket ID (src/web/http.js), endet aber mit einem Redirect auf den
+ *    Universal Link `<PUBLIC_URL>/app/angemeldet?code=…&state=…` statt mit
+ *    einer Sitzung. `challenge` = base64url(sha256(verifier)), wie PKCE.
+ *    Den Link fängt das Login-Blatt ab; iOS gibt ihn nur an die App, die in
+ *    `/.well-known/apple-app-site-association` steht (Team und Bundle-ID).
  * 2. `POST /api/app/einloesen` `{ code, verifier, device }` tauscht den Code
  *    gegen ein Sitzungs-Cookie (für den `WKHTTPCookieStore`) und einen
  *    Geräte-Token mit dem Recht `app` (src/cockpit/tokens.js).
  *
  * Der Code lebt nur im Speicher, 60 Sekunden, und gilt für genau einen
- * Versuch: Wer ihn abfängt (fremde App mit Schema `cockpit://`), hat den
- * Verifier nicht. Der Redirect geht nur auf das feste `cockpit://login`.
+ * Versuch: Wer ihn abfängt, hat den Verifier nicht. Der Redirect geht nur auf
+ * das feste `/app/angemeldet`. Ein eigenes Schema (`cockpit://login`) gibt es
+ * nur bei `PUBLIC_URL` ohne https, also für einen lokalen Entwicklungsserver:
+ * Dort gibt es keine Universal Links, und eine fremde App mit demselben Schema
+ * könnte sich sonst selbst einen Login holen.
  *
  * Mit dem Geräte-Token (`Authorization: Bearer vct_…`) statt Sitzung und CSRF:
  * `GET /api/app/stapel?zeit=15`, `GET /api/app/text?id=…`,
@@ -29,7 +34,12 @@ import { readLimited, FormError } from './multipart.js';
  * Fehler wie src/lesen/api.js: `{ error, status, message }`.
  */
 
-export const APP_REDIRECT = 'cockpit://login';
+/** Standard für `APP_TEAM_ID` und `APP_BUNDLE_ID` (ios/project.yml). */
+export const APP_TEAM_ID = 'H95J852PKP';
+export const APP_BUNDLE_ID = 'dev.rubeen.cockpit';
+export const APP_CALLBACK_PATH = '/app/angemeldet';
+export const SITE_ASSOCIATION_PATH = '/.well-known/apple-app-site-association';
+const DEV_REDIRECT = 'cockpit://login';
 const CODE_SECONDS = 60;
 // shortcut: ein globales Fenster für alle Absender (ein Nutzer, wenige Geräte); bei mehr Nutzern je Adresse zählen.
 const REDEEM_LIMIT = 10;
@@ -55,8 +65,9 @@ class AppError extends Error {
  * `sessions` aus src/web/sessions.js, `tokens` aus src/cockpit/tokens.js,
  * `reading` aus src/lesen/http.js (Aktionen und `listen`).
  */
-export function createAppAccess({ sessions, tokens, reading, publicUrl, logger = console, now = () => Date.now() }) {
+export function createAppAccess({ sessions, tokens, reading, publicUrl, appId = `${APP_TEAM_ID}.${APP_BUNDLE_ID}`, logger = console, now = () => Date.now() }) {
   const codes = new Map();
+  const redirectTo = publicUrl.startsWith('https://') ? new URL(APP_CALLBACK_PATH, publicUrl).href : DEV_REDIRECT;
   let attempts = [];
 
   const json = (res, status, body) => {
@@ -175,17 +186,23 @@ export function createAppAccess({ sessions, tokens, reading, publicUrl, logger =
       return STATE.test(state) && CHALLENGE.test(challenge) ? { state, challenge } : null;
     },
 
-    /** Nach erfolgreichem OIDC: einmaliger Code, Ziel immer `cockpit://login`. */
+    /** Für Universal Link (`applinks`) und das Login-Blatt mit https-Callback (`webcredentials`). */
+    siteAssociation: {
+      applinks: { details: [{ appIDs: [appId], components: [{ '/': `${APP_CALLBACK_PATH}*` }] }] },
+      webcredentials: { apps: [appId] },
+    },
+
+    /** Nach erfolgreichem OIDC: einmaliger Code, Ziel immer `/app/angemeldet` (lokal ohne https `cockpit://login`). */
     finish(app, user) {
       const t = now();
       for (const [c, e] of codes) if (e.exp <= t) codes.delete(c);
       const code = randomBytes(32).toString('base64url');
       codes.set(code, { user, challenge: app.challenge, exp: t + CODE_SECONDS * 1000 });
-      return `${APP_REDIRECT}?${new URLSearchParams({ code, state: app.state })}`;
+      return `${redirectTo}?${new URLSearchParams({ code, state: app.state })}`;
     },
 
     /** Abbruch oder Ablehnung zurück an die App, damit das Login-Blatt zugeht. */
-    deny: (app, error) => `${APP_REDIRECT}?${new URLSearchParams({ error, state: app.state })}`,
+    deny: (app, error) => `${redirectTo}?${new URLSearchParams({ error, state: app.state })}`,
 
     async handle(req, res, url) {
       try {

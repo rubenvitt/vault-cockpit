@@ -58,6 +58,7 @@ das Sitzungs-Secret erzeugt der Dienst selbst.
 | `OIDC_ISSUER` | Pocket-ID-Issuer, Pflicht |
 | `ALLOWED_SUBJECTS` | Pocket-ID-`sub`-Werte mit Zugriff, Pflicht |
 | `WEB_CLIENT_ID`, `WEB_CLIENT_SECRET` | OIDC-Client des [Web-Cockpits](#web-cockpit); ohne `WEB_CLIENT_ID` gibt es keine Oberfläche und damit keine Einstellungen |
+| `APP_TEAM_ID`, `APP_BUNDLE_ID` | Apple-Team und Bundle-ID der [iOS-App](#ios-app-login-und-app-api) für `/.well-known/apple-app-site-association`, Standard `H95J852PKP` und `dev.rubeen.cockpit` |
 
 Betrieb und Pfade im Container (die Compose-Datei setzt sie, sonst passen die Standards):
 
@@ -613,7 +614,10 @@ Sätze mit Zeichenpositionen wie in `src/lesen/anchor.js`. Nach jedem Satz
 speichert die Seite den Anfang des nächsten als Lesestelle; die Leseansicht
 springt mit `#weiter` genau dorthin, und das nächste Hören setzt dort fort. Ohne
 JavaScript listet die Seite nur die Texte. Das Zeitfenster rechnet mit 220 Wörtern
-pro Minute; vorgelesen dauert es oft länger.
+pro Minute; vorgelesen dauert es oft länger. In der iOS-App (erkannt an
+`window.webkit.messageHandlers.cockpit`) zeigt die Seite nur **Abspielen**, und
+das schickt `{type: 'hoeren', zeit}` an den nativen Player der App (VCP-94)
+statt die Sprachausgabe zu nutzen.
 
 Was über iOS bekannt ist, und was nicht:
 
@@ -776,8 +780,8 @@ Der Kurzbefehl muss wie die anderen auf einem Mac signiert werden
 
 Die iOS-App (`dev.rubeen.cockpit`, Ordner `ios/`) zeigt das Cockpit in einem
 WKWebView. Passkeys gehen dort nicht, deshalb meldet sie sich über das
-Login-Blatt des Systems an (`ASWebAuthenticationSession`, Callback-Schema
-`cockpit`) und bekommt danach ein Sitzungs-Cookie für den WKWebView und einen
+Login-Blatt des Systems an (`ASWebAuthenticationSession`, Callback über den
+Universal Link `<PUBLIC_URL>/app/angemeldet`) und bekommt danach ein Sitzungs-Cookie für den WKWebView und einen
 **Geräte-Token** für Share Extension und Vorlese-Player (VCP-91, Code in
 `src/web/app-access.js`). Dafür muss das Web-Cockpit eingerichtet sein
 (`WEB_CLIENT_ID`); in Pocket ID ändert sich nichts, der Callback bleibt
@@ -791,10 +795,21 @@ Login-Blatt des Systems an (`ASWebAuthenticationSession`, Callback-Schema
    Zeichenvorrat).
 2. Login-Blatt öffnen: `GET <PUBLIC_URL>/login?app=1&state=…&challenge=…`.
    Das läuft wie der Web-Login über Pocket ID (nur `ALLOWED_SUBJECTS`) und endet
-   mit `303` auf `cockpit://login?code=…&state=…`. Bei Abbruch oder abgelehntem
-   Konto `cockpit://login?error=access_denied&state=…`. Fehlen `state` oder
-   `challenge` oder passen sie nicht, `400` (HTML). Das Ziel ist fest, kein
-   Parameter ändert es; im Login-Blatt entsteht keine Sitzung.
+   mit `303` auf `<PUBLIC_URL>/app/angemeldet?code=…&state=…`. Bei Abbruch oder
+   abgelehntem Konto `…/app/angemeldet?error=access_denied&state=…`. Fehlen
+   `state` oder `challenge` oder passen sie nicht, `400` (HTML). Das Ziel ist
+   fest, kein Parameter ändert es; im Login-Blatt entsteht keine Sitzung. Das
+   Login-Blatt fängt den Link ab (`callback: .https(host:path:)`); iOS lässt das
+   nur für die App zu, die in `GET /.well-known/apple-app-site-association`
+   steht (`applinks` für `/app/angemeldet*` und `webcredentials`, App-ID aus
+   `APP_TEAM_ID` und `APP_BUNDLE_ID`, ohne Anmeldung, `application/json`). Wer
+   `/app/angemeldet` im Browser öffnet, sieht nur „Zurück zur App …“; der Code
+   darin wird dort nicht verarbeitet.
+
+   Nur für einen lokalen Entwicklungsserver: Ist `PUBLIC_URL` nicht `https://`,
+   geht der Redirect stattdessen auf `cockpit://login?…`, weil es ohne https
+   keine Universal Links gibt. Die App nimmt das Schema nur in Debug-Builds an
+   (siehe `ios/README.md`), ein Release-Build kennt es nicht.
 3. `state` prüfen, dann innerhalb von 60 Sekunden einlösen:
 
 ```http
@@ -951,14 +966,15 @@ npm ci && npm test
   Sitzungs-Cookie gebunden ist; die Schnelleingabe schreibt nie in einen
   vertraulichen oder ausgeschlossenen Ordner der Policy.
 - **App-Login mit Einmal-Code:** Die iOS-App bekommt nach Pocket ID
-  nur einen Code auf das feste Schema `cockpit://login`, 60 Sekunden gültig, nur
-  im Speicher, einmal einlösbar und an ihre Challenge gebunden (wie PKCE). Wer
-  das Schema abfängt, hat den Verifier nicht. Der Geräte-Token ist ein normaler
-  API-Token (nur Hash gespeichert, widerrufbar), das Einlösen ist begrenzt.
-  Nicht abgedeckt: Eine fremde App mit demselben Schema kann einen eigenen Login
-  mit eigener Challenge starten; bei noch offener Sitzung in Pocket ID geht der
-  ohne Rückfrage durch. Dagegen hilft später ein Universal Link statt
-  `cockpit://` oder `prompt=login`.
+  nur einen Code auf den festen Universal Link `<PUBLIC_URL>/app/angemeldet`,
+  60 Sekunden gültig, nur im Speicher, einmal einlösbar und an ihre Challenge
+  gebunden (wie PKCE). Den Link bekommt nur die App mit der App-ID aus der
+  `apple-app-site-association`; eine fremde App kann keinen eigenen Login
+  starten und den Code abholen, wie es mit einem eigenen Schema ginge. Das
+  Schema `cockpit://` gibt es nur bei `PUBLIC_URL` ohne https (lokale
+  Entwicklung) und nur in Debug-Builds der App. Der Geräte-Token ist ein
+  normaler API-Token (nur Hash gespeichert, widerrufbar), das Einlösen ist
+  begrenzt.
 - **Readwise-Importe** sind eine eigene Indexklasse und standardmäßig aus der Suche
   ausgenommen, damit importierte Fremdtexte die eigenen Notizen nicht verdrängen.
 

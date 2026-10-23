@@ -1,5 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
+import { parseHTML } from 'linkedom';
 import { createReadingStore } from '../src/lesen/store.js';
 import { readingRoutes } from '../src/lesen/http.js';
 import { sanitizeHtml } from '../src/lesen/extract.js';
@@ -87,4 +90,32 @@ test('Hören: Seite listet das Zeitfenster ohne JavaScript, Text als JSON, Link 
 
   assert.match((await page('/lesen/stapel?zeit=30')).html, /<a href="\/lesen\/hoeren\?zeit=30" class="btn quiet">Unterwegs hören<\/a>/);
   assert.match((await page('/lesen/stapel')).html, /href="\/lesen\/hoeren\?zeit=15"/);
+});
+
+/** /static/lesen-hoeren.js auf der gerenderten Seite ausführen; `window` sind die Browser-Fähigkeiten. */
+async function runPlayerScript(window) {
+  const { page } = setup();
+  const { document } = parseHTML((await page('/lesen/hoeren?zeit=30')).html);
+  const context = { window, document, location: { search: '?zeit=30' }, URLSearchParams, Element: document.defaultView.Element, localStorage: { getItem: () => null, setItem() {} }, navigator: {}, fetch: () => new Promise(() => {}) };
+  vm.runInNewContext(readFileSync(new URL('../src/web/static/lesen-hoeren.js', import.meta.url), 'utf8'), context);
+  return document.querySelector('.hoeren-player');
+}
+
+test('Hören: in der iOS-App geht „Abspielen“ an die Brücke statt an die Sprachausgabe', async () => {
+  const posted = [];
+  const spoken = [];
+  const speechSynthesis = { getVoices: () => [], speak: (u) => spoken.push(u), cancel() {} };
+  const player = await runPlayerScript({ webkit: { messageHandlers: { cockpit: { postMessage: (m) => posted.push({ ...m }) } } }, speechSynthesis, cockpit: {} });
+  assert.equal(player.hidden, false);
+  assert.equal(player.querySelector('[data-cmd=next]').hidden, true);
+  player.querySelector('[data-cmd=play]').click();
+  assert.deepEqual(posted, [{ type: 'hoeren', zeit: 30 }]);
+  assert.deepEqual(spoken, []);
+});
+
+test('Hören: im Browser bleibt die Sprachausgabe, ohne Brücke', async () => {
+  const speechSynthesis = { getVoices: () => [], speak() {}, cancel() {} };
+  const player = await runPlayerScript({ speechSynthesis, cockpit: { toast() {}, send() {}, csrf: () => 'c' } });
+  assert.equal(player.hidden, false);
+  assert.equal(player.querySelector('[data-cmd=next]').hidden, false);
 });

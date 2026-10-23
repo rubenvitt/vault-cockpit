@@ -32,6 +32,7 @@ import { createEmbedCache } from './lesen/embed-cache.js';
 import { createSynthesisEvidence } from './lesen/synthesis-evidence.js';
 import { createOidcLogin } from './web/oidc.js';
 import { createWebHttp } from './web/http.js';
+import { APP_TEAM_ID, APP_BUNDLE_ID } from './web/app-access.js';
 import { loadShortcuts } from './web/shortcuts.js';
 import { createCockpitActions } from './cockpit/actions.js';
 import { createWeekPlanner } from './cockpit/plan.js';
@@ -381,6 +382,8 @@ const webHttp = process.env.WEB_CLIENT_ID
         process.kill(process.pid, 'SIGTERM');
       },
       publicUrl: PUBLIC_URL,
+      // iOS-App für Universal Link und Login-Blatt (apple-app-site-association).
+      appId: `${process.env.APP_TEAM_ID || APP_TEAM_ID}.${process.env.APP_BUNDLE_ID || APP_BUNDLE_ID}`,
       allowedSubjects: ALLOWED_SUBJECTS,
     })
   : null;

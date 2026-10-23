@@ -4,12 +4,24 @@
 // Server, die Leseansicht steht danach an derselben Stelle. Braucht
 // /static/cockpit.js (window.cockpit) davor.
 //
+// In der iOS-App schickt „Abspielen“ nur `{type:'hoeren', zeit}` an die App.
+//
 // Text und Sätze kommen von `/lesen/hoeren/text`, in Zeichen des Lesetexts wie
 // src/lesen/anchor.js; „Das hier merken“ bildet den Anker wie `anchorAt`.
 (() => {
   'use strict';
 
   const player = document.querySelector('.hoeren-player');
+  // In der iOS-App (WKWebView mit Brücke `cockpit`) spielt der native Player (VCP-92/94) statt der Sprachausgabe.
+  const app = window.webkit?.messageHandlers?.cockpit;
+  if (player && app) {
+    const zeit = Number(new URLSearchParams(location.search).get('zeit')) || 15;
+    for (const b of player.querySelectorAll('[data-cmd=next], [data-cmd=mark], .hoeren-rate')) b.hidden = true;
+    player.querySelector('[data-cmd=play]').addEventListener('click', () => app.postMessage({ type: 'hoeren', zeit }));
+    player.hidden = false;
+    document.querySelector('.hoeren-nojs')?.setAttribute('hidden', '');
+    return;
+  }
   if (!player || !window.cockpit || !('speechSynthesis' in window)) return;
   const { toast, send, csrf } = window.cockpit;
   const synth = window.speechSynthesis;
