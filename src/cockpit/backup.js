@@ -2,11 +2,12 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { scrypt, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
+import { gzipSync, gunzipSync } from 'node:zlib';
 import { writePrivate } from './settings.js';
 
 /**
  * Sicherung der Dateien unter `/data`, die sich nicht neu bauen lassen
- * (Einstellungen, API-Tokens, Merkzettel, Sitzungs-Secret). Index und Vektoren
+ * (Einstellungen, API-Tokens, Merkzettel, Sitzungs-Secret, Lesestapel). Index und Vektoren
  * gehören nicht dazu, die entstehen beim Start von selbst.
  *
  * Die Sicherung ist eine JSON-Datei: Kopf im Klartext (Format, Version,
@@ -17,6 +18,11 @@ import { writePrivate } from './settings.js';
  *
  * Gesichert wird je Datei der ganze Inhalt, nicht einzelne Felder. Eine neue
  * Datei unter `/data` braucht nur einen Eintrag in `DATA_FILES`.
+ *
+ * SQLite-Dateien (`sqlite: true`) hält ein laufender Teil offen. Sie kommen
+ * über `live` als konsistenter Schnappschuss herein und gehen dorthin zurück,
+ * damit der Teil die Datei schließt und neu öffnet. In der Sicherung liegen
+ * sie gzip-gepackt (Artikeltext packt sich gut).
  */
 
 export class BackupError extends Error {}
@@ -30,11 +36,18 @@ export const DATA_FILES = [
   { name: 'api-tokens.json', label: 'API-Tokens (nur ihre Hashes)', setup: true },
   { name: 'capture-state.json', label: 'Merkzettel von Capture und Zunder-Brücke' },
   { name: 'session-secret', label: 'Secret für das Sitzungs-Cookie' },
+  { name: 'lesestapel.db', label: 'Lesestapel (Artikel, Markierungen, Feeds)', sqlite: true },
 ];
 
 export const MIN_PASSPHRASE = 12;
-/** Größte Sicherung, die das Cockpit schreibt und wieder annimmt. */
-export const MAX_BACKUP = 8 * 1024 * 1024;
+/**
+ * Größte Sicherung, die das Cockpit schreibt und wieder annimmt. 32 MB statt
+ * vorher 8 wegen des Lesestapels; gepackt reicht das für einige tausend Artikel.
+ */
+export const MAX_BACKUP = 32 * 1024 * 1024;
+// Entpackt darf eine SQLite-Datei aus der Sicherung höchstens so groß werden.
+const MAX_SQLITE = 512 * 1024 * 1024;
+const SQLITE_MAGIC = Buffer.from('SQLite format 3\0');
 
 const FORMAT = 'vault-cockpit-sicherung';
 const VERSION = 1;
@@ -143,10 +156,6 @@ function holdsState(path) {
 }
 
 /**
- * `dir`: Ordner der Dateien (`/data`), `paths`: abweichende Pfade je Name
- * (z. B. `CAPTURE_STATE_FILE`). `cost` nur für Tests kleiner.
- */
-/**
  * Eine ältere Sicherung bringt eine ältere Sitzungs-Generation mit; Cookies,
  * die „Überall abmelden“ seither beendet hat, gälten damit wieder. Deshalb
  * zählt das Wiederherstellen die Generation über beide Stände hinaus hoch:
@@ -165,7 +174,13 @@ function withNewGeneration(content, currentPath) {
   return Buffer.from(JSON.stringify({ ...restored, session }, null, 2) + '\n');
 }
 
-export function createBackup({ dir, paths = {}, files = DATA_FILES, cost = COST, now = () => Date.now() }) {
+/**
+ * `dir`: Ordner der Dateien (`/data`), `paths`: abweichende Pfade je Name
+ * (z. B. `CAPTURE_STATE_FILE`), `live`: je Name `{ read: () => Buffer,
+ * write: (buf) => void }` für Dateien, die ein laufender Teil offen hält.
+ * `cost` nur für Tests kleiner.
+ */
+export function createBackup({ dir, paths = {}, live = {}, files = DATA_FILES, cost = COST, now = () => Date.now() }) {
   const entries = files.map((f) => ({ ...f, path: paths[f.name] ?? join(dir, f.name) }));
   const byName = new Map(entries.map((e) => [e.name, e]));
 
@@ -184,11 +199,13 @@ export function createBackup({ dir, paths = {}, files = DATA_FILES, cost = COST,
       if (repeat !== undefined && repeat !== passphrase) throw new BackupError('Die beiden Passphrasen stimmen nicht überein');
       const content = {};
       for (const e of entries) {
-        if (existsSync(e.path)) content[e.name] = readFileSync(e.path);
+        if (live[e.name]) content[e.name] = live[e.name].read();
+        else if (existsSync(e.path)) content[e.name] = readFileSync(e.path);
+        if (e.sqlite && content[e.name]) content[e.name] = gzipSync(content[e.name]);
       }
       if (!Object.keys(content).length) throw new BackupError('Unter /data liegt noch nichts, das sich sichern ließe');
       const body = await seal(content, passphrase, { cost, now });
-      if (Buffer.byteLength(body) > MAX_BACKUP) throw new BackupError('Die Sicherung wäre zu groß zum Wiederherstellen');
+      if (Buffer.byteLength(body) > MAX_BACKUP) throw new BackupError('Die Sicherung wäre zu groß zum Wiederherstellen. Bitte /data über das Host-Backup sichern.');
       return { filename: `cockpit-sicherung-${new Date(now()).toISOString().slice(0, 10)}.json`, body, files: Object.keys(content) };
     },
 
@@ -209,6 +226,15 @@ export function createBackup({ dir, paths = {}, files = DATA_FILES, cost = COST,
       const skipped = Object.keys(files).filter((n) => !byName.has(n));
       if (!known.length) throw new BackupError('Die Sicherung enthält keine bekannte Datei');
       for (const n of known) {
+        if (byName.get(n).sqlite) {
+          try {
+            files[n] = gunzipSync(files[n], { maxOutputLength: MAX_SQLITE });
+          } catch {
+            throw new BackupError(`${n} in der Sicherung ist beschädigt`);
+          }
+          if (!files[n].subarray(0, SQLITE_MAGIC.length).equals(SQLITE_MAGIC)) throw new BackupError(`${n} in der Sicherung ist keine SQLite-Datei`);
+          continue;
+        }
         if (!n.endsWith('.json')) continue;
         try {
           JSON.parse(files[n].toString('utf8'));
@@ -219,7 +245,7 @@ export function createBackup({ dir, paths = {}, files = DATA_FILES, cost = COST,
       if (files['cockpit-settings.json'] && byName.has('cockpit-settings.json')) {
         files['cockpit-settings.json'] = withNewGeneration(files['cockpit-settings.json'], byName.get('cockpit-settings.json').path);
       }
-      for (const n of known) writePrivate(byName.get(n).path, files[n]);
+      for (const n of known) (live[n] ? live[n].write(files[n]) : writePrivate(byName.get(n).path, files[n]));
       return { createdAt, files: known, skipped };
     },
   };

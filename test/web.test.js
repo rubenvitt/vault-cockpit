@@ -1597,6 +1597,11 @@ test('Wissen: Fragesuche mit Typfilter, Synthese-Kopf und offene Punkte nach Zun
       const html = await page.text();
       assert.match(html, /<h2>Treffer<\/h2><ul class="results"><li><a href="\/notiz\?pfad=wiki%2Fsynthesis%2FA\.md">Architektur statt Disziplin<\/a>/);
       assert.match(html, /<option selected>entwurf<\/option>/);
+      // Wissen gehört zum Bereich Lesen (VCP-77).
+      assert.match(html, /<a href="\/lesen" class="nav-link" aria-current="page">/);
+      assert.match(html, /<a href="\/wissen" class="subnav-link" aria-current="page">Wissen<\/a>/);
+      // Die Suche, die in der Leiste unten Lesen weichen musste, bleibt von hier erreichbar.
+      assert.match(html, /<a href="\/graph\?q=Struktur">Ganzen Vault durchsuchen<\/a>/);
       assert.deepEqual(asked[0], ['Struktur', { type: 'synthesis' }]);
 
       // Live-Suche und Notizseite.

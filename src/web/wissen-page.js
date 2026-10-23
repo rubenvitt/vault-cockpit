@@ -1,5 +1,6 @@
 import { esc } from './render.js';
 import { head, appHeader } from './layout.js';
+import { readingNav } from '../lesen/pages.js';
 import { SYNTHESIS, fmValue, synthesisChips } from './synthesis-render.js';
 
 const RECENT = 20;
@@ -50,9 +51,10 @@ export function renderWissen(m, { user = null } = {}) {
 <html lang="de">
 ${head(m.q ? `Wissen: ${m.q}` : 'Wissen')}
 <body class="page-wissen">
-${appHeader({ current: 'wissen', user })}
+${appHeader({ current: 'lesen', user })}
+${readingNav('wissen')}
 <div class="page-head">
-  <div><h1>Wissen</h1><p class="meta">${m.total} Synthesen</p></div>
+  <div><h1>Wissen</h1><p class="meta">${m.total} Synthesen · <a href="${esc(`/graph${m.q ? `?q=${encodeURIComponent(m.q)}` : ''}`)}">Ganzen Vault durchsuchen</a></p></div>
   <form method="get" action="/wissen" class="wissen-form" role="search">
     <input type="search" name="q" value="${esc(m.q)}" placeholder="Frage an die Synthesen" aria-label="Frage an die Synthesen" enterkeyhint="search" autocomplete="off">
     ${select('art', 'Querverbindung', m.art, m.arts)}

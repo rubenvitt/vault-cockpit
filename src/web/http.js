@@ -154,6 +154,8 @@ for (const [path, file] of offlineFiles(PUBLIC, { html: HTML_HEADERS }).entries)
  * - `GET /zustand` zeigt den Zustand der Hintergrunddienste (`health`, siehe
  *   src/health/collect.js); meldet einer einen Fehler, trägt die Kopfzeile der
  *   Wochenansicht einen Hinweis dorthin.
+ * - `GET /lesen/…` und `POST /aktion/lesen/…` — Lesestapel (VCP-77), Seiten und
+ *   Aktionen aus `reading` (src/lesen/http.js).
  * - `GET /sw.js` (Service Worker) und `GET /offline` (App-Hülle ohne Netz) gibt
  *   es ohne Sitzung; `GET /api/sitzung` liefert das CSRF-Token der Sitzung, mit
  *   dem der Offline-Puffer die Schnelleingabe nachsendet (401 ohne Sitzung).
@@ -161,10 +163,11 @@ for (const [path, file] of offlineFiles(PUBLIC, { html: HTML_HEADERS }).entries)
  * Die Sitzung ist ein signiertes Cookie und nur für diese Routen gültig; die
  * MCP-Schnittstelle prüft weiter ausschließlich Bearer-Tokens.
  */
-export function createWebHttp({ cockpit, settings, actions = null, notes = null, plan = null, tokens = null, shortcuts = [], captureEnabled = false, calendars = null, graph = null, search = null, health = null, backup = null, restart = () => {}, oidc, sessionSecret, publicUrl, allowedSubjects = [], logger = console, now = () => Date.now() }) {
+export function createWebHttp({ cockpit, settings, actions = null, notes = null, plan = null, reading = null, tokens = null, shortcuts = [], captureEnabled = false, calendars = null, graph = null, search = null, health = null, backup = null, restart = () => {}, oidc, sessionSecret, publicUrl, allowedSubjects = [], logger = console, now = () => Date.now() }) {
   const signer = createCookieSigner(sessionSecret);
   const secure = publicUrl.startsWith('https://');
   const sessions = createSessions({ signer, settings, allowedSubjects, secure, now });
+  const READING_PAGES = reading?.pages ?? {};
 
   const send = (res, status, body, headers = {}) => {
     res.writeHead(status, { ...HTML_HEADERS, ...headers });
@@ -351,8 +354,8 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   /** Seite hinter `back` mit Meldung (Weg ohne JavaScript, wenn eine Aktion scheitert). */
   const backPage = (req, res, back, session, opts) => {
     const url = new URL(back, publicUrl);
-    // Die Graphseite rendert sich aus der Meldung im Cookie neu.
-    if (url.pathname === '/graph') return redirect(res, back, [flashCookie(opts.flash)]);
+    // Graph- und Lesen-Seiten rendern sich aus der Meldung im Cookie neu.
+    if (url.pathname === '/graph' || READING_PAGES[url.pathname]) return redirect(res, back, [flashCookie(opts.flash)]);
     if (url.pathname === '/planen' && plan) return planPage(req, res, url, session, opts);
     return url.pathname === '/notiz' && notes ? notePage(req, res, url, session, opts) : page(req, res, url, session, opts);
   };
@@ -492,6 +495,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
         },
       }
     : {};
+  Object.assign(ACTIONS, reading?.actions);
 
   /**
    * Alle Aktionen. Mit JavaScript als JSON, ohne als Formular mit
@@ -775,11 +779,18 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     return json(res, 200, g);
   }
 
+  /** Seite aus dem Bereich Lesen (src/lesen/http.js). */
+  async function readingPage(req, res, url, session) {
+    const r = await READING_PAGES[url.pathname]({ url, user: session.name ?? session.sub, tz: settings.get().tz, write: { csrf: csrfOf(req), back: url.pathname + url.search }, flash: takeFlash(req, res) });
+    if (r.redirect) return redirect(res, r.redirect);
+    return send(res, r.status ?? 200, r.html);
+  }
+
   const TOKEN_ROUTES = { '/einstellungen/tokens': createToken, '/einstellungen/tokens/widerrufen': revokeToken };
   const BACKUP_ROUTES = backup ? { '/einstellungen/sicherung': downloadBackup, '/einstellungen/sicherung/wiederherstellen': restoreBackup } : {};
   const ACTION_ROUTES = new Set(Object.keys(ACTIONS));
   const SHORTCUT_ROUTES = new Map(shortcuts.map((s) => [`/kurzbefehle/${s.slug}.shortcut`, s]));
-  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...PUBLIC.keys(), '/', '/api/woche', '/api/sitzung', '/api/suche', ...(actions ? ['/api/erfassen/vorschau'] : []), '/rueckblick', ...(notes ? ['/notiz', '/notiz/bild'] : []), ...(plan ? ['/planen'] : []), '/graph', '/api/graph', '/einstellungen', ...(health ? ['/zustand'] : []), ...(tokens ? Object.keys(TOKEN_ROUTES) : []), ...Object.keys(BACKUP_ROUTES), '/einstellungen/abmelden', '/login', '/auth/callback', '/logout']);
+  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...PUBLIC.keys(), '/', '/api/woche', '/api/sitzung', '/api/suche', ...(actions ? ['/api/erfassen/vorschau'] : []), '/rueckblick', ...(notes ? ['/notiz', '/notiz/bild'] : []), ...(plan ? ['/planen'] : []), '/graph', '/api/graph', ...Object.keys(READING_PAGES), '/einstellungen', ...(health ? ['/zustand'] : []), ...(tokens ? Object.keys(TOKEN_ROUTES) : []), ...Object.keys(BACKUP_ROUTES), '/einstellungen/abmelden', '/login', '/auth/callback', '/logout']);
   if (notes) ROUTES.add('/wissen');
 
   return {
@@ -883,6 +894,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       }
       if (!session) return redirect(res, `/login?next=${encodeURIComponent(url.pathname + url.search)}`);
       if (path === '/graph') return graphPage(req, res, url, session);
+      if (READING_PAGES[path]) return readingPage(req, res, url, session);
       if (path === '/notiz') return notePage(req, res, url, session);
       if (path === '/wissen') return send(res, 200, await wissenPage({ notes, search, url, user: session.name ?? session.sub }));
       if (path === '/rueckblick') return reviewPage(req, res, url, session);

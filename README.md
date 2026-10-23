@@ -91,23 +91,31 @@ Die übrigen lassen sich nicht neu bauen, ohne sie ist alles neu einzurichten:
 | `api-tokens.json` | API-Tokens für Kurzbefehle, Funke und Suche (nur Hashes; fehlen sie, müssen alle Kurzbefehle neue Tokens bekommen) |
 | `capture-state.json` | Merkzettel von Capture und Brücke (keine doppelten Aufgaben, zuletzt gesehene Checkbox-Stände) |
 | `session-secret` | Secret des Sitzungs-Cookies (bei gesetztem `SESSION_SECRET` ohne Bedeutung) |
+| `lesestapel.db` | [Lesestapel](#lesen): gespeicherte Artikel samt Text, Markierungen, Feeds (SQLite) |
 
 Die Obsidian-Anmeldung des Sync-Sidecars liegt nicht hier, sondern in
 `./sync-config`; fehlt sie, einmal neu anmelden (siehe [Sync](#sync)).
 
 **Am einfachsten** sichert der Host das Verzeichnis `./data` mit seinem
 Backup-Job (restic, Kopia, Snapshots des Volumes). Wiederherstellen heißt dann:
-Dateien zurückkopieren, `chown 1000:1000`, Container starten.
+Dateien zurückkopieren, `chown 1000:1000`, Container starten. `lesestapel.db`
+ist eine SQLite-Datei, die der Dienst offen hält: Eine Dateikopie mitten in einem
+Schreibvorgang kann unbrauchbar sein. Für das Host-Backup (VCP-64) deshalb einen
+Snapshot des Volumes nehmen, vorher `sqlite3 data/lesestapel.db ".backup data/lesestapel.bak"`
+laufen lassen oder zusätzlich die Sicherung im Cockpit ziehen.
 
 **Ohne Host-Backup** gibt es die Sicherung im Cockpit: **Einstellungen →
 Sicherung**, eine Passphrase mit mindestens 12 Zeichen zweimal eingeben,
 „Sicherung herunterladen“. Die Datei `cockpit-sicherung-JJJJ-MM-TT.json` enthält
-die vier Dateien oben, verschlüsselt mit AES-256-GCM und einem Schlüssel aus der
+die Dateien oben, verschlüsselt mit AES-256-GCM und einem Schlüssel aus der
 Passphrase (scrypt, N = 2^17, r = 8, p = 1, zufälliges Salt). Im Klartext stehen
 nur Format, Version, Zeitpunkt und die Parameter; eine Änderung daran fällt beim
 Öffnen auf. Ohne die Passphrase ist die Datei wertlos, also beides getrennt
 aufbewahren (Passphrase im Passwortmanager). Die Sicherung ist ein Schnappschuss:
-nach neuen Kalendern oder Tokens eine neue ziehen.
+nach neuen Kalendern oder Tokens eine neue ziehen. Den Lesestapel nimmt sie als
+konsistente Kopie der laufenden Datenbank (`VACUUM INTO`) auf, gzip-gepackt. Eine
+Sicherung darf bis zu 32 MB groß sein (vorher 8 MB); das reicht gepackt für einige
+tausend Artikel. Wird sie größer, lehnt das Cockpit ab, dann hilft nur das Host-Backup.
 
 Nach einem Verlust von `/data`:
 
@@ -509,6 +517,38 @@ Fastmail). Wer bei `degraded` anschlagen will, prüft den Text oder ruft
 `/health?strict=1` auf, das dann mit 503 antwortet. Welcher Dienst betroffen ist,
 steht nur auf `/zustand`.
 
+### Lesen
+
+Der Lesestapel ist ein Bereich im Cockpit (VCP-77): **Lesen** in der Kopfzeile
+und in der Leiste unten, darunter **Eingang · Stapel · Markiert · Wissen**. In der
+Leiste unten nimmt „Lesen“ den Platz der Suche ein; die Suche erreicht man dort
+über Lesen → Wissen → „Ganzen Vault durchsuchen“, im Kopf steht sie weiter.
+
+Im **Eingang** (`/lesen/eingang`) speichert ein Formular eine Adresse: Das Cockpit
+holt die Seite, macht mit Readability den Lesetext daraus und legt ihn mit Titel,
+Quelle, Autor, Auszug und Lesezeit (220 Wörter pro Minute) ab. Dieselbe Adresse
+oder ein doppelt abgeschicktes Formular legt nichts Neues an. Gespeichert wird in
+`/data/lesestapel.db` (SQLite wie der Index, aber nicht neu baubar, deshalb in der
+[Sicherung](#sicherung-von-data)). Das Schema enthält schon Status, Fortschritt,
+Markierungen mit Textanker, Feeds und Rückgängig-Spur für die folgenden Ausbaustufen.
+
+Das Holen ist gegen SSRF geschützt: nur `http`/`https`, keine Zugangsdaten in der
+Adresse, und jede Adresse wird nach der DNS-Auflösung geprüft, auch nach jeder
+Weiterleitung (höchstens 5). Abgelehnt werden Loopback, private Netze, Link-Local
+(samt Metadaten-IP `169.254.169.254`), CGNAT, Multicast und reservierte Bereiche,
+für IPv6 `::1`, `::`, `fc00::/7`, `fe80::/10` und IPv4-mapped Adressen. Verbunden
+wird genau mit der geprüften IP (eigene `lookup`-Funktion), DNS-Rebinding läuft
+damit ins Leere. Höchstens 5 MB und 15 Sekunden je Artikel.
+
+Der Artikeltext wird streng nach Allowlist gesäubert (`sanitizeHtml` in
+`src/lesen/extract.js`, auch für Mails und Feeds gedacht): kein Skript, kein Stil,
+keine Frames, keine Event-Attribute, Links nur `http`, `https` und `mailto`.
+Bilder und Videos werden zu Links, die Content-Security-Policy lädt weiter nichts
+von fremden Servern.
+
+Abhängigkeiten dafür: `@mozilla/readability` und `linkedom` (reines JavaScript,
+feste Versionen).
+
 ### Semantische Suche und Graph
 
 Das Cockpit bettet alle eigenen Notizen (ohne Readwise-Importe) abschnittsweise mit
@@ -568,6 +608,7 @@ npm ci && npm test
 - `src/search/` — lesender Such-Endpunkt `/api/search` mit eigenem Token
 - `src/graph/` — Graph um eine Notiz mit Aufgaben- und Termin-Knoten
 - `src/health/` — Zustand der Hintergrunddienste für `/zustand` und `/health`, Maskieren von Fehlertexten
+- `src/lesen/` — Lesestapel: SQLite-Speicher (`store.js`), SSRF-sicheres Holen (`fetch.js`), Readability und Säubern (`extract.js`), Seiten und Routen (`pages.js`, `http.js`)
 - `src/web/` — Web-Cockpit: OIDC-Login mit PKCE, signiertes Sitzungs-Cookie, HTML der Wochenansicht, Einstellungen, Suche und Graph
 - `sync/` — Image des Sidecars `vault-sync` (Obsidian Headless mit Status-Wrapper)
 

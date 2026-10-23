@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, readFileSync, existsSync, statSync, rmSync 
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Readable } from 'node:stream';
-import { createBackup, seal, open, BackupError, DATA_FILES } from '../src/cockpit/backup.js';
+import { createBackup, seal, open, BackupError, DATA_FILES, MAX_BACKUP } from '../src/cockpit/backup.js';
 import { parseMultipart, readMultipart, FormError } from '../src/web/multipart.js';
 import { createApp } from '../src/http/app.js';
 import { createWebHttp } from '../src/web/http.js';
@@ -85,7 +85,7 @@ test('Sicherung: erfasst die bekannten Dateien unter /data, leer heißt ohne Ein
     assert.equal(backup.isEmpty(), true, 'keine Tokens und kein Merkzettel zählen nicht');
     const status = backup.status();
     assert.deepEqual(status.files.map((f) => f.name), DATA_FILES.map((f) => f.name));
-    assert.deepEqual(status.files.map((f) => f.present), [false, true, true, true]);
+    assert.deepEqual(status.files.map((f) => f.present), [false, true, true, true, false]);
 
     writeFileSync(join(dir, 'cockpit-settings.json'), SETTINGS);
     assert.equal(backup.isEmpty(), false);
@@ -352,7 +352,7 @@ test('Einstellungen → Wiederherstellen: zu große Datei bekommt eine Meldung s
   try {
     await withCockpit(dir, async ({ call, csrf, restarts }) => {
       const token = await csrf();
-      const res = await call('/einstellungen/sicherung/wiederherstellen', { method: 'POST', body: upload({ passphrase: PASS, csrf: token }, Buffer.alloc(9 * 1024 * 1024, 97)) });
+      const res = await call('/einstellungen/sicherung/wiederherstellen', { method: 'POST', body: upload({ passphrase: PASS, csrf: token }, Buffer.alloc(MAX_BACKUP + 1024 * 1024, 97)) });
       assert.equal(res.status, 413);
       assert.match(await res.text(), /zu groß/);
       assert.equal(restarts.length, 0);

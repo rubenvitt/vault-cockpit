@@ -21,6 +21,8 @@ import { createCalendarSources, calendarForGraph } from './cockpit/calendars.js'
 import { createSettingsStore, loadOrCreateSecret } from './cockpit/settings.js';
 import { createTokenStore } from './cockpit/tokens.js';
 import { createBackup } from './cockpit/backup.js';
+import { createReadingStore } from './lesen/store.js';
+import { readingRoutes } from './lesen/http.js';
 import { createOidcLogin } from './web/oidc.js';
 import { createWebHttp } from './web/http.js';
 import { loadShortcuts } from './web/shortcuts.js';
@@ -176,6 +178,10 @@ const captureRouter = createCaptureRouter({ capture, zunder, state: captureState
 // /capture und /funke. CAPTURE_TOKEN aus älteren Deployments gilt daneben weiter.
 const apiTokens = createTokenStore({ file: join(dirname(COCKPIT_SETTINGS_FILE), 'api-tokens.json') });
 const LEGACY_CAPTURE_TOKEN = process.env.CAPTURE_TOKEN || null;
+
+// Lesestapel (VCP-77): Artikel, Markierungen und Feeds, neben den Einstellungen
+// unter /data. Lässt sich nicht neu bauen, gehört deshalb in die Sicherung.
+const reading = createReadingStore({ path: join(dirname(COCKPIT_SETTINGS_FILE), 'lesestapel.db') });
 const captureHttp = createCaptureHttp({ token: LEGACY_CAPTURE_TOKEN, tokens: apiTokens, router: captureRouter, zunderEnabled: () => Boolean(zunder()) });
 const captureEnabled = () => Boolean(LEGACY_CAPTURE_TOKEN) || apiTokens.has('capture');
 const searchHttp = createSearchHttp({ tokens: apiTokens, index, semantic: currentSemantic });
@@ -306,6 +312,8 @@ const webHttp = process.env.WEB_CLIENT_ID
       graph,
       search: (query, { type = null } = {}) => hybridSearch({ index, semantic: currentSemantic, query, type, limit: 30 }),
       health,
+      // Lesen: Eingang, Stapel, Markiert; Artikel holt src/lesen/fetch.js (SSRF-geschützt).
+      reading: readingRoutes({ store: reading }),
       oidc: createOidcLogin({
         issuer: ISSUER,
         clientId: process.env.WEB_CLIENT_ID,
@@ -325,6 +333,8 @@ const webHttp = process.env.WEB_CLIENT_ID
           'capture-state.json': process.env.CAPTURE_STATE_FILE ?? '/data/capture-state.json',
           'session-secret': process.env.SESSION_SECRET_FILE ?? '/data/session-secret',
         },
+        // Die offene Datenbank als Schnappschuss; beim Wiederherstellen öffnet der Store sie neu.
+        live: { 'lesestapel.db': { read: () => reading.snapshot(), write: (buf) => reading.replaceWith(buf) } },
       }),
       restart: () => {
         setTimeout(() => process.exit(0), 5000).unref();
@@ -397,6 +407,7 @@ for (const sig of ['SIGTERM', 'SIGINT']) {
     mail?.stop();
     index.stop();
     semantic?.close();
+    reading.close();
     app.close(() => process.exit(0));
   });
 }
