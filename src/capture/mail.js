@@ -14,6 +14,9 @@ import { createHash } from 'node:crypto';
  * führendem `@` eine ganze Domain ohne Subdomains); alles andere wird
  * unverarbeitet in den Erledigt-Ordner verschoben, damit eine fremde Mail an die
  * Adresse weder Notizen noch Aufgaben erzeugt.
+ *
+ * `readingMail` (`{ matches(email), save(email) }`, src/lesen/mail.js) nimmt
+ * Mails mit `[lesen]` im Betreff oder `>` vorn statt des Routers: Sie gehen in den Lesestapel.
  */
 const MAIL = 'urn:ietf:params:jmap:mail';
 const USING = ['urn:ietf:params:jmap:core', MAIL];
@@ -25,6 +28,7 @@ export function createMailCapture({
   doneMailbox = 'Archive',
   allowedSenders,
   router,
+  readingMail = null,
   fetch = globalThis.fetch,
   batch = 20,
   logger = console,
@@ -88,9 +92,11 @@ export function createMailCapture({
         {
           accountId,
           '#ids': { resultOf: 'q', name: 'Email/query', path: '/ids' },
-          properties: ['id', 'messageId', 'from', 'subject', 'receivedAt', 'textBody', 'bodyValues'],
+          properties: ['id', 'messageId', 'from', 'subject', 'receivedAt', 'textBody', 'htmlBody', 'bodyValues'],
           fetchTextBodyValues: true,
-          maxBodyValueBytes: 100_000,
+          // HTML für Newsletter im Lesestapel; längere Werte schneidet JMAP ab, der Rest ist dann weg.
+          fetchHTMLBodyValues: Boolean(readingMail),
+          maxBodyValueBytes: readingMail ? 500_000 : 100_000,
         },
         'g',
       ],
@@ -104,6 +110,9 @@ export function createMailCapture({
       try {
         if (!isAllowed(sender)) {
           logger.warn?.(`Mail-Capture: Absender nicht freigegeben, Mail wird nur verschoben (${email.id})`);
+        } else if (readingMail?.matches(email)) {
+          await readingMail.save(email);
+          processed += 1;
         } else {
           await router.route(toCapture(email));
           processed += 1;

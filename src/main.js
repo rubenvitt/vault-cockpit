@@ -25,6 +25,7 @@ import { createReadingStore } from './lesen/store.js';
 import { readingRoutes } from './lesen/http.js';
 import { createReadingApi } from './lesen/api.js';
 import { saveUrl } from './lesen/save.js';
+import { createMailReader } from './lesen/mail.js';
 import { createOidcLogin } from './web/oidc.js';
 import { createWebHttp } from './web/http.js';
 import { loadShortcuts } from './web/shortcuts.js';
@@ -213,6 +214,8 @@ function applyMail() {
       doneMailbox: m.doneMailbox,
       allowedSenders: m.senders,
       router: captureRouter,
+      // `[lesen]` im Betreff: Artikel oder Newsletter in den Lesestapel.
+      readingMail: createMailReader({ store: reading }),
     });
     mail.start(m.pollMinutes);
     console.log(`Mail-Capture: „${m.mailbox}“ alle ${m.pollMinutes} Minuten`);

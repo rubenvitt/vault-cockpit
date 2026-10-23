@@ -47,6 +47,8 @@ function attrsOf(el, tag, base) {
 
 function mediaLink(el, tag, base) {
   const src = el.getAttribute('src') ?? el.querySelector?.('source[src]')?.getAttribute('src');
+  // Zählpixel (1×1, vor allem in Newslettern) fallen ganz weg, auch nicht als Link.
+  if (tag === 'img' && ['width', 'height'].some((a) => /^\s*[01](?:px)?\s*$/i.test(el.getAttribute(a) ?? ''))) return '';
   const href = safeUrl(src, base);
   const label = (el.getAttribute('alt') ?? el.getAttribute('title') ?? '').trim();
   const text = `${MEDIA[tag]}${label ? `: ${label}` : ''}`;
@@ -99,19 +101,30 @@ export function extractArticle(html, url) {
   } catch {
     // keine verwertbare Seite: unten mit dem Seitentitel weiter
   }
-  const contentHtml = sanitizeHtml(article?.content ?? '', url);
-  // Blöcke durch Zeilenumbrüche trennen, sonst klebt „Titel“ an „Erster Absatz“.
-  const clean = parseHTML(`<!doctype html><html><body>${contentHtml.replace(/<br>|<hr>|<\/(?:p|div|h[1-6]|li|dt|dd|blockquote|pre|tr|th|td|figcaption|caption|section|article|aside|summary)>/g, '$&\n')}</body></html>`).document;
-  const contentText = clean.body.textContent.split(/\n+/).map(squash).filter(Boolean).join('\n\n');
-  const wordCount = words(contentText);
-  const firstParagraph = squash(clean.querySelector('p')?.textContent);
+  const text = textFields(sanitizeHtml(article?.content ?? '', url));
   return {
     url,
     canonical_url: canonical && canonical !== url && /^https?:/.test(canonical) ? canonical : null,
     title: squash(article?.title) || pageTitle || new URL(url).hostname,
     author: squash(article?.byline) || null,
     site: squash(article?.siteName) || new URL(url).hostname.replace(/^www\./, ''),
-    excerpt: (squash(article?.excerpt) || firstParagraph || squash(contentText)).slice(0, 500) || null,
+    ...text,
+    excerpt: squash(article?.excerpt).slice(0, 500) || text.excerpt,
+  };
+}
+
+/**
+ * Aus schon gesäubertem HTML (`sanitizeHtml`) Lesetext, Wortzahl, Lesezeit und
+ * Anriss (erster Absatz) als Felder für `store.addDocument`; für Artikel,
+ * Newsletter und PDFs.
+ */
+export function textFields(contentHtml) {
+  // Blöcke durch Zeilenumbrüche trennen, sonst klebt „Titel“ an „Erster Absatz“.
+  const clean = parseHTML(`<!doctype html><html><body>${contentHtml.replace(/<br>|<hr>|<\/(?:p|div|h[1-6]|li|dt|dd|blockquote|pre|tr|th|td|figcaption|caption|section|article|aside|summary)>/g, '$&\n')}</body></html>`).document;
+  const contentText = clean.body.textContent.split(/\n+/).map(squash).filter(Boolean).join('\n\n');
+  const wordCount = words(contentText);
+  return {
+    excerpt: (squash(clean.querySelector('p')?.textContent) || squash(contentText)).slice(0, 500) || null,
     content_html: contentHtml,
     content_text: contentText,
     word_count: wordCount,
