@@ -575,6 +575,21 @@ main.refreshing { transition: opacity var(--mid); }
   display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .lesen-quote { margin: 0; padding-left: var(--s-3); border-left: 3px solid var(--accent-line); font: var(--t-md)/1.5 var(--font-read); }
 
+/* --- Lesen: Stapel (src/lesen/stack.js): Zeitfenster, Füllbalken, Sortierung --- */
+.stapel-zeit a.chip, .stapel-sort a.chip { display: inline-flex; align-items: center; text-decoration: none; }
+.stapel-zeit, .stapel-sort { margin-bottom: var(--s-4); }
+.stapel-fill { display: flex; align-items: center; gap: var(--s-3); margin-bottom: var(--s-4); }
+.stapel-fill .meta { flex: none; font-variant-numeric: tabular-nums; }
+.stapel-bar { flex: 1; height: 6px; border: 0; border-radius: var(--r-full); overflow: hidden; background: var(--line); -webkit-appearance: none; appearance: none; color: var(--accent); }
+.stapel-bar::-webkit-progress-bar { background: var(--line); border-radius: var(--r-full); }
+.stapel-bar::-webkit-progress-value { background: var(--accent); border-radius: var(--r-full); }
+.stapel-bar::-moz-progress-bar { background: var(--accent); border-radius: var(--r-full); }
+.stapel-rest { margin: var(--s-4) 0 0; color: var(--text-3); }
+@media (max-width: 700px) {
+  /* Unterwegs zählt das Zeitfenster; umsortieren nur am Desktop */
+  .stapel-sort { display: none; }
+}
+
 /* --- Schmale Bildschirme ------------------------------------------------- */
 @media (max-width: 900px) {
   .feuer, .columns, .settings { grid-template-columns: minmax(0, 1fr); }

@@ -3,6 +3,7 @@ import { FetchError } from './fetch.js';
 import { ReadingError } from './store.js';
 import { saveUrl } from './save.js';
 import { renderInbox, renderStack, renderHighlights } from './pages.js';
+import { stackRoutes } from './stack.js';
 
 /**
  * Routen des Bereichs „Lesen“, eingebunden in src/web/http.js (Sitzung, CSRF,
@@ -31,7 +32,7 @@ export function readingRoutes({ store, fetchPage = undefined, logger = console }
     pages: {
       '/lesen': async () => ({ redirect: '/lesen/eingang' }),
       '/lesen/eingang': async (ctx) => ({ html: renderInbox(store.list({ status: 'eingang' }), ctx) }),
-      '/lesen/stapel': async (ctx) => ({ html: renderStack(store.list({ status: 'stapel' }), ctx) }),
+      ...stackRoutes({ store }).pages,
       '/lesen/markiert': async (ctx) => ({ html: renderHighlights(store.listHighlights(), ctx) }),
     },
     actions: {
