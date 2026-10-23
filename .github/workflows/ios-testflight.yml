@@ -1,12 +1,19 @@
 name: iOS TestFlight
 
-# Manuell oder per Tag `ios/v…` (z. B. `ios/v1.0-1`): archiviert, signiert automatisch und
-# lädt zu TestFlight hoch. Der Tag-Weg geht auch, bevor der Workflow auf main liegt, und braucht
-# kein lokales Xcode (lokale Betas nimmt App Store Connect nicht an).
+# Archiviert, signiert automatisch und lädt zu TestFlight hoch, ohne lokales Xcode (lokale
+# Betas nimmt App Store Connect nicht an). Startet von selbst bei jedem Push auf main, der ios/
+# ändert, dazu manuell oder per Tag `ios/v…` (geht auch für Branches, die noch nicht auf main sind).
 on:
   workflow_dispatch:
   push:
+    branches: [main]
+    paths: ['ios/**']
     tags: ['ios/v*']
+
+# Ein Upload nach dem anderen; ein neuer Push wartet, statt einen laufenden abzubrechen.
+concurrency:
+  group: ios-testflight
+  cancel-in-progress: false
 
 jobs:
   upload:
