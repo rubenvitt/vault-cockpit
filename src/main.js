@@ -304,7 +304,7 @@ const webHttp = process.env.WEB_CLIENT_ID
       captureEnabled,
       calendars,
       graph,
-      search: (query) => hybridSearch({ index, semantic: currentSemantic, query, limit: 30 }),
+      search: (query, { type = null } = {}) => hybridSearch({ index, semantic: currentSemantic, query, type, limit: 30 }),
       health,
       oidc: createOidcLogin({
         issuer: ISSUER,

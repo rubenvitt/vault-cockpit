@@ -1,0 +1,76 @@
+import { esc } from './render.js';
+import { head, appHeader } from './layout.js';
+import { SYNTHESIS, fmValue, synthesisChips } from './synthesis-render.js';
+
+const RECENT = 20;
+const noteHref = (path) => `/notiz?pfad=${encodeURIComponent(path)}`;
+
+/**
+ * Daten für `/wissen`: alle Synthesen, die das Cockpit zeigen darf
+ * (`notes.ofType`, dieselbe Grenze wie `/notiz`), gefiltert nach `art`
+ * (Querverbindung) und `status` (Entwurf). Mit Frage `q` kommen die Treffer
+ * der Hybrid-Suche mit Typfilter `synthesis` in deren Reihenfolge dazu.
+ * „Zuletzt bewegt“ sortiert nach `updated`, Notizen ohne Datum zuletzt.
+ */
+export async function wissenView({ notes, search = null }, { q = '', art = '', status = '' } = {}) {
+  const all = notes.ofType(SYNTHESIS).map((r) => ({
+    path: r.path,
+    title: r.title ?? r.path.split('/').pop().replace(/\.md$/i, ''),
+    art: fmValue(r.frontmatter.art),
+    status: fmValue(r.frontmatter.status),
+    confidence: fmValue(r.frontmatter.confidence),
+    summary: fmValue(r.frontmatter.summary),
+    updated: r.updated ?? null,
+  }));
+  const choices = (k) => [...new Set(all.map((n) => n[k]).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de'));
+  const keep = (n) => (!art || n.art === art) && (!status || n.status === status);
+  let hits = null;
+  let degraded = null;
+  if (q && search) {
+    const byPath = new Map(all.map((n) => [n.path, n]));
+    const r = await search(q, { type: SYNTHESIS });
+    hits = r.results.map((h) => byPath.get(h.path)).filter((n) => n && keep(n));
+    degraded = r.degraded ?? null;
+  }
+  const recent = all.filter(keep).sort((a, b) => (b.updated ?? '').localeCompare(a.updated ?? '')).slice(0, RECENT);
+  return { q, art, status, arts: choices('art'), statuses: choices('status'), hits, recent, degraded, total: all.length };
+}
+
+const select = (name, label, value, options) =>
+  `<label><span class="hint">${label}</span><select name="${name}"><option value="">alle</option>${options.map((o) => `<option${o === value ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select></label>`;
+
+const item = (n) => `<li><a href="${esc(noteHref(n.path))}">${esc(n.title)}</a>${n.updated ? ` <span class="meta">${esc(n.updated)}</span>` : ''}
+    ${synthesisChips(n)}${n.summary ? `<p class="snippet">${esc(n.summary)}</p>` : ''}</li>`;
+
+/** Seite `/wissen`: Fragesuche über die Synthesen, ohne JavaScript über ein GET-Formular. */
+export function renderWissen(m, { user = null } = {}) {
+  const list = (items, empty) => (items.length ? `<ul class="results">${items.map(item).join('')}</ul>` : `<p class="empty">${empty}</p>`);
+  const hits = m.hits ? `<section><h2>Treffer</h2>${list(m.hits, `Keine Synthese passt zu „${esc(m.q)}“.`)}</section>` : '';
+  return `<!doctype html>
+<html lang="de">
+${head(m.q ? `Wissen: ${m.q}` : 'Wissen')}
+<body class="page-wissen">
+${appHeader({ current: 'wissen', user })}
+<div class="page-head">
+  <div><h1>Wissen</h1><p class="meta">${m.total} Synthesen</p></div>
+  <form method="get" action="/wissen" class="wissen-form" role="search">
+    <input type="search" name="q" value="${esc(m.q)}" placeholder="Frage an die Synthesen" aria-label="Frage an die Synthesen" enterkeyhint="search" autocomplete="off">
+    ${select('art', 'Querverbindung', m.art, m.arts)}
+    ${select('status', 'Status', m.status, m.statuses)}
+    <button type="submit" class="btn">Suchen</button>
+  </form>
+</div>
+<main>
+${m.degraded ? `<p class="problem">${esc(m.degraded)}</p>` : ''}
+${hits}
+<section><h2>Zuletzt bewegt</h2>${list(m.recent, m.total ? 'Keine Synthese passt zu den Filtern.' : 'Noch keine Synthesen (Frontmatter <code>type: synthesis</code>).')}</section>
+</main>
+</body>
+</html>`;
+}
+
+/** `/wissen?q=…&art=…&status=…` als fertige Seite. */
+export async function wissenPage({ notes, search, url, user }) {
+  const p = (k) => (url.searchParams.get(k) ?? '').trim().slice(0, 500);
+  return renderWissen(await wissenView({ notes, search }, { q: p('q'), art: p('art'), status: p('status') }), { user });
+}

@@ -355,7 +355,7 @@ export function openIndex(dbOrPath, { vaultPath = process.env.VAULT_PATH ?? '/va
     notesOfType(type) {
       return db
         .prepare(
-          `SELECT path, title, status, frontmatter FROM notes
+          `SELECT path, title, status, updated, frontmatter FROM notes
             WHERE type = ? AND class = 'core' AND sensitivity IS NULL
             ORDER BY path`,
         )

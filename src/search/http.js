@@ -12,7 +12,7 @@ const MAX_LIMIT = 50;
  * (`core`) ohne vertrauliche Ordner. Notizen lesen oder ändern geht damit nicht.
  *
  * - `GET /api/search?q=…` — `mode` (`hybrid` Standard oder `semantic`),
- *   `folder`, `limit` (Standard 10, höchstens 50), `offset`. Die Antwort ist das
+ *   `folder`, `type` (Frontmatter-`type`, z. B. `synthesis`), `limit` (Standard 10, höchstens 50), `offset`. Die Antwort ist das
  *   Ergebnis von `hybridSearch` unverändert: `{results, total, hasMore, degraded}`.
  */
 export function createSearchHttp({ tokens, index, semantic = null }) {
@@ -58,6 +58,7 @@ export function createSearchHttp({ tokens, index, semantic = null }) {
         include: ['core'],
         includeSensitive: false,
         folder: params.get('folder') || null,
+        type: params.get('type') || null,
         limit: Math.min(limit, MAX_LIMIT),
         offset,
       });
