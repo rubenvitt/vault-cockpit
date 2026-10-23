@@ -4,6 +4,7 @@ import SwiftUI
 @main
 struct CockpitApp: App {
     @State private var model = AppModel()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
@@ -16,6 +17,10 @@ struct CockpitApp: App {
                 case .loggedOut:
                     LoginView(model: model)
                 }
+            }
+            // Geteiltes, das die Share Extension ohne Netz gepuffert hat, beim Start, im Vordergrund und nach dem Login nachsenden.
+            .task(id: scenePhase == .active && model.phase == .loggedIn) {
+                if scenePhase == .active, model.phase == .loggedIn { await model.sendPendingShares() }
             }
             .sheet(item: $model.listening) { PlayerView(minutes: $0.minutes) }
             .confirmationDialog("Cockpit", isPresented: $model.showsMenu) {
