@@ -758,6 +758,36 @@ html[data-read-sans] .lesen-text :is(h1, h2, h3, h4, h5, h6) { font-family: var(
   .lesen-doc kbd, .lesen-selbar kbd, .lesen-keys { display: none; }
 }
 
+/* --- Lesen: Wiedersehen --- */
+/* /lesen/wiedersehen (src/lesen/review-page.js): Karte wie im Eingang, darunter die Woche wie im Wochenrückblick */
+.wiedersehen-card { touch-action: auto; }
+.wiedersehen-note { font-family: var(--font-read); color: var(--text-2); }
+.wiedersehen-actions { display: grid; gap: var(--s-2); }
+.wiedersehen-actions form { margin: 0; }
+.wiedersehen-decide { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-2); }
+.wiedersehen-decide .btn { min-height: 48px; }
+.wiedersehen-worte summary { cursor: pointer; color: var(--text-2); padding: var(--s-1) 0; }
+.wiedersehen-worte form { display: grid; gap: var(--s-2); margin-top: var(--s-2); }
+.wiedersehen-worte textarea { width: 100%; resize: vertical; font-family: var(--font-read); }
+.wiedersehen-worte .btn { justify-self: start; }
+.wiedersehen-week { display: grid; gap: var(--s-4); margin-top: var(--s-6); }
+.wiedersehen-week-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s-2); }
+.wiedersehen-week-head h2 { margin: 0; }
+.wiedersehen-week > p { margin: 0; }
+.wiedersehen-topics { display: grid; gap: var(--s-2); }
+.wiedersehen-topics li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) 3ch; gap: var(--s-3); align-items: center; }
+.wiedersehen-topic { overflow-wrap: anywhere; }
+.wiedersehen-topics .meta { text-align: right; font-variant-numeric: tabular-nums; }
+.wiedersehen-topics progress { width: 100%; height: 8px; border: 0; border-radius: var(--r-full); overflow: hidden; background: var(--line); -webkit-appearance: none; appearance: none; color: var(--accent); }
+.wiedersehen-topics progress::-webkit-progress-bar { background: var(--line); border-radius: var(--r-full); }
+.wiedersehen-topics progress::-webkit-progress-value { background: var(--accent); border-radius: var(--r-full); }
+.wiedersehen-topics progress::-moz-progress-bar { background: var(--accent); border-radius: var(--r-full); }
+.wiedersehen-link { display: grid; gap: var(--s-3); padding: var(--s-4); background: var(--accent-soft); border: 1px solid var(--accent-line); border-radius: var(--r-lg); }
+.wiedersehen-link h3 { margin: 0; }
+.wiedersehen-link ul { display: grid; gap: var(--s-3); }
+.wiedersehen-link li { display: grid; gap: 2px; }
+.wiedersehen-link form { margin: 0; }
+
 /* --- Schmale Bildschirme ------------------------------------------------- */
 @media (max-width: 900px) {
   .feuer, .columns, .settings { grid-template-columns: minmax(0, 1fr); }

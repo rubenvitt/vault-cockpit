@@ -89,7 +89,7 @@ test('Lesen: nur angemeldet, /lesen führt zum Eingang, Navigation mit Lesen und
     const tabs = html.match(/<nav class="tabbar"[^]*?<\/nav>/)[0];
     assert.deepEqual([...tabs.matchAll(/<span>([^<]+)<\/span>/g)].map((m) => m[1]), ['Woche', 'Rückblick', 'Lesen', 'Einstellungen']);
     assert.match(html, /<a href="\/graph" class="nav-link">/);
-    assert.match(html, /<nav class="subnav" aria-label="Lesen"><a href="\/lesen\/eingang" class="subnav-link" aria-current="page">Eingang<\/a><a href="\/lesen\/stapel"[^>]*>Stapel<\/a><a href="\/lesen\/markiert"[^>]*>Markiert<\/a><a href="\/wissen"[^>]*>Wissen<\/a><a href="\/lesen\/feeds"[^>]*>Feeds<\/a><\/nav>/);
+    assert.match(html, /<nav class="subnav" aria-label="Lesen"><a href="\/lesen\/eingang" class="subnav-link" aria-current="page">Eingang<\/a><a href="\/lesen\/stapel"[^>]*>Stapel<\/a><a href="\/lesen\/markiert"[^>]*>Markiert<\/a><a href="\/lesen\/wiedersehen"[^>]*>Wiedersehen<\/a><a href="\/wissen"[^>]*>Wissen<\/a><a href="\/lesen\/feeds"[^>]*>Feeds<\/a><\/nav>/);
     assert.match(html, /<form method="post" action="\/aktion\/lesen\/speichern"/);
     assert.match(html, /Eingang leer/);
     assert.ok(!/style=|<script>/.test(html), 'keine Inline-Styles oder -Skripte');

@@ -12,6 +12,7 @@ const SUB = [
   ['eingang', '/lesen/eingang', 'Eingang'],
   ['stapel', '/lesen/stapel', 'Stapel'],
   ['markiert', '/lesen/markiert', 'Markiert'],
+  ['wiedersehen', '/lesen/wiedersehen', 'Wiedersehen'],
   ['wissen', '/wissen', 'Wissen'],
   ['feeds', '/lesen/feeds', 'Feeds'],
 ];

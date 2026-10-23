@@ -134,19 +134,23 @@ const cockpitSettings = createSettingsStore({
 const VECTOR_DB = process.env.VECTOR_DB ?? '/data/vectors.db';
 let semantic = null;
 let semanticKey = null;
+// Derselbe Embedder bettet im Wiedersehen die Markierungen der Woche ein.
+let embedder = null;
 function applyEmbed() {
   const e = cockpitSettings.get().embed;
   const key = e ? `${e.url}\n${e.model}` : null;
   if (key === semanticKey) return;
   semantic?.close();
   semantic = null;
+  embedder = null;
   semanticKey = key;
   if (!e) return console.log('Semantik: aus (Einstellungen → Embeddings)');
+  embedder = createOllamaEmbedder({ url: e.url, model: e.model });
   semantic = createSemanticIndex({
     dbPath: VECTOR_DB,
     vaultPath: VAULT_PATH,
     index,
-    embedder: createOllamaEmbedder({ url: e.url, model: e.model }),
+    embedder,
   });
   semantic.schedule();
   console.log(`Semantik: ${e.model} über ${e.url}`);
@@ -331,7 +335,7 @@ const webHttp = process.env.WEB_CLIENT_ID
       health,
       // Lesen: Eingang, Stapel, Markiert; Artikel holt src/lesen/fetch.js (SSRF-geschützt).
       // „In Inbox“ aus der Leseansicht nutzt die Schnelleingabe des Cockpits.
-      reading: readingRoutes({ store: reading, capture: (input) => cockpitActions.capture(input) }),
+      reading: readingRoutes({ store: reading, capture: (input) => cockpitActions.capture(input), review: { embedder: () => embedder } }),
       oidc: createOidcLogin({
         issuer: ISSUER,
         clientId: process.env.WEB_CLIENT_ID,
