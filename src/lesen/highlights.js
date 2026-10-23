@@ -68,8 +68,9 @@ function renderMarked(items, facets, filter, ctx) {
 /**
  * `capture` legt eine Notiz in der Vault-Inbox an (`actions.capture` des
  * Cockpits, mit dessen Prüfung des Inbox-Ordners); ohne gibt es „In Inbox“ nicht.
+ * `onChange(docId)` hört jede Änderung an Markierungen.
  */
-export function highlightRoutes({ store, asAction, capture = null, logger = console }) {
+export function highlightRoutes({ store, asAction, capture = null, onChange = () => {}, logger = console }) {
   const docOf = (id) => {
     const doc = store.get(id);
     if (!doc) throw new ActionError('Diesen Artikel gibt es nicht', 404);
@@ -104,6 +105,7 @@ export function highlightRoutes({ store, asAction, capture = null, logger = cons
             note: noteOf(form),
           }),
         );
+        onChange(doc.id);
         return { message: h.note ? 'Markiert, mit Notiz' : 'Markiert', highlight: { id: h.id }, undo: { action: '/aktion/lesen/markierung/loeschen', fields: { id: h.id } } };
       },
 
@@ -111,12 +113,14 @@ export function highlightRoutes({ store, asAction, capture = null, logger = cons
         const h = highlightOf(form.get('id'));
         const note = noteOf(form);
         await asAction(() => store.updateHighlight(h.id, { note }));
+        onChange(h.doc_id);
         return { message: note ? 'Notiz gespeichert' : 'Notiz entfernt', highlight: { id: h.id }, undo: { action: '/aktion/lesen/markierung/notiz', fields: { id: h.id, notiz: h.note ?? '' } } };
       },
 
       async '/aktion/lesen/markierung/loeschen'(form) {
         const h = highlightOf(form.get('id'));
         store.deleteHighlight(h.id);
+        onChange(h.doc_id);
         const fields = { id: h.doc_id, quote: h.quote, prefix: h.prefix, suffix: h.suffix, start: h.start_hint ?? '', notiz: h.note ?? '' };
         return { message: 'Markierung entfernt', undo: { action: '/aktion/lesen/markierung/neu', fields } };
       },

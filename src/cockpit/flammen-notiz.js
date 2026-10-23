@@ -1,8 +1,6 @@
-import { readFileSync, realpathSync } from 'node:fs';
-import { join, sep } from 'node:path';
-import { createHash } from 'node:crypto';
 import { findFeuer } from './feuer.js';
 import { describeWeek, parseWeekId, weekOf, localDate, localTime } from './week.js';
+import { sectionBlock, planSection, writeSection } from '../vault/generated-section.js';
 
 /**
  * Flammen der Woche in der Feuer-Notiz (Timing-Anreicherung, VCP-52).
@@ -19,11 +17,11 @@ import { describeWeek, parseWeekId, weekOf, localDate, localTime } from './week.
  *   …
  *   <!-- cockpit:flammen:ende 1a2b3c4d -->
  *
- * Der Endmarker trägt eine Prüfsumme des Inhalts. Passt sie nicht mehr, hat
- * jemand im Bereich von Hand geschrieben; dann bleibt die Notiz unberührt, bis
- * der Bereich zwischen den Markern geleert wird. Fehlen die Marker, kommen sie
- * ans Ende des Abschnitts „## Flammen“; was dort steht (etwa die leere
- * Vorlagen-Tabelle), bleibt stehen. Ohne Feuer-Notiz der Woche, ohne diesen
+ * Die Mechanik (Prüfsumme im Endmarker, Abbruch bei Handarbeit im Bereich
+ * oder gleichzeitiger Änderung) steckt in src/vault/generated-section.js, die
+ * Marker sind dieselben wie vorher. Fehlen sie, kommen sie ans Ende des
+ * Abschnitts „## Flammen“; was dort steht (etwa die leere Vorlagen-Tabelle),
+ * bleibt stehen. Ohne Feuer-Notiz der Woche, ohne diesen
  * Abschnitt oder in einem vertraulichen Ordner wird nichts geschrieben, und
  * auch nur, wenn sich der Inhalt tatsächlich ändert (sonst erzeugte jedes
  * Intervall einen Sync-Vorgang). Geschrieben wird über den Editor; ändert der
@@ -33,13 +31,11 @@ import { describeWeek, parseWeekId, weekOf, localDate, localTime } from './week.
 export const START_MARKER = 'cockpit:flammen:start';
 export const END_MARKER = 'cockpit:flammen:ende';
 
-const START_LINE = /^[ \t]*<!--\s*cockpit:flammen:start\b.*$/gm;
-const END_LINE = /^[ \t]*<!--\s*cockpit:flammen:ende\b(?:[ \t]+([0-9a-f]{8}))?.*$/gm;
-const SECTION = /^##[ \t]+Flammen[ \t]*#*[ \t]*$/m;
+const NAME = 'flammen';
+const LABEL = 'aus Zunder, das Cockpit schreibt bis zum Endmarker neu';
 const DAY_NAMES = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
 const STATUS = { open: 'offen', in_progress: 'in Arbeit', blocked: 'blockiert', review: 'im Review', done: 'erledigt' };
 
-const checksum = (text) => createHash('sha256').update(text).digest('hex').slice(0, 8);
 const pad = (n) => String(n).padStart(2, '0');
 
 /** „Mo 12.10.“ zu einem Kalenderdatum JJJJ-MM-TT. */
@@ -99,38 +95,15 @@ export function renderFlameTable(rows) {
 }
 
 /** Der ganze Bereich mit Markern; `eol` wie in der Notiz. */
-export function flameBlock(inner, eol = '\n') {
-  return [`<!-- ${START_MARKER} · aus Zunder, das Cockpit schreibt bis zum Endmarker neu -->`, inner, `<!-- ${END_MARKER} ${checksum(inner)} -->`].join('\n').replaceAll('\n', eol);
-}
+export const flameBlock = (inner, eol = '\n') => sectionBlock(NAME, inner, { label: LABEL, eol });
 
 /**
- * Was mit der Notiz zu tun ist, damit der Bereich `inner` enthält:
- * `{ action: 'keep' }` (schon aktuell), `{ action: 'replace', oldText, newText }`,
- * `{ action: 'insert', text }` (ans Ende von „## Flammen“) oder
- * `{ action: 'skip', reason }`. `hasRows`: Ohne Flammen werden keine neuen
- * Marker angelegt.
+ * Was mit der Notiz zu tun ist, damit der Bereich `inner` enthält (siehe
+ * `planSection`): neue Marker ans Ende von „## Flammen“, ohne den Abschnitt
+ * `skip`. `hasRows`: Ohne Flammen werden keine neuen Marker angelegt.
  */
 export function planFlameUpdate(content, inner, { hasRows = true } = {}) {
-  const eol = content.includes('\r\n') ? '\r\n' : '\n';
-  const starts = [...content.matchAll(START_LINE)];
-  const ends = [...content.matchAll(END_LINE)];
-  if (!starts.length && !ends.length) {
-    if (!hasRows) return { action: 'keep' };
-    if (!SECTION.test(content)) return { action: 'skip', reason: 'Die Feuer-Notiz hat keinen Abschnitt „## Flammen“' };
-    // Leerzeile davor, damit der Kommentar nicht an einer Tabelle klebt.
-    return { action: 'insert', text: `${eol}${flameBlock(inner, eol)}` };
-  }
-  if (starts.length !== 1 || ends.length !== 1 || ends[0].index < starts[0].index) {
-    return { action: 'skip', reason: 'Die Marker des Flammen-Bereichs fehlen zur Hälfte oder stehen doppelt; bitte in Obsidian aufräumen' };
-  }
-  const from = starts[0].index;
-  const to = ends[0].index + ends[0][0].length;
-  const current = content.slice(from + starts[0][0].length, ends[0].index).replace(/\r\n/g, '\n').trim();
-  if (current && ends[0][1] !== checksum(current)) {
-    return { action: 'skip', reason: 'Im Flammen-Bereich wurde von Hand geschrieben; das Cockpit lässt ihn stehen (zum Neuschreiben den Bereich zwischen den Markern leeren)' };
-  }
-  if (current === inner) return { action: 'keep' };
-  return { action: 'replace', oldText: content.slice(from, to), newText: flameBlock(inner, eol) };
+  return planSection(content, NAME, inner, { label: LABEL, heading: 'Flammen', create: hasRows });
 }
 
 /**
@@ -144,7 +117,6 @@ export function planFlameUpdate(content, inner, { hasRows = true } = {}) {
  * `settings.get().flameNote.enabled` schaltet ab.
  */
 export function createFlameNote({ vaultPath, index, editor, policy, settings, zunder, now = () => new Date(), logger = console }) {
-  const vaultReal = realpathSync(vaultPath);
   const status = { lastRun: null, lastOkAt: null, lastError: null, lastWrite: null };
   let queue = Promise.resolve();
 
@@ -170,13 +142,9 @@ export function createFlameNote({ vaultPath, index, editor, policy, settings, zu
     const inner = renderFlameTable(rows);
 
     // Ab hier synchron: frisch lesen, planen, über den Editor schreiben.
-    const absolute = join(vaultPath, path);
-    if (!realpathSync(absolute).startsWith(vaultReal + sep)) throw new Error(`„${path}“ zeigt aus dem Vault heraus`);
-    const plan = planFlameUpdate(readFileSync(absolute, 'utf8'), inner, { hasRows: rows.length > 0 });
-    if (plan.action === 'keep') return { state: 'aktuell', path, week: week.id };
-    if (plan.action === 'skip') throw new Error(`${path}: ${plan.reason}`);
-    if (plan.action === 'replace') editor.replace({ path, oldText: plan.oldText, newText: plan.newText });
-    else editor.append({ path, heading: 'Flammen', text: plan.text });
+    const written = writeSection({ vaultPath, editor, path, name: NAME, inner, label: LABEL, heading: 'Flammen', create: rows.length > 0 });
+    if (written.state === 'aktuell') return { state: 'aktuell', path, week: week.id };
+    if (written.state === 'übersprungen') throw new Error(`${path}: ${written.reason}`);
     status.lastWrite = { at: now().toISOString(), path, week: week.id };
     logger.info?.(`Feuer-Notiz: Flammen in ${path} aktualisiert (${rows.length})`);
     return { state: 'geschrieben', path, week: week.id, rows: rows.length };
