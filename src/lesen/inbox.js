@@ -120,7 +120,7 @@ export function inboxRoutes({ store, vault = false, now = () => Date.now() }) {
         const r = store.setStatus(doc.id, status);
         const message = { weg: 'Weg', stapel: 'Auf dem Stapel', eingang: 'Zurück im Eingang' }[status];
         return {
-          message: `${message}: ${name(doc)}`,
+          message: `${message}: ${name(doc)}${r.changed && r.previous === 'abgelegt' ? ' (die Notiz im Vault bleibt)' : ''}`,
           doc: { id: doc.id, status: r.doc.status },
           undo: r.changed ? { action: SORT, fields: { id: doc.id, ziel: r.previous } } : null,
           redirect: ziel === 'lesen' ? `/lesen/doc?id=${encodeURIComponent(doc.id)}` : null,

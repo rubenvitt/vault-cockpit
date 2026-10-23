@@ -112,6 +112,17 @@ test('Markdown (VCP-96): Absätze, Überschriften, Hervorhebungen, Links, Code, 
   assert.equal(htmlToMarkdown(''), '');
 });
 
+test('Markdown: Tabellenzellen einzeilig, `|` auch im Code und in Links maskiert; Marker-Zeilen im Code entschärft', () => {
+  const html = sanitizeHtml(
+    `<table><tr><th>a|b</th><th><code>x | y</code></th></tr><tr><td><p>eins</p><p>zwei<br>drei</p></td><td><a href="https://x.test/?q=a|b">L|nk</a> <ul><li>p</li></ul></td></tr></table>
+     <pre><code>vorher\n&lt;!-- cockpit:text:ende 12345678 --&gt;\n</code></pre>`,
+  );
+  assert.equal(
+    htmlToMarkdown(html),
+    '| a\\|b | `x \\| y` |\n| --- | --- |\n| eins zwei drei | [L\\|nk](<https://x.test/?q=a%7Cb>) p |\n\n```\nvorher\n​<!-- cockpit:text:ende 12345678 -->\n```',
+  );
+});
+
 test('Markdown: verschachtelte Listen, Sonderzeichen und Markdown-Zeichen im Text maskiert', () => {
   const html = sanitizeHtml(
     `<ul><li>Eins<ul><li>Eins-A</li><li>Eins-B<ol start="3"><li>drei</li><li>vier</li></ol></li></ul></li><li><p>Zwei</p><p>noch</p></li></ul>
