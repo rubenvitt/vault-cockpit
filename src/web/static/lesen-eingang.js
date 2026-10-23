@@ -21,15 +21,24 @@
     const card = document.querySelector('.inbox-card');
     card?.classList.add(`fly-${ziel}`);
     if (card) card.style.transform = '';
+    const toasts = document.querySelector('.toasts');
+    const before = toasts?.lastElementChild;
     form.requestSubmit(button);
     if (!card) return;
-    // Klappt es, ersetzt cockpit.js `main`; scheitert es, bleibt das Formular stehen: Karte zurück.
+    // Nur eine neue Fehlermeldung von cockpit.js heißt „nicht gespeichert“: Karte zurück.
+    // (Nach „Jetzt lesen“ ist das Formular bis zum Seitenwechsel noch da.)
     new MutationObserver((_, watcher) => {
       if (form.classList.contains('busy')) return;
       watcher.disconnect();
-      if (form.isConnected) card.classList.remove(`fly-${ziel}`);
+      const last = toasts?.lastElementChild;
+      if (last && last !== before && last.classList.contains('error')) card.classList.remove(`fly-${ziel}`);
     }).observe(form, { attributes: true, attributeFilter: ['class'] });
   }
+
+  // Zurück aus der Leseansicht (bfcache): Die Karte von damals ist schon entschieden.
+  addEventListener('pageshow', (e) => {
+    if (e.persisted) location.reload();
+  });
 
   // --- Wischen: ← weg, ↓ Stapel, → lesen -----------------------------------
 

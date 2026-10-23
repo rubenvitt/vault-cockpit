@@ -233,7 +233,8 @@ export function createReadingStore({ path, now = () => Date.now() }) {
     leftInboxSince(since) {
       const where = "previous_status = 'eingang' AND status != 'eingang' AND status_changed_at >= ?";
       const { n } = db.prepare(`SELECT COUNT(*) AS n FROM documents WHERE ${where}`).get(since);
-      const last = db.prepare(`SELECT id, title, url FROM documents WHERE ${where} ORDER BY status_changed_at DESC, rowid DESC LIMIT 1`).get(since);
+      // Zurücklegen geht nur von Stapel und Weg aus (src/lesen/inbox.js).
+      const last = db.prepare(`SELECT id, title, url FROM documents WHERE ${where} AND status IN ('stapel', 'weg') ORDER BY status_changed_at DESC, rowid DESC LIMIT 1`).get(since);
       return { count: n, last: last ? { ...last } : null };
     },
 

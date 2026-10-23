@@ -178,6 +178,11 @@ test('Lesestapel: leftInboxSince zählt nur heutige Entscheidungen aus dem Einga
   store.setStatus(c.id, 'archiv'); // kam nicht aus dem Eingang
   const since = '2026-10-22T22:00:00.000Z';
   assert.deepEqual(store.leftInboxSince(since), { count: 1, last: { id: b.id, title: 'B', url: 'https://a.test/b' } });
+  // Direkt aus dem Eingang archiviert (Leseansicht): zählt, ist aber kein Rückgängig-Ziel.
+  const { doc: d } = store.addDocument({ url: 'https://a.test/d', title: 'D' });
+  t += 1000;
+  store.setStatus(d.id, 'archiv');
+  assert.deepEqual(store.leftInboxSince(since), { count: 2, last: { id: b.id, title: 'B', url: 'https://a.test/b' } });
   store.setStatus(b.id, 'eingang');
-  assert.deepEqual(store.leftInboxSince(since), { count: 0, last: null });
+  assert.deepEqual(store.leftInboxSince(since), { count: 1, last: null });
 });
