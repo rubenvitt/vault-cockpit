@@ -34,10 +34,11 @@ import { connectionRoutes } from './connections.js';
  * (src/lesen/embed-cache.js); ohne gibt es keine Querverbindung im Wiedersehen.
  * `connections` (`index`, `semantic`, `policy`, `exporter`) schaltet die
  * Querverbindungen der Leseansicht ein (src/lesen/connections.js).
- * `onChange(docId)` meldet Archivieren, „fertig gelesen“ und geänderte
- * Markierungen (für die Lesestapel-Notiz im Vault, src/lesen/vault-export.js).
+ * `onChange(docId)` meldet Statuswechsel und geänderte Markierungen (für die
+ * Lesestapel-Notiz im Vault, src/lesen/vault-export.js). `exporter` schaltet
+ * „In den Vault“ und „Im Vault ablegen“ ein (VCP-96, src/lesen/doc.js).
  */
-export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefined, capture = null, review = {}, embedCache = null, connections = null, onChange = () => {}, logger = console }) {
+export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefined, capture = null, review = {}, embedCache = null, connections = null, exporter = null, onChange = () => {}, logger = console }) {
   const feeds = feedRoutes({ store, fetchFeed, logger });
   /** Fehler aus Abruf und Speicher als Meldung für die Seite. */
   const asAction = async (run) => {
@@ -50,11 +51,11 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
     }
   };
 
-  const inbox = inboxRoutes({ store });
+  const inbox = inboxRoutes({ store, vault: Boolean(exporter) });
 
   const add = addRoutes({ store, asAction, logger });
 
-  const doc = docRoutes({ store, asAction, onChange });
+  const doc = docRoutes({ store, asAction, onChange, exporter });
   const marked = highlightRoutes({ store, asAction, capture, onChange, logger });
   const wiedersehen = reviewRoutes({ store, capture, logger, embedCache, ...review });
   const links = connections ? connectionRoutes({ store, embedCache, logger, ...connections }) : { pages: {}, actions: {} };
@@ -67,7 +68,7 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
       ...add.pages,
       '/lesen': async () => ({ redirect: '/lesen/eingang' }),
       ...inbox.pages,
-      ...stackRoutes({ store }).pages,
+      ...stackRoutes({ store, vault: Boolean(exporter) }).pages,
       ...listenRoutes({ store }).pages,
       ...feeds.pages,
       ...doc.pages,

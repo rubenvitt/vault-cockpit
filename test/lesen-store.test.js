@@ -59,9 +59,15 @@ test('Lesestapel: Liste nach Status, Statuswechsel mit Rückgängig-Spur, Fortsc
   assert.ok(archived.archived_at && archived.read_at);
   store.setStatus(b.id, 'weg');
   assert.deepEqual(store.list().map((d) => d.id), [a.id], 'ohne Status alles außer weg');
-  assert.deepEqual(store.counts(), { eingang: 1, stapel: 0, archiv: 0, weg: 1 });
+  assert.deepEqual(store.counts(), { eingang: 1, stapel: 0, archiv: 0, abgelegt: 0, weg: 1 });
   assert.throws(() => store.setStatus(a.id, 'gelesen'), /Unbekannter Status/);
   assert.throws(() => store.setStatus('gibtsnicht', 'archiv'), /gibt es nicht/);
+  // „Weg“ vor dem Lesen ohne `read_at`, „Fertig, weg“ mit (VCP-96), auch ohne Statuswechsel.
+  assert.equal(store.setStatus(a.id, 'weg').doc.read_at, null);
+  const done = store.setStatus(a.id, 'weg', { read: true });
+  assert.ok(!done.changed && done.doc.read_at);
+  assert.equal(store.setStatus(a.id, 'abgelegt').doc.archived_at, null);
+  store.setStatus(a.id, 'eingang');
 
   assert.equal(store.setProgress(a.id, 1.7, 'p:12').progress, 1);
   assert.equal(store.setProgress(a.id, 0.4).scroll_anchor, 'p:12');

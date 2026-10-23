@@ -11,14 +11,16 @@ import { writePrivate } from '../cockpit/settings.js';
  * bauen und gehört deshalb in die Sicherung (`snapshot`, `replaceWith`).
  *
  * Status eines Dokuments: `eingang` (neu, noch nicht gesichtet), `stapel`
- * (will ich lesen), `archiv` (gelesen), `weg` (verworfen). `previous_status`
- * hält den Stand vor dem letzten Wechsel für „Rückgängig“.
+ * (will ich lesen), `archiv` (gelesen, Notiz im Vault), `abgelegt` (ungelesen
+ * mit Volltext im Vault, VCP-96), `weg` (verworfen; mit `read_at` „fertig,
+ * weg“ nach dem Lesen, ohne vor dem Lesen). `previous_status` hält den Stand vor
+ * dem letzten Wechsel für „Rückgängig“.
  *
  * Kein WAL: Die Datei ist klein, es schreibt nur dieser Dienst, und ohne
  * `-wal`/`-shm` daneben bleibt Sichern und Zurückschreiben einfach.
  */
 
-export const STATUSES = ['eingang', 'stapel', 'archiv', 'weg'];
+export const STATUSES = ['eingang', 'stapel', 'archiv', 'abgelegt', 'weg'];
 export const KINDS = ['artikel', 'newsletter', 'feed', 'pdf'];
 export const REVIEW_STATES = ['aktiv', 'losgelassen'];
 
@@ -205,20 +207,20 @@ export function createReadingStore({ path, now = () => Date.now() }) {
 
     /**
      * Neuer Status; `previous` ist der alte (für „Rückgängig“ einfach
-     * `setStatus(id, previous)`). `archiv` setzt `archived_at`, das erste
-     * Archivieren auch `read_at`.
+     * `setStatus(id, previous)`). `archiv` setzt `archived_at`; `read` (Standard
+     * bei `archiv`) setzt `read_at`, wenn es noch fehlt, auch ohne Statuswechsel.
      */
-    setStatus(id, status) {
+    setStatus(id, status, { read = status === 'archiv' } = {}) {
       if (!STATUSES.includes(status)) throw new ReadingError(`Unbekannter Status ${status}`);
       const doc = must(get(id), 'Dieses Dokument');
-      if (doc.status === status) return { doc, previous: doc.status, changed: false };
       const t = iso();
+      if (read && !doc.read_at) db.prepare('UPDATE documents SET read_at = ?, updated_at = ? WHERE id = ?').run(t, t, doc.id);
+      if (doc.status === status) return { doc: get(doc.id), previous: doc.status, changed: false };
       db.prepare(
         `UPDATE documents SET previous_status = status, status = ?, status_changed_at = ?, updated_at = ?,
-           archived_at = CASE WHEN ? = 'archiv' THEN ? ELSE archived_at END,
-           read_at = CASE WHEN ? = 'archiv' AND read_at IS NULL THEN ? ELSE read_at END
+           archived_at = CASE WHEN ? = 'archiv' THEN ? ELSE archived_at END
          WHERE id = ?`,
-      ).run(status, t, t, status, t, status, t, doc.id);
+      ).run(status, t, t, status, t, doc.id);
       return { doc: get(doc.id), previous: doc.status, changed: true };
     },
 
@@ -233,8 +235,8 @@ export function createReadingStore({ path, now = () => Date.now() }) {
     leftInboxSince(since) {
       const where = "previous_status = 'eingang' AND status != 'eingang' AND status_changed_at >= ?";
       const { n } = db.prepare(`SELECT COUNT(*) AS n FROM documents WHERE ${where}`).get(since);
-      // Zurücklegen geht nur von Stapel und Weg aus (src/lesen/inbox.js).
-      const last = db.prepare(`SELECT id, title, url FROM documents WHERE ${where} AND status IN ('stapel', 'weg') ORDER BY status_changed_at DESC, rowid DESC LIMIT 1`).get(since);
+      // Zurücklegen geht nur von Stapel, Weg und Abgelegt aus (src/lesen/inbox.js).
+      const last = db.prepare(`SELECT id, title, url FROM documents WHERE ${where} AND status IN ('stapel', 'weg', 'abgelegt') ORDER BY status_changed_at DESC, rowid DESC LIMIT 1`).get(since);
       return { count: n, last: last ? { ...last } : null };
     },
 
