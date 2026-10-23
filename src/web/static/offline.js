@@ -122,6 +122,21 @@
   const all = async () => ((await store('readonly', (s) => s.getAll())) ?? []).sort((a, b) => a.created - b.created);
   const save = (entry) => store('readwrite', (s) => s.put(entry));
   const drop = (id) => store('readwrite', (s) => s.delete(id));
+  /**
+   * Nach dem Senden: löschen bzw. ersetzen nur, wenn noch genau die gesendete
+   * Fassung im Puffer liegt. Eine neuere (gleiche ID, anderer `rev`) bleibt stehen.
+   */
+  const settle = (entry, replacement = null) =>
+    store('readwrite', (s) => {
+      const req = s.get(entry.id);
+      req.onsuccess = () => {
+        const cur = req.result;
+        if (!cur || (cur.rev ?? cur.created) !== (entry.rev ?? entry.created)) return;
+        if (replacement) s.put(replacement);
+        else s.delete(entry.id);
+      };
+      return req;
+    });
   const reload = async () => {
     entries = await all().catch(() => entries);
   };
@@ -161,7 +176,7 @@
    */
   async function queue({ id, action, fields, label, quiet = false }) {
     try {
-      await save({ id, action, fields, label, quiet, created: Date.now(), error: null });
+      await save({ id, action, fields, label, quiet, created: Date.now(), rev: newId(), error: null });
     } catch {
       return false;
     }
@@ -258,7 +273,7 @@
     }
     const data = await res.json().catch(() => null);
     if (res.ok && data?.ok) {
-      await drop(entry.id);
+      await settle(entry);
       return data.message || entry.label || `${kindOf(entry.text)} gesendet`;
     }
     if (res.status === 401) {
@@ -268,7 +283,7 @@
     if (res.status === 403 && data?.error === 'csrf') return 'csrf';
     // Keine Antwort vom Cockpit selbst (Proxy während eines Deploys): nichts ist passiert, später noch einmal.
     if (!data?.message && res.status >= 500) return 'stop';
-    await save({ ...entry, error: data?.message || `Fehler ${res.status}`, failedAt: Date.now() });
+    await settle(entry, { ...entry, error: data?.message || `Fehler ${res.status}`, failedAt: Date.now() });
     return 'failed';
   }
 
