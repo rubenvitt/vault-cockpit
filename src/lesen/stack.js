@@ -49,7 +49,7 @@ function stackItem(d) {
   const minutes = known(d) ? `${started(d) ? 'noch ' : ''}${d.remaining} Min.` : null;
   const meta = [started(d) ? 'Weiterlesen' : null, minutes, d.site].filter(Boolean).map(esc).join(' · ');
   return `<li class="lesen-item">
-    <a href="/lesen/doc?id=${encodeURIComponent(d.id)}" class="lesen-title">${esc(d.title || d.url)}</a>
+    <a href="/lesen/doc?id=${encodeURIComponent(d.id)}${started(d) ? '#weiter' : ''}" class="lesen-title">${esc(d.title || d.url)}</a>
     <span class="meta">${meta}</span>
   </li>`;
 }

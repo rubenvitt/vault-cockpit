@@ -2,11 +2,12 @@ import { ActionError } from '../cockpit/actions.js';
 import { FetchError } from './fetch.js';
 import { ReadingError } from './store.js';
 import { saveUrl } from './save.js';
-import { renderHighlights } from './pages.js';
 import { stackRoutes } from './stack.js';
 import { inboxRoutes } from './inbox.js';
 import { feedRoutes } from './feeds-page.js';
 import { addRoutes } from './add.js';
+import { docRoutes } from './doc.js';
+import { highlightRoutes } from './highlights.js';
 
 /**
  * Routen des Bereichs „Lesen“, eingebunden in src/web/http.js (Sitzung, CSRF,
@@ -21,8 +22,9 @@ import { addRoutes } from './add.js';
  *   die Dateien liegen dann in `form.files`.
  *
  * Eine neue Seite oder Aktion ist ein Eintrag hier (gern aus einer eigenen Datei).
+ * `capture` legt Notizen in der Vault-Inbox an („In Inbox“, src/lesen/highlights.js).
  */
-export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefined, logger = console }) {
+export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefined, capture = null, logger = console }) {
   const feeds = feedRoutes({ store, fetchFeed, logger });
   /** Fehler aus Abruf und Speicher als Meldung für die Seite. */
   const asAction = async (run) => {
@@ -39,6 +41,9 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
 
   const add = addRoutes({ store, asAction, logger });
 
+  const doc = docRoutes({ store, asAction });
+  const marked = highlightRoutes({ store, asAction, capture, logger });
+
   return {
     uploads: { ...add.uploads, ...feeds.uploads },
     pages: {
@@ -46,12 +51,15 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
       '/lesen': async () => ({ redirect: '/lesen/eingang' }),
       ...inbox.pages,
       ...stackRoutes({ store }).pages,
-      '/lesen/markiert': async (ctx) => ({ html: renderHighlights(store.listHighlights(), ctx) }),
       ...feeds.pages,
+      ...doc.pages,
+      ...marked.pages,
     },
     actions: {
       ...inbox.actions,
       ...add.actions,
+      ...doc.actions,
+      ...marked.actions,
       async '/aktion/lesen/speichern'(form, session) {
         const url = (form.get('url') ?? '').trim();
         if (!url) throw new ActionError('Bitte eine Adresse eingeben');

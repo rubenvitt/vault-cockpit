@@ -546,6 +546,18 @@ keine Frames, keine Event-Attribute, Links nur `http`, `https` und `mailto`.
 Bilder und Videos werden zu Links, die Content-Security-Policy lädt weiter nichts
 von fremden Servern.
 
+Die **Leseansicht** (`/lesen/doc?id=…`, VCP-71) zeigt den Text in Leseschrift mit
+Fortschritt, Restzeit und Archivieren (ohne JavaScript als Formular). Mit
+JavaScript (`/static/lesen-doc.js`) speichert sie die Lesestelle beim Scrollen;
+`#weiter` springt dorthin. Markiert wird per Textauswahl über eine Leiste unten
+(Markieren · Notiz · Verbinden · In Inbox), am iPhone also nicht im Weg des
+Systemmenüs. Eine Markierung merkt sich Zitat, etwas Text davor und danach und die
+ungefähre Stelle (`src/lesen/anchor.js`). So sitzt sie auch nach erneutem Holen
+oder Umformatieren wieder richtig. Eingesetzt werden die Markierungen beim
+Ausliefern als `<mark>` nur um Textstücke. „In Inbox“ legt das Zitat mit Quelle
+über die Schnelleingabe als Notiz in der Vault-Inbox an. Unter **Markiert** stehen
+alle Markierungen, filterbar nach Quelle und Thema.
+
 Abhängigkeiten dafür: `@mozilla/readability` und `linkedom` (reines JavaScript,
 feste Versionen).
 
@@ -658,7 +670,7 @@ npm ci && npm test
 - `src/search/` — lesender Such-Endpunkt `/api/search` mit eigenem Token
 - `src/graph/` — Graph um eine Notiz mit Aufgaben- und Termin-Knoten
 - `src/health/` — Zustand der Hintergrunddienste für `/zustand` und `/health`, Maskieren von Fehlertexten
-- `src/lesen/` — Lesestapel: SQLite-Speicher (`store.js`), SSRF-sicheres Holen (`fetch.js`), Readability und Säubern (`extract.js`), Seiten und Routen (`pages.js`, `http.js`)
+- `src/lesen/` — Lesestapel: SQLite-Speicher (`store.js`), SSRF-sicheres Holen (`fetch.js`), Readability und Säubern (`extract.js`), Seiten und Routen (`pages.js`, `http.js`), Leseansicht und Markierungen (`doc.js`, `highlights.js`, Textanker in `anchor.js`)
 - `src/web/` — Web-Cockpit: OIDC-Login mit PKCE, signiertes Sitzungs-Cookie, HTML der Wochenansicht, Einstellungen, Suche und Graph
 - `sync/` — Image des Sidecars `vault-sync` (Obsidian Headless mit Status-Wrapper)
 
