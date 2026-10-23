@@ -284,21 +284,23 @@ const health = createHealth({
 
 const graph = createGraph({ index, semantic: currentSemantic, zunder, calendar: calendarForGraph(calendars), tz: () => cockpitSettings.get().tz });
 
+// Abhaken und Schnelleingabe: Zunder-Zugang und Inbox-Ordner aus den Einstellungen.
+const cockpitActions = createCockpitActions({
+  vaultPath: VAULT_PATH,
+  settings: cockpitSettings,
+  policy: POLICY,
+  state: captureState,
+  zunder,
+  index,
+  onFlame: (task) => flameNote.afterFlame(task),
+});
+
 // Web-Cockpit (Schritt 3): Wochenansicht mit eigenem Browser-Login. Aus, bis
 // WEB_CLIENT_ID gesetzt ist.
 const webHttp = process.env.WEB_CLIENT_ID
   ? createWebHttp({
       cockpit,
-      // Abhaken und Schnelleingabe: Zunder-Zugang und Inbox-Ordner aus den Einstellungen.
-      actions: createCockpitActions({
-        vaultPath: VAULT_PATH,
-        settings: cockpitSettings,
-        policy: POLICY,
-        state: captureState,
-        zunder,
-        index,
-        onFlame: (task) => flameNote.afterFlame(task),
-      }),
+      actions: cockpitActions,
       // Woche planen: Zunder-Aufgaben holen, Flammen einplanen (VCP-47).
       plan: createWeekPlanner({ settings: cockpitSettings, zunder }),
       // Vault-Notizen ansehen und verarbeiten, über denselben Editor wie vault_edit;
@@ -313,7 +315,8 @@ const webHttp = process.env.WEB_CLIENT_ID
       search: (query, { type = null } = {}) => hybridSearch({ index, semantic: currentSemantic, query, type, limit: 30 }),
       health,
       // Lesen: Eingang, Stapel, Markiert; Artikel holt src/lesen/fetch.js (SSRF-geschützt).
-      reading: readingRoutes({ store: reading }),
+      // „In Inbox“ aus der Leseansicht nutzt die Schnelleingabe des Cockpits.
+      reading: readingRoutes({ store: reading, capture: (input) => cockpitActions.capture(input) }),
       oidc: createOidcLogin({
         issuer: ISSUER,
         clientId: process.env.WEB_CLIENT_ID,

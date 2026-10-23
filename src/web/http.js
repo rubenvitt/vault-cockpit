@@ -25,12 +25,13 @@ const staticFile = (name, enc) => readFileSync(new URL(`./static/${name}`, impor
 const CLIENT_JS = staticFile('cockpit.js', 'utf8');
 const GRAPH_JS = staticFile('graph.js', 'utf8');
 const OFFLINE_JS = staticFile('offline.js', 'utf8');
+const LESEN_DOC_JS = staticFile('lesen-doc.js', 'utf8');
 // sigma + graphology + ForceAtlas2, gebündelt mit `npm run vendor` und eingecheckt.
 const GRAPH_LIB = staticFile('vendor/graph-lib.js', 'utf8');
 // Design-System (Tokens, Bausteine, Wochenansicht) plus die Teile der übrigen Seiten.
 const CSS = staticFile('cockpit.css', 'utf8') + GRAPH_CSS + NOTE_CSS + REVIEW_CSS + PLAN_CSS + HEALTH_CSS + OFFLINE_CSS;
 const hash = (s) => createHash('sha256').update(s).digest('base64url').slice(0, 10);
-const VERSION = { css: hash(CSS), js: hash(CLIENT_JS), graph: hash(GRAPH_JS), graphLib: hash(GRAPH_LIB), offline: hash(OFFLINE_JS) };
+const VERSION = { css: hash(CSS), js: hash(CLIENT_JS), graph: hash(GRAPH_JS), graphLib: hash(GRAPH_LIB), offline: hash(OFFLINE_JS), lesenDoc: hash(LESEN_DOC_JS) };
 versionAssets(VERSION);
 
 /** Web-App-Manifest: Das Cockpit startet auf dem iPhone und unter Android wie eine App. */
@@ -63,6 +64,7 @@ const PUBLIC = new Map([
   ['/static/graph.js', { type: 'text/javascript; charset=utf-8', body: GRAPH_JS, version: VERSION.graph }],
   ['/static/vendor/graph-lib.js', { type: 'text/javascript; charset=utf-8', body: GRAPH_LIB, version: VERSION.graphLib }],
   ['/static/offline.js', { type: 'text/javascript; charset=utf-8', body: OFFLINE_JS, version: VERSION.offline }],
+  ['/static/lesen-doc.js', { type: 'text/javascript; charset=utf-8', body: LESEN_DOC_JS, version: VERSION.lesenDoc }],
   ['/manifest.webmanifest', { type: 'application/manifest+json; charset=utf-8', body: MANIFEST }],
   ['/static/icon.svg', { type: 'image/svg+xml', body: staticFile('icon.svg') }],
   ...['apple-touch-icon', 'icon-192', 'icon-512', 'icon-maskable-512'].map((n) => [`/static/icons/${n}.png`, { type: 'image/png', body: staticFile(`icons/${n}.png`) }]),

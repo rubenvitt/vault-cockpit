@@ -258,12 +258,27 @@ export function createReadingStore({ path, now = () => Date.now() }) {
       return getHighlight(id);
     },
     getHighlight,
-    /** Mit `docId` die eines Dokuments in Lesereihenfolge, sonst alle neuesten zuerst samt Titel und Adresse. */
-    listHighlights({ docId = null, limit = 200 } = {}) {
+    /**
+     * Mit `docId` die eines Dokuments in Lesereihenfolge, sonst alle neuesten
+     * zuerst samt Titel, Adresse, Quelle (`doc_site`) und Themen (`doc_topics`);
+     * `site` und `topic` filtern danach.
+     */
+    listHighlights({ docId = null, site = null, topic = null, limit = 200 } = {}) {
       if (docId) return db.prepare('SELECT * FROM highlights WHERE doc_id = ? ORDER BY start_hint, created_at').all(docId);
       return db
-        .prepare('SELECT h.*, d.title AS doc_title, d.url AS doc_url FROM highlights h JOIN documents d ON d.id = h.doc_id ORDER BY h.created_at DESC, h.rowid DESC LIMIT ?')
-        .all(limit);
+        .prepare(
+          `SELECT h.*, d.title AS doc_title, d.url AS doc_url, d.site AS doc_site, d.topics AS doc_topics FROM highlights h JOIN documents d ON d.id = h.doc_id
+           WHERE (? IS NULL OR d.site = ?) AND (? IS NULL OR EXISTS (SELECT 1 FROM json_each(d.topics) WHERE value = ?))
+           ORDER BY h.created_at DESC, h.rowid DESC LIMIT ?`,
+        )
+        .all(site, site, topic, topic, limit)
+        .map((h) => ({ ...h, doc_topics: JSON.parse(h.doc_topics ?? '[]') }));
+    },
+    /** Quellen und Themen der Dokumente mit Markierungen, für die Filter unter „Markiert“. */
+    highlightFacets() {
+      const rows = db.prepare('SELECT DISTINCT d.site, d.topics FROM highlights h JOIN documents d ON d.id = h.doc_id').all();
+      const sorted = (values) => [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de'));
+      return { sites: sorted(rows.map((r) => r.site)), topics: sorted(rows.flatMap((r) => JSON.parse(r.topics ?? '[]'))) };
     },
     updateHighlight(id, patch) {
       must(getHighlight(id), 'Diese Markierung');

@@ -2,7 +2,9 @@ import { ActionError } from '../cockpit/actions.js';
 import { FetchError } from './fetch.js';
 import { ReadingError } from './store.js';
 import { saveUrl } from './save.js';
-import { renderInbox, renderStack, renderHighlights } from './pages.js';
+import { renderInbox, renderStack } from './pages.js';
+import { docRoutes } from './doc.js';
+import { highlightRoutes } from './highlights.js';
 
 /**
  * Routen des Bereichs „Lesen“, eingebunden in src/web/http.js (Sitzung, CSRF,
@@ -14,8 +16,9 @@ import { renderInbox, renderStack, renderHighlights } from './pages.js';
  *   wie die übrigen `/aktion/…`; Fehler als `ActionError`.
  *
  * Eine neue Seite oder Aktion ist ein Eintrag hier (gern aus einer eigenen Datei).
+ * `capture` legt Notizen in der Vault-Inbox an („In Inbox“, src/lesen/highlights.js).
  */
-export function readingRoutes({ store, fetchPage = undefined, logger = console }) {
+export function readingRoutes({ store, fetchPage = undefined, capture = null, logger = console }) {
   /** Fehler aus Abruf und Speicher als Meldung für die Seite. */
   const asAction = async (run) => {
     try {
@@ -27,14 +30,20 @@ export function readingRoutes({ store, fetchPage = undefined, logger = console }
     }
   };
 
+  const doc = docRoutes({ store, asAction });
+  const marked = highlightRoutes({ store, asAction, capture, logger });
+
   return {
     pages: {
       '/lesen': async () => ({ redirect: '/lesen/eingang' }),
       '/lesen/eingang': async (ctx) => ({ html: renderInbox(store.list({ status: 'eingang' }), ctx) }),
       '/lesen/stapel': async (ctx) => ({ html: renderStack(store.list({ status: 'stapel' }), ctx) }),
-      '/lesen/markiert': async (ctx) => ({ html: renderHighlights(store.listHighlights(), ctx) }),
+      ...doc.pages,
+      ...marked.pages,
     },
     actions: {
+      ...doc.actions,
+      ...marked.actions,
       async '/aktion/lesen/speichern'(form, session) {
         const url = (form.get('url') ?? '').trim();
         if (!url) throw new ActionError('Bitte eine Adresse eingeben');
