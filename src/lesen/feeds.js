@@ -225,6 +225,7 @@ export function createFeedPoller({ store, fetchFeed = fetchFeedDefault, fetchPag
   }
 
   /** Icon als `data:`-Adresse (die CSP lädt keine fremden Bilder); `''` heißt: keins gefunden. */
+  // shortcut: Ein nicht gefundenes Icon (`''`) wird nie wieder versucht; nachrüsten, wenn Feeds später eins bekommen.
   async function icon(feed, parsed) {
     try {
       const res = await fetchFeed(parsed.icon ?? new URL('/favicon.ico', parsed.siteUrl ?? feed.url).href, { accept: ICON_TYPES, maxBytes: 100_000 });
@@ -246,12 +247,15 @@ export function createFeedPoller({ store, fetchFeed = fetchFeedDefault, fetchPag
     const fresh = parsed.entries.filter((e) => e.key && !known.has(e.key));
     if (fresh.every((e) => e.published)) fresh.sort((a, b) => b.published - a.published);
     const take = first ? fresh.slice(0, FIRST_FETCH) : fresh;
+    // Erster Abruf: den Rest vorab als bekannt merken, sonst rückt er nach einem Fehler unten beim nächsten Mal nach.
+    if (first) for (const entry of fresh.slice(FIRST_FETCH)) store.rememberEntry(feed.id, entry.key, null);
     const site = parsed.title ?? feed.title ?? hostOf(feed.url);
     let added = 0;
     // Älteste zuerst anlegen, damit der neueste Eintrag oben im Eingang steht.
     for (const entry of [...take].reverse()) {
       if (known.has(entry.key)) continue;
       known.add(entry.key);
+      // shortcut: Gefilterte Einträge bleiben für immer bekannt, ein gelockerter Filter holt sie nicht nach; ändern, wenn das stört.
       if (!entry.url || !matchesFilter(feed.keyword_filter, entry)) {
         store.rememberEntry(feed.id, entry.key, null);
         continue;
@@ -260,7 +264,6 @@ export function createFeedPoller({ store, fetchFeed = fetchFeedDefault, fetchPag
       store.rememberEntry(feed.id, entry.key, doc.id);
       if (!duplicate) added += 1;
     }
-    for (const entry of fresh) if (!known.has(entry.key)) store.rememberEntry(feed.id, entry.key, null);
     const patch = {
       etag: res.headers?.etag ?? null,
       last_modified: res.headers?.['last-modified'] ?? null,
@@ -304,9 +307,15 @@ export function createFeedPoller({ store, fetchFeed = fetchFeedDefault, fetchPag
       };
       await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker));
       return added;
-    })().finally(() => {
-      running = null;
-    });
+    })()
+      .catch((err) => {
+        // Etwa die Datenbank nach einem gescheiterten Wiederherstellen; ohne catch beendete das den Prozess.
+        logger.error?.(`Feeds: Durchgang fehlgeschlagen: ${err.message}`);
+        return 0;
+      })
+      .finally(() => {
+        running = null;
+      });
     return running;
   }
 
@@ -316,6 +325,7 @@ export function createFeedPoller({ store, fetchFeed = fetchFeedDefault, fetchPag
     const feeds = store.listFeeds();
     if (!feeds.length) return { ...base, state: 'off', summary: 'keine Feeds abonniert', facts: [] };
     // Name nie die Adresse: private Feeds tragen gern einen Token darin.
+    // shortcut: Ein dauerhaft toter Feed hält den Dienst auf „Fehler“ (Störung in der Kopfzeile, `degraded`), bis man ihn pausiert oder entfernt; wie bei den Kalendern.
     const items = feeds.map((f) => ({
       name: f.title || hostOf(f.url),
       state: f.paused ? 'off' : f.error_count ? 'error' : f.last_fetch_at ? 'ok' : 'unknown',
