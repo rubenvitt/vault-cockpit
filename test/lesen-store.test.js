@@ -179,6 +179,10 @@ test('Lesestapel: Feed-Gruppen anlegen, ordnen, zuordnen, filtern, löschen', ()
   const tech = store.addGroup({ name: '  Tech ' }).group;
   assert.equal(tech.name, 'Tech');
   assert.equal(store.addGroup({ name: 'tech' }).duplicate, true, 'Name ohne Groß/klein');
+  const eco = store.addGroup({ name: 'Ökologie' }).group;
+  assert.equal(store.addGroup({ name: 'ökologie' }).group.id, eco.id, 'auch mit Umlaut');
+  assert.throws(() => store.updateGroup(tech.id, { name: 'ÖKOLOGIE' }), /gibt es schon/);
+  store.deleteGroup(eco.id);
   const news = store.addGroup({ name: 'News', paused: true }).group;
   assert.equal(news.paused, true);
   assert.deepEqual(store.listGroups().map((g) => g.name), ['Tech', 'News']);

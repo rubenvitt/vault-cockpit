@@ -5,7 +5,7 @@ import { esc } from '../web/layout.js';
 import { xmlAttr } from './feeds.js';
 
 const attrOf = (el, name) => xmlAttr(el, name) ?? xmlAttr(el, name.toLowerCase());
-const titleOf = (el) => (attrOf(el, 'title') ?? attrOf(el, 'text') ?? '').trim() || null;
+const titleOf = (el) => [attrOf(el, 'title'), attrOf(el, 'text')].map((v) => v?.trim()).find(Boolean) ?? null;
 const isOutline = (el) => el?.tagName?.toLowerCase() === 'outline';
 
 /**
