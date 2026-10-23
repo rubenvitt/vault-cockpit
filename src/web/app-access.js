@@ -30,7 +30,8 @@ import { readLimited, FormError } from './multipart.js';
  *
  * Mit dem Geräte-Token (`Authorization: Bearer vct_…`) statt Sitzung und CSRF:
  * `GET /api/app/stapel?zeit=15`, `GET /api/app/text?id=…`,
- * `POST /api/app/fortschritt`, `POST /api/app/markierung`, `GET /api/app/ich`.
+ * `POST /api/app/fortschritt`, `POST /api/app/markierung`, `GET /api/app/ich`,
+ * `POST /api/app/abmelden` (widerruft den Token selbst).
  * Dieselbe Logik wie `/lesen/hoeren` und die `/aktion/lesen/…`-Aktionen.
  * Fehler wie src/lesen/api.js: `{ error, status, message }`.
  */
@@ -144,6 +145,15 @@ export function createAppAccess({ sessions, tokens, reading, publicUrl, appId = 
 
   /** Pfad → [Methode, Handler(req, res, url, device)]. */
   const API = {
+    // Abmelden in der App: widerruft genau diesen Geräte-Token, danach gibt jeder Endpunkt 401.
+    '/api/app/abmelden': [
+      'POST',
+      (req, res, url, device) => {
+        tokens.revoke(device.id);
+        logger.info?.(`App abgemeldet: Geräte-Token „${device.name}“ widerrufen`);
+        return json(res, 200, { ok: true });
+      },
+    ],
     '/api/app/ich': ['GET', (req, res, url, device) => json(res, 200, { ok: true, name: device.name, scopes: grantsOf(device.scope), version: VERSION })],
     '/api/app/stapel': [
       'GET',

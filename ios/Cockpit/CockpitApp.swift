@@ -51,6 +51,12 @@ struct LoginView: View {
             .controlSize(.large)
             .disabled(model.isLoggingIn)
             .padding(.top)
+            if let notice = model.notice {
+                Text(notice)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
             if let error = model.loginError {
                 Text(error)
                     .font(.callout)

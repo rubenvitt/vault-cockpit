@@ -62,6 +62,12 @@ public struct APIClient: Sendable {
         try await send("api/app/markierung", body: highlight)
     }
 
+    /// Widerruft diesen Geräte-Token auf dem Server (Abmelden); danach gibt jeder Aufruf 401.
+    public func signOut() async throws {
+        struct Empty: Codable {}
+        let _: Empty = try await send("api/app/abmelden", body: Empty())
+    }
+
     /// Legt eine Adresse in den Lesestapel (Recht „Lesestapel“ gehört zum App-Token).
     public func saveToReadingList(url: URL, title: String? = nil) async throws -> SavedDocument {
         struct Body: Encodable { let url: String; let title: String? }

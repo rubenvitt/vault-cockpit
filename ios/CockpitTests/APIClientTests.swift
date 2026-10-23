@@ -111,6 +111,14 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(seen[0].body["url"] as? String, "https://blatt.test/b")
     }
 
+    func testSignOutRevokesToken() async throws {
+        respond(#"{"ok":true}"#)
+        try await client.signOut()
+        XCTAssertEqual(seen[0].request.httpMethod, "POST")
+        XCTAssertEqual(seen[0].request.url?.path(), "/api/app/abmelden")
+        XCTAssertEqual(seen[0].request.value(forHTTPHeaderField: "Authorization"), "Bearer vct_geheim")
+    }
+
     func testErrorsCarryStatusAndMessage() async {
         respond(#"{"error":"unauthorized","status":401,"message":"Token abgelehnt. Bitte in der App neu anmelden."}"#, status: 401)
         do {

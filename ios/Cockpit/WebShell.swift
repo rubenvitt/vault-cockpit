@@ -7,7 +7,8 @@ enum NavigationDecision: Equatable {
     case allow
     /// Sitzung abgelaufen: nativer Login, danach weiter auf `next`.
     case login(next: String)
-    /// „Abmelden“ im Cockpit: nativ abmelden (Cookies, Website-Daten, Token).
+    /// „Abmelden“ im Cockpit: geht zum Server durch, danach nativ abmelden (Token widerrufen,
+    /// Cookies, Website-Daten, Keychain).
     case logout
     /// Anderer Host: `SFSafariViewController`.
     case external(URL)
@@ -59,6 +60,8 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     private let model: AppModel
     private var webView: WKWebView!
     private var downloads: [ObjectIdentifier: URL] = [:]
+    /// `POST /logout` läuft; die Weiterleitung auf `/login` danach meldet nativ ab statt neu an.
+    private var loggingOut = false
 
     init(model: AppModel) {
         self.model = model
@@ -124,9 +127,15 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
             }
             return .allow
         case .login(let next):
-            model.sessionExpired(next: next)
+            if loggingOut {
+                loggingOut = false
+                await model.logout()
+            } else {
+                model.sessionExpired(next: next)
+            }
         case .logout:
-            await model.logout()
+            loggingOut = true
+            return .allow
         case .external(let url):
             present(SFSafariViewController(url: url), animated: true)
         case .system(let url):
@@ -159,6 +168,11 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         webView.scrollView.refreshControl?.endRefreshing()
+        // Ohne Netz erreicht `POST /logout` den Server nicht; lokal trotzdem abmelden.
+        if loggingOut {
+            loggingOut = false
+            Task { await model.logout() }
+        }
     }
 
     // MARK: Downloads (OPML, Wochenexport)

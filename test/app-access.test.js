@@ -321,6 +321,17 @@ test('App-API: ohne, mit fremdem Recht und mit widerrufenem Token', async () => 
     assert.equal((await call('/api/app/ich', { bearer: device.token })).status, 200);
     tokens.revoke(device.id);
     await all(device.token, 401);
+    // Abmelden in der App widerruft genau diesen Token.
+    const phone = tokens.create('iPhone', 'app');
+    const other = tokens.create('iPad', 'app');
+    assert.equal((await call('/api/app/abmelden', { bearer: phone.token })).status, 405);
+    assert.equal((await call('/api/app/abmelden', { method: 'POST', body: {} })).status, 401);
+    const out = await call('/api/app/abmelden', { method: 'POST', bearer: phone.token, body: {} });
+    assert.equal(out.status, 200);
+    assert.deepEqual(await out.json(), { ok: true });
+    await all(phone.token, 401);
+    assert.equal((await call('/api/app/abmelden', { method: 'POST', bearer: phone.token, body: {} })).status, 401);
+    assert.equal((await call('/api/app/ich', { bearer: other.token })).status, 200);
     // Eine Sitzung ersetzt den Token nicht.
     assert.equal((await call('/api/app/ich')).status, 401);
   });

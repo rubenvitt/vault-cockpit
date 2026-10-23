@@ -24,6 +24,8 @@ final class AppModel {
     var phase: Phase
     var isLoggingIn = false
     var loginError: String?
+    /// Hinweis nach dem Abmelden, z. B. wenn der Token ohne Netz nicht widerrufen wurde.
+    var notice: String?
     /// Pfad, den die Web-Hülle nach dem nächsten Login öffnet.
     var startPath = "/"
     /// Neue Web-Hülle nach jedem Login, damit sie mit dem frischen Cookie startet.
@@ -46,6 +48,7 @@ final class AppModel {
         guard !isLoggingIn else { return }
         isLoggingIn = true
         loginError = nil
+        notice = nil
         defer { isLoggingIn = false }
         do {
             let request = LoginRequest(serverURL: config.serverURL)
@@ -77,9 +80,19 @@ final class AppModel {
         Task { await login() }
     }
 
-    /// Cookies, Website-Daten (auch Service Worker und Offline-Puffer) und Token löschen. Den Token
-    /// widerruft man bei Bedarf unter Einstellungen → API-Tokens.
+    /// Geräte-Token auf dem Server widerrufen, dann Cookies, Website-Daten (auch Service Worker und
+    /// Offline-Puffer) und Token löschen. Ohne Netz wird trotzdem lokal gelöscht, mit Hinweis.
     func logout() async {
+        var notice: String?
+        if let token = (try? keychain.token()) ?? nil {
+            do {
+                try await APIClient(baseURL: config.serverURL, token: token).signOut()
+            } catch let error as APIError where error.isUnauthorized {
+                // Schon widerrufen.
+            } catch {
+                notice = "Abgemeldet, aber der Server war nicht erreichbar. Den Geräte-Token unter Einstellungen → API-Tokens widerrufen."
+            }
+        }
         await WKWebsiteDataStore.default().removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
         do {
             try keychain.deleteToken()
@@ -88,6 +101,7 @@ final class AppModel {
         }
         startPath = "/"
         loginError = nil
+        self.notice = notice
         phase = .loggedOut
     }
 }

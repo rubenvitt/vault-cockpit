@@ -853,7 +853,10 @@ Den Geräte-Token legt die App sicher ab (Keychain, mit der Share Extension
 geteilt). Er steht unter **Einstellungen → API-Tokens** mit dem Recht **App**
 und dem Gerätenamen und lässt sich dort widerrufen; danach gibt jeder Endpunkt
 sofort `401`. Er darf alles, was **Lesestapel** darf: Die Share Extension
-speichert über `POST /lesestapel/speichern` (siehe oben).
+speichert über `POST /lesestapel/speichern` (siehe oben). Abmelden in der App
+widerruft ihn selbst (`POST /api/app/abmelden`) und löscht Cookies,
+Website-Daten und Keychain-Eintrag; das Sitzungs-Cookie ist zustandslos signiert,
+eine Kopie davon beendet nur „Überall abmelden“ oder der Ablauf.
 
 **App-API** (Header `Authorization: Bearer vct_…`, kein Cookie, kein CSRF):
 
@@ -863,6 +866,7 @@ speichert über `POST /lesestapel/speichern` (siehe oben).
 | `GET /api/app/stapel?zeit=15` | `{"ok", "zeit", "items": [{"id","title","url","site","kind","minutes","remaining","progress"}]}` — Wiedergabeliste wie `/lesen/hoeren` (`zeit` 5, 15, 30 oder 60, sonst 15) |
 | `GET /api/app/text?id=…` | `{"ok", "id", "title", "text", "sentences": [[start, end], …], "progress", "anchor"}` wie `/lesen/hoeren/text`; `404` ohne Artikel |
 | `POST /api/app/fortschritt` | Body `{"id", "fortschritt": 0.42, "anker": 1234}` (Anker = Zeichen im Text, optional) → `{"ok", "progress"}` |
+| `POST /api/app/abmelden` | Body `{}` → `{"ok": true}`; widerruft genau diesen Geräte-Token (Abmelden in der App), danach `401` |
 | `POST /api/app/markierung` | Body `{"id", "quote", "prefix"?, "suffix"?, "start"?, "cid"?}` → `201 {"ok", "id", "duplicate": false, "message"}`; dieselbe `cid` noch einmal → `200` mit `"duplicate": true` |
 
 Fehler: `{"error", "status", "message"}` mit `400` (fehlendes oder falsches

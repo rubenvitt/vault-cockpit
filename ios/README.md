@@ -37,10 +37,14 @@ make test      # Unit-Tests auf dem ersten verfügbaren iPhone-Simulator
   Teilen-Blatt gegeben. Navigation auf `/login` (Sitzung abgelaufen) startet den nativen Login und
   danach `next`. Service Worker laufen in einem WKWebView nur für App-Bound Domains:
   `WKAppBoundDomains` in der Info.plist, `limitsNavigationsToAppBoundDomains = true`.
-- **Abmelden**: „Abmelden“ im Cockpit (`POST /logout`) fängt die App ab, außerdem gibt es ein
-  natives Menü (mit zwei Fingern lange drücken). Beides löscht Cookies und alle Website-Daten
-  (auch Service Worker und Offline-Puffer) und den Token in der Keychain. Widerrufen lässt sich der
-  Token unter Einstellungen → API-Tokens.
+- **Abmelden**: „Abmelden“ im Cockpit (`POST /logout`) geht normal zum Server; die Weiterleitung
+  danach auf `/login` meldet nativ ab statt neu an. Dasselbe macht das native Menü (mit zwei Fingern
+  lange drücken). Nativ abmelden heißt: `POST /api/app/abmelden` widerruft den Geräte-Token auf dem
+  Server, dann werden Cookies, alle Website-Daten (auch Service Worker und Offline-Puffer) und der
+  Token in der Keychain gelöscht. Ohne Netz wird lokal trotzdem gelöscht, und der Login-Bildschirm
+  sagt, dass man den Token unter Einstellungen → API-Tokens widerrufen soll. Das Sitzungs-Cookie
+  ist signiert und ohne Zustand auf dem Server: `POST /logout` löscht es nur im Client, eine Kopie
+  gilt bis zum Ablauf oder bis „Überall abmelden“.
 - **Brücke** `cockpit` (`window.webkit.messageHandlers.cockpit`): `/lesen/hoeren` schickt
   `{type: 'hoeren', zeit}`; die App öffnet `PlayerView(minutes:)`, bis VCP-94 nur ein Platzhalter.
   Nachrichten nimmt die App nur vom Hauptframe des eigenen Hosts an.
