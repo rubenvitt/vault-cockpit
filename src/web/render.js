@@ -564,6 +564,15 @@ export function renderSettings({ stored, defaults, checks = {}, notice = null, e
       ? ['Token aus der Umgebung', 'ok']
       : ['nicht eingerichtet', 'off'];
   const embed = stored.embed.url ? ['eigener Server', 'ok'] : d.embedUrl ? [`aus der Umgebung (${esc(d.embedUrl)})`, 'ok'] : ['aus, nur Volltextsuche', 'off'];
+  const tts = stored.tts ?? { provider: null, key: null, voice: null, model: null };
+  const ttsKey = tts.key ?? d.elevenlabsKey;
+  const ttsChoice = tts.provider ?? d.ttsProvider ?? (ttsKey ? 'elevenlabs' : 'geraet');
+  const voice = ttsChoice !== 'elevenlabs'
+    ? ['Gerätestimme', 'off']
+    : !ttsKey
+      ? ['ElevenLabs, es fehlt der API-Key', 'warn']
+      : [tts.key ? 'ElevenLabs' : 'ElevenLabs, Key aus der Umgebung', 'ok'];
+  const ttsDefault = (d.ttsProvider ?? (d.elevenlabsKey ? 'elevenlabs' : 'geraet')) === 'elevenlabs' ? 'ElevenLabs' : 'Gerät';
   const bridgeOn = stored.bridge.enabled ?? d.bridgeEnabled;
   const bridge = bridgeOn ? ['an', 'ok'] : ['aus', 'off'];
   const flameNoteOn = stored.flameNote?.enabled ?? d.flameNoteEnabled ?? true;
@@ -583,6 +592,7 @@ export function renderSettings({ stored, defaults, checks = {}, notice = null, e
     ['mail', 'Mail', mail],
     ['lesestapel', 'Lesestapel', null],
     ['embeddings', 'Embeddings', embed],
+    ['vorlesen', 'Vorlesen', voice],
     ['anzeige', 'Anzeige', null],
     ['anmeldung', 'Anmeldung', null],
     ...(tokens ? [['tokens', 'API-Tokens', null]] : []),
@@ -681,6 +691,27 @@ ${backupHint(backup)}
     <label>Adresse<input name="embed.url" value="${esc(stored.embed.url ?? '')}" placeholder="${esc(d.embedUrl ?? 'http://ollama:11434')}"></label>
     <label>Modell<input name="embed.model" value="${esc(stored.embed.model ?? '')}" placeholder="${esc(d.embedModel)}"></label>
   </div>
+</section>
+<section id="vorlesen">
+  ${head2('Vorlesen', voice)}
+  <p class="meta">Wer bei „Unterwegs hören“ vorliest, im Browser und in der iOS-App. Mit ElevenLabs holt der Server jeden Satz als Audio, der Key bleibt auf dem Server. Jeder Satz kostet Zeichen-Kontingent; schon Gehörtes liegt im Cache und kostet nichts mehr. Fällt ElevenLabs aus, liest das Gerät weiter.</p>
+  <div class="grid">
+    <label>Anbieter<select name="tts.provider">
+      <option value=""${tts.provider === null ? ' selected' : ''}>Standard (${ttsDefault})</option>
+      <option value="geraet"${tts.provider === 'geraet' ? ' selected' : ''}>Gerät</option>
+      <option value="elevenlabs"${tts.provider === 'elevenlabs' ? ' selected' : ''}>ElevenLabs</option>
+    </select></label>
+    <label><span>ElevenLabs-API-Key <span class="hint">nur Text to Speech</span></span><input name="tts.key" type="password" autocomplete="new-password"
+      placeholder="${tts.key ? 'gesetzt (leer lassen = unverändert)' : d.elevenlabsKey ? 'aus der Umgebung' : ''}"></label>
+  </div>
+  <details class="more">
+    <summary>Stimme und Modell</summary>
+    <div class="grid">
+      <label><span>Stimme <span class="hint">Voice-ID</span></span><input name="tts.voice" value="${esc(tts.voice ?? '')}" placeholder="${esc(d.elevenlabsVoice ?? '')}"></label>
+      <label><span>Modell <span class="hint">eleven_flash_v2_5 kostet die Hälfte</span></span><input name="tts.model" value="${esc(tts.model ?? '')}" placeholder="${esc(d.elevenlabsModel ?? '')}"></label>
+    </div>
+  </details>
+  ${tts.key ? '<label class="checkline"><input type="checkbox" name="tts.clear" value="1"> eigenen Key löschen</label>' : ''}
 </section>
 <section id="anzeige">
   ${head2('Anzeige')}

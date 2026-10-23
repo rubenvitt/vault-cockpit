@@ -61,8 +61,13 @@ make test      # Unit-Tests auf dem ersten verfügbaren iPhone-Simulator
 - **Bedienung:** Abspielen/Pause, Satz zurück, nächster Satz, nächster Text, Tempo 0,8–1,8
   (`UserDefaults`, Schlüssel `player.tempo`), Liste mit Restzeit, „Das hier merken“. Pause bricht
   den Satz ab, Weiterhören beginnt ihn neu (auch nach Anruf oder abgezogenem Kopfhörer).
-- **Stimme:** beste installierte `de-DE`-Stimme (Premium vor Enhanced, ohne Spaß- und eigene
-  Stimme), sonst die Standardstimme. `AVAudioSession` `.playback`/`.spokenAudio`, aktiv ab dem
+- **Stimme:** Nennt `GET /api/app/stapel` eine `stimme` (ElevenLabs, im Cockpit unter
+  Einstellungen → Vorlesen), holt `ServerSpeech` jeden Satz als MP3 von `GET /api/app/audio`
+  (`von`/`bis` = Satzgrenzen in UTF-16) und spielt ihn mit `AVAudioPlayer` (`enableRate` für das
+  Tempo); den nächsten Satz lädt er schon während des laufenden, das Laden läuft als
+  Hintergrund-Task. Lehnt der Server ab oder fehlt das Netz, zeigt der Player den Grund und liest
+  bis zum Schließen mit der Gerätestimme weiter. Gerätestimme: beste installierte `de-DE`-Stimme
+  (Premium vor Enhanced, ohne Spaß- und eigene Stimme), sonst die Standardstimme. `AVAudioSession` `.playback`/`.spokenAudio`, aktiv ab dem
   ersten Satz; bei Pause bleibt sie aktiv, damit Sperrbildschirm und AirPods bei der App bleiben.
 - **Sperrbildschirm:** `MPNowPlayingInfoCenter` mit Titel, Quelle, Dauer und Stelle als Schätzung
   (15 Zeichen pro Sekunde bei Tempo 1) und Tempo. `MPRemoteCommandCenter`: Play, Pause, Umschalten,

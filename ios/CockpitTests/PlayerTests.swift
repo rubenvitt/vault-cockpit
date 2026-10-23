@@ -256,8 +256,13 @@ final class PendingListeningTests: XCTestCase {
 @MainActor
 private final class FakeSpeech: SpeechOutput {
     var onFinish: (() -> Void)?
+    var onNotice: ((String) -> Void)?
     var spoken: [String] = []
-    func speak(_ text: String, tempo: Double) { spoken.append(text) }
+    var prepared: [Utterance] = []
+    var voices: [String?] = []
+    func speak(_ utterance: Utterance, tempo: Double) { spoken.append(utterance.text) }
+    func prepare(_ utterance: Utterance) { prepared.append(utterance) }
+    func use(serverVoice: String?) { voices.append(serverVoice) }
     func stop() {}
 }
 
@@ -266,6 +271,10 @@ private actor FakeService: ListenService {
     var saved: [ProgressUpdate] = []
     var highlights: [NewHighlight] = []
     var rejectsHighlights = false
+    var audioRequests: [[Int]] = []
+    /// Antwort der Stimme vom Server; nil = Kontingent aufgebraucht.
+    var audioData: Data?
+    var voice: String?
     /// Langsames Netz beim Speichern des Fortschritts.
     let saveDelay: Duration
 
@@ -275,10 +284,18 @@ private actor FakeService: ListenService {
 
     func setOffline(_ value: Bool) { offline = value }
     func setRejectsHighlights(_ value: Bool) { rejectsHighlights = value }
+    func setVoice(_ value: String?) { voice = value }
 
     func queue(minutes: Int) async throws -> Queue {
-        let list = ["zeit": minutes, "items": [["id": "a", "title": "Erster Text", "url": "https://example.org/a", "site": "example.org", "kind": "article", "minutes": 3, "remaining": 2, "progress": 0.4]]] as [String: Any]
+        var list = ["zeit": minutes, "items": [["id": "a", "title": "Erster Text", "url": "https://example.org/a", "site": "example.org", "kind": "article", "minutes": 3, "remaining": 2, "progress": 0.4]]] as [String: Any]
+        if let voice { list["stimme"] = voice }
         return try JSONDecoder().decode(Queue.self, from: JSONSerialization.data(withJSONObject: list))
+    }
+
+    func audio(id: String, start: Int, end: Int) async throws -> Data {
+        audioRequests.append([start, end])
+        guard let audioData else { throw APIError(status: 502, code: "bad_request", message: "ElevenLabs: Kontingent aufgebraucht") }
+        return audioData
     }
 
     /// Wie der Server: die zuletzt gespeicherte Lesestelle, sonst Satz 2.
@@ -374,5 +391,68 @@ final class PlayerTests: XCTestCase {
         player.remember()
         await waitUntil { player.message != nil }
         XCTAssertEqual(player.message, "Gemerkt.")
+    }
+}
+
+@MainActor
+final class ServerSpeechTests: XCTestCase {
+    private func waitUntil(_ condition: () async -> Bool) async {
+        for _ in 0..<200 where !(await condition()) { try? await Task.sleep(for: .milliseconds(10)) }
+    }
+
+    private let first = Utterance(id: "a", text: "Erster Satz.", start: 0, end: 12)
+    private let second = Utterance(id: "a", text: "Zweiter Satz.", start: 13, end: 26)
+
+    func testWithoutServerVoiceTheDeviceSpeaks() async {
+        let service = FakeService()
+        let device = FakeSpeech()
+        let speech = ServerSpeech(service: service, fallback: device)
+        speech.use(serverVoice: nil)
+        speech.prepare(second)
+        speech.speak(first, tempo: 1)
+        XCTAssertEqual(device.spoken, ["Erster Satz."])
+        try? await Task.sleep(for: .milliseconds(50))
+        let requests = await service.audioRequests
+        XCTAssertEqual(requests, [], "ohne Stimme vom Server nichts holen")
+    }
+
+    func testFailureFallsBackToTheDeviceAndStaysThere() async {
+        let service = FakeService()
+        let device = FakeSpeech()
+        let speech = ServerSpeech(service: service, fallback: device)
+        var notices: [String] = []
+        speech.onNotice = { notices.append($0) }
+        var finished = 0
+        speech.onFinish = { finished += 1 }
+        speech.use(serverVoice: "ElevenLabs")
+
+        speech.prepare(first)
+        speech.speak(first, tempo: 1)
+        await waitUntil { !device.spoken.isEmpty }
+        XCTAssertEqual(device.spoken, ["Erster Satz."], "Gerätestimme übernimmt den Satz")
+        XCTAssertEqual(notices, ["ElevenLabs: Kontingent aufgebraucht. Die Gerätestimme liest weiter."])
+        let requests = await service.audioRequests
+        XCTAssertEqual(requests, [[0, 12]], "Vorladen und Abspielen holen den Satz nur einmal")
+
+        device.onFinish?()
+        XCTAssertEqual(finished, 1, "Ende der Gerätestimme kommt beim Player an")
+        speech.speak(second, tempo: 1)
+        XCTAssertEqual(device.spoken, ["Erster Satz.", "Zweiter Satz."], "danach gleich das Gerät")
+        let after = await service.audioRequests
+        XCTAssertEqual(after.count, 1)
+    }
+
+    func testPlayerPassesVoiceAndPreparesTheNextSentence() async {
+        let defaults = UserDefaults(suiteName: "test-\(UUID())")!
+        let speech = FakeSpeech()
+        let service = FakeService()
+        await service.setVoice("ElevenLabs")
+        let player = Player(minutes: 15, service: service, speech: speech, defaults: defaults)
+        defer { player.close() }
+
+        await player.start()
+        await waitUntil { !speech.spoken.isEmpty }
+        XCTAssertEqual(speech.voices, ["ElevenLabs"])
+        XCTAssertEqual(speech.prepared, [Utterance(id: "a", text: "Dritter 🎉 Satz.", start: 35, end: 51)])
     }
 }

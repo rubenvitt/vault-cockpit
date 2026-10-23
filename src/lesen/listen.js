@@ -3,6 +3,7 @@ import { hidden } from '../web/render.js';
 import { readingPage } from './pages.js';
 import { htmlText } from './anchor.js';
 import { WINDOWS, fitToWindow } from './stack.js';
+import { SpeechError } from './tts.js';
 
 /**
  * Unterwegs hören (VCP-79): `/lesen/hoeren?zeit=15` nimmt die Texte des
@@ -15,6 +16,12 @@ import { WINDOWS, fitToWindow } from './stack.js';
  * src/lesen/anchor.js und die Sätze als `[start, end]` darin, damit Anker und
  * Lesestelle genau zur Leseansicht passen. Ohne JavaScript listet die Seite
  * nur die Texte.
+ *
+ * Ist eine Stimme auf dem Server eingerichtet (`speech`, src/lesen/tts.js),
+ * trägt der Player `data-voice` und holt jeden Satz als MP3 von
+ * `/lesen/hoeren/audio?id=…&von=…&bis=…` (Zeichen wie die Sätze). Vorgelesen
+ * wird so nur Text aus dem Stapel, kein beliebiger. Fällt die Stimme aus,
+ * übernimmt die Sprachausgabe des Geräts.
  */
 
 // Blockgrenzen: Dort endet immer ein Satz, auch wenn im Lesetext kein Leerraum steht („AnfangDer Stapel …“).
@@ -65,9 +72,13 @@ export function sentences(html) {
 }
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' };
+// Der Satz ändert sich nicht, solange der Text gleich bleibt; der Browser darf ihn behalten.
+const AUDIO_HEADERS = { 'content-type': 'audio/mpeg', 'cache-control': 'private, max-age=86400' };
 const RATES = [0.8, 1, 1.2, 1.5, 1.8];
+// Längstes Stück für die Stimme vom Server; Sätze sind viel kürzer, das hier begrenzt nur Ausreißer.
+export const MAX_AUDIO_CHARS = 5000;
 
-function listenBody(items, zeit, ctx) {
+function listenBody(items, zeit, ctx, voice) {
   const picker = `<nav class="chips stapel-zeit" aria-label="Zeitfenster">${WINDOWS.map((m) => `<a href="/lesen/hoeren?zeit=${m}" class="chip"${m === zeit ? ' aria-current="true"' : ''}>${m} Min.</a>`).join('')}</nav>`;
   if (!items.length) return `${picker}<p class="empty">Für dieses Zeitfenster passt nichts vom Stapel.</p>`;
   const list = items
@@ -80,7 +91,7 @@ function listenBody(items, zeit, ctx) {
     .join('');
   return `${picker}
   <p class="meta hoeren-nojs">Abspielen braucht JavaScript und Sprachausgabe im Browser. Lesen geht über die Titel.</p>
-  <div class="hoeren-player" hidden>
+  <div class="hoeren-player"${voice ? ` data-voice="${esc(voice)}"` : ''} hidden>
     ${hidden({ csrf: ctx.write.csrf })}
     <p class="hoeren-now"><span class="meta" data-title>Bereit</span><span class="hoeren-sentence" data-sentence></span></p>
     <div class="hoeren-controls">
@@ -118,12 +129,48 @@ export function listenText(store, id) {
   };
 }
 
-export function listenRoutes({ store }) {
+const offset = (v) => (/^\d{1,9}$/.test(String(v ?? '')) ? Number(v) : NaN);
+
+/**
+ * MP3 für das Stück `von`–`bis` (Zeichen im Lesetext) eines Dokuments, mit den
+ * Nachbarsätzen als Kontext, wenn `von` ein Satzanfang ist; auch für
+ * `/api/app/audio`. Fehler als `SpeechError` mit HTTP-Status.
+ */
+export async function listenAudio(store, speech, { id, von, bis }) {
+  if (!speech?.voice()) throw new SpeechError('Keine Stimme auf dem Server eingerichtet (Einstellungen → Vorlesen)', 404);
+  const doc = id ? store.get(id) : null;
+  if (!doc) throw new SpeechError('Diesen Artikel gibt es nicht', 404);
+  const html = doc.content_html ?? '';
+  const text = htmlText(html);
+  const start = offset(von);
+  const end = offset(bis);
+  if (!(start < end && end <= text.length)) throw new SpeechError('Stelle passt nicht zum Text (von < bis, höchstens bis zum Ende)', 400);
+  if (end - start > MAX_AUDIO_CHARS) throw new SpeechError(`Stück zu lang (höchstens ${MAX_AUDIO_CHARS} Zeichen)`, 400);
+  const piece = text.slice(start, end).trim();
+  if (!piece) throw new SpeechError('Hier steht nichts zum Vorlesen', 400);
+  const list = sentences(html);
+  const i = list.findIndex((s) => s.start === start);
+  const say = (s) => (s ? text.slice(s.start, s.end) : null);
+  return speech.audio({ text: piece, previous: i > 0 ? say(list[i - 1]) : null, next: i >= 0 ? say(list[i + 1]) : null });
+}
+
+export function listenRoutes({ store, speech = null }) {
   return {
     pages: {
       async '/lesen/hoeren'(ctx) {
         const { zeit, items } = listenQueue(store, ctx.url.searchParams.get('zeit'));
-        return { html: readingPage(ctx, { key: 'stapel', title: 'Unterwegs hören', body: `<section>${listenBody(items, zeit, ctx)}</section>`, scripts: [assets.lesenHoeren] }) };
+        const body = `<section>${listenBody(items, zeit, ctx, speech?.voice() ?? null)}</section>`;
+        return { html: readingPage(ctx, { key: 'stapel', title: 'Unterwegs hören', body, scripts: [assets.lesenHoeren] }) };
+      },
+      /** Ein Satz als MP3 von der Stimme auf dem Server. */
+      async '/lesen/hoeren/audio'(ctx) {
+        const q = ctx.url.searchParams;
+        try {
+          return { body: await listenAudio(store, speech, { id: q.get('id'), von: q.get('von'), bis: q.get('bis') }), headers: AUDIO_HEADERS };
+        } catch (err) {
+          if (!(err instanceof SpeechError)) throw err;
+          return { status: err.status, body: JSON.stringify({ error: 'speech_failed', message: err.message }), headers: JSON_HEADERS };
+        }
       },
       /** Lesetext und Sätze eines Dokuments für die Sprachausgabe. */
       async '/lesen/hoeren/text'(ctx) {

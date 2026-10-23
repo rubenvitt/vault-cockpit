@@ -8,6 +8,8 @@ protocol ListenService: Sendable {
     func text(id: String) async throws -> ListenText
     func saveProgress(id: String, progress: Double, anchor: Int?) async throws -> Double
     func addHighlight(_ highlight: NewHighlight) async throws -> HighlightResult
+    /// MP3 eines Satzes von der Stimme auf dem Server (nur, wenn `Queue.voice` gesetzt ist).
+    func audio(id: String, start: Int, end: Int) async throws -> Data
 }
 
 extension APIClient: ListenService {}
@@ -44,6 +46,11 @@ struct DemoListenService: ListenService {
 
     func addHighlight(_ highlight: NewHighlight) async throws -> HighlightResult {
         try Self.decode(#"{"id": "h1", "duplicate": false, "message": "Markiert"}"#)
+    }
+
+    /// Die Vorführung hat keine Stimme vom Server (`voice` fehlt in der Liste).
+    func audio(id: String, start: Int, end: Int) async throws -> Data {
+        throw APIError(status: 404, code: "not_found", message: "Keine Stimme auf dem Server eingerichtet")
     }
 }
 #endif
