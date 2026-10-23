@@ -4,6 +4,7 @@ import MediaPlayer
 import Network
 import Observation
 import OSLog
+import UIKit
 
 /// Führt aus, was `PlayerMachine` entscheidet: Sprachausgabe, Audio-Sitzung, Sperrbildschirm,
 /// Fernbedienung (AirPods, Sperrbildschirm, CarPlay), Laden und Speichern mit Puffer ohne Netz.
@@ -96,6 +97,8 @@ final class Player {
     }
 
     func send(_ event: PlayerMachine.Event) {
+        // Nach `close` kommen noch Antworten laufender Abrufe: nicht wieder auf den Sperrbildschirm.
+        guard isStarted else { return }
         for effect in machine.handle(event) {
             switch effect {
             case .speak(let sentence):
@@ -145,6 +148,9 @@ final class Player {
 
     private func load(_ id: String) async {
         guard let service else { return }
+        // Beim Textwechsel spielt kein Ton: ohne Hintergrund-Task könnte iOS die gesperrte App hier anhalten.
+        let task = UIApplication.shared.beginBackgroundTask(withName: "Text laden")
+        defer { UIApplication.shared.endBackgroundTask(task) }
         do {
             send(.loaded(id: id, text: SpeechText(try await service.text(id: id))))
         } catch let error as APIError where error.status == 404 {

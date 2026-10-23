@@ -22,7 +22,7 @@ struct SpeechText: Equatable {
 
     let id: String
     let sentences: [Sentence]
-    /// Erster Satz ab der gespeicherten Lesestelle, sonst 0 (wie `load` in `lesen-hoeren.js`).
+    /// Erster Satz ab der gespeicherten Lesestelle bzw. dem Fortschritt, sonst 0 (wie `load` in `lesen-hoeren.js`).
     let startSentence: Int
     /// Fortschritt 0…1; `finish` lässt ihn nie sinken.
     private(set) var progress: Double
@@ -39,7 +39,9 @@ struct SpeechText: Equatable {
             let end = min(max(pair[1], 0), length)
             return start < end ? Sentence(start: start, end: end) : nil
         }
-        startSentence = sentences.firstIndex { $0.start >= listen.anchor } ?? 0
+        // Ohne Anker (Fortschritt ohne `anker` gespeichert) die Stelle aus dem Fortschritt schätzen.
+        let from = listen.anchor > 0 ? listen.anchor : Int(listen.progress * Double(length))
+        startSentence = sentences.firstIndex { $0.start >= from } ?? 0
         progress = min(max(listen.progress, 0), 1)
     }
 

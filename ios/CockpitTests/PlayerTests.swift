@@ -58,6 +58,8 @@ final class SpeechTextTests: XCTestCase {
         XCTAssertEqual(speechText(anchor: 21).startSentence, 1)
         XCTAssertEqual(speechText(anchor: 22).startSentence, 2)
         XCTAssertEqual(speechText(anchor: 999).startSentence, 0, "hinter dem letzten Satz: von vorn, wie im Web")
+        XCTAssertEqual(speechText(progress: 0.5, anchor: 0).startSentence, 2, "ohne Anker ab dem Fortschritt (Einheit 25)")
+        XCTAssertEqual(speechText(progress: 0.5, anchor: 21).startSentence, 1, "Anker geht vor")
     }
 
     func testServerOffsetsAreClamped() {
