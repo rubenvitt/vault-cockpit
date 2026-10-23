@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
-import { createReadingStore, ReadingError } from '../src/lesen/store.js';
+import { createReadingStore, ReadingError, MIGRATIONS, NO_FEED } from '../src/lesen/store.js';
 import { gzipSync } from 'node:zlib';
 import { createBackup, open, seal } from '../src/cockpit/backup.js';
 
@@ -145,11 +145,76 @@ test('Lesestapel: neuere Schema-Fassung wird nicht still überschrieben', () => 
     const file = join(dir, 'lesestapel.db');
     createReadingStore({ path: file }).close();
     const db = new DatabaseSync(file);
-    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 1);
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, MIGRATIONS.length);
     db.exec('PRAGMA user_version = 99');
     db.close();
     assert.throws(() => createReadingStore({ path: file }), /Fassung 99/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('Lesestapel: Fassung 1 bekommt Feed-Gruppen, Feeds und Einträge bleiben', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'vc-lesen-'));
+  try {
+    const file = join(dir, 'lesestapel.db');
+    const db = new DatabaseSync(file);
+    db.exec(MIGRATIONS[0]);
+    db.exec('PRAGMA user_version = 1');
+    db.prepare("INSERT INTO feeds (id, url, title, created_at) VALUES ('f1', 'https://a.test/feed', 'A', '2026-10-01T00:00:00Z')").run();
+    db.prepare("INSERT INTO feed_entries (feed_id, guid) VALUES ('f1', 'g1')").run();
+    db.close();
+    const store = createReadingStore({ path: file });
+    assert.equal(store.getFeed('f1').group_id, null);
+    assert.deepEqual([...store.knownEntries('f1')], ['g1']);
+    store.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Lesestapel: Feed-Gruppen anlegen, ordnen, zuordnen, filtern, löschen', () => {
+  const c = clock();
+  const store = createReadingStore({ path: ':memory:', now: c.now });
+  const tech = store.addGroup({ name: '  Tech ' }).group;
+  assert.equal(tech.name, 'Tech');
+  assert.equal(store.addGroup({ name: 'tech' }).duplicate, true, 'Name ohne Groß/klein');
+  const news = store.addGroup({ name: 'News', paused: true }).group;
+  assert.equal(news.paused, true);
+  assert.deepEqual(store.listGroups().map((g) => g.name), ['Tech', 'News']);
+  assert.deepEqual(store.moveGroup(news.id, -1).map((g) => g.name), ['News', 'Tech']);
+  assert.deepEqual(store.moveGroup(news.id, -1).map((g) => g.name), ['News', 'Tech'], 'am Rand bleibt es');
+  assert.throws(() => store.updateGroup(tech.id, { name: 'NEWS' }), /gibt es schon/);
+  assert.throws(() => store.addGroup({ name: ' ' }), /Name/);
+  assert.equal(store.updateGroup(tech.id, { name: 'Technik', to_stack: true }).to_stack, true);
+
+  const a = store.addFeed({ url: 'https://a.test/feed', title: 'A', group_id: tech.id }).feed;
+  const b = store.addFeed({ url: 'https://b.test/feed', title: 'B', group_id: '' }).feed;
+  assert.equal(a.group_to_stack, true);
+  assert.equal(a.to_stack, false, 'Feld des Feeds bleibt seins');
+  assert.equal(b.group_id, null);
+  assert.throws(() => store.updateFeed(b.id, { group_id: 'gibtsnicht' }), /Gruppe gibt es nicht/);
+  assert.equal(store.updateFeed(b.id, { group_id: news.id }).group_paused, true);
+  assert.deepEqual(store.listFeeds({ group: tech.id }).map((f) => f.title), ['A']);
+  assert.deepEqual(store.listFeeds({ group: NO_FEED }).map((f) => f.title), []);
+
+  store.addDocument({ url: 'https://a.test/1', title: 'A1', origin: `feed:${a.id}` });
+  c.tick();
+  store.addDocument({ url: 'https://b.test/1', title: 'B1', origin: `feed:${b.id}` });
+  c.tick();
+  const saved = store.addDocument({ url: 'https://x.test', title: 'Gespeichert' }).doc;
+  store.addDocument({ url: 'https://m.test', title: 'Mail', origin: 'mail' });
+  assert.deepEqual(store.list({ status: 'eingang', group: tech.id }).map((d) => d.title), ['A1']);
+  assert.deepEqual(store.list({ status: 'eingang', group: NO_FEED }).map((d) => d.title), ['Mail', 'Gespeichert']);
+  assert.equal(store.counts({ group: news.id }).eingang, 1);
+  assert.deepEqual(store.inboxByGroup(), { [tech.id]: 1, [news.id]: 1 });
+  store.setStatus(saved.id, 'stapel');
+  assert.equal(store.leftInboxSince('2026-01-01T00:00:00Z', { group: tech.id }).count, 0);
+  assert.equal(store.leftInboxSince('2026-01-01T00:00:00Z', { group: NO_FEED }).count, 1);
+
+  // Gruppe weg: ihre Feeds bleiben, ohne Gruppe.
+  assert.equal(store.deleteGroup(tech.id), true);
+  assert.equal(store.getFeed(a.id).group_id, null);
+  assert.equal(store.getFeed(a.id).group_to_stack, false);
+  assert.deepEqual(store.listGroups().map((g) => g.name), ['News']);
 });

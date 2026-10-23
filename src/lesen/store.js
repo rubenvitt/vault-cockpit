@@ -25,7 +25,7 @@ export const KINDS = ['artikel', 'newsletter', 'feed', 'pdf'];
 export const REVIEW_STATES = ['aktiv', 'losgelassen'];
 
 /** Neue Fassung: Eintrag hier anhängen, `user_version` zählt mit. */
-const MIGRATIONS = [
+export const MIGRATIONS = [
   `CREATE TABLE documents (
     id TEXT PRIMARY KEY,
     url TEXT NOT NULL,
@@ -99,16 +99,38 @@ const MIGRATIONS = [
     doc_id TEXT REFERENCES documents(id) ON DELETE SET NULL,
     PRIMARY KEY (feed_id, guid)
   );`,
+  // Feed-Gruppen (VCP-97): ein Feed in höchstens einer, gelöschte Gruppe lässt ihn ohne.
+  `CREATE TABLE feed_groups (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    position INTEGER NOT NULL,
+    paused INTEGER NOT NULL DEFAULT 0,
+    to_stack INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+  );
+  ALTER TABLE feeds ADD COLUMN group_id TEXT REFERENCES feed_groups(id) ON DELETE SET NULL;`,
 ];
 
 export class ReadingError extends Error {}
 
 const DOC_FIELDS = ['url', 'canonical_url', 'title', 'author', 'site', 'kind', 'origin', 'client_id', 'excerpt', 'content_html', 'content_text', 'word_count', 'reading_minutes', 'status', 'topics'];
 const HIGHLIGHT_EDIT = ['quote', 'prefix', 'suffix', 'start_hint', 'note', 'color', 'review_box', 'review_due', 'review_state'];
-const FEED_EDIT = ['url', 'site_url', 'title', 'icon', 'paused', 'to_stack', 'keyword_filter', 'interval_minutes', 'etag', 'last_modified', 'last_fetch_at', 'last_error', 'error_count', 'next_fetch_at'];
+const FEED_EDIT = ['url', 'site_url', 'title', 'icon', 'paused', 'to_stack', 'keyword_filter', 'interval_minutes', 'etag', 'last_modified', 'last_fetch_at', 'last_error', 'error_count', 'next_fetch_at', 'group_id'];
+const GROUP_EDIT = ['name', 'paused', 'to_stack'];
+/** Filter `group` für `list`/`counts`: Gruppen-ID oder `ohne` (nicht aus einem Feed: Gespeichertes, Mail). */
+export const NO_FEED = 'ohne';
 
 const fromRow = (row) => (row ? { ...row, topics: JSON.parse(row.topics ?? '[]') } : null);
-const feedRow = (row) => (row ? { ...row, paused: Boolean(row.paused), to_stack: Boolean(row.to_stack) } : null);
+/**
+ * Feed mit den Einstellungen seiner Gruppe (`group_paused`, `group_to_stack`).
+ * Es gilt Feed ODER Gruppe: `false` am Feed heißt „nichts Eigenes gesetzt“.
+ */
+const feedRow = (row) => (row ? { ...row, paused: Boolean(row.paused), to_stack: Boolean(row.to_stack), group_paused: Boolean(row.group_paused), group_to_stack: Boolean(row.group_to_stack) } : null);
+const groupRow = (row) => (row ? { ...row, paused: Boolean(row.paused), to_stack: Boolean(row.to_stack) } : null);
+const FEED_SELECT = 'SELECT f.*, g.paused AS group_paused, g.to_stack AS group_to_stack FROM feeds f LEFT JOIN feed_groups g ON g.id = f.group_id';
+/** WHERE-Teil für den Gruppenfilter über `origin` (Dokumente kennen nur ihren Feed). */
+const groupWhere = (group) =>
+  group == null ? ['1', []] : group === NO_FEED ? ["origin NOT LIKE 'feed:%'", []] : ["origin IN (SELECT 'feed:' || id FROM feeds WHERE group_id = ?)", [String(group)]];
 // node:sqlite bindet keine Booleans.
 const bindable = (v) => (typeof v === 'boolean' ? Number(v) : v === undefined ? null : v);
 
@@ -146,7 +168,21 @@ export function createReadingStore({ path, now = () => Date.now() }) {
 
   const get = (id) => fromRow(db.prepare('SELECT * FROM documents WHERE id = ?').get(String(id ?? '')));
   const getHighlight = (id) => db.prepare('SELECT * FROM highlights WHERE id = ?').get(String(id ?? '')) ?? null;
-  const getFeed = (id) => feedRow(db.prepare('SELECT * FROM feeds WHERE id = ?').get(String(id ?? '')));
+  const getFeed = (id) => feedRow(db.prepare(`${FEED_SELECT} WHERE f.id = ?`).get(String(id ?? '')));
+  const getGroup = (id) => groupRow(db.prepare('SELECT * FROM feed_groups WHERE id = ?').get(String(id ?? '')));
+  const listGroups = () => db.prepare('SELECT * FROM feed_groups ORDER BY position, name').all().map(groupRow);
+  const groupName = (name) => {
+    const n = String(name ?? '').replace(/\s+/g, ' ').trim();
+    if (!n) throw new ReadingError('Name der Gruppe fehlt');
+    return n;
+  };
+  /** `group_id` im Patch: leer heißt ohne Gruppe, eine unbekannte ist ein Fehler (statt Fremdschlüssel-Fehler). */
+  const withGroup = (patch) => {
+    if (!patch || !('group_id' in patch)) return patch;
+    const groupId = patch.group_id || null;
+    if (groupId && !getGroup(groupId)) throw new ReadingError('Diese Gruppe gibt es nicht');
+    return { ...patch, group_id: groupId };
+  };
   const must = (row, what) => {
     if (!row) throw new ReadingError(`${what} gibt es nicht`);
     return row;
@@ -189,19 +225,24 @@ export function createReadingStore({ path, now = () => Date.now() }) {
     /** Vorhandenes Dokument zu `{ client_id, url, canonical_url }` oder `null`. */
     find: findExisting,
 
-    /** Neueste zuerst; ohne `status` alle außer `weg`. Ohne Inhalt (`content_*`), der kommt mit `get`. */
-    list({ status = null, limit = 100, offset = 0 } = {}) {
+    /**
+     * Neueste zuerst; ohne `status` alle außer `weg`. Ohne Inhalt (`content_*`), der kommt mit `get`.
+     * `group`: nur aus Feeds dieser Gruppe, `NO_FEED` nur nicht aus Feeds.
+     */
+    list({ status = null, group = null, limit = 100, offset = 0 } = {}) {
       const cols = 'id, url, canonical_url, title, author, site, kind, origin, excerpt, word_count, reading_minutes, status, previous_status, progress, scroll_anchor, topics, saved_at, status_changed_at, read_at, archived_at, updated_at';
+      const [where, args] = groupWhere(group);
       const rows = status
-        ? db.prepare(`SELECT ${cols} FROM documents WHERE status = ? ORDER BY saved_at DESC, rowid DESC LIMIT ? OFFSET ?`).all(status, limit, offset)
-        : db.prepare(`SELECT ${cols} FROM documents WHERE status != 'weg' ORDER BY saved_at DESC, rowid DESC LIMIT ? OFFSET ?`).all(limit, offset);
+        ? db.prepare(`SELECT ${cols} FROM documents WHERE status = ? AND ${where} ORDER BY saved_at DESC, rowid DESC LIMIT ? OFFSET ?`).all(status, ...args, limit, offset)
+        : db.prepare(`SELECT ${cols} FROM documents WHERE status != 'weg' AND ${where} ORDER BY saved_at DESC, rowid DESC LIMIT ? OFFSET ?`).all(...args, limit, offset);
       return rows.map(fromRow);
     },
 
-    /** Anzahl je Status, z. B. für Zähler in der Navigation. */
-    counts() {
+    /** Anzahl je Status, z. B. für Zähler in der Navigation; `group` wie bei `list`. */
+    counts({ group = null } = {}) {
       const out = Object.fromEntries(STATUSES.map((s) => [s, 0]));
-      for (const r of db.prepare('SELECT status, COUNT(*) AS n FROM documents GROUP BY status').all()) out[r.status] = r.n;
+      const [where, args] = groupWhere(group);
+      for (const r of db.prepare(`SELECT status, COUNT(*) AS n FROM documents WHERE ${where} GROUP BY status`).all(...args)) out[r.status] = r.n;
       return out;
     },
 
@@ -232,11 +273,12 @@ export function createReadingStore({ path, now = () => Date.now() }) {
      * Zählung (`previous_status` ist dann `stapel`); bei Bedarf ein eigenes Feld
      * `triaged_at` per Migration.
      */
-    leftInboxSince(since) {
-      const where = "previous_status = 'eingang' AND status != 'eingang' AND status_changed_at >= ?";
-      const { n } = db.prepare(`SELECT COUNT(*) AS n FROM documents WHERE ${where}`).get(since);
+    leftInboxSince(since, { group = null } = {}) {
+      const [inGroup, args] = groupWhere(group);
+      const where = `previous_status = 'eingang' AND status != 'eingang' AND status_changed_at >= ? AND ${inGroup}`;
+      const { n } = db.prepare(`SELECT COUNT(*) AS n FROM documents WHERE ${where}`).get(since, ...args);
       // Zurücklegen geht nur von Stapel, Weg und Abgelegt aus (src/lesen/inbox.js).
-      const last = db.prepare(`SELECT id, title, url FROM documents WHERE ${where} AND status IN ('stapel', 'weg', 'abgelegt') ORDER BY status_changed_at DESC, rowid DESC LIMIT 1`).get(since);
+      const last = db.prepare(`SELECT id, title, url FROM documents WHERE ${where} AND status IN ('stapel', 'weg', 'abgelegt') ORDER BY status_changed_at DESC, rowid DESC LIMIT 1`).get(since, ...args);
       return { count: n, last: last ? { ...last } : null };
     },
 
@@ -317,20 +359,83 @@ export function createReadingStore({ path, now = () => Date.now() }) {
     addFeed(fields) {
       if (!fields?.url) throw new ReadingError('Adresse fehlt');
       const existing = db.prepare('SELECT * FROM feeds WHERE url = ?').get(fields.url);
-      if (existing) return { feed: feedRow(existing), duplicate: true };
+      if (existing) return { feed: getFeed(existing.id), duplicate: true };
+      const checked = withGroup(fields);
       const id = randomUUID();
       db.prepare('INSERT INTO feeds (id, url, created_at) VALUES (?, ?, ?)').run(id, fields.url, iso());
-      update('feeds', id, fields, FEED_EDIT.filter((k) => k !== 'url'));
+      update('feeds', id, checked, FEED_EDIT.filter((k) => k !== 'url'));
       return { feed: getFeed(id), duplicate: false };
     },
     getFeed,
-    listFeeds: () => db.prepare('SELECT * FROM feeds ORDER BY title COLLATE NOCASE, url').all().map(feedRow),
+    /** Alle Feeds, nach Titel; mit `group` nur die dieser Gruppe, `NO_FEED` heißt hier: ohne Gruppe. */
+    listFeeds({ group } = {}) {
+      const where = group === undefined ? '' : group === NO_FEED || group === null ? 'WHERE f.group_id IS NULL' : 'WHERE f.group_id = ?';
+      const args = where.includes('?') ? [String(group)] : [];
+      return db.prepare(`${FEED_SELECT} ${where} ORDER BY f.title COLLATE NOCASE, f.url`).all(...args).map(feedRow);
+    },
     updateFeed(id, patch) {
       must(getFeed(id), 'Diesen Feed');
-      update('feeds', id, patch, FEED_EDIT);
+      update('feeds', id, withGroup(patch), FEED_EDIT);
       return getFeed(id);
     },
     deleteFeed: (id) => db.prepare('DELETE FROM feeds WHERE id = ?').run(String(id ?? '')).changes > 0,
+    // --- Feed-Gruppen (VCP-97) --------------------------------------------------
+
+    /** Neue Gruppe ans Ende; idempotent per Name (ohne Groß/klein), `duplicate` sagt, ob es sie schon gab. */
+    addGroup(fields) {
+      const name = groupName(fields?.name);
+      const existing = db.prepare('SELECT * FROM feed_groups WHERE name = ?').get(name);
+      if (existing) return { group: groupRow(existing), duplicate: true };
+      const id = randomUUID();
+      const { p } = db.prepare('SELECT COALESCE(MAX(position), -1) + 1 AS p FROM feed_groups').get();
+      db.prepare('INSERT INTO feed_groups (id, name, position, created_at) VALUES (?, ?, ?, ?)').run(id, name, p, iso());
+      update('feed_groups', id, fields, GROUP_EDIT.filter((k) => k !== 'name'));
+      return { group: getGroup(id), duplicate: false };
+    },
+    getGroup,
+    /** In ihrer Reihenfolge (`position`). */
+    listGroups,
+    /** Name, `paused`, `to_stack`; ein Name, den schon eine andere Gruppe trägt, gibt `ReadingError`. */
+    updateGroup(id, patch) {
+      must(getGroup(id), 'Diese Gruppe');
+      const p = { ...patch };
+      if ('name' in p) {
+        p.name = groupName(p.name);
+        const other = db.prepare('SELECT id FROM feed_groups WHERE name = ? AND id != ?').get(p.name, String(id));
+        if (other) throw new ReadingError(`Eine Gruppe „${p.name}“ gibt es schon`);
+      }
+      update('feed_groups', id, p, GROUP_EDIT);
+      return getGroup(id);
+    },
+    /** Feeds der Gruppe bleiben, dann ohne Gruppe. */
+    deleteGroup: (id) => db.prepare('DELETE FROM feed_groups WHERE id = ?').run(String(id ?? '')).changes > 0,
+    /** Eine Stelle nach oben (`-1`) oder unten (`1`): tauscht mit der Nachbarin; am Rand ändert sich nichts. */
+    moveGroup(id, delta) {
+      const groups = listGroups();
+      const i = groups.findIndex((g) => g.id === String(id ?? ''));
+      if (i < 0) throw new ReadingError('Diese Gruppe gibt es nicht');
+      const j = i + Math.sign(Number(delta) || 0);
+      if (j === i || j < 0 || j >= groups.length) return groups;
+      [groups[i], groups[j]] = [groups[j], groups[i]];
+      // Neu durchnummerieren, damit gleiche Positionen (etwa nach Wiederherstellen) nicht stören.
+      db.exec('BEGIN');
+      try {
+        groups.forEach((g, k) => db.prepare('UPDATE feed_groups SET position = ? WHERE id = ?').run(k, g.id));
+        db.exec('COMMIT');
+      } catch (err) {
+        db.exec('ROLLBACK');
+        throw err;
+      }
+      return listGroups();
+    },
+    /** Neue Einträge im Eingang je Gruppe: `{ [groupId]: n }`, Gruppen ohne Einträge fehlen. */
+    inboxByGroup() {
+      const rows = db
+        .prepare("SELECT f.group_id AS g, COUNT(*) AS n FROM documents d JOIN feeds f ON d.origin = 'feed:' || f.id WHERE d.status = 'eingang' AND f.group_id IS NOT NULL GROUP BY f.group_id")
+        .all();
+      return Object.fromEntries(rows.map((r) => [r.g, r.n]));
+    },
+
     /** Merkt sich einen Feed-Eintrag; `false`, wenn er schon bekannt war. */
     rememberEntry(feedId, guid, docId = null) {
       return db.prepare('INSERT OR IGNORE INTO feed_entries (feed_id, guid, doc_id) VALUES (?, ?, ?)').run(feedId, guid, docId).changes > 0;
