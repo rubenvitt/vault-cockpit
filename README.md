@@ -268,8 +268,10 @@ suchen oder lesen; Such-Tokens kommen umgekehrt nicht an `/capture`. Ohne
 Capture-Token (und ohne `CAPTURE_TOKEN` aus älteren Deployments) lehnen `/capture`
 und `/funke` jede Anfrage mit `401` ab.
 
-Mail-Abruf: Nur freigegebene Absender (Einstellungen → Mail) werden verarbeitet, alle
-anderen Mails wandern unverarbeitet in den Ablage-Ordner. Ein Eintrag mit
+Mail-Abruf: Nur freigegebene Absender (Einstellungen → Mail) werden zu Notizen oder
+Aufgaben. Mails anderer Absender landen im Eingang des Lesestapels (so kommen direkt
+abonnierte Newsletter an); ist der Lesestapel aus, wandern sie unverarbeitet in den
+Ablage-Ordner. Ein Eintrag mit
 führendem `@` (z. B. `@rubeen.dev`) gibt jede Adresse dieser Domain frei, aber
 keine Subdomain. Der Absender einer Mail lässt sich fälschen; die Adresse deshalb
 nicht weitergeben. Mit ganzen Domains wird die Annahme breiter, also die
@@ -590,7 +592,7 @@ Artikel kommen über dieselben Wege wie Notizen in den Eingang (VCP-69):
 |---|---|
 | iOS-Kurzbefehl | Unter **Einstellungen → API-Tokens** einen Token mit dem Recht **Lesestapel** anlegen, „Zum Lesestapel“ unter **Einstellungen → Kurzbefehle** laden, importieren und beim Import den Token eintragen. Dann in Safari teilen → „Zum Lesestapel“; die Mitteilung nennt den Titel. |
 | Schnelleingabe | `> https://…` (nur die Adresse nach `>`) wird ein Artikel statt einer Notiz, die Vorschau zeigt „Artikel · Lesestapel“. Ein Markdown-Zitat wie `> Ein kluger Satz` bleibt eine Notiz. Ohne Netz puffert das Cockpit den Eintrag wie jede Schnelleingabe und sendet ihn mit derselben ID nach; doppelt kommt er nicht an. |
-| Mail | An die Capture-Adresse (siehe [Capture](#capture), gleicher Ordner, gleiche freigegebenen Absender) mit `[lesen]` irgendwo im Betreff (auch nach „Fwd:“) oder `>` vorn. Steht in der Mail nur eine Adresse, wird der Artikel geholt. Sonst wird die Mail selbst ein Dokument der Art `newsletter`: HTML gesäubert wie Artikel (kein Skript, Zählpixel fallen weg, Bilder werden Links), ohne HTML der Text in Absätzen; die Adresse ist `mid:<Message-ID>`, Titel der Betreff ohne Kürzel. Newsletter also mit `[lesen]` an die Adresse weiterleiten. Lässt sich die eine Adresse nicht holen, wird die Mail mit dem Link gespeichert, statt bei jedem Abruf liegen zu bleiben. |
+| Mail | An die Capture-Adresse (siehe [Capture](#capture), gleicher Ordner) von einem freigegebenen Absender mit `[lesen]` irgendwo im Betreff (auch nach „Fwd:“) oder `>` vorn. Steht in der Mail nur eine Adresse, wird der Artikel geholt. Sonst wird die Mail selbst ein Dokument der Art `newsletter`: HTML gesäubert wie Artikel (kein Skript, Zählpixel fallen weg, Bilder werden Links), ohne HTML der Text in Absätzen; die Adresse ist `mid:<Message-ID>`, Titel der Betreff ohne Kürzel. Newsletter lassen sich direkt mit der Adresse abonnieren: Mails fremder Absender gehen immer in den Lesestapel, nie in Notizen oder Aufgaben. Lässt sich die eine Adresse nicht holen, wird die Mail mit dem Link gespeichert, statt bei jedem Abruf liegen zu bleiben. |
 | PDF | Im Cockpit unter `/lesen/hinzufuegen` hochladen (dort auch eine Adresse speichern), oder an den Endpunkt mit `Content-Type: application/pdf` (Felder dann als Query: `?title=…&id=…`). Höchstens 20 MB. Das Cockpit zieht den Text heraus und macht daraus Absätze als Lesetext mit Lesezeit; die Datei selbst wird nicht gespeichert. Titel aus den PDF-Metadaten, sonst Dateiname oder erste Zeile. Dieselbe Datei liegt nur einmal im Stapel (Adresse `pdf:sha256-…`). Gescannte PDFs ohne Text werden abgelehnt. |
 
 `POST <PUBLIC_URL>/lesestapel/speichern` mit Header `Authorization: Bearer vct_…`

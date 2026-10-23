@@ -10,13 +10,14 @@ import { createHash } from 'node:crypto';
  * Erledigt-Ordner (Standard „Archive“). Scheitert eine Mail, bleibt sie liegen
  * und kommt beim nächsten Abruf wieder dran.
  *
- * Nur Absender aus `allowedSenders` werden verarbeitet (Adresse oder mit
- * führendem `@` eine ganze Domain ohne Subdomains); alles andere wird
- * unverarbeitet in den Erledigt-Ordner verschoben, damit eine fremde Mail an die
- * Adresse weder Notizen noch Aufgaben erzeugt.
+ * Nur Absender aus `allowedSenders` werden zu Notizen oder Aufgaben (Adresse oder
+ * mit führendem `@` eine ganze Domain ohne Subdomains), damit eine fremde Mail an
+ * die Adresse beides nie erzeugt.
  *
  * `readingMail` (`{ matches(email), save(email) }`, src/lesen/mail.js) nimmt
- * Mails mit `[lesen]` im Betreff oder `>` vorn statt des Routers: Sie gehen in den Lesestapel.
+ * Mails mit `[lesen]` im Betreff oder `>` vorn statt des Routers: Sie gehen in den
+ * Lesestapel. Mit `readingMail` landen auch Mails fremder Absender dort (direkt
+ * abonnierte Newsletter); ohne werden sie unverarbeitet verschoben.
  */
 const MAIL = 'urn:ietf:params:jmap:mail';
 const USING = ['urn:ietf:params:jmap:core', MAIL];
@@ -110,7 +111,11 @@ export function createMailCapture({
       const sender = String(email.from?.[0]?.email ?? '').toLowerCase();
       try {
         if (!isAllowed(sender)) {
-          logger.warn?.(`Mail-Capture: Absender nicht freigegeben, Mail wird nur verschoben (${email.id})`);
+          // Direkt abonnierte Newsletter: fremde Absender landen im Lese-Eingang, nie als Notiz oder Aufgabe.
+          if (readingMail) {
+            await readingMail.save(email);
+            processed += 1;
+          } else logger.warn?.(`Mail-Capture: Absender nicht freigegeben, Mail wird nur verschoben (${email.id})`);
         } else if (readingMail?.matches(email)) {
           await readingMail.save(email);
           processed += 1;

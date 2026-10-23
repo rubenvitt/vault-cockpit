@@ -84,11 +84,12 @@ test('Mail mit nur einer Adresse speichert den Artikel; nicht holbar wird es die
   assert.match(local.content_html, /<a href="http:\/\/127.0.0.1\/admin"/);
 });
 
-test('Mail-Abruf: [lesen] geht in den Lesestapel, der Rest an den Router, fremde Absender nirgends hin', async () => {
+test('Mail-Abruf: [lesen] geht in den Lesestapel, der Rest an den Router, fremde Absender nur in den Lesestapel', async () => {
   const emails = [
     mail({ id: 'm1', subject: '[lesen] Wochenpost', html: NEWSLETTER }),
     mail({ id: 'm2', subject: 'Notiz', text: 'Text' }),
-    mail({ id: 'm3', from: 'fremd@spam.test', subject: '[lesen] Spam', html: NEWSLETTER }),
+    mail({ id: 'm3', from: 'news@blatt.test', subject: 'Wochenblatt', html: NEWSLETTER }),
+    mail({ id: 'm4', from: 'fremd@spam.test', subject: '!Hack', text: 'x' }),
   ];
   const moved = [];
   let getArgs = null;
@@ -119,9 +120,9 @@ test('Mail-Abruf: [lesen] geht in den Lesestapel, der Rest an den Router, fremde
     fetch,
     logger: quiet,
   });
-  assert.equal(await capture.runOnce(), 2);
+  assert.equal(await capture.runOnce(), 4);
   assert.ok(getArgs.properties.includes('htmlBody') && getArgs.fetchHTMLBodyValues);
-  assert.deepEqual(routed, ['Notiz']);
-  assert.deepEqual(store.list().map((d) => d.title), ['Wochenpost']);
-  assert.deepEqual(moved, ['m1', 'm2', 'm3']);
+  assert.deepEqual(routed, ['Notiz'], 'fremde Absender erzeugen weder Notiz noch Aufgabe');
+  assert.deepEqual(store.list().map((d) => d.title).sort(), ['!Hack', 'Wochenblatt', 'Wochenpost']);
+  assert.deepEqual(moved, ['m1', 'm2', 'm3', 'm4']);
 });
