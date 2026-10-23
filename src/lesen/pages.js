@@ -22,10 +22,10 @@ export function readingNav(current) {
 }
 
 /** Rahmen einer Lesen-Seite: Kopfzeile, Unternavigation, Titel, Inhalt, Meldung. */
-export function readingPage(ctx, { key, title, body }) {
+export function readingPage(ctx, { key, title, body, scripts = [] }) {
   return `<!doctype html>
 <html lang="de">
-${head(title, { script: true })}
+${head(title, { script: true, scripts })}
 <body class="page-lesen">
 ${appHeader({ current: 'lesen', user: ctx.user })}
 ${readingNav(key)}
@@ -55,7 +55,7 @@ function docItem(d, tz) {
 const docList = (docs, ctx, empty) => (docs.length ? `<ul class="lesen-list">${docs.map((d) => docItem(d, ctx.tz)).join('')}</ul>` : `<p class="empty">${esc(empty)}</p>`);
 
 /** Formular „URL speichern“; `cid` macht doppeltes Absenden harmlos. */
-const saveForm = (ctx) => `<form method="post" action="/aktion/lesen/speichern" class="lesen-save">
+export const saveForm = (ctx) => `<form method="post" action="/aktion/lesen/speichern" class="lesen-save">
     ${hidden({ csrf: ctx.write.csrf, back: ctx.write.back, cid: randomUUID() })}
     <label class="lesen-url"><span class="sr-only">Adresse des Artikels</span><input type="url" name="url" required placeholder="https://… Artikel speichern" inputmode="url" autocomplete="off" spellcheck="false" enterkeyhint="go"></label>
     <button type="submit" class="btn primary">Speichern</button>

@@ -91,7 +91,7 @@ test('Lesen: nur angemeldet, /lesen führt zum Eingang, Navigation mit Lesen und
     assert.match(html, /<a href="\/graph" class="nav-link">/);
     assert.match(html, /<nav class="subnav" aria-label="Lesen"><a href="\/lesen\/eingang" class="subnav-link" aria-current="page">Eingang<\/a><a href="\/lesen\/stapel"[^>]*>Stapel<\/a><a href="\/lesen\/markiert"[^>]*>Markiert<\/a><a href="\/wissen"[^>]*>Wissen<\/a><\/nav>/);
     assert.match(html, /<form method="post" action="\/aktion\/lesen\/speichern"/);
-    assert.match(html, /Der Eingang ist leer/);
+    assert.match(html, /Eingang leer/);
     assert.ok(!/style=|<script>/.test(html), 'keine Inline-Styles oder -Skripte');
 
     assert.match(await (await call('/lesen/stapel')).text(), /Auf dem Stapel liegt nichts/);
@@ -112,7 +112,7 @@ test('Lesen: URL speichern erscheint mit Titel, Quelle und Lesezeit im Eingang; 
       assert.equal(saved.headers.get('location'), '/lesen/eingang');
       const html = await (await call('/lesen/eingang')).text();
       assert.match(html, /<span class="toast-text">Gespeichert: Vom Lesen<\/span>/);
-      assert.match(html, /<a href="https:\/\/blatt\.test\/vom-lesen" class="lesen-title" rel="noopener noreferrer">Vom Lesen<\/a>\s*<span class="meta">Blatt · \d+ min · gespeichert/);
+      assert.match(html, /<p class="inbox-meta"><a href="https:\/\/blatt\.test\/vom-lesen" rel="noopener noreferrer">Blatt<\/a> · Artikel · \d+ min<\/p>\s*<h2 class="inbox-title">Vom Lesen<\/h2>/);
       assert.equal(store.list({ status: 'eingang' })[0].origin, 'formular');
 
       // Doppelt abgeschickt (gleiche cid): nichts Neues, mit JavaScript als JSON.

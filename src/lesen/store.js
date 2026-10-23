@@ -222,6 +222,22 @@ export function createReadingStore({ path, now = () => Date.now() }) {
       return { doc: get(doc.id), previous: doc.status, changed: true };
     },
 
+    /**
+     * Entscheidungen im Eingang seit `since` (ISO): wie viele Dokumente ihn
+     * verlassen haben und welches zuletzt. Ein Rückgängig setzt
+     * `previous_status` um, damit zählt es nicht mehr.
+     * shortcut: Wer „Jetzt lesen“ noch am selben Tag archiviert, fällt aus der
+     * Zählung (`previous_status` ist dann `stapel`); bei Bedarf ein eigenes Feld
+     * `triaged_at` per Migration.
+     */
+    leftInboxSince(since) {
+      const where = "previous_status = 'eingang' AND status != 'eingang' AND status_changed_at >= ?";
+      const { n } = db.prepare(`SELECT COUNT(*) AS n FROM documents WHERE ${where}`).get(since);
+      // Zurücklegen geht nur von Stapel und Weg aus (src/lesen/inbox.js).
+      const last = db.prepare(`SELECT id, title, url FROM documents WHERE ${where} AND status IN ('stapel', 'weg') ORDER BY status_changed_at DESC, rowid DESC LIMIT 1`).get(since);
+      return { count: n, last: last ? { ...last } : null };
+    },
+
     /** Lesefortschritt 0..1, optional mit Anker zum Weiterlesen. */
     setProgress(id, progress, scrollAnchor = undefined) {
       const p = Number(progress);
