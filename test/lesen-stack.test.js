@@ -61,7 +61,7 @@ test('Stapel-Seite: Zeitfenster mit Balken, Weiterlesen und Hinweis auf den Rest
   const html = await page(store, '?zeit=15');
   assert.match(html, /<a href="\/lesen\/stapel\?zeit=15" class="chip" aria-current="true">15 Min\.<\/a>/);
   assert.match(html, /<progress class="stapel-bar" value="15" max="15" aria-hidden="true"><\/progress>\s*<span class="meta">15 von 15 Min\.<\/span>/);
-  assert.match(html, new RegExp(`<a href="/lesen/doc\\?id=${id.Halb}" class="lesen-title">Halb</a>\\s*<span class="meta">Weiterlesen · noch 4 Min\\.</span>`));
+  assert.match(html, new RegExp(`<a href="/lesen/doc\\?id=${id.Halb}#weiter" class="lesen-title">Halb</a>\\s*<span class="meta">Weiterlesen · noch 4 Min\\.</span>`));
   assert.match(html, new RegExp(`/lesen/doc\\?id=${id.Mittel}"`));
   assert.match(html, new RegExp(`/lesen/doc\\?id=${id.Kurz}"`));
   assert.ok(!html.includes(id.Extra) && !html.includes(id.Lang));
