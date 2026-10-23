@@ -1,4 +1,5 @@
 @testable import Cockpit
+import WebKit
 import XCTest
 
 final class WebShellTests: XCTestCase {
@@ -37,5 +38,17 @@ final class WebShellTests: XCTestCase {
         XCTAssertEqual(BridgeMessage(["type": "hoeren"]), .listen(minutes: 15))
         XCTAssertNil(BridgeMessage(["type": "anders"]))
         XCTAssertNil(BridgeMessage("hoeren"))
+    }
+
+    func testHandlesJavaScriptDialogs() {
+        // Fehlt eine dieser Methoden, gilt confirm()/prompt() in WebKit als abgebrochen.
+        let selectors = [
+            #selector(WKUIDelegate.webView(_:runJavaScriptAlertPanelWithMessage:initiatedByFrame:completionHandler:)),
+            #selector(WKUIDelegate.webView(_:runJavaScriptConfirmPanelWithMessage:initiatedByFrame:completionHandler:)),
+            #selector(WKUIDelegate.webView(_:runJavaScriptTextInputPanelWithPrompt:defaultText:initiatedByFrame:completionHandler:)),
+        ]
+        for selector in selectors {
+            XCTAssertTrue(WebViewController.instancesRespond(to: selector), "\(selector)")
+        }
     }
 }
