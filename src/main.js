@@ -30,6 +30,7 @@ import { createMailReader } from './lesen/mail.js';
 import { createReadingExport } from './lesen/vault-export.js';
 import { createEmbedCache } from './lesen/embed-cache.js';
 import { createSynthesisEvidence } from './lesen/synthesis-evidence.js';
+import { createSpeech, createSpeechCache } from './lesen/tts.js';
 import { createOidcLogin } from './web/oidc.js';
 import { createWebHttp } from './web/http.js';
 import { APP_TEAM_ID, APP_BUNDLE_ID } from './web/app-access.js';
@@ -129,7 +130,18 @@ const cockpitSettings = createSettingsStore({
     mailPollMinutes: Number(process.env.MAIL_POLL_MIN) || 5,
     embedUrl: process.env.EMBED_URL || null,
     embedModel: process.env.EMBED_MODEL || 'bge-m3',
+    ttsProvider: process.env.TTS_PROVIDER || null,
+    elevenlabsKey: process.env.ELEVENLABS_API_KEY || null,
+    ...(process.env.ELEVENLABS_VOICE_ID ? { elevenlabsVoice: process.env.ELEVENLABS_VOICE_ID } : {}),
+    ...(process.env.ELEVENLABS_MODEL ? { elevenlabsModel: process.env.ELEVENLABS_MODEL } : {}),
   },
+});
+
+// Vorlesen mit ElevenLabs („Unterwegs hören“): aus, bis unter Einstellungen →
+// Vorlesen ein Key steht. Jeder Satz landet einmal im Cache unter /data.
+const speech = createSpeech({
+  settings: () => cockpitSettings.get().tts,
+  cache: createSpeechCache({ dir: process.env.TTS_CACHE_DIR ?? '/data/tts-cache', maxBytes: (Number(process.env.TTS_CACHE_MB) || 500) * 1024 * 1024 }),
 });
 
 // Semantische Suche: Embeddings über einen Ollama-Server, eigener Vektorspeicher
@@ -351,6 +363,7 @@ const webHttp = process.env.WEB_CLIENT_ID
         store: reading,
         capture: (input) => cockpitActions.capture(input),
         embedCache,
+        speech,
         // Querverbindungen in der Leseansicht (VCP-73): Wikilinks nur in die Lesestapel-Notiz.
         connections: { index, semantic: currentSemantic, policy: POLICY, exporter: readingExport },
         onChange: (id) => readingExport.changed(id),
@@ -444,6 +457,8 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`  Zunder      : ${z ? `${z} (! → Inbox, Brücke ${bridgeState()})` : `aus (Einstellungen → Zunder), Brücke ${bridgeState()}`}`);
   const e = cockpitSettings.get().embed;
   console.log(`  Semantik    : ${e ? `${e.model} über ${e.url}` : 'aus (Einstellungen → Embeddings)'}`);
+  const t = cockpitSettings.get().tts;
+  console.log(`  Vorlesen    : ${t ? `ElevenLabs (${t.model}, Stimme ${t.voice})` : 'Gerätestimme (Einstellungen → Vorlesen)'}`);
   console.log(`  Cockpit     : ${webHttp ? `${PUBLIC_URL}/ (${cockpitSettings.get().calendars.length} Kalender, Einstellungen unter /einstellungen)` : 'aus (WEB_CLIENT_ID)'}`);
 });
 

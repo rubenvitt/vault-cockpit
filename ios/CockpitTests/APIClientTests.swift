@@ -82,12 +82,34 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(queue.minutes, 30)
         XCTAssertEqual(queue.items.first?.remaining, 3)
         XCTAssertNil(queue.items.first?.site)
+        XCTAssertNil(queue.voice, "ohne `stimme`: Gerätestimme")
 
         respond(#"{"ok":true,"id":"d1","title":"Vom Lesen","text":"Eins. Zwei.","sentences":[[0,5],[6,11]],"progress":0.5,"anchor":6}"#)
         let text = try await client.text(id: "d 1")
         XCTAssertEqual(seen[0].request.url?.absoluteString, "https://vault.test/api/app/text?id=d%201")
         XCTAssertEqual(text.sentences, [[0, 5], [6, 11]])
         XCTAssertEqual(text.anchor, 6)
+    }
+
+    func testAudioReturnsBytesOrServerMessage() async throws {
+        respond("ID3-mp3")
+        let data = try await client.audio(id: "d 1", start: 6, end: 11)
+        XCTAssertEqual(String(decoding: data, as: UTF8.self), "ID3-mp3")
+        XCTAssertEqual(seen[0].request.url?.absoluteString, "https://vault.test/api/app/audio?id=d%201&von=6&bis=11")
+        XCTAssertEqual(seen[0].request.value(forHTTPHeaderField: "Authorization"), "Bearer vct_geheim")
+
+        respond(#"{"error":"bad_request","status":502,"message":"ElevenLabs: Kontingent aufgebraucht"}"#, status: 502)
+        do {
+            _ = try await client.audio(id: "d1", start: 0, end: 5)
+            XCTFail("sollte werfen")
+        } catch let error as APIError {
+            XCTAssertEqual(error.status, 502)
+            XCTAssertEqual(error.message, "ElevenLabs: Kontingent aufgebraucht")
+        }
+
+        respond(#"{"ok":true,"zeit":15,"stimme":"ElevenLabs","items":[]}"#)
+        let queue = try await client.queue()
+        XCTAssertEqual(queue.voice, "ElevenLabs")
     }
 
     func testWritesSendJSON() async throws {

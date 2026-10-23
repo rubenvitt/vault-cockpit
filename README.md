@@ -70,6 +70,7 @@ Betrieb und Pfade im Container (die Compose-Datei setzt sie, sonst passen die St
 | `SYNC_ADAPTER` | `obsidian-headless` (Standard) oder `none` (keine Dateibeobachtung, kein Sync-Status) |
 | `SYNC_STATUS_FILE` | Statusdatei des Sync-Sidecars, z. B. `/sync-status/sync.json` |
 | `CAPTURE_STATE_FILE` | Merkzettel gegen doppelte Aufgaben, Standard `/data/capture-state.json` |
+| `TTS_CACHE_DIR`, `TTS_CACHE_MB` | Cache der [Stimme vom Server](#lesen) (ein MP3 je Satz), Standard `/data/tts-cache` und 500 MB; darüber fliegen die am längsten nicht gehörten Sätze |
 
 **Übergang für ältere Deployments:** `CAPTURE_TOKEN`, `ZUNDER_URL`/`ZUNDER_TOKEN`,
 `ZUNDER_BRIDGE`/`ZUNDER_BRIDGE_TAG`, `OBSIDIAN_VAULT_NAME`, `COCKPIT_TZ`,
@@ -80,6 +81,13 @@ Einstellungen leer ist; die Einstellungsseite zeigt dann „aus der Umgebung“.
 Einstellungen eingetragen (und die Kurzbefehle mit einem neuen Capture-Token
 importiert), können die Variablen aus dem Deployment raus.
 
+**Vorlesen aus der Umgebung:** `ELEVENLABS_API_KEY` schaltet die Stimme von
+ElevenLabs ein, `ELEVENLABS_VOICE_ID` und `ELEVENLABS_MODEL` wählen Stimme und
+Modell (Standard „George“ `JBFqnCBsd6RMkjVDRZzb` und `eleven_multilingual_v2`),
+`TTS_PROVIDER=geraet` schaltet sie trotz Key ab. Wie oben gilt das, solange das
+Feld unter **Einstellungen → Vorlesen** leer ist; so kann der Key auch aus einem
+Secret-Store ins Deployment kommen, statt in `cockpit-settings.json` zu liegen.
+
 ### Sicherung von `/data`
 
 Unter `/data` liegen zwei Sorten Dateien. `index.db` und `vectors.db` baut das
@@ -88,7 +96,7 @@ Die übrigen lassen sich nicht neu bauen, ohne sie ist alles neu einzurichten:
 
 | Datei | Inhalt |
 |---|---|
-| `cockpit-settings.json` | alle Einstellungen: Kalender mit Adressen und Passwörtern, Zunder-Zugang, Brücke, Mail-Token, Embeddings, Anzeige |
+| `cockpit-settings.json` | alle Einstellungen: Kalender mit Adressen und Passwörtern, Zunder-Zugang, Brücke, Mail-Token, Embeddings, Vorlesen (ElevenLabs-Key), Anzeige |
 | `api-tokens.json` | API-Tokens für Kurzbefehle, Funke und Suche (nur Hashes; fehlen sie, müssen alle Kurzbefehle neue Tokens bekommen) |
 | `capture-state.json` | Merkzettel von Capture und Brücke (keine doppelten Aufgaben, zuletzt gesehene Checkbox-Stände) |
 | `session-secret` | Secret des Sitzungs-Cookies (bei gesetztem `SESSION_SECRET` ohne Bedeutung) |
@@ -607,7 +615,7 @@ alle Markierungen, filterbar nach Quelle und Thema.
 **Unterwegs hören** (`/lesen/hoeren?zeit=15`, VCP-79, Link auf dem Stapel): Die
 Texte des Zeitfensters werden zur Wiedergabeliste. Vorgelesen wird auf dem Gerät
 mit der Web Speech API (`speechSynthesis`, deutsche Stimme bevorzugt), ohne
-Serverkosten. Bedienung: Abspielen/Pause, Nächster Text, Tempo (0,8× bis 1,8×,
+Serverkosten, oder mit ElevenLabs (unten, „Stimme vom Server“). Bedienung: Abspielen/Pause, Nächster Text, Tempo (0,8× bis 1,8×,
 im Browser gemerkt) und **Das hier merken**, das den gerade gesprochenen Satz
 markiert. Den Text liefert der Server (`/lesen/hoeren/text?id=…`): Lesetext und
 Sätze mit Zeichenpositionen wie in `src/lesen/anchor.js`. Nach jedem Satz
@@ -642,10 +650,26 @@ Was über iOS bekannt ist, und was nicht:
   Bedienungshilfen → Gesprochene Inhalte → Stimmen) und ob die Leseansicht danach
   an der richtigen Stelle steht.
 
-Reicht das für den Spaziergang nicht, ist die Alternative (nicht gebaut): Der
-Server erzeugt je Text eine Audiodatei mit lokalem TTS (z. B. Piper), die Seite
-spielt sie über `<audio>` mit Media Session für die Steuerung im Sperrbildschirm.
-Die Lesestelle käme dann aus Zeitmarken je Satz.
+**Stimme vom Server (ElevenLabs):** Steht unter **Einstellungen → Vorlesen** ein
+ElevenLabs-API-Key (oder `ELEVENLABS_API_KEY`, siehe [Betrieb](#betrieb)), liest
+ElevenLabs statt des Geräts vor, im Browser und in der iOS-App. Der Server holt
+jeden Satz einzeln (`POST /v1/text-to-speech/{voice}`, MP3 44,1 kHz/128 kbit/s,
+Satz davor und danach als `previous_text`/`next_text` für den Tonfall) und
+liefert ihn über `/lesen/hoeren/audio?id=…&von=…&bis=…` bzw. `/api/app/audio`
+aus. `von`/`bis` sind Zeichen im Lesetext wie die Sätze: Vorgelesen wird nur Text
+aus dem Stapel, kein beliebiger, und der Key verlässt den Server nie. Jede Antwort
+liegt im Cache (`TTS_CACHE_DIR`), ein zweites Hören kostet kein Kontingent. Die
+Seite spielt über ein `<audio>`-Element mit Media Session (Sperrbildschirm,
+Kopfhörer), lädt den nächsten Satz schon vorab und den ersten beim Öffnen, damit
+„Abspielen“ ihn noch im Tipp startet (sonst bleibt iOS stumm). Tempo über
+`playbackRate`. Lehnt ElevenLabs ab (Kontingent, Key, Stimme) oder fehlt das Netz,
+meldet die Seite das einmal und liest mit der Gerätestimme weiter.
+
+Kosten: ElevenLabs rechnet nach Zeichen. Ein Text mit 15 Minuten Lesezeit hat
+rund 20 000 Zeichen; mit `eleven_multilingual_v2` kostet das 20 000 Credits, mit
+`eleven_flash_v2_5` die Hälfte bei etwas weniger natürlicher Betonung. Das Modell
+steht unter **Einstellungen → Vorlesen → Stimme und Modell**. Beim Öffnen von
+`/lesen/hoeren` holt die Seite schon den ersten Satz, auch ohne Abspielen.
 
 **Wiedersehen** (`/lesen/wiedersehen`, VCP-74) holt Markierungen nach einem
 einfachen Leitner-Schema zurück: Box 1 bis 5 mit 1, 3, 7, 21 und 60 Tagen
@@ -863,7 +887,8 @@ eine Kopie davon beendet nur „Überall abmelden“ oder der Ablauf.
 | Route | Antwort |
 |---|---|
 | `GET /api/app/ich` | `{"ok", "name", "scopes": ["app","lesestapel"], "version": "0.1.0"}` — Token prüfen |
-| `GET /api/app/stapel?zeit=15` | `{"ok", "zeit", "items": [{"id","title","url","site","kind","minutes","remaining","progress"}]}` — Wiedergabeliste wie `/lesen/hoeren` (`zeit` 5, 15, 30 oder 60, sonst 15) |
+| `GET /api/app/stapel?zeit=15` | `{"ok", "zeit", "stimme", "items": [{"id","title","url","site","kind","minutes","remaining","progress"}]}` — Wiedergabeliste wie `/lesen/hoeren` (`zeit` 5, 15, 30 oder 60, sonst 15); `stimme` ist der Anbieter der Stimme vom Server (`"ElevenLabs"`) oder `null` |
+| `GET /api/app/audio?id=…&von=…&bis=…` | MP3 (`audio/mpeg`) des Stücks `von`–`bis` (Zeichen wie `sentences`) von der Stimme auf dem Server; `404` ohne Stimme oder Artikel, `400` bei falscher Stelle, `502` mit `message`, wenn der Anbieter ablehnt |
 | `GET /api/app/text?id=…` | `{"ok", "id", "title", "text", "sentences": [[start, end], …], "progress", "anchor"}` wie `/lesen/hoeren/text`; `404` ohne Artikel |
 | `POST /api/app/fortschritt` | Body `{"id", "fortschritt": 0.42, "anker": 1234}` (Anker = Zeichen im Text, optional) → `{"ok", "progress"}` |
 | `POST /api/app/abmelden` | Body `{}` → `{"ok": true}`; widerruft genau diesen Geräte-Token (Abmelden in der App), danach `401` |

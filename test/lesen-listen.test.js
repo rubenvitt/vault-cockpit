@@ -8,6 +8,7 @@ import { readingRoutes } from '../src/lesen/http.js';
 import { sanitizeHtml } from '../src/lesen/extract.js';
 import { htmlText, anchorAt } from '../src/lesen/anchor.js';
 import { sentences } from '../src/lesen/listen.js';
+import { SpeechError } from '../src/lesen/tts.js';
 
 const said = (html) => sentences(html).map(({ start, end }) => htmlText(html).slice(start, end));
 
@@ -28,11 +29,11 @@ test('Hören: Abkürzungen, Daten und Zahlen beenden keinen Satz', () => {
 });
 
 /** Lesestapel mit einem Text aus zwei Absätzen, Seiten und Aktionen direkt aufgerufen. */
-function setup() {
+function setup({ speech = null } = {}) {
   const store = createReadingStore({ path: ':memory:' });
   const html = sanitizeHtml('<h2>Anfang</h2><p>Der Stapel wächst &amp; wächst.</p><p>Ein zweiter Absatz. Mit einem Satz, den man sich merkt.</p>');
   const { doc } = store.addDocument({ url: 'https://blatt.test/a', title: 'Vom Lesen', status: 'stapel', reading_minutes: 5, content_html: html });
-  const routes = readingRoutes({ store, logger: { info() {}, warn() {}, error() {} } });
+  const routes = readingRoutes({ store, speech, logger: { info() {}, warn() {}, error() {} } });
   const ctx = (path) => ({ url: new URL(`https://vault.test${path}`), user: 'ruben', tz: 'Europe/Berlin', write: { csrf: 'c', back: path }, flash: null });
   const page = (path) => routes.pages[new URL(`https://vault.test${path}`).pathname](ctx(path));
   const act = (path, fields) => routes.actions[path](new URLSearchParams(fields), { sub: 'ruben' });
@@ -93,10 +94,10 @@ test('Hören: Seite listet das Zeitfenster ohne JavaScript, Text als JSON, Link 
 });
 
 /** /static/lesen-hoeren.js auf der gerenderten Seite ausführen; `window` sind die Browser-Fähigkeiten. */
-async function runPlayerScript(window) {
-  const { page } = setup();
+async function runPlayerScript(window, { speech = null, globals = () => ({}) } = {}) {
+  const { page } = setup({ speech });
   const { document } = parseHTML((await page('/lesen/hoeren?zeit=30')).html);
-  const context = { window, document, location: { search: '?zeit=30' }, URLSearchParams, Element: document.defaultView.Element, localStorage: { getItem: () => null, setItem() {} }, navigator: {}, fetch: () => new Promise(() => {}) };
+  const context = { window, document, location: { search: '?zeit=30' }, URLSearchParams, Element: document.defaultView.Element, localStorage: { getItem: () => null, setItem() {} }, navigator: {}, fetch: () => new Promise(() => {}), ...globals(page) };
   vm.runInNewContext(readFileSync(new URL('../src/web/static/lesen-hoeren.js', import.meta.url), 'utf8'), context);
   return document.querySelector('.hoeren-player');
 }
@@ -118,4 +119,76 @@ test('Hören: im Browser bleibt die Sprachausgabe, ohne Brücke', async () => {
   const player = await runPlayerScript({ speechSynthesis, cockpit: { toast() {}, send() {}, csrf: () => 'c' } });
   assert.equal(player.hidden, false);
   assert.equal(player.querySelector('[data-cmd=next]').hidden, false);
+});
+
+test('Hören: mit Stimme vom Server spielt jeder Satz als Audio, fällt sie aus, liest das Gerät weiter', async () => {
+  // Der dritte Satz scheitert am Kontingent.
+  const speech = {
+    voice: () => 'ElevenLabs',
+    audio: async ({ text }) => {
+      if (text.startsWith('Ein zweiter')) throw new SpeechError('ElevenLabs: Kontingent aufgebraucht');
+      return Buffer.from(text);
+    },
+  };
+  const requests = [];
+  const fetchFrom = (page) => async (url, init = {}) => {
+    requests.push(String(url));
+    if (init.method === 'POST') return { ok: true };
+    const r = await page(String(url));
+    const body = r.body;
+    return { ok: (r.status ?? 200) < 300, status: r.status ?? 200, redirected: false, json: async () => JSON.parse(body), blob: async () => String(body) };
+  };
+  const played = [];
+  class FakeAudio {
+    constructor() {
+      this.paused = true;
+      this.on = {};
+      FakeAudio.last = this;
+    }
+    addEventListener(type, fn) {
+      this.on[type] = fn;
+    }
+    play() {
+      this.paused = false;
+      played.push(this.src);
+      return Promise.resolve();
+    }
+    pause() {
+      this.paused = true;
+    }
+  }
+  const blobs = [];
+  const URL = { createObjectURL: (b) => (blobs.push(b), `blob:${blobs.length}`), revokeObjectURL() {} };
+  const spoken = [];
+  const toasts = [];
+  const speechSynthesis = { getVoices: () => [], speak: (u) => spoken.push(u.text), cancel() {} };
+  class SpeechSynthesisUtterance {
+    constructor(text) {
+      this.text = text;
+    }
+  }
+  const tick = () => new Promise((r) => setTimeout(r, 5));
+  const player = await runPlayerScript(
+    { speechSynthesis, cockpit: { toast: (m) => toasts.push(m), send() {}, csrf: () => 'c' } },
+    { speech, globals: (page) => ({ fetch: fetchFrom(page), Audio: FakeAudio, URL, SpeechSynthesisUtterance, setTimeout }) },
+  );
+  await tick();
+  assert.equal(player.dataset.voice, 'ElevenLabs');
+  assert.ok(requests.some((u) => /^\/lesen\/hoeren\/audio\?id=[^&]+&von=0&bis=6$/.test(u)), 'erster Satz schon vorgeladen');
+
+  player.querySelector('[data-cmd=play]').click();
+  assert.deepEqual(played, ['blob:1'], 'startet noch im Tipp');
+  assert.deepEqual(blobs, ['Anfang']);
+  await tick();
+  FakeAudio.last.on.ended();
+  await tick();
+  assert.deepEqual(played, ['blob:1', 'blob:2']);
+  assert.equal(blobs[1], 'Der Stapel wächst & wächst.');
+  assert.ok(requests.includes('/aktion/lesen/doc/fortschritt'), 'Stelle gespeichert');
+
+  FakeAudio.last.on.ended();
+  await tick();
+  assert.deepEqual(spoken, ['Ein zweiter Absatz.'], 'Gerätestimme übernimmt den Satz');
+  assert.deepEqual(toasts, ['ElevenLabs: Kontingent aufgebraucht. Die Gerätestimme liest weiter.']);
+  assert.equal(played.length, 2);
 });

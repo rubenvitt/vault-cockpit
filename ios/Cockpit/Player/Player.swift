@@ -23,7 +23,7 @@ final class Player {
         didSet {
             defaults.set(tempo, forKey: Self.tempoKey)
             // Neues Tempo gleich hören: den laufenden Satz neu beginnen.
-            if machine.isPlaying, let sentence = machine.currentSentence { speech.speak(sentence, tempo: tempo) }
+            if machine.isPlaying, let utterance = machine.currentUtterance { speech.speak(utterance, tempo: tempo) }
             updateNowPlaying()
         }
     }
@@ -54,6 +54,7 @@ final class Player {
         tempo = Self.tempos.contains(saved) ? saved : 1
         pending = PendingListening(defaults: defaults)
         speech.onFinish = { [weak self] in self?.send(.sentenceFinished) }
+        speech.onNotice = { [weak self] in self?.message = $0 }
     }
 
     /// Player mit Token aus der Keychain und Puffer in der App Group.
@@ -67,7 +68,10 @@ final class Player {
         #if DEBUG
         if DemoListenService.isRequested { service = DemoListenService() }
         #endif
-        return Player(minutes: minutes, service: service, speech: SystemSpeech(), defaults: defaults)
+        // Stimme vom Server, wenn die Wiedergabeliste eine nennt; sonst und bei Ausfall die des Geräts.
+        var speech: any SpeechOutput = SystemSpeech()
+        if let service { speech = ServerSpeech(service: service, fallback: SystemSpeech()) }
+        return Player(minutes: minutes, service: service, speech: speech, defaults: defaults)
     }
 
     // MARK: Ablauf
@@ -93,6 +97,7 @@ final class Player {
         do {
             let queue = try await service.queue(minutes: minutes)
             message = nil
+            speech.use(serverVoice: queue.voice)
             send(.queue(queue.items))
         } catch {
             message = "Wiedergabeliste ließ sich nicht laden: \(error.localizedDescription)"
@@ -104,9 +109,11 @@ final class Player {
         guard isStarted else { return }
         for effect in machine.handle(event) {
             switch effect {
-            case .speak(let sentence):
+            case .speak:
+                guard let utterance = machine.currentUtterance else { break }
                 activateSession()
-                speech.speak(sentence, tempo: tempo)
+                speech.speak(utterance, tempo: tempo)
+                if let next = machine.nextUtterance { speech.prepare(next) }
             case .stop:
                 speech.stop()
             case .load(let id):

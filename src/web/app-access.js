@@ -3,6 +3,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { ActionError } from '../cockpit/actions.js';
 import { SettingsError } from '../cockpit/settings.js';
 import { SCOPES, grantsOf } from '../cockpit/tokens.js';
+import { SpeechError } from '../lesen/tts.js';
 import { readLimited, FormError } from './multipart.js';
 
 /**
@@ -30,7 +31,8 @@ import { readLimited, FormError } from './multipart.js';
  *
  * Mit dem Geräte-Token (`Authorization: Bearer vct_…`) statt Sitzung und CSRF:
  * `GET /api/app/stapel?zeit=15`, `GET /api/app/text?id=…`,
- * `POST /api/app/fortschritt`, `POST /api/app/markierung`, `GET /api/app/ich`,
+ * `GET /api/app/audio?id=…&von=…&bis=…` (MP3 eines Satzes, nur mit Stimme vom
+ * Server; welche, sagt `stimme` in `/api/app/stapel`), `POST /api/app/fortschritt`, `POST /api/app/markierung`, `GET /api/app/ich`,
  * `POST /api/app/abmelden` (widerruft den Token selbst).
  * Dieselbe Logik wie `/lesen/hoeren` und die `/aktion/lesen/…`-Aktionen.
  * Fehler wie src/lesen/api.js: `{ error, status, message }`.
@@ -159,7 +161,8 @@ export function createAppAccess({ sessions, tokens, reading, publicUrl, appId = 
       'GET',
       (req, res, url) => {
         const { zeit, items } = reading.listen.queue(url.searchParams.get('zeit'));
-        return json(res, 200, { ok: true, zeit, items: items.map(slim) });
+        // `stimme`: Anbieter der Stimme vom Server, `null` = Sprachausgabe des Geräts.
+        return json(res, 200, { ok: true, zeit, stimme: reading.listen.voice?.() ?? null, items: items.map(slim) });
       },
     ],
     '/api/app/text': [
@@ -167,6 +170,15 @@ export function createAppAccess({ sessions, tokens, reading, publicUrl, appId = 
       (req, res, url) => {
         const body = reading.listen.text(url.searchParams.get('id'));
         return body ? json(res, 200, { ok: true, ...body }) : fail(res, 404, 'Diesen Artikel gibt es nicht');
+      },
+    ],
+    '/api/app/audio': [
+      'GET',
+      async (req, res, url) => {
+        const q = url.searchParams;
+        const data = await reading.listen.audio({ id: q.get('id'), von: q.get('von'), bis: q.get('bis') });
+        res.writeHead(200, { 'content-type': 'audio/mpeg', 'content-length': data.length, 'cache-control': 'private, max-age=86400', 'x-content-type-options': 'nosniff' });
+        return res.end(req.method === 'HEAD' ? undefined : data);
       },
     ],
     '/api/app/fortschritt': [
@@ -227,7 +239,7 @@ export function createAppAccess({ sessions, tokens, reading, publicUrl, appId = 
         if ((req.method === 'HEAD' ? 'GET' : req.method) !== method) return fail(res, 405, `Nur ${method}`);
         return await run(req, res, url, device);
       } catch (err) {
-        if (err instanceof AppError || err instanceof ActionError) return fail(res, err.status ?? 400, err.message);
+        if (err instanceof AppError || err instanceof ActionError || err instanceof SpeechError) return fail(res, err.status ?? 400, err.message);
         throw err;
       }
     },

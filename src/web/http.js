@@ -12,7 +12,7 @@ import { renderReview, REVIEW_CSS } from './review-render.js';
 import { renderPlan, planRoutes, PLAN_CSS } from './plan-page.js';
 import { renderHealth, healthAlert, HEALTH_CSS } from './health-render.js';
 import { offlineFiles, readingOfflineUrls, OFFLINE_CSS, OFFLINE_MARK, SYNTHESIS_FOLDER } from './offline.js';
-import { SettingsError, MAX_CALENDARS } from '../cockpit/settings.js';
+import { SettingsError, MAX_CALENDARS, TTS_PROVIDERS } from '../cockpit/settings.js';
 import { describeWeek, weekOf } from '../cockpit/week.js';
 import { ActionError, SETTABLE } from '../cockpit/actions.js';
 import { BackupError, MAX_BACKUP } from '../cockpit/backup.js';
@@ -644,6 +644,12 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
         pollMinutes: field('mail.pollMinutes'),
       },
       embed: { url: field('embed.url'), model: field('embed.model') },
+      tts: {
+        provider: TTS_PROVIDERS.includes(field('tts.provider')) ? field('tts.provider') : null,
+        key: form.get('tts.clear') ? null : field('tts.key') || stored.tts?.key || null,
+        voice: field('tts.voice'),
+        model: field('tts.model'),
+      },
       calendars: calendarsIn,
       hiddenEvents: form.has('hiddenEvents') ? field('hiddenEvents').split(',') : stored.hiddenEvents,
       // Die Generation ändert nur „Überall abmelden“.
