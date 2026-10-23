@@ -154,10 +154,10 @@ test('Markierungen: anlegen, Notiz, im Text als <mark>, nach neuem Holen noch an
     assert.equal(del.status, 303);
     assert.equal(store.getHighlight(id), null);
     html = await page();
-    assert.match(html, /Markierung entfernt[^]*action="\/aktion\/lesen\/markierung\/neu"[^]*name="quote" value="einem Satz"/);
-    const undo = await call('/aktion/lesen/markierung/neu', { method: 'POST', form: { csrf, id: doc.id, quote: 'einem Satz', prefix: a.prefix, suffix: a.suffix, start: '' }, json: true });
+    assert.match(html, /Markierung entfernt[^]*action="\/aktion\/lesen\/markierung\/neu"[^]*name="cid" value="[^"]+"[^]*name="quote" value="einem Satz"/);
+    const undo = await call('/aktion/lesen/markierung/neu', { method: 'POST', form: { csrf, id: doc.id, cid: id, quote: 'einem Satz', prefix: a.prefix, suffix: a.suffix, start: '' }, json: true });
     assert.equal(undo.status, 200);
-    assert.equal(store.listHighlights({ docId: doc.id }).length, 1);
+    assert.deepEqual(store.listHighlights({ docId: doc.id }).map((h) => h.id), [id], 'gleiche ID, Block-ID bleibt');
   });
 });
 

@@ -133,7 +133,8 @@ export function highlightRoutes({ store, asAction, capture = null, onChange = ()
         const h = highlightOf(form.get('id'));
         store.deleteHighlight(h.id);
         onChange(h.doc_id);
-        const fields = { id: h.doc_id, quote: h.quote, prefix: h.prefix, suffix: h.suffix, start: h.start_hint ?? '', notiz: h.note ?? '' };
+        // `cid` = alte ID: Block-ID `^hl-…` und Links darauf bleiben nach dem Rückgängig gültig.
+        const fields = { id: h.doc_id, cid: h.id, quote: h.quote, prefix: h.prefix, suffix: h.suffix, start: h.start_hint ?? '', notiz: h.note ?? '' };
         return { message: 'Markierung entfernt', undo: { action: '/aktion/lesen/markierung/neu', fields } };
       },
 
