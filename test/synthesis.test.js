@@ -151,3 +151,22 @@ test('Als Aufgaben nach Zunder: je Punkt eine Aufgabe, zweimal klicken legt nich
   const none = createCockpitActions({ vaultPath: root, settings: createSettingsStore({ defaults: {}, logger: quiet }), policy, state, zunder: () => null, logger: quiet });
   await assert.rejects(none.synthesisTasks({ path, points: ['D'] }), (err) => err.status === 503);
 });
+
+test('/wissen: Filter greifen vor der Trefferbegrenzung der Suche', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'vault-wissen-viele-'));
+  try {
+    mkdirSync(join(dir, 'wiki/synthesis'), { recursive: true });
+    for (let i = 0; i < 35; i += 1) writeFileSync(join(dir, `wiki/synthesis/Entwurf ${i}.md`), `---\ntype: synthesis\nstatus: entwurf\n---\n# Entwurf ${i}\n\nStruktur Struktur Struktur.\n`);
+    writeFileSync(join(dir, 'wiki/synthesis/Reif.md'), '---\ntype: synthesis\nstatus: reif\n---\n# Reif\n\nEin langer Text über vieles, Gewohnheiten, Umgebung, Reibung und am Rand auch Struktur.\n');
+    let idx;
+    buildIndex({ vaultPath: dir, dbPath: ':memory:', policy, logger: quiet, persist: (db, vp) => (idx = openIndex(db, { vaultPath: vp, policy })) });
+    const notes = createNoteDesk({ index: idx, editor: createEditor({ vaultPath: dir, index: idx }), policy, settings: createSettingsStore({ defaults: { inboxFolder: 'inbox' }, logger: quiet }) });
+    const many = (query, opts) => hybridSearch({ index: idx, query, limit: 30, ...opts });
+    assert.equal((await many('Struktur', { type: 'synthesis' })).results.some((r) => r.path === 'wiki/synthesis/Reif.md'), false, 'ohne Pfadfilter liegt sie hinter der Grenze');
+    const m = await wissenView({ notes, search: many }, { q: 'Struktur', status: 'reif' });
+    assert.deepEqual(m.hits.map((h) => h.title), ['Reif']);
+    idx.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

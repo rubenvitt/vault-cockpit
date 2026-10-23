@@ -340,7 +340,7 @@ const webHttp = process.env.WEB_CLIENT_ID
       captureEnabled,
       calendars,
       graph,
-      search: (query, { type = null } = {}) => hybridSearch({ index, semantic: currentSemantic, query, type, limit: 30 }),
+      search: (query, { type = null, paths = null } = {}) => hybridSearch({ index, semantic: currentSemantic, query, type, paths, limit: 30 }),
       // Synthesen: passende neue Markierungen als Belege anhängen (VCP-82).
       evidence: createSynthesisEvidence({ notes: noteDesk, index, store: reading, exporter: readingExport, embedCache, semantic: currentSemantic, vaultPath: VAULT_PATH, editor }),
       health,

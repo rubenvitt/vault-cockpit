@@ -1603,7 +1603,8 @@ test('Wissen: Fragesuche mit Typfilter, Synthese-Kopf und offene Punkte nach Zun
       assert.match(html, /<a href="\/wissen" class="subnav-link" aria-current="page">Wissen<\/a>/);
       // Die Suche, die in der Leiste unten Lesen weichen musste, bleibt von hier erreichbar.
       assert.match(html, /<a href="\/graph\?q=Struktur">Ganzen Vault durchsuchen<\/a>/);
-      assert.deepEqual(asked[0], ['Struktur', { type: 'synthesis' }]);
+      // Die Suche bekommt nur die Synthesen, die die Filter erfüllen.
+      assert.deepEqual(asked[0], ['Struktur', { type: 'synthesis', paths: ['wiki/synthesis/A.md'] }]);
 
       // Live-Suche und Notizseite.
       await call('/api/suche?q=Struktur&type=synthesis');
