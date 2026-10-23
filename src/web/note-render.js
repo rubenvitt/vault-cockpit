@@ -1,6 +1,8 @@
 import { esc, formHead, flashToast, obsidianLink } from './render.js';
 import { renderMarkdown, inlineMd } from './markdown-render.js';
 import { head, appHeader } from './layout.js';
+import { synthesisHead, SYNTHESIS } from './synthesis-render.js';
+import { evidenceBox } from '../lesen/synthesis-evidence.js';
 
 const noteHref = (path) => `/notiz?pfad=${encodeURIComponent(path)}`;
 const graphHref = (path) => `/graph?pfad=${encodeURIComponent(path)}`;
@@ -71,9 +73,11 @@ function suggestSection(s, note, ctx) {
  * Wikilinks und Backlinks führen zu weiteren Notizseiten, so lässt sich im
  * Vault lesen, ohne Obsidian zu öffnen. `related` kommt von `notes.related`,
  * `graph` verlinkt den Graphen der Notiz, `suggestions` (nur Inbox) kommt von
- * `notes.suggest`.
+ * `notes.suggest`. Eine Synthese (`type: synthesis`) bekommt oben ihren Kopf
+ * (siehe `synthesisHead`); `zunder` sagt, ob ein Zunder-Zugang eingerichtet ist,
+ * `evidence` sind passende neue Markierungen (src/lesen/synthesis-evidence.js).
  */
-export function renderNote(note, { user = null, write = null, back = '/', flash = null, draft = null, targets = [], archive = null, vaultName = null, related = null, graph = false, suggestions = null } = {}) {
+export function renderNote(note, { user = null, write = null, back = '/', flash = null, draft = null, targets = [], archive = null, vaultName = null, related = null, graph = false, suggestions = null, zunder = false, evidence = null } = {}) {
   const ctx = { write, back };
   const obsidian = obsidianLink(note.path, vaultName);
   const checkbox = write
@@ -81,6 +85,7 @@ export function renderNote(note, { user = null, write = null, back = '/', flash 
         `${formHead(ctx, '/aktion/notiz/checkbox', { pfad: note.path, n, line: line.trim(), erledigt: done ? '0' : '1' }).replace('class="act"', 'class="act box-form"')}<button type="submit" class="box${done ? ' on' : ''}" aria-pressed="${done}" aria-label="${done ? 'Wieder öffnen' : 'Abhaken'}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg></button></form>`
     : null;
   const fm = Object.entries(note.frontmatter ?? {}).filter(([k]) => k !== 'tags' && k !== 'tag');
+  const md = renderMarkdown(note.body, { checkbox, links: note.links ?? null });
   const panel = write
     ? `<aside class="note-actions">
     ${suggestSection(suggestions, note, ctx)}
@@ -120,9 +125,11 @@ ${appHeader({ user })}
   <div class="note-main">
   <article class="note-preview">
     ${note.tags.length ? `<p class="tags">${note.tags.map((t) => `<span class="tag">#${esc(t)}</span>`).join(' ')}</p>` : ''}
+    ${note.frontmatter?.type === SYNTHESIS ? synthesisHead(note, md, { ctx, zunder }) : ''}
     ${frontmatter(fm, note.links ?? null)}
-    <div class="md">${renderMarkdown(note.body, { checkbox, links: note.links ?? null }) || '<p class="empty">Die Notiz ist leer.</p>'}</div>
+    <div class="md">${md || '<p class="empty">Die Notiz ist leer.</p>'}</div>
   </article>
+  ${evidenceBox(evidence, note, ctx)}
   ${relatedSection(related)}
   </div>
   ${panel}

@@ -24,6 +24,12 @@ before(() => {
   write('privat/tagebuch.md', '# Tagebuch\n\nHeute mit dem Hund im Wald.\n');
   write('readwise/artikel.md', '# Artikel\n\nHund und Wald.\n');
   for (let i = 0; i < 60; i++) write(`masse/notiz-${i}.md`, `# Notiz ${i}\n\nZettelkasten Eintrag ${i}.\n`);
+  // Synthese für die Fragesuche (VCP-76) und ablenkende Nicht-Synthesen mit denselben Wörtern.
+  write('wiki/synthesis/Architektur statt Disziplin.md', '---\ntype: synthesis\nsummary: Gute Struktur ersetzt Willenskraft.\n---\n# Architektur statt Disziplin\n\nWo Struktur fehlt, muss Willenskraft alles tragen.\n');
+  write('wiki/synthesis/Gewohnheiten.md', '---\ntype: synthesis\n---\n# Gewohnheiten\n\nKleine Schritte, jeden Tag.\n');
+  write('wiki/concepts/Willenskraft.md', '---\ntype: concept\n---\n# Willenskraft\n\nWo hilft Willenskraft mehr als Struktur? Willenskraft, Willenskraft, Struktur, Struktur, mehr als genug.\n');
+  write('wiki/Struktur.md', '# Struktur\n\nStruktur hilft mehr als Willenskraft, sagt man. Struktur, Struktur.\n');
+  write('privat/Synthese Willenskraft.md', '---\ntype: synthesis\n---\n# Geheime Synthese\n\nWo hilft Struktur mehr als Willenskraft? Struktur Willenskraft.\n');
   const policy = compilePolicy({ sensitive: { privat: 'privat' }, readwise: 'readwise' });
   tokens = createTokenStore({ logger: quiet });
   ({ token } = tokens.create('Test'));
@@ -186,4 +192,18 @@ test('/api/search lehnt Capture-Tokens ab', async () => {
   } finally {
     tokens.revoke(cap.id);
   }
+});
+
+test('/api/search filtert nach type: die Frage findet die Synthese, nicht die ablenkenden Notizen', async () => {
+  await withServer(async (call) => {
+    const q = encodeURIComponent('Wo hilft Struktur mehr als Willenskraft?');
+    const all = await (await call(`/api/search?q=${q}`)).json();
+    assert.notEqual(all.results[0].title, 'Architektur statt Disziplin', 'ohne Filter liegen die ablenkenden Notizen vorn');
+
+    const only = await (await call(`/api/search?q=${q}&type=synthesis`)).json();
+    assert.equal(only.results[0].title, 'Architektur statt Disziplin');
+    assert.ok(only.results.every((r) => r.type === 'synthesis'));
+    // Vertrauliche Ordner bleiben draußen, auch mit Typfilter.
+    assert.ok(!only.results.some((r) => r.path.startsWith('privat/')));
+  });
 });

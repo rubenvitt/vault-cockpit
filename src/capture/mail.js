@@ -10,10 +10,14 @@ import { createHash } from 'node:crypto';
  * Erledigt-Ordner (Standard „Archive“). Scheitert eine Mail, bleibt sie liegen
  * und kommt beim nächsten Abruf wieder dran.
  *
- * Nur Absender aus `allowedSenders` werden verarbeitet (Adresse oder mit
- * führendem `@` eine ganze Domain ohne Subdomains); alles andere wird
- * unverarbeitet in den Erledigt-Ordner verschoben, damit eine fremde Mail an die
- * Adresse weder Notizen noch Aufgaben erzeugt.
+ * Nur Absender aus `allowedSenders` werden zu Notizen oder Aufgaben (Adresse oder
+ * mit führendem `@` eine ganze Domain ohne Subdomains), damit eine fremde Mail an
+ * die Adresse beides nie erzeugt.
+ *
+ * `readingMail` (`{ matches(email), save(email) }`, src/lesen/mail.js) nimmt
+ * Mails mit `[lesen]` im Betreff oder `>` vorn statt des Routers: Sie gehen in den
+ * Lesestapel. Mit `readingMail` landen auch Mails fremder Absender dort (direkt
+ * abonnierte Newsletter); ohne werden sie unverarbeitet verschoben.
  */
 const MAIL = 'urn:ietf:params:jmap:mail';
 const USING = ['urn:ietf:params:jmap:core', MAIL];
@@ -25,6 +29,7 @@ export function createMailCapture({
   doneMailbox = 'Archive',
   allowedSenders,
   router,
+  readingMail = null,
   fetch = globalThis.fetch,
   batch = 20,
   logger = console,
@@ -88,9 +93,12 @@ export function createMailCapture({
         {
           accountId,
           '#ids': { resultOf: 'q', name: 'Email/query', path: '/ids' },
-          properties: ['id', 'messageId', 'from', 'subject', 'receivedAt', 'textBody', 'bodyValues'],
+          properties: ['id', 'messageId', 'from', 'subject', 'receivedAt', 'textBody', 'htmlBody', 'bodyValues'],
           fetchTextBodyValues: true,
-          maxBodyValueBytes: 100_000,
+          // HTML für Newsletter im Lesestapel.
+          // shortcut: JMAP schneidet Werte über 500 KB ab, der Rest eines langen Newsletters fehlt; bei Bedarf den Blob über downloadUrl holen.
+          fetchHTMLBodyValues: Boolean(readingMail),
+          maxBodyValueBytes: readingMail ? 500_000 : 100_000,
         },
         'g',
       ],
@@ -103,7 +111,15 @@ export function createMailCapture({
       const sender = String(email.from?.[0]?.email ?? '').toLowerCase();
       try {
         if (!isAllowed(sender)) {
-          logger.warn?.(`Mail-Capture: Absender nicht freigegeben, Mail wird nur verschoben (${email.id})`);
+          // Direkt abonnierte Newsletter: fremde Absender landen im Lese-Eingang, nie als Notiz oder Aufgabe,
+          // und lösen keinen Abruf einer Adresse aus.
+          if (readingMail) {
+            await readingMail.save(email, { fetch: false });
+            processed += 1;
+          } else logger.warn?.(`Mail-Capture: Absender nicht freigegeben, Mail wird nur verschoben (${email.id})`);
+        } else if (readingMail?.matches(email)) {
+          await readingMail.save(email);
+          processed += 1;
         } else {
           await router.route(toCapture(email));
           processed += 1;

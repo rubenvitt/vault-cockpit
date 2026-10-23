@@ -507,7 +507,7 @@ function calendarRow(c, i, check) {
 }
 
 /** Abschnitt „API-Tokens“: eigene Formulare, damit „Speichern“ oben die Tokens nie berührt. */
-const SCOPE_LABEL = { search: 'Suche', capture: 'Capture' };
+const SCOPE_LABEL = { search: 'Suche', capture: 'Capture', lesestapel: 'Lesestapel' };
 
 function tokenSection(tokens, created, tz, token) {
   const date = (iso) => new Date(iso).toLocaleDateString('de-DE', { timeZone: tz });
@@ -519,7 +519,7 @@ function tokenSection(tokens, created, tz, token) {
     .join('');
   return `<section id="tokens">
   <h2>API-Tokens ${pill(tokens.length ? String(tokens.length) : 'keine')}</h2>
-  <p class="meta">Für Kurzbefehle, Raycast und Funke. <b>Suche</b> darf <code>GET /api/search</code> (ohne vertrauliche Ordner), <b>Capture</b> darf <code>/capture</code> und <code>/funke</code> und kann nur neue Notizen und Zunder-Aufgaben anlegen.</p>
+  <p class="meta">Für Kurzbefehle, Raycast und Funke. <b>Suche</b> darf <code>GET /api/search</code> (ohne vertrauliche Ordner), <b>Capture</b> darf <code>/capture</code> und <code>/funke</code> und kann nur neue Notizen und Zunder-Aufgaben anlegen. <b>Lesestapel</b> darf <code>/lesestapel/speichern</code> und legt nur Artikel und PDFs in den Eingang des Lesestapels.</p>
   ${created ? `<div class="created"><p class="notice">${esc(SCOPE_LABEL[created.scope] ?? '')}-Token „${esc(created.name)}“ angelegt. Jetzt kopieren, er wird nicht noch einmal angezeigt:</p><p><code>${esc(created.token)}</code></p></div>` : ''}
   ${rows ? `<ul class="tokens">${rows}</ul>` : '<p class="empty">Noch keine Tokens.</p>'}
   <details class="cal cal-new token-add">
@@ -540,7 +540,7 @@ function shortcutSection(shortcuts, captureEnabled) {
     .join('');
   return `<section id="kurzbefehle">
   <h2>Kurzbefehle</h2>
-  <p class="meta">Auf dem iPhone antippen und importieren. Beim Import fragt iOS nach einem Token mit dem Recht „Capture“${captureEnabled ? '' : ' (noch keiner angelegt, siehe <a href="#tokens">API-Tokens</a>)'}.</p>
+  <p class="meta">Auf dem iPhone antippen und importieren. Beim Import fragt iOS nach einem Token: „Zum Lesestapel“ braucht das Recht „Lesestapel“, die übrigen das Recht „Capture“${captureEnabled ? '' : ' (noch keiner angelegt, siehe <a href="#tokens">API-Tokens</a>)'}.</p>
   <ul class="shortcuts">${items}</ul>
 </section>`;
 }
@@ -581,6 +581,7 @@ export function renderSettings({ stored, defaults, checks = {}, notice = null, e
     ['bruecke', 'Zunder-Brücke', bridge],
     ['feuer-notiz', 'Feuer-Notiz', flameNote],
     ['mail', 'Mail', mail],
+    ['lesestapel', 'Lesestapel', null],
     ['embeddings', 'Embeddings', embed],
     ['anzeige', 'Anzeige', null],
     ['anmeldung', 'Anmeldung', null],
@@ -665,6 +666,13 @@ ${backupHint(backup)}
     </div>
   </details>
   ${stored.mail.token ? '<label class="checkline"><input type="checkbox" name="mail.clear" value="1"> eigenen Token löschen</label>' : ''}
+</section>
+<section id="lesestapel">
+  ${head2('Lesestapel')}
+  <p class="meta">Gelesene Texte mit Markierungen kommen als Notiz in diesen Ordner, jede Markierung mit Block-ID zum Verlinken. Das Cockpit schreibt danach nur den Bereich „Markierungen“ neu; in vertraulichen und Readwise-Ordnern legt es nichts an.</p>
+  <div class="grid">
+    <label>Ordner im Vault<input name="readingNotes.folder" value="${esc(stored.readingNotes?.folder ?? '')}" placeholder="${esc(d.readingNotesFolder ?? '30-ressourcen/lesestapel')}"></label>
+  </div>
 </section>
 <section id="embeddings">
   ${head2('Embeddings', embed)}

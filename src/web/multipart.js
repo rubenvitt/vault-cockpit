@@ -12,7 +12,7 @@ export class FormError extends Error {
 }
 
 /** Liest den Body bis `limit` Bytes. Darüber wird der Rest verworfen, damit die Antwort noch ankommt. */
-function readLimited(req, limit) {
+export function readLimited(req, limit) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;

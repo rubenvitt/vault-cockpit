@@ -10,7 +10,7 @@ import { renderNote, NOTE_CSS } from './note-render.js';
 import { renderReview, REVIEW_CSS } from './review-render.js';
 import { renderPlan, planRoutes, PLAN_CSS } from './plan-page.js';
 import { renderHealth, healthAlert, HEALTH_CSS } from './health-render.js';
-import { offlineFiles, OFFLINE_CSS, OFFLINE_MARK } from './offline.js';
+import { offlineFiles, readingOfflineUrls, OFFLINE_CSS, OFFLINE_MARK, SYNTHESIS_FOLDER } from './offline.js';
 import { SettingsError, MAX_CALENDARS } from '../cockpit/settings.js';
 import { describeWeek, weekOf } from '../cockpit/week.js';
 import { ActionError, SETTABLE } from '../cockpit/actions.js';
@@ -18,17 +18,24 @@ import { BackupError, MAX_BACKUP } from '../cockpit/backup.js';
 import { readMultipart, FormError } from './multipart.js';
 import { restoredMessage } from './backup-render.js';
 import { placement } from '../capture/syntax.js';
+import { wissenPage } from './wissen-page.js';
+import { openPoints, SYNTHESIS } from './synthesis-render.js';
+import { evidenceRoutes } from '../lesen/synthesis-evidence.js';
 
 const staticFile = (name, enc) => readFileSync(new URL(`./static/${name}`, import.meta.url), enc);
 const CLIENT_JS = staticFile('cockpit.js', 'utf8');
 const GRAPH_JS = staticFile('graph.js', 'utf8');
 const OFFLINE_JS = staticFile('offline.js', 'utf8');
+const INBOX_JS = staticFile('lesen-eingang.js', 'utf8');
+const LESEN_DOC_JS = staticFile('lesen-doc.js', 'utf8');
+const LESEN_HOEREN_JS = staticFile('lesen-hoeren.js', 'utf8');
+const LESEN_LINKS_JS = staticFile('lesen-verbinden.js', 'utf8');
 // sigma + graphology + ForceAtlas2, gebündelt mit `npm run vendor` und eingecheckt.
 const GRAPH_LIB = staticFile('vendor/graph-lib.js', 'utf8');
 // Design-System (Tokens, Bausteine, Wochenansicht) plus die Teile der übrigen Seiten.
 const CSS = staticFile('cockpit.css', 'utf8') + GRAPH_CSS + NOTE_CSS + REVIEW_CSS + PLAN_CSS + HEALTH_CSS + OFFLINE_CSS;
 const hash = (s) => createHash('sha256').update(s).digest('base64url').slice(0, 10);
-const VERSION = { css: hash(CSS), js: hash(CLIENT_JS), graph: hash(GRAPH_JS), graphLib: hash(GRAPH_LIB), offline: hash(OFFLINE_JS) };
+const VERSION = { css: hash(CSS), js: hash(CLIENT_JS), graph: hash(GRAPH_JS), graphLib: hash(GRAPH_LIB), offline: hash(OFFLINE_JS), inbox: hash(INBOX_JS), lesenDoc: hash(LESEN_DOC_JS), lesenHoeren: hash(LESEN_HOEREN_JS), lesenLinks: hash(LESEN_LINKS_JS) };
 versionAssets(VERSION);
 
 /** Web-App-Manifest: Das Cockpit startet auf dem iPhone und unter Android wie eine App. */
@@ -61,6 +68,10 @@ const PUBLIC = new Map([
   ['/static/graph.js', { type: 'text/javascript; charset=utf-8', body: GRAPH_JS, version: VERSION.graph }],
   ['/static/vendor/graph-lib.js', { type: 'text/javascript; charset=utf-8', body: GRAPH_LIB, version: VERSION.graphLib }],
   ['/static/offline.js', { type: 'text/javascript; charset=utf-8', body: OFFLINE_JS, version: VERSION.offline }],
+  ['/static/lesen-eingang.js', { type: 'text/javascript; charset=utf-8', body: INBOX_JS, version: VERSION.inbox }],
+  ['/static/lesen-doc.js', { type: 'text/javascript; charset=utf-8', body: LESEN_DOC_JS, version: VERSION.lesenDoc }],
+  ['/static/lesen-hoeren.js', { type: 'text/javascript; charset=utf-8', body: LESEN_HOEREN_JS, version: VERSION.lesenHoeren }],
+  ['/static/lesen-verbinden.js', { type: 'text/javascript; charset=utf-8', body: LESEN_LINKS_JS, version: VERSION.lesenLinks }],
   ['/manifest.webmanifest', { type: 'application/manifest+json; charset=utf-8', body: MANIFEST }],
   ['/static/icon.svg', { type: 'image/svg+xml', body: staticFile('icon.svg') }],
   ...['apple-touch-icon', 'icon-192', 'icon-512', 'icon-maskable-512'].map((n) => [`/static/icons/${n}.png`, { type: 'image/png', body: staticFile(`icons/${n}.png`) }]),
@@ -146,20 +157,31 @@ for (const [path, file] of offlineFiles(PUBLIC, { html: HTML_HEADERS }).entries)
  *   (`restart`); ist es nicht leer, nur mit `ersetzen=1`.
  * - `GET /kurzbefehle/<slug>.shortcut` liefert die signierten iOS-Kurzbefehle
  *   (verlinkt in den Einstellungen).
+ * - `GET /wissen?q=…&art=…&status=…` sucht in den Synthesen (`type: synthesis`),
+ *   `POST /aktion/synthese/aufgaben` legt die offenen Punkte einer Synthese
+ *   als Zunder-Aufgaben an (je Punkt höchstens einmal). Mit `evidence`
+ *   (src/lesen/synthesis-evidence.js) zeigt eine Synthese passende neue
+ *   Markierungen, `POST /aktion/synthese/beleg` hängt eine an, `/wissen?lesen=1`
+ *   filtert danach.
  * - `GET /zustand` zeigt den Zustand der Hintergrunddienste (`health`, siehe
  *   src/health/collect.js); meldet einer einen Fehler, trägt die Kopfzeile der
  *   Wochenansicht einen Hinweis dorthin.
+ * - `GET /lesen/…` und `POST /aktion/lesen/…` — Lesestapel (VCP-77), Seiten und
+ *   Aktionen aus `reading` (src/lesen/http.js).
  * - `GET /sw.js` (Service Worker) und `GET /offline` (App-Hülle ohne Netz) gibt
  *   es ohne Sitzung; `GET /api/sitzung` liefert das CSRF-Token der Sitzung, mit
  *   dem der Offline-Puffer die Schnelleingabe nachsendet (401 ohne Sitzung).
+ *   `GET /api/lesen/offline` nennt die Seiten, die der Service Worker als
+ *   Lesestoff für unterwegs speichern darf (src/web/offline.js).
  *
  * Die Sitzung ist ein signiertes Cookie und nur für diese Routen gültig; die
  * MCP-Schnittstelle prüft weiter ausschließlich Bearer-Tokens.
  */
-export function createWebHttp({ cockpit, settings, actions = null, notes = null, plan = null, tokens = null, shortcuts = [], captureEnabled = false, calendars = null, graph = null, search = null, health = null, backup = null, restart = () => {}, oidc, sessionSecret, publicUrl, allowedSubjects = [], logger = console, now = () => Date.now() }) {
+export function createWebHttp({ cockpit, settings, actions = null, notes = null, plan = null, reading = null, tokens = null, shortcuts = [], captureEnabled = false, calendars = null, graph = null, search = null, evidence = null, health = null, backup = null, restart = () => {}, oidc, sessionSecret, publicUrl, allowedSubjects = [], logger = console, now = () => Date.now() }) {
   const signer = createCookieSigner(sessionSecret);
   const secure = publicUrl.startsWith('https://');
   const sessions = createSessions({ signer, settings, allowedSubjects, secure, now });
+  const READING_PAGES = reading?.pages ?? {};
 
   const send = (res, status, body, headers = {}) => {
     res.writeHead(status, { ...HTML_HEADERS, ...headers });
@@ -294,8 +316,12 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       graph: Boolean(graph),
       // Vorschläge zum Ablegen nur für Inbox-Notizen und nur, wenn die Seite schreiben darf.
       suggestions: actions && note.inInbox ? (notes.suggest?.(note.path, related) ?? null) : null,
+      zunder: Boolean(actions && settings.get().zunder),
+      evidence: evidence && note.frontmatter?.type === SYNTHESIS ? await evidence.suggest(note.path) : null,
     });
-    return send(res, status, html);
+    // Synthesen darf der Service Worker für offline behalten (VCP-80), aber nie mit einem Entwurf im Feld.
+    const offline = status === 200 && !kept && !draft && note.path.startsWith(`${SYNTHESIS_FOLDER}/`) ? { [OFFLINE_MARK]: 'lesen' } : {};
+    return send(res, status, html, offline);
   }
 
   /**
@@ -345,8 +371,8 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   /** Seite hinter `back` mit Meldung (Weg ohne JavaScript, wenn eine Aktion scheitert). */
   const backPage = (req, res, back, session, opts) => {
     const url = new URL(back, publicUrl);
-    // Die Graphseite rendert sich aus der Meldung im Cookie neu.
-    if (url.pathname === '/graph') return redirect(res, back, [flashCookie(opts.flash)]);
+    // Graph- und Lesen-Seiten rendern sich aus der Meldung im Cookie neu.
+    if (url.pathname === '/graph' || READING_PAGES[url.pathname]) return redirect(res, back, [flashCookie(opts.flash)]);
     if (url.pathname === '/planen' && plan) return planPage(req, res, url, session, opts);
     return url.pathname === '/notiz' && notes ? notePage(req, res, url, session, opts) : page(req, res, url, session, opts);
   };
@@ -375,6 +401,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     return `Flamme gestoppt: ${taskName(t)}${minutes != null ? ` · ${minutes} min` : ''}${failed}`;
   };
   const captureMessage = (r) => {
+    if (r.kind === 'article') return `${r.duplicate ? 'Schon im Lesestapel' : 'Im Lesestapel'}: ${r.title}`;
     if (r.kind === 'task') return `${r.duplicate ? 'Schon erfasst' : 'Aufgabe angelegt'}: ${r.ref ?? 'neue Aufgabe'} ${placement(r)}${r.notes?.length ? ` · ${r.notes.join(' ')}` : ''}`;
     return `${r.duplicate ? 'Schon erfasst' : 'Notiz angelegt'}: ${r.path}`;
   };
@@ -460,6 +487,17 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
                 logger.info?.(`Cockpit: ${r.path} angelegt (${session.sub})`);
                 return { message: `${r.title} angelegt`, path: r.path };
               },
+              async '/aktion/synthese/aufgaben'(form, session) {
+                const note = notes.get(form.get('pfad'));
+                if (note?.frontmatter.type !== SYNTHESIS) throw new ActionError('Diese Synthese gibt es nicht oder das Cockpit darf sie nicht zeigen', 404);
+                const points = openPoints(note.body);
+                if (!points.length) throw new ActionError('Die Synthese hat keine offenen Punkte');
+                const r = await actions.synthesisTasks({ path: note.path, points });
+                logger.info?.(`Cockpit: ${r.created} offene Punkte aus ${note.path} nach Zunder (${session.sub})`);
+                const message = r.created ? `Nach Zunder: ${r.created} ${r.created === 1 ? 'Aufgabe' : 'Aufgaben'}${r.existing ? `, ${r.existing} schon dort` : ''}` : 'Alle offenen Punkte sind schon in Zunder';
+                return { message, path: note.path };
+              },
+              ...(evidence ? evidenceRoutes(evidence, { logger }) : {}),
               async '/aktion/notiz/checkbox'(form) {
                 const done = form.get('erledigt') === '1';
                 const r = notes.toggle(form.get('pfad'), form.get('n'), form.get('line'), done);
@@ -476,6 +514,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
         },
       }
     : {};
+  Object.assign(ACTIONS, reading?.actions);
 
   /**
    * Alle Aktionen. Mit JavaScript als JSON, ohne als Formular mit
@@ -485,7 +524,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
    */
   async function action(req, res, path, session) {
     const wantsJson = String(req.headers.accept ?? '').includes('application/json');
-    const form = await readForm(req, res);
+    const form = await readForm(req, res, reading?.uploads?.[path]);
     if (!form) return;
     const back = safeNext(form.get('back'));
     if (!csrfOk(req, form.get('csrf'))) {
@@ -582,6 +621,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       zunder: clear ? { url: null, token: null } : { url: field('zunder.url'), token: field('zunder.token') || stored.zunder.token },
       bridge: { enabled: choice('bridge.enabled'), tag: field('bridge.tag') },
       flameNote: { enabled: choice('flameNote.enabled') },
+      readingNotes: { folder: field('readingNotes.folder') },
       mail: {
         token: form.get('mail.clear') ? null : field('mail.token') || stored.mail.token,
         senders: list('mail.senders'),
@@ -600,16 +640,31 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   // Zusätzlich zu SameSite=Lax: Formulare nur von dieser Seite annehmen.
   const foreignOrigin = (req) => req.headers.origin && req.headers.origin !== new URL(publicUrl).origin;
 
-  /** Formular lesen; `null`, wenn schon mit 403/413 geantwortet wurde. */
-  async function readForm(req, res) {
+  /**
+   * Formular lesen; `null`, wenn schon mit 403/413 geantwortet wurde. Mit
+   * `uploadLimit` (nur Aktionen aus `reading.uploads`) auch `multipart/form-data`
+   * bis zu dieser Größe, die Dateien dann in `form.files`.
+   */
+  async function readForm(req, res, uploadLimit = 0) {
     if (foreignOrigin(req)) {
       json(res, 403, { error: 'forbidden', error_description: 'fremde Herkunft' });
       return null;
     }
+    if (uploadLimit && /^multipart\/form-data/i.test(req.headers['content-type'] ?? '')) {
+      try {
+        const { fields, files } = await readMultipart(req, { limit: uploadLimit });
+        return Object.assign(fields, { files });
+      } catch (err) {
+        if (!(err instanceof FormError)) throw err;
+        if (!res.destroyed) json(res, err.status, { error: 'bad_form', message: err.message });
+        return null;
+      }
+    }
     try {
       return new URLSearchParams(await readBody(req));
-    } catch {
-      json(res, 413, { error: 'too_large' });
+    } catch (err) {
+      if (!(err instanceof FormError)) json(res, 413, { error: 'too_large' });
+      else if (!res.destroyed) json(res, err.status, { error: 'invalid_form', message: err.message });
       return null;
     }
   }
@@ -734,11 +789,11 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     return send(res, 200, renderGraph(g, { vaultName, user, tz, write: writeContext(req), back: url.pathname + url.search, flash: takeFlash(req, res), notes: Boolean(notes) }));
   }
 
-  /** Live-Suche: die besten Treffer, knapp. */
+  /** Live-Suche: die besten Treffer, knapp; `type` filtert nach Frontmatter-`type` (z. B. `synthesis`). */
   async function searchApi(req, res, url) {
     const q = (url.searchParams.get('q') ?? '').trim().slice(0, 500);
     if (!q || !search) return json(res, 200, { query: q, results: [], total: 0 });
-    const r = await search(q);
+    const r = await search(q, { type: url.searchParams.get('type') || null });
     const results = r.results.slice(0, 8).map((x) => ({ path: x.path, title: x.title ?? x.path, snippet: x.snippet ?? null, streams: x.streams ?? [] }));
     return json(res, 200, { query: q, results, total: r.total, degraded: r.degraded ?? null });
   }
@@ -759,11 +814,22 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     return json(res, 200, g);
   }
 
+  /** Seite aus dem Bereich Lesen (src/lesen/http.js). */
+  async function readingPage(req, res, url, session) {
+    const r = await READING_PAGES[url.pathname]({ url, user: session.name ?? session.sub, tz: settings.get().tz, write: { csrf: csrfOf(req), back: url.pathname + url.search }, flash: takeFlash(req, res) });
+    if (r.redirect) return redirect(res, r.redirect);
+    // Leseansicht und Stapel darf der Service Worker für offline behalten (VCP-80); welche Artikel, sagt `/api/lesen/offline`.
+    const offline = r.html && (r.status ?? 200) === 200 && (url.pathname === '/lesen/doc' || (url.pathname === '/lesen/stapel' && !url.search)) ? { [OFFLINE_MARK]: 'lesen' } : {};
+    return send(res, r.status ?? 200, r.html ?? r.body, { ...r.headers, ...offline });
+  }
+
   const TOKEN_ROUTES = { '/einstellungen/tokens': createToken, '/einstellungen/tokens/widerrufen': revokeToken };
   const BACKUP_ROUTES = backup ? { '/einstellungen/sicherung': downloadBackup, '/einstellungen/sicherung/wiederherstellen': restoreBackup } : {};
   const ACTION_ROUTES = new Set(Object.keys(ACTIONS));
   const SHORTCUT_ROUTES = new Map(shortcuts.map((s) => [`/kurzbefehle/${s.slug}.shortcut`, s]));
-  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...PUBLIC.keys(), '/', '/api/woche', '/api/sitzung', '/api/suche', ...(actions ? ['/api/erfassen/vorschau'] : []), '/rueckblick', ...(notes ? ['/notiz', '/notiz/bild'] : []), ...(plan ? ['/planen'] : []), '/graph', '/api/graph', '/einstellungen', ...(health ? ['/zustand'] : []), ...(tokens ? Object.keys(TOKEN_ROUTES) : []), ...Object.keys(BACKUP_ROUTES), '/einstellungen/abmelden', '/login', '/auth/callback', '/logout']);
+  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...PUBLIC.keys(), '/', '/api/woche', '/api/sitzung', '/api/suche', ...(actions ? ['/api/erfassen/vorschau'] : []), '/rueckblick', ...(notes ? ['/notiz', '/notiz/bild'] : []), ...(plan ? ['/planen'] : []), '/graph', '/api/graph', ...Object.keys(READING_PAGES), '/einstellungen', ...(health ? ['/zustand'] : []), ...(tokens ? Object.keys(TOKEN_ROUTES) : []), ...Object.keys(BACKUP_ROUTES), '/einstellungen/abmelden', '/login', '/auth/callback', '/logout']);
+  if (notes) ROUTES.add('/wissen');
+  if (notes || reading) ROUTES.add('/api/lesen/offline');
 
   return {
     matches: (path) => ROUTES.has(path),
@@ -849,6 +915,10 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
         if (!session) return json(res, 401, { error: 'unauthorized', message: 'Die Anmeldung ist abgelaufen. Bitte neu anmelden.' });
         return json(res, 200, { ok: true, csrf: csrfOf(req) });
       }
+      if (path === '/api/lesen/offline') {
+        if (!session) return json(res, 401, { error: 'unauthorized', message: 'Die Anmeldung ist abgelaufen. Bitte neu anmelden.' });
+        return json(res, 200, { ok: true, urls: readingOfflineUrls({ reading, notes }) });
+      }
       if (path === '/api/suche') {
         if (!session) return json(res, 401, { error: 'unauthorized', error_description: 'Anmeldung unter /login nötig' });
         return searchApi(req, res, url);
@@ -864,9 +934,13 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
         }
         return noteImage(req, res, url);
       }
+      // JSON aus dem Bereich Lesen (`/api/lesen/…`): ohne Sitzung 401 statt Login-Seite.
+      if (!session && path.startsWith('/api/')) return json(res, 401, { error: 'unauthorized', message: 'Die Anmeldung ist abgelaufen. Bitte neu anmelden.' });
       if (!session) return redirect(res, `/login?next=${encodeURIComponent(url.pathname + url.search)}`);
       if (path === '/graph') return graphPage(req, res, url, session);
+      if (READING_PAGES[path]) return readingPage(req, res, url, session);
       if (path === '/notiz') return notePage(req, res, url, session);
+      if (path === '/wissen') return send(res, 200, await wissenPage({ notes, search, evidence, url, user: session.name ?? session.sub }), url.search ? {} : { [OFFLINE_MARK]: 'lesen' });
       if (path === '/rueckblick') return reviewPage(req, res, url, session);
       if (path === '/planen' && plan) return planPage(req, res, url, session);
       if (path === '/zustand' && health) return healthPage(req, res, session);

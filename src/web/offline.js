@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { head, appHeader, assets } from './layout.js';
 import { captureBar } from './render.js';
+import { SYNTHESIS } from './synthesis-render.js';
 
 /**
  * Offline-Betrieb des Web-Cockpits (VCP-46): Service Worker unter `/sw.js`,
@@ -18,13 +19,41 @@ import { captureBar } from './render.js';
  *   kennzeichnet. Notizvorschau, Suche, Graph, Rückblick, Einstellungen und
  *   alle `/api/…`-Antworten bleiben ungespeichert, damit keine Notizinhalte
  *   auf dem Gerät liegen.
- * - Ohne Netz zeigt er die gespeicherte Woche mit „offline, Stand von …“,
- *   sonst die App-Hülle. Die Schnelleingabe puffert dann in IndexedDB
- *   (`/static/offline.js`) und sendet über `/aktion/erfassen` nach.
+ * - Lesestoff (VCP-80): die nächsten `OFFLINE_DOCS` Artikel des Stapels, die
+ *   Synthesen in `SYNTHESIS_FOLDER` (höchstens `OFFLINE_SYNTHESES`) und die
+ *   Listen `/lesen/stapel` und `/wissen`. Welche genau, sagt allein
+ *   `/api/lesen/offline` (`readingOfflineUrls`); der Service Worker speichert
+ *   davon nur, was der Server mit `OFFLINE_MARK: lesen` ausliefert. Vertrauliche
+ *   und ausgeschlossene Notizen kommen nie in die Liste (`notes.ofType`).
+ * - Ohne Netz zeigt er die gespeicherte Woche bzw. Leseseite mit „offline,
+ *   Stand von …“, sonst die App-Hülle. Die Schnelleingabe und die Aktionen der
+ *   Leseansicht puffern dann in IndexedDB (`/static/offline.js`) und senden nach.
  */
 
 /** Antwort-Header, mit dem der Server eine Seite für den Offline-Cache freigibt. */
 export const OFFLINE_MARK = 'x-cockpit-offline';
+
+/** Ordner der Synthesen; nur Notizen darunter dürfen offline liegen. */
+export const SYNTHESIS_FOLDER = 'wiki/synthesis';
+export const OFFLINE_DOCS = 30;
+export const OFFLINE_SYNTHESES = 200;
+
+/**
+ * Was offline liegen darf, als Liste von Seiten für `/api/lesen/offline`.
+ * `reading` sind die Routen aus src/lesen/http.js, `notes` der Schreibtisch
+ * (src/cockpit/notes.js); fehlt eins, fehlt sein Teil. Synthesen: nur
+ * `type: synthesis` in `SYNTHESIS_FOLDER`, zuletzt bewegte zuerst.
+ */
+export function readingOfflineUrls({ reading = null, notes = null }) {
+  const syntheses = (notes?.ofType(SYNTHESIS) ?? [])
+    .filter((n) => n.path.startsWith(`${SYNTHESIS_FOLDER}/`))
+    .sort((a, b) => String(b.updated ?? '').localeCompare(String(a.updated ?? '')))
+    .slice(0, OFFLINE_SYNTHESES);
+  return [
+    ...(reading ? ['/lesen/stapel', ...reading.offlineDocs(OFFLINE_DOCS)] : []),
+    ...(notes ? ['/wissen', ...syntheses.map((n) => `/notiz?pfad=${encodeURIComponent(n.path)}`)] : []),
+  ];
+}
 
 const SW_SOURCE = readFileSync(new URL('./static/sw.js', import.meta.url), 'utf8');
 
@@ -52,7 +81,8 @@ ${appHeader({ current: 'woche' })}
   <h2>Offline</h2>
   <p>Das Cockpit ist gerade nicht erreichbar, und diese Seite liegt nicht auf dem Gerät.</p>
   <p>Die Schnelleingabe geht trotzdem: Notizen und Aufgaben mit <code>!</code> warten auf dem Gerät und gehen raus, sobald wieder Netz da ist.</p>
-  <p><a href="/" class="btn">Zur gespeicherten Woche</a></p>
+  <p>Artikel vom Stapel und Synthesen liegen auch auf dem Gerät, sofern sie schon geladen wurden.</p>
+  <p><a href="/" class="btn">Zur gespeicherten Woche</a> <a href="/lesen/stapel" class="btn quiet">Zum Stapel</a> <a href="/wissen" class="btn quiet">Zu den Synthesen</a></p>
 </section>
 </main>
 <div class="toasts" aria-live="polite"></div>
@@ -68,7 +98,7 @@ ${appHeader({ current: 'woche' })}
  */
 export function offlineFiles(files, { html }) {
   const page = renderOfflinePage();
-  const shell = [assets.css, assets.js, assets.offline, ...SHELL_FILES].map((path) => {
+  const shell = [assets.css, assets.js, assets.offline, assets.lesenDoc, assets.lesenLinks, ...SHELL_FILES].map((path) => {
     const file = files.get(path.split('?')[0]);
     if (!file) throw new Error(`App-Hülle: ${path} fehlt`);
     return [path, file.body];
@@ -77,7 +107,7 @@ export function offlineFiles(files, { html }) {
   const h = createHash('sha256').update(SW_SOURCE);
   for (const [path, body] of shell) h.update(`\0${path}\0`).update(body);
   const version = h.digest('base64url').slice(0, 10);
-  const config = { version, shell: shell.map(([path]) => path), mark: OFFLINE_MARK };
+  const config = { version, shell: shell.map(([path]) => path), mark: OFFLINE_MARK, synthesis: SYNTHESIS_FOLDER };
   return {
     version,
     entries: [

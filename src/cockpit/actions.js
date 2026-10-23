@@ -1,5 +1,6 @@
 import { createCapture } from '../vault/capture.js';
-import { createCaptureRouter, CaptureError } from '../capture/router.js';
+import { createCaptureRouter, CaptureError, CAPTURE_ID } from '../capture/router.js';
+import { articleUrl } from '../capture/syntax.js';
 import { localDate, addDays, parseWeekId } from './week.js';
 
 /** Status, die das Cockpit setzen darf: abhaken, zurücknehmen, anfangen, parken, verwerfen. */
@@ -44,12 +45,13 @@ export class ActionError extends Error {
  * Schreibende Aktionen des Web-Cockpits. Aufgaben ändert Zunder, das Cockpit
  * speichert keine eigenen. Notizen entstehen über dieselbe Capture-Logik wie
  * `/capture`: `!` vorne → Zunder-Inbox, sonst eine neue Notiz im Inbox-Ordner
- * aus den Einstellungen.
+ * aus den Einstellungen. `> https://…` ist mit `saveArticle` ein Artikel für
+ * den Lesestapel (`({ url, clientId }) → { doc, duplicate }`, src/lesen/save.js).
  *
  * Zunder-Zugang und Inbox-Ordner werden bei jedem Aufruf frisch gelesen, damit
  * eine Änderung unter `/einstellungen` sofort gilt.
  */
-export function createCockpitActions({ vaultPath, settings, policy, state, zunder, index = null, onFlame = null, now = () => new Date(), logger = console }) {
+export function createCockpitActions({ vaultPath, settings, policy, state, zunder, index = null, saveArticle = null, onFlame = null, now = () => new Date(), logger = console }) {
   const zunderOrFail = () => {
     const z = zunder();
     if (!z) throw new ActionError('Zunder ist nicht eingerichtet (Einstellungen → Zunder)', 503);
@@ -70,6 +72,7 @@ export function createCockpitActions({ vaultPath, settings, policy, state, zunde
     if (!task) throw new ActionError('Zunder hat die Aufgabe nicht zurückgegeben', 502);
     return task;
   };
+  let synthesisQueue = Promise.resolve();
   const summary = (task) => ({
     id: task.id,
     ref: task.ref ?? null,
@@ -149,6 +152,20 @@ export function createCockpitActions({ vaultPath, settings, policy, state, zunde
      * Absenden harmlos. Liefert das Ergebnis des Capture-Routers.
      */
     async capture({ text, captureId = null }) {
+      const url = saveArticle ? articleUrl(text) : null;
+      if (url) {
+        if (captureId && !CAPTURE_ID.test(captureId)) throw new ActionError('Ungültige Capture-ID');
+        let saved;
+        try {
+          saved = await saveArticle({ url, clientId: captureId || null });
+        } catch (err) {
+          // FetchError trägt den passenden Status, ReadingError ist eine falsche Eingabe.
+          throw new ActionError(err.message, err.status ?? 400);
+        }
+        const { doc, duplicate } = saved;
+        if (!duplicate) logger.info?.(`Schnelleingabe → Lesestapel ${doc.url}`);
+        return { kind: 'article', id: doc.id, title: doc.title ?? doc.url, duplicate };
+      }
       const { inboxFolder } = settings.get();
       // Der Inbox-Ordner ist frei einstellbar; in einen vertraulichen oder
       // ausgeschlossenen Ordner schreibt das Cockpit trotzdem nicht.
@@ -183,8 +200,45 @@ export function createCockpitActions({ vaultPath, settings, policy, state, zunde
      * `{ kind, summary, title?, due?, location?, phoenix?, notes? }`. Legt nichts an.
      */
     async previewCapture(text) {
+      if (saveArticle && articleUrl(text)) return { kind: 'article', summary: 'Artikel · Lesestapel' };
       const router = createCaptureRouter({ capture: null, zunder: zunder(), state, tz: settings.get().tz, now, logger });
       return router.preview({ text: String(text ?? '').slice(0, 2000) });
+    },
+
+    /**
+     * Offene Punkte einer Synthese als Aufgaben in die Zunder-Inbox. Der
+     * Merkzettel (`state`) hält je Notiz und Punkt die angelegte Aufgabe fest,
+     * gleich nach jedem Anlegen; ein zweiter Klick oder ein neuer Versuch nach
+     * einem Fehler legt nichts doppelt an. Aufrufe laufen nacheinander, damit
+     * auch zwei gleichzeitige Klicks den Merkzettel sehen. Liefert `{ created, existing }`.
+     */
+    synthesisTasks({ path, points }) {
+      const job = async () => {
+        const z = zunderOrFail();
+        const name = path.replace(/\.md$/i, '');
+        let created = 0;
+        let existing = 0;
+        for (const point of points) {
+          // shortcut: Schlüssel ist Pfad + Wortlaut; nach Umbenennen der Notiz oder des Punkts entsteht eine neue Aufgabe, bei Bedarf über Zunder-`vault_links` abgleichen.
+          const key = `synthese:${path}\n${point}`;
+          if (state.get(key)) {
+            existing += 1;
+            continue;
+          }
+          let task;
+          try {
+            task = await z.createTask({ title: point, description: `Offener Punkt aus der Synthese [[${name}]] (\`${path}\`).\n\n_Angelegt im Vault Cockpit_`, vaultLinks: [path] });
+          } catch (err) {
+            throw new ActionError(`${created ? `${created} angelegt, dann: ` : ''}${err.message}`, 502);
+          }
+          state.set(key, task);
+          created += 1;
+        }
+        return { created, existing };
+      };
+      const run = synthesisQueue.then(job);
+      synthesisQueue = run.catch(() => {});
+      return run;
     },
   };
   return { ...actions, capture: singleFlight(actions.capture) };

@@ -91,23 +91,31 @@ Die übrigen lassen sich nicht neu bauen, ohne sie ist alles neu einzurichten:
 | `api-tokens.json` | API-Tokens für Kurzbefehle, Funke und Suche (nur Hashes; fehlen sie, müssen alle Kurzbefehle neue Tokens bekommen) |
 | `capture-state.json` | Merkzettel von Capture und Brücke (keine doppelten Aufgaben, zuletzt gesehene Checkbox-Stände) |
 | `session-secret` | Secret des Sitzungs-Cookies (bei gesetztem `SESSION_SECRET` ohne Bedeutung) |
+| `lesestapel.db` | [Lesestapel](#lesen): gespeicherte Artikel samt Text, Markierungen, Feeds (SQLite) |
 
 Die Obsidian-Anmeldung des Sync-Sidecars liegt nicht hier, sondern in
 `./sync-config`; fehlt sie, einmal neu anmelden (siehe [Sync](#sync)).
 
 **Am einfachsten** sichert der Host das Verzeichnis `./data` mit seinem
 Backup-Job (restic, Kopia, Snapshots des Volumes). Wiederherstellen heißt dann:
-Dateien zurückkopieren, `chown 1000:1000`, Container starten.
+Dateien zurückkopieren, `chown 1000:1000`, Container starten. `lesestapel.db`
+ist eine SQLite-Datei, die der Dienst offen hält: Eine Dateikopie mitten in einem
+Schreibvorgang kann unbrauchbar sein. Für das Host-Backup (VCP-64) deshalb einen
+Snapshot des Volumes nehmen, vorher `sqlite3 data/lesestapel.db ".backup data/lesestapel.bak"`
+laufen lassen oder zusätzlich die Sicherung im Cockpit ziehen.
 
 **Ohne Host-Backup** gibt es die Sicherung im Cockpit: **Einstellungen →
 Sicherung**, eine Passphrase mit mindestens 12 Zeichen zweimal eingeben,
 „Sicherung herunterladen“. Die Datei `cockpit-sicherung-JJJJ-MM-TT.json` enthält
-die vier Dateien oben, verschlüsselt mit AES-256-GCM und einem Schlüssel aus der
+die Dateien oben, verschlüsselt mit AES-256-GCM und einem Schlüssel aus der
 Passphrase (scrypt, N = 2^17, r = 8, p = 1, zufälliges Salt). Im Klartext stehen
 nur Format, Version, Zeitpunkt und die Parameter; eine Änderung daran fällt beim
 Öffnen auf. Ohne die Passphrase ist die Datei wertlos, also beides getrennt
 aufbewahren (Passphrase im Passwortmanager). Die Sicherung ist ein Schnappschuss:
-nach neuen Kalendern oder Tokens eine neue ziehen.
+nach neuen Kalendern oder Tokens eine neue ziehen. Den Lesestapel nimmt sie als
+konsistente Kopie der laufenden Datenbank (`VACUUM INTO`) auf, gzip-gepackt. Eine
+Sicherung darf bis zu 32 MB groß sein (vorher 8 MB); das reicht gepackt für einige
+tausend Artikel. Wird sie größer, lehnt das Cockpit ab, dann hilft nur das Host-Backup.
 
 Nach einem Verlust von `/data`:
 
@@ -241,7 +249,7 @@ HTTP-Status nicht sieht.
 `GET <PUBLIC_URL>/api/search?q=…` mit Header `Authorization: Bearer vct_…`
 durchsucht den Vault für Clients ohne OAuth, nur lesend und nur in eigenen Notizen
 ohne vertrauliche Ordner. Parameter: `q` (Pflicht), `mode` (`hybrid` Standard oder
-`semantic`), `folder`, `limit` (Standard 10, höchstens 50), `offset`. Antwort:
+`semantic`), `folder`, `type` (Frontmatter-`type`, z. B. `synthesis`), `limit` (Standard 10, höchstens 50), `offset`. Antwort:
 `200 {"results":[{"path","title","streams","similarity","score",…}],"total","hasMore","degraded"}`,
 Pfade relativ zum Vault mit `/`. `400` bei falscher Eingabe, `401` ohne gültigen Token. Den Token im Web-Cockpit
 unter **Einstellungen → API-Tokens** anlegen; er wird nur einmal angezeigt, gespeichert
@@ -260,8 +268,10 @@ suchen oder lesen; Such-Tokens kommen umgekehrt nicht an `/capture`. Ohne
 Capture-Token (und ohne `CAPTURE_TOKEN` aus älteren Deployments) lehnen `/capture`
 und `/funke` jede Anfrage mit `401` ab.
 
-Mail-Abruf: Nur freigegebene Absender (Einstellungen → Mail) werden verarbeitet, alle
-anderen Mails wandern unverarbeitet in den Ablage-Ordner. Ein Eintrag mit
+Mail-Abruf: Nur freigegebene Absender (Einstellungen → Mail) werden zu Notizen oder
+Aufgaben. Mails anderer Absender landen im Eingang des Lesestapels (so kommen direkt
+abonnierte Newsletter an); ist der Lesestapel aus, wandern sie unverarbeitet in den
+Ablage-Ordner. Ein Eintrag mit
 führendem `@` (z. B. `@rubeen.dev`) gibt jede Adresse dieser Domain frei, aber
 keine Subdomain. Der Absender einer Mail lässt sich fälschen; die Adresse deshalb
 nicht weitergeben. Mit ganzen Domains wird die Annahme breiter, also die
@@ -386,6 +396,33 @@ Bereich, was erledigt war und was geplant war (Phönix-Schritte und in der Woche
 Fälliges), was außerdem erledigt wurde, die Flammen-Zeit der Woche und was offen
 blieb.
 
+**Wissen:** `/wissen` sucht mit einer Frage in den Synthesen (Frontmatter
+`type: synthesis`, Hybrid-Suche mit Typfilter; `/api/suche` kennt `type` auch),
+filtert nach Querverbindung (`art`) und Status (z. B. Entwurf) und listet die
+zuletzt bewegten nach `updated`; alles über ein GET-Formular ohne JavaScript.
+Eine Synthese zeigt auf ihrer Notizseite oben die Zusammenfassung (`summary`),
+Art, Status und Vertrauen (`confidence`), die Thesen (H2-Überschriften als
+Sprungmarken) und die offenen Punkte (`[TODO …]` im Text und offene Einträge
+unter „Offene Punkte“). **Als Aufgaben nach Zunder** legt sie in der
+Zunder-Inbox an; ein Merkzettel (`capture-state.json`) hält je Notiz und Punkt
+die Aufgabe fest, ein zweiter Klick legt also nichts doppelt an. Ohne
+Zunder-Zugang fehlt der Knopf.
+
+**Aus dem Lesestapel passt dazu:** Unter einer Synthese stehen bis zu fünf
+Markierungen, die seit ihrem `updated` (sonst seit der letzten Änderung der
+Datei) entstanden sind und inhaltlich passen: Kosinus zwischen der Markierung
+und dem ähnlichsten Abschnitt der Synthese im semantischen Index, mindestens
+0,6. Schon verlinkte Markierungen (`#^hl-…` in der Synthese) kommen nicht
+wieder. **Als Beleg anhängen** schreibt nur in den generierten Bereich
+`aus-dem-lesestapel` unter „## Aus dem Lesestapel“ (legt die Überschrift
+notfalls am Ende an): je Beleg das Zitat, darunter `[[lesestapel-notiz#^hl-…]]`
+und die Quelle; die Lesestapel-Notiz entsteht dabei notfalls. Bestehende
+Einträge bleiben, „Rückgängig“ nimmt den Eintrag wieder heraus. Hat der Sync die
+Synthese gerade geändert, kommt eine Meldung und nichts wird geschrieben. Ohne
+Embeddings fehlt der Kasten. Auf `/wissen` zeigt **Passt zu meinem Lesen** nur
+die Synthesen unter den 20 zuletzt bewegten, zu denen es solche Markierungen
+gibt.
+
 **Flammen in der Feuer-Notiz:** Das Cockpit trägt die Flammen der Woche aus
 Zunder in den Abschnitt „## Flammen“ der Feuer-Notiz ein (Tag, Flamme mit Link,
 geplanter Tag aus der Fälligkeit, gemessene Minuten, Status), damit Obsidian
@@ -401,6 +438,9 @@ den Markern leeren). Ändert der Sync die Notiz gleichzeitig, bricht der
 Schreibvorgang ab und der nächste Lauf versucht es wieder. Ohne Feuer-Notiz der
 Woche legt das Cockpit keine an, in vertraulichen Ordnern schreibt es nicht.
 Abschalten unter **Einstellungen → Feuer-Notiz**.
+Die Marker-Mechanik ist allgemein (`src/vault/generated-section.js`, „generierter
+Bereich“ `<!-- cockpit:<name>:start -->` … `<!-- cockpit:<name>:ende <prüfsumme> -->`)
+und taugt auch für andere Notizen, etwa die des Lesestapels.
 
 **Woche planen** (`/planen?woche=…`, verlinkt als „Woche planen“ bei den Big
 Rocks und „Einplanen“ bei den Flammen): Zunder-Aufgaben per Volltext oder
@@ -454,6 +494,31 @@ bleibt mit Fehler in der Liste, bis man es erneut sendet, ins Feld zurückholt
 oder verwirft. Notizvorschau, Suche, Einstellungen und die JSON-Schnittstellen
 speichert der Service Worker nie; Abmelden und jeder neue Login löschen die
 gespeicherte Woche (der Puffer bleibt und geht mit der nächsten Anmeldung raus).
+
+**Offline lesen** (VCP-80): Neben der Woche darf genau dieser Lesestoff auf dem
+Gerät liegen, und nichts sonst: die nächsten 30 Artikel des Stapels (Reihenfolge
+wie „Passt jetzt“, mit Lesetext und Markierungen), die Synthesen aus
+`wiki/synthesis` (`type: synthesis`, höchstens 200, zuletzt bewegte zuerst) und
+die Listen `/lesen/stapel` und `/wissen`. Andere Notizen, Eingang, Archiv und
+alles aus vertraulichen oder ausgeschlossenen Ordnern bleiben draußen. Die Liste
+liefert `GET /api/lesen/offline` (nur angemeldet), gefiltert nach derselben
+Policy wie `/notiz`; der Service Worker speichert davon nur Seiten, die er als
+Leseansicht, Synthese oder Liste erkennt und die der Server mit
+`x-cockpit-offline: lesen` ausliefert. Die Seite bittet ihn beim Öffnen, beim
+Zurückholen der App und beim Wiederverbinden darum, höchstens alle zehn Minuten;
+er holt nur, was fehlt oder älter als einen Tag ist, und löscht, was nicht mehr
+auf der Liste steht. Wer einen gespeicherten Artikel mit Netz öffnet, frischt ihn
+auf. Eine Synthese zeigt auch Titel und Pfade verlinkter oder ähnlicher Notizen
+(wie online), deren Inhalt nicht. Ohne Netz gehen in der Leseansicht
+**Markieren, Notizen, Fortschritt und Archivieren** in denselben Puffer wie die
+Schnelleingabe; wartende Markierungen sind gestrichelt unterlegt. Jede neue
+Markierung bekommt auf dem Gerät eine ID, die der Server als ihre ID übernimmt
+(`cid` bei `/aktion/lesen/markierung/neu`): Dieselbe ID legt nie eine zweite an.
+Fortschritt, Status und Notiz gelten mit dem letzten Stand. Das CSRF-Token holt
+sich das Nachsenden wie bei der Schnelleingabe frisch von `/api/sitzung`, und nur
+mit Netz. Abmelden, jeder neue Login und eine abgelaufene Sitzung löschen den
+Lesestoff zusammen mit der Woche (beide liegen im selben Cache).
+
 Nach einem Deploy bringt `/sw.js` eine neue Cache-Version mit (Inhalts-Hash der
 App-Hülle) und räumt die alte weg.
 
@@ -482,7 +547,7 @@ ist, mit letztem erfolgreichem Lauf und letztem Fehler samt Zeitpunkt und Text:
 Sync (Status, letzter Abgleich, Lebenszeichen des Sidecars), Index (Notizen,
 letzter Aufbau), Embeddings (Modell, Fortschritt), Mail-Abruf, Zunder-Brücke (neue
 Checkboxen und Abgleich getrennt), Zunder-Zugang (nimmt Zunder den Token an?) und
-Kalender (je Kalender). Die Daten sind dieselben wie in `vault_stats`; Mail-Abruf,
+Kalender (je Kalender) und Feeds (je Feed). Die Daten sind dieselben wie in `vault_stats`; Mail-Abruf,
 Brücke, Kalender und Zunder-Zugang merken sich ihren letzten Lauf im Speicher, nach
 einem Neustart also erst ab dem nächsten Lauf. Beim Laden der Seite werden Zunder
 und Kalender einmal frisch geprüft. Fehlertexte erscheinen maskiert: Adressen nur
@@ -496,6 +561,216 @@ das Cockpit nicht neu startet, wenn der Fehler draußen liegt (Sidecar, Zunder,
 Fastmail). Wer bei `degraded` anschlagen will, prüft den Text oder ruft
 `/health?strict=1` auf, das dann mit 503 antwortet. Welcher Dienst betroffen ist,
 steht nur auf `/zustand`.
+
+### Lesen
+
+Der Lesestapel ist ein Bereich im Cockpit (VCP-77): **Lesen** in der Kopfzeile
+und in der Leiste unten, darunter **Eingang · Stapel · Markiert · Wiedersehen · Wissen · Feeds**. In der
+Leiste unten nimmt „Lesen“ den Platz der Suche ein; die Suche erreicht man dort
+über Lesen → Wissen → „Ganzen Vault durchsuchen“, im Kopf steht sie weiter.
+
+Im **Eingang** (`/lesen/eingang`) speichert ein Formular eine Adresse: Das Cockpit
+holt die Seite, macht mit Readability den Lesetext daraus und legt ihn mit Titel,
+Quelle, Autor, Auszug und Lesezeit (220 Wörter pro Minute) ab. Dieselbe Adresse
+oder ein doppelt abgeschicktes Formular legt nichts Neues an. Gespeichert wird in
+`/data/lesestapel.db` (SQLite wie der Index, aber nicht neu baubar, deshalb in der
+[Sicherung](#sicherung-von-data)). Das Schema enthält schon Status, Fortschritt,
+Markierungen mit Textanker, Feeds und Rückgängig-Spur für die folgenden Ausbaustufen.
+
+Das Holen ist gegen SSRF geschützt: nur `http`/`https`, keine Zugangsdaten in der
+Adresse, und jede Adresse wird nach der DNS-Auflösung geprüft, auch nach jeder
+Weiterleitung (höchstens 5). Abgelehnt werden Loopback, private Netze, Link-Local
+(samt Metadaten-IP `169.254.169.254`), CGNAT, Multicast und reservierte Bereiche,
+für IPv6 `::1`, `::`, `fc00::/7`, `fe80::/10` und IPv4-mapped Adressen. Verbunden
+wird genau mit der geprüften IP (eigene `lookup`-Funktion), DNS-Rebinding läuft
+damit ins Leere. Höchstens 5 MB und 15 Sekunden je Artikel.
+
+Der Artikeltext wird streng nach Allowlist gesäubert (`sanitizeHtml` in
+`src/lesen/extract.js`, auch für Mails und Feeds gedacht): kein Skript, kein Stil,
+keine Frames, keine Event-Attribute, Links nur `http`, `https` und `mailto`.
+Bilder und Videos werden zu Links, die Content-Security-Policy lädt weiter nichts
+von fremden Servern.
+
+Die **Leseansicht** (`/lesen/doc?id=…`, VCP-71) zeigt den Text in Leseschrift mit
+Fortschritt, Restzeit und Archivieren (ohne JavaScript als Formular). Mit
+JavaScript (`/static/lesen-doc.js`) speichert sie die Lesestelle beim Scrollen;
+`#weiter` springt dorthin. Markiert wird per Textauswahl über eine Leiste unten
+(Markieren · Notiz · Verbinden · In Inbox), am iPhone also nicht im Weg des
+Systemmenüs. Eine Markierung merkt sich Zitat, etwas Text davor und danach und die
+ungefähre Stelle (`src/lesen/anchor.js`). So sitzt sie auch nach erneutem Holen
+oder Umformatieren wieder richtig. Eingesetzt werden die Markierungen beim
+Ausliefern als `<mark>` nur um Textstücke. „In Inbox“ legt das Zitat mit Quelle
+über die Schnelleingabe als Notiz in der Vault-Inbox an. Unter **Markiert** stehen
+alle Markierungen, filterbar nach Quelle und Thema.
+
+**Unterwegs hören** (`/lesen/hoeren?zeit=15`, VCP-79, Link auf dem Stapel): Die
+Texte des Zeitfensters werden zur Wiedergabeliste. Vorgelesen wird auf dem Gerät
+mit der Web Speech API (`speechSynthesis`, deutsche Stimme bevorzugt), ohne
+Serverkosten. Bedienung: Abspielen/Pause, Nächster Text, Tempo (0,8× bis 1,8×,
+im Browser gemerkt) und **Das hier merken**, das den gerade gesprochenen Satz
+markiert. Den Text liefert der Server (`/lesen/hoeren/text?id=…`): Lesetext und
+Sätze mit Zeichenpositionen wie in `src/lesen/anchor.js`. Nach jedem Satz
+speichert die Seite den Anfang des nächsten als Lesestelle; die Leseansicht
+springt mit `#weiter` genau dorthin, und das nächste Hören setzt dort fort. Ohne
+JavaScript listet die Seite nur die Texte. Das Zeitfenster rechnet mit 220 Wörtern
+pro Minute; vorgelesen dauert es oft länger.
+
+Was über iOS bekannt ist, und was nicht:
+
+- Bekannt aus Berichten, nicht selbst geprüft: Web-Audio und Sprachausgabe einer
+  Home-Screen-App hören auf, sobald sie nicht mehr im Vordergrund ist oder der
+  Bildschirm sperrt ([WebKit-Bug 198277](https://bugs.webkit.org/show_bug.cgi?id=198277),
+  Stand 2019/2020). Selbst nativ pausiert `AVSpeechSynthesizer` laut einem Bericht
+  beim Sperren und spricht erst nach dem Entsperren weiter
+  ([Apple-Forum](https://developer.apple.com/forums/thread/849627)).
+  `speechSynthesis` unterbricht außerdem andere Medien wie Musik oder Podcasts
+  ([WebKit-Bug 218815](https://bugs.webkit.org/show_bug.cgi?id=218815)).
+- Deshalb hält die Seite beim Abspielen den Bildschirm wach (Screen Wake Lock,
+  falls der Browser ihn kennt). Das hilft nur, solange das Gerät nicht gesperrt
+  und die App vorn ist. Ob Wake Lock in der Home-Screen-App greift, ist **ungeprüft**.
+- Wird die Seite wieder sichtbar und spricht nichts mehr, liest sie den aktuellen
+  Satz neu. Weil jeder Satz erst nach dem vorigen angestoßen wird, hört die
+  Wiedergabe spätestens nach dem laufenden Satz auf, wenn iOS das Script anhält.
+- **Ungeprüft** ist das Verhalten auf aktuellem iOS insgesamt, als Safari-Tab wie
+  als Home-Screen-App. Auf dem iPhone prüfen: Bildschirm mitten im Satz sperren
+  (spricht es weiter, und geht es nach dem Satz weiter?), App wechseln,
+  mit AirPods, Tempo, ob eine deutsche Stimme da ist (Einstellungen →
+  Bedienungshilfen → Gesprochene Inhalte → Stimmen) und ob die Leseansicht danach
+  an der richtigen Stelle steht.
+
+Reicht das für den Spaziergang nicht, ist die Alternative (nicht gebaut): Der
+Server erzeugt je Text eine Audiodatei mit lokalem TTS (z. B. Piper), die Seite
+spielt sie über `<audio>` mit Media Session für die Steuerung im Sperrbildschirm.
+Die Lesestelle käme dann aus Zeitmarken je Satz.
+
+**Wiedersehen** (`/lesen/wiedersehen`, VCP-74) holt Markierungen nach einem
+einfachen Leitner-Schema zurück: Box 1 bis 5 mit 1, 3, 7, 21 und 60 Tagen
+Abstand, eine neue Markierung ist nach einem Tag dran. Je Karte: **Behalten**
+rückt eine Box weiter, **In eigenen Worten** legt Zitat, eigene Worte und Quelle
+als Notiz in der Vault-Inbox an und rückt ebenfalls weiter, **Loslassen** nimmt
+die Markierung nur aus der Wiederholung (gelöscht wird nichts). Rückgängig steht
+in der Meldung, alles geht auch ohne JavaScript. Höchstens 20 Karten am Tag, der
+Rest kommt morgen. Darunter die Woche (`?woche=2026-W43`, aus dem
+Wochenrückblick verlinkt): Zahlen, Balken je Thema (ohne Thema je Quelle) und
+Export als Markdown. Ist ein Embedding-Server eingestellt, bettet das Cockpit die
+Markierungen der Woche ein (nur im Speicher) und zeigt ähnliche aus
+verschiedenen Texten als „Querverbindung entdeckt“, mit „Als eigene Notiz
+anlegen“. Ohne Embedder oder wenn Ollama nicht antwortet, fehlt der Kasten.
+
+Abhängigkeiten dafür: `@mozilla/readability` und `linkedom` (reines JavaScript,
+feste Versionen).
+
+**Markierungen im Vault** (VCP-75): Der Vault bleibt Quelle der Wahrheit. Wird
+ein Text mit Markierungen archiviert oder fertig gelesen (Fortschritt 1), legt
+das Cockpit über den Editor eine Notiz an, Standard
+`30-ressourcen/lesestapel/<slug>.md` (änderbar unter **Einstellungen →
+Lesestapel**). Ihr Frontmatter hat `type: lesestapel`, `lesestapel_id`,
+`quelle`, `url`, `gespeichert`, `gelesen` und `themen`. Jede Markierung steht
+als Zitat mit eigener Block-ID (`[[vom-lesen#^hl-1a2b3c4d]]`), darunter Notiz und
+Verknüpfungen als Wikilinks:
+
+```markdown
+## Markierungen
+
+<!-- cockpit:markierungen:start · aus dem Lesestapel, das Cockpit schreibt bis zum Endmarker neu -->
+
+> Ein Satz, den man sich merkt.
+
+^hl-1a2b3c4d
+
+Meine Notiz dazu.
+
+Verknüpft: [[Synthese Lesen]]
+
+<!-- cockpit:markierungen:ende 5e6f7a8b -->
+
+## Eigene Gedanken
+```
+
+Danach schreibt das Cockpit bei jeder Änderung an Markierungen nur diesen
+generierten Bereich neu (wie die Flammen in der Feuer-Notiz, mit Prüfsumme),
+gebündelt nach 30 Sekunden Ruhe und beim Herunterfahren. Alles andere, vor
+allem „Eigene Gedanken“, bleibt unberührt. Gefunden wird die Notiz über
+`lesestapel_id` im Index, Umbenennen und Verschieben in Obsidian schaden also
+nicht. Ändert der Sync die Notiz gleichzeitig, bricht das Schreiben ab und
+wird später wiederholt. Wer im Bereich von Hand schreibt, hält das Cockpit davon
+ab, ihn zu überschreiben. In vertraulichen, ausgeschlossenen oder
+Readwise-Ordnern legt es nichts an, und eine dorthin verschobene Notiz fasst es
+nicht mehr an. Wikilinks zu einer Markierung schreibt `addLink` aus
+`src/lesen/vault-export.js` (für „Verknüpfen“). Sie stehen in der Zeile
+„Verknüpft:“ und bleiben beim Neuschreiben erhalten.
+
+**Querverbindungen** (VCP-73): „Verbinden“ (Taste L) zu einer Markierung oder
+einer noch nicht gespeicherten Auswahl zeigt in der Seitenleiste der
+Leseansicht, auf dem iPhone als Blatt von unten, passende Stellen aus anderen
+Quellen: Markierungen anderer Texte aus dem Lesestapel und Synthesen und
+Konzepte (`type: synthesis` oder `concept`) mit ihrem ähnlichsten Abschnitt.
+Die Auswahl wird dafür sofort eingebettet, nicht erst beim nächsten Indexlauf;
+die Embeddings der Markierungen liegen nur im Speicher und teilen sich
+Wiedersehen und Querverbindungen (`src/lesen/embed-cache.js`). Die eigene
+Lesestapel-Notiz des Textes fehlt, vertrauliche und ausgeschlossene Notizen auch
+(wie „Ähnlich“ in `/notiz`). **Verknüpfen** schreibt `[[Ziel]]` bzw.
+`[[Ziel#Abschnitt]]` in die Zeile „Verknüpft:“ unter der Markierung in ihrer
+Lesestapel-Notiz, nie in die Zielnotiz; eine Auswahl wird vorher markiert. Ist
+das Ziel eine Markierung, verweist der Link auf deren Block
+(`[[anderer-text#^hl-…]]`) und das Cockpit legt die Notiz zum anderen Text an,
+falls es sie noch nicht gibt. Schon Verknüpftes steht als „Schon verknüpft“ da.
+Ohne Embedder oder wenn Ollama nicht antwortet, sucht es mit Hinweis nur im
+Volltext (dann auch in den Lesestapel-Notizen). Als JSON:
+`GET /api/lesen/verbindungen?markierung=<id>` oder `?doc=<id>&text=<Auswahl>`
+(angemeldet, sonst 401); verknüpft wird mit `POST /aktion/lesen/verbinden`
+(`markierung` und `pfad` mit optionalem `abschnitt` oder `zu` für eine andere
+Markierung). Ohne JavaScript bleibt ein Hinweis.
+
+**Feeds** (`/lesen/feeds`, VCP-78): Eine Feed-Adresse abonnieren oder einfach die
+Website, das Cockpit findet den Feed dann über `<link rel="alternate">`. Gelesen
+werden RSS 2.0 (auch 1.0), Atom und JSON Feed. Je Feed lässt sich einstellen:
+pausieren, „direkt auf den Stapel“ statt in den Eingang, ein Stichwort-Filter
+(durch Komma getrennt, eins davon muss in Titel oder Text stehen) und der Abstand
+(Standard 30 Minuten, 5 bis 1440). Ein Hintergrundlauf sieht jede Minute nach,
+welche Feeds dran sind, und holt sie mit `ETag`/`Last-Modified`, höchstens drei
+gleichzeitig. Jeder neue Eintrag (erkannt an der GUID, sonst an der Adresse) wird
+genau einmal ein Dokument mit Herkunft `feed:<id>`; der erste Abruf eines neuen
+Feeds holt nur die letzten fünf. Ist der Text im Feed lang genug (ab 150 Wörtern),
+wird er genommen, sonst holt das Cockpit die Seite und extrahiert den Artikel wie
+beim Speichern; klappt das nicht, bleibt der Feed-Text. Alles geht durch
+`sanitizeHtml` und den SSRF-geschützten Abruf (5 MB, 15 Sekunden). XML liest
+`linkedom`, das keine Entitäten aus einer DTD auflöst (kein XXE). Scheitert ein
+Abruf, wartet der Feed doppelt so lange wie üblich, nach jedem weiteren Fehler
+wieder doppelt so lange (höchstens einen Tag); die anderen Feeds laufen weiter,
+und auf `/zustand` steht der Fehler beim Feed. Icons werden einmal geholt und als
+`data:`-Adresse gespeichert, weil die Content-Security-Policy keine fremden Bilder
+lädt. Unten auf der Seite: OPML importieren (Datei aus einem anderen Reader,
+Ordner werden flach übernommen) und exportieren.
+
+#### Von außen speichern
+
+Artikel kommen über dieselben Wege wie Notizen in den Eingang (VCP-69):
+
+| Weg | So geht's |
+|---|---|
+| iOS-Kurzbefehl | Unter **Einstellungen → API-Tokens** einen Token mit dem Recht **Lesestapel** anlegen, „Zum Lesestapel“ unter **Einstellungen → Kurzbefehle** laden, importieren und beim Import den Token eintragen. Dann in Safari teilen → „Zum Lesestapel“; die Mitteilung nennt den Titel. |
+| Schnelleingabe | `> https://…` (nur die Adresse nach `>`) wird ein Artikel statt einer Notiz, die Vorschau zeigt „Artikel · Lesestapel“. Ein Markdown-Zitat wie `> Ein kluger Satz` bleibt eine Notiz. Ohne Netz puffert das Cockpit den Eintrag wie jede Schnelleingabe und sendet ihn mit derselben ID nach; doppelt kommt er nicht an. |
+| Mail | An die Capture-Adresse (siehe [Capture](#capture), gleicher Ordner) von einem freigegebenen Absender mit `[lesen]` irgendwo im Betreff (auch nach „Fwd:“) oder `>` vorn. Steht in der Mail nur eine Adresse, wird der Artikel geholt. Sonst wird die Mail selbst ein Dokument der Art `newsletter`: HTML gesäubert wie Artikel (kein Skript, Zählpixel fallen weg, Bilder werden Links), ohne HTML der Text in Absätzen; die Adresse ist `mid:<Message-ID>`, Titel der Betreff ohne Kürzel. Newsletter lassen sich direkt mit der Adresse abonnieren: Mails fremder Absender gehen immer in den Lesestapel, nie in Notizen oder Aufgaben. Lässt sich die eine Adresse nicht holen, wird die Mail mit dem Link gespeichert, statt bei jedem Abruf liegen zu bleiben. |
+| PDF | Im Cockpit unter `/lesen/hinzufuegen` hochladen (dort auch eine Adresse speichern), oder an den Endpunkt mit `Content-Type: application/pdf` (Felder dann als Query: `?title=…&id=…`). Höchstens 20 MB. Das Cockpit zieht den Text heraus und macht daraus Absätze als Lesetext mit Lesezeit; die Datei selbst wird nicht gespeichert. Titel aus den PDF-Metadaten, sonst Dateiname oder erste Zeile. Dieselbe Datei liegt nur einmal im Stapel (Adresse `pdf:sha256-…`). Gescannte PDFs ohne Text werden abgelehnt. |
+
+`POST <PUBLIC_URL>/lesestapel/speichern` mit Header `Authorization: Bearer vct_…`
+nimmt die Adresse als Text (die erste `http(s)`-Adresse darin) oder JSON
+`{"url", "title"?, "source"?, "id"?}`; `source` ist `kurzbefehl` (Standard) oder
+`import`. Mit `id` ist das Speichern idempotent wie bei `/capture`, ohne `id`
+greift die Adresse. Antworten: `201 {"ok","id","title","url","kind","duplicate","message"}`,
+`200` für ein schon gespeichertes Dokument, `400` bei falscher oder lokaler
+Adresse, `401` ohne gültigen Token, `403` für einen Token ohne das Recht
+**Lesestapel** (ein Capture-Token bekommt es nicht automatisch), `413` über 16 KB
+Body. Fehler tragen wie bei `/capture` `status` und `message` im Body. Geholt wird
+über denselben SSRF-geschützten Abruf wie im Formular.
+
+PDF-Text liest `unpdf` (reines JavaScript, bündelt pdf.js, feste Version, ohne das
+optionale native Canvas-Modul).
+
+Der Kurzbefehl muss wie die anderen auf einem Mac signiert werden
+(`node scripts/kurzbefehle/build.js`, dann `scripts/kurzbefehle/sign.sh`, siehe
+[Capture](#capture)); bis dahin fehlt er unter **Einstellungen → Kurzbefehle**.
 
 ### Semantische Suche und Graph
 
@@ -556,6 +831,7 @@ npm ci && npm test
 - `src/search/` — lesender Such-Endpunkt `/api/search` mit eigenem Token
 - `src/graph/` — Graph um eine Notiz mit Aufgaben- und Termin-Knoten
 - `src/health/` — Zustand der Hintergrunddienste für `/zustand` und `/health`, Maskieren von Fehlertexten
+- `src/lesen/` — Lesestapel: SQLite-Speicher (`store.js`), SSRF-sicheres Holen (`fetch.js`), Readability und Säubern (`extract.js`), Seiten und Routen (`pages.js`, `http.js`), Leseansicht und Markierungen (`doc.js`, `highlights.js`, Textanker in `anchor.js`), Wiedersehen (Planung und Clustering in `review.js`, Seite in `review-page.js`), Querverbindungen (`connections.js`, Embeddings der Markierungen in `embed-cache.js`)
 - `src/web/` — Web-Cockpit: OIDC-Login mit PKCE, signiertes Sitzungs-Cookie, HTML der Wochenansicht, Einstellungen, Suche und Graph
 - `sync/` — Image des Sidecars `vault-sync` (Obsidian Headless mit Status-Wrapper)
 

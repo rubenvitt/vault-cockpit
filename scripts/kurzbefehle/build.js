@@ -65,23 +65,23 @@ const action = (id, params = {}) => ({
 });
 
 /**
- * Gemeinsamer Schluss: Variable „Text“ an /capture schicken und den Satz aus der
- * Antwort (`message`) als Mitteilung zeigen. Bewusst ohne Wenn-Abfragen: Das
- * Cockpit formuliert Erfolg und Fehler (401, 502, 503 …) selbst, weil „Inhalte von
- * URL abrufen“ den HTTP-Status nicht liefert.
+ * Gemeinsamer Schluss: Variable „Text“ als Feld `field` an `path` schicken
+ * (Standard /capture) und den Satz aus der Antwort (`message`) als Mitteilung
+ * zeigen. Bewusst ohne Wenn-Abfragen: Das Cockpit formuliert Erfolg und Fehler
+ * (401, 502, 503 …) selbst, weil „Inhalte von URL abrufen“ den HTTP-Status nicht liefert.
  */
-function send(shortcut, { tokenUuid, url, source }) {
+function send(shortcut, { tokenUuid, url, source, path = '/capture', field = 'text' }) {
   const res = uuidFor(shortcut, 'antwort');
   const message = uuidFor(shortcut, 'message');
   return [
     action('downloadurl', {
       UUID: res,
-      WFURL: `${url}/capture`,
+      WFURL: `${url}${path}`,
       WFHTTPMethod: 'POST',
       ShowHeaders: true,
       WFHTTPHeaders: dictionary({ Authorization: ['Bearer ', out(tokenUuid, 'Text')] }),
       WFHTTPBodyType: 'JSON',
-      WFJSONValues: dictionary({ text: [named('Text')], source }),
+      WFJSONValues: dictionary({ [field]: [named('Text')], source }),
     }),
     action('getvalueforkey', {
       UUID: message,
@@ -102,22 +102,22 @@ function tokenAction(shortcut) {
   return { uuid, action: action('gettext', { UUID: uuid, WFTextActionText: '' }) };
 }
 
-const importQuestion = {
+const importQuestion = (text) => ({
   ActionIndex: 0,
   Category: 'Parameter',
   ParameterKey: 'WFTextActionText',
-  Text: 'Capture-Token des Vault Cockpits',
+  Text: text,
   DefaultValue: '',
-};
+});
 
-function workflow({ actions, types = [], input = [], hasInput = false, noInput, glyph, color }) {
+function workflow({ actions, types = [], input = [], hasInput = false, noInput, glyph, color, question = 'Capture-Token des Vault Cockpits' }) {
   return {
     ...(noInput ? { WFWorkflowNoInputBehavior: noInput } : {}),
     WFWorkflowMinimumClientVersion: 900,
     WFWorkflowMinimumClientVersionString: '900',
     WFWorkflowClientVersion: '2607.0.2',
     WFWorkflowIcon: { WFWorkflowIconStartColor: color, WFWorkflowIconGlyphNumber: glyph },
-    WFWorkflowImportQuestions: [importQuestion],
+    WFWorkflowImportQuestions: [importQuestion(question)],
     WFWorkflowTypes: types,
     WFWorkflowInputContentItemClasses: input,
     WFWorkflowHasShortcutInputVariables: hasInput,
@@ -172,9 +172,34 @@ export function sprachmemoInsCockpit({ url }) {
   });
 }
 
+/**
+ * „Zum Lesestapel“: Adresse aus dem Teilen-Menü (Safari) oder abgefragt an
+ * /lesestapel/speichern. Braucht einen Token mit dem Recht „Lesestapel“.
+ */
+export function zumLesestapel({ url }) {
+  const name = 'lesestapel';
+  const token = tokenAction(name);
+  return workflow({
+    types: ['ActionExtension'],
+    input: ['WFURLContentItem', 'WFStringContentItem'],
+    hasInput: true,
+    // Ohne Teilen-Menü fragt iOS nach der Adresse; das Cockpit sucht die erste http(s)-Adresse heraus.
+    noInput: { Name: 'WFWorkflowNoInputBehaviorAskForInput', Parameters: { ItemClass: 'WFStringContentItem' } },
+    glyph: 59511,
+    color: 4251333119,
+    question: 'Lesestapel-Token des Vault Cockpits',
+    actions: [
+      token.action,
+      action('setvariable', { WFVariableName: 'Text', WFInput: attachment(shortcutInput) }),
+      ...send(name, { tokenUuid: token.uuid, url, source: 'kurzbefehl', path: '/lesestapel/speichern', field: 'url' }),
+    ],
+  });
+}
+
 export const SHORTCUTS = {
   'Notiz ins Cockpit': notizInsCockpit,
   'Sprachmemo ins Cockpit': sprachmemoInsCockpit,
+  'Zum Lesestapel': zumLesestapel,
 };
 
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

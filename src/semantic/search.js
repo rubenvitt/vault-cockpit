@@ -16,11 +16,12 @@ const STREAM_DEPTH = 50;
  *
  * `mode: 'semantic'` nutzt nur die Embeddings. Ist der Embedding-Server nicht
  * erreichbar, fällt die Suche auf Volltext zurück und sagt das in `degraded`.
+ * `paths` beschränkt die Suche vorab auf diese Pfade (vor der Begrenzung).
  */
-export async function hybridSearch({ index, semantic: semanticOrGetter = null, query, mode = 'hybrid', include = ['core'], includeSensitive = false, tag = null, folder = null, type = null, limit = 10, offset = 0 }) {
+export async function hybridSearch({ index, semantic: semanticOrGetter = null, query, mode = 'hybrid', include = ['core'], includeSensitive = false, tag = null, folder = null, type = null, paths = null, limit = 10, offset = 0 }) {
   // Index oder Funktion, die den aktuellen liefert (Einstellungen → Embeddings).
   const semantic = typeof semanticOrGetter === 'function' ? semanticOrGetter() : semanticOrGetter;
-  const filters = { include, includeSensitive, tag, folder, type };
+  const filters = { include, includeSensitive, tag, folder, type, paths };
   const allowed = index.filterPaths(filters);
   const streams = {};
   let degraded = null;
@@ -103,7 +104,7 @@ function graphStream(index, seeds, allowed) {
 }
 
 /** Kurzer Ausschnitt für Treffer ohne Volltext-Snippet: der Abschnitt mit dem ähnlichsten Text. */
-function excerpt(index, path, heading, max = 220) {
+export function excerpt(index, path, heading, max = 220) {
   const note = index.getNote(path);
   if (!note?.content) return null;
   let body = parseNote(note.content).body;

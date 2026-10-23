@@ -21,6 +21,15 @@ import { createCalendarSources, calendarForGraph } from './cockpit/calendars.js'
 import { createSettingsStore, loadOrCreateSecret } from './cockpit/settings.js';
 import { createTokenStore } from './cockpit/tokens.js';
 import { createBackup } from './cockpit/backup.js';
+import { createReadingStore } from './lesen/store.js';
+import { readingRoutes } from './lesen/http.js';
+import { createFeedPoller } from './lesen/feeds.js';
+import { createReadingApi } from './lesen/api.js';
+import { saveUrl } from './lesen/save.js';
+import { createMailReader } from './lesen/mail.js';
+import { createReadingExport } from './lesen/vault-export.js';
+import { createEmbedCache } from './lesen/embed-cache.js';
+import { createSynthesisEvidence } from './lesen/synthesis-evidence.js';
 import { createOidcLogin } from './web/oidc.js';
 import { createWebHttp } from './web/http.js';
 import { loadShortcuts } from './web/shortcuts.js';
@@ -128,19 +137,24 @@ const cockpitSettings = createSettingsStore({
 const VECTOR_DB = process.env.VECTOR_DB ?? '/data/vectors.db';
 let semantic = null;
 let semanticKey = null;
+// Derselbe Embedder bettet Markierungen ein (Wiedersehen, Querverbindungen), über einen gemeinsamen Speicher.
+let embedder = null;
+const embedCache = createEmbedCache({ embedder: () => embedder });
 function applyEmbed() {
   const e = cockpitSettings.get().embed;
   const key = e ? `${e.url}\n${e.model}` : null;
   if (key === semanticKey) return;
   semantic?.close();
   semantic = null;
+  embedder = null;
   semanticKey = key;
   if (!e) return console.log('Semantik: aus (Einstellungen → Embeddings)');
+  embedder = createOllamaEmbedder({ url: e.url, model: e.model });
   semantic = createSemanticIndex({
     dbPath: VECTOR_DB,
     vaultPath: VAULT_PATH,
     index,
-    embedder: createOllamaEmbedder({ url: e.url, model: e.model }),
+    embedder,
   });
   semantic.schedule();
   console.log(`Semantik: ${e.model} über ${e.url}`);
@@ -176,8 +190,21 @@ const captureRouter = createCaptureRouter({ capture, zunder, state: captureState
 // /capture und /funke. CAPTURE_TOKEN aus älteren Deployments gilt daneben weiter.
 const apiTokens = createTokenStore({ file: join(dirname(COCKPIT_SETTINGS_FILE), 'api-tokens.json') });
 const LEGACY_CAPTURE_TOKEN = process.env.CAPTURE_TOKEN || null;
+
+// Lesestapel (VCP-77): Artikel, Markierungen und Feeds, neben den Einstellungen
+// unter /data. Lässt sich nicht neu bauen, gehört deshalb in die Sicherung.
+const reading = createReadingStore({ path: join(dirname(COCKPIT_SETTINGS_FILE), 'lesestapel.db') });
+// Feeds (VCP-78): jede Minute nachsehen, welche dran sind; jeder Feed hat seinen
+// eigenen Abstand (Standard 30 min), Fehler verlängern ihn.
+const feedPoller = createFeedPoller({ store: reading });
+feedPoller.start();
+// Gelesene Texte mit Markierungen als Notiz in den Vault (VCP-75), entprellt;
+// `readingExport.addLink` schreibt Wikilinks zu einer Markierung dorthin.
+const readingExport = createReadingExport({ vaultPath: VAULT_PATH, index, editor, policy: POLICY, store: reading, settings: cockpitSettings });
 const captureHttp = createCaptureHttp({ token: LEGACY_CAPTURE_TOKEN, tokens: apiTokens, router: captureRouter, zunderEnabled: () => Boolean(zunder()) });
 const captureEnabled = () => Boolean(LEGACY_CAPTURE_TOKEN) || apiTokens.has('capture');
+// Kurzbefehl „Zum Lesestapel“: nur API-Tokens mit dem Recht „Lesestapel“.
+const readingApi = createReadingApi({ tokens: apiTokens, store: reading });
 const searchHttp = createSearchHttp({ tokens: apiTokens, index, semantic: currentSemantic });
 
 // Mail-Abruf: läuft, sobald Token und Absender in den Einstellungen stehen;
@@ -203,6 +230,8 @@ function applyMail() {
       doneMailbox: m.doneMailbox,
       allowedSenders: m.senders,
       router: captureRouter,
+      // `[lesen]` im Betreff: Artikel oder Newsletter in den Lesestapel.
+      readingMail: createMailReader({ store: reading }),
     });
     mail.start(m.pollMinutes);
     console.log(`Mail-Capture: „${m.mailbox}“ alle ${m.pollMinutes} Minuten`);
@@ -274,38 +303,57 @@ const health = createHealth({
   zunderAccess,
   calendars,
   flameNote,
+  feeds: () => feedPoller.health(),
 });
 
 const graph = createGraph({ index, semantic: currentSemantic, zunder, calendar: calendarForGraph(calendars), tz: () => cockpitSettings.get().tz });
+
+// Abhaken und Schnelleingabe: Zunder-Zugang und Inbox-Ordner aus den Einstellungen.
+const cockpitActions = createCockpitActions({
+  vaultPath: VAULT_PATH,
+  settings: cockpitSettings,
+  policy: POLICY,
+  state: captureState,
+  zunder,
+  index,
+  // `> https://…` in der Schnelleingabe geht in den Lesestapel.
+  saveArticle: ({ url, clientId }) => saveUrl({ store: reading, url, origin: 'schnelleingabe', clientId }),
+  onFlame: (task) => flameNote.afterFlame(task),
+});
+
+// Vault-Notizen ansehen und verarbeiten, über denselben Editor wie vault_edit;
+// Bilder aus dem Vault und ähnliche Notizen für die Vorschau.
+const noteDesk = createNoteDesk({ index, editor, policy: POLICY, settings: cockpitSettings, vaultPath: VAULT_PATH, semantic: currentSemantic });
 
 // Web-Cockpit (Schritt 3): Wochenansicht mit eigenem Browser-Login. Aus, bis
 // WEB_CLIENT_ID gesetzt ist.
 const webHttp = process.env.WEB_CLIENT_ID
   ? createWebHttp({
       cockpit,
-      // Abhaken und Schnelleingabe: Zunder-Zugang und Inbox-Ordner aus den Einstellungen.
-      actions: createCockpitActions({
-        vaultPath: VAULT_PATH,
-        settings: cockpitSettings,
-        policy: POLICY,
-        state: captureState,
-        zunder,
-        index,
-        onFlame: (task) => flameNote.afterFlame(task),
-      }),
+      actions: cockpitActions,
       // Woche planen: Zunder-Aufgaben holen, Flammen einplanen (VCP-47).
       plan: createWeekPlanner({ settings: cockpitSettings, zunder }),
-      // Vault-Notizen ansehen und verarbeiten, über denselben Editor wie vault_edit;
-      // Bilder aus dem Vault und ähnliche Notizen für die Vorschau.
-      notes: createNoteDesk({ index, editor, policy: POLICY, settings: cockpitSettings, vaultPath: VAULT_PATH, semantic: currentSemantic }),
+      notes: noteDesk,
       settings: cockpitSettings,
       tokens: apiTokens,
       shortcuts: loadShortcuts(),
       captureEnabled,
       calendars,
       graph,
-      search: (query) => hybridSearch({ index, semantic: currentSemantic, query, limit: 30 }),
+      search: (query, { type = null, paths = null } = {}) => hybridSearch({ index, semantic: currentSemantic, query, type, paths, limit: 30 }),
+      // Synthesen: passende neue Markierungen als Belege anhängen (VCP-82).
+      evidence: createSynthesisEvidence({ notes: noteDesk, index, store: reading, exporter: readingExport, embedCache, semantic: currentSemantic, vaultPath: VAULT_PATH, editor }),
       health,
+      // Lesen: Eingang, Stapel, Markiert; Artikel holt src/lesen/fetch.js (SSRF-geschützt).
+      // „In Inbox“ aus der Leseansicht nutzt die Schnelleingabe des Cockpits.
+      reading: readingRoutes({
+        store: reading,
+        capture: (input) => cockpitActions.capture(input),
+        embedCache,
+        // Querverbindungen in der Leseansicht (VCP-73): Wikilinks nur in die Lesestapel-Notiz.
+        connections: { index, semantic: currentSemantic, policy: POLICY, exporter: readingExport },
+        onChange: (id) => readingExport.changed(id),
+      }),
       oidc: createOidcLogin({
         issuer: ISSUER,
         clientId: process.env.WEB_CLIENT_ID,
@@ -325,6 +373,8 @@ const webHttp = process.env.WEB_CLIENT_ID
           'capture-state.json': process.env.CAPTURE_STATE_FILE ?? '/data/capture-state.json',
           'session-secret': process.env.SESSION_SECRET_FILE ?? '/data/session-secret',
         },
+        // Die offene Datenbank als Schnappschuss; beim Wiederherstellen öffnet der Store sie neu.
+        live: { 'lesestapel.db': { read: () => reading.snapshot(), write: (buf) => reading.replaceWith(buf) } },
       }),
       restart: () => {
         setTimeout(() => process.exit(0), 5000).unref();
@@ -363,6 +413,7 @@ const app = createApp({
     return principal;
   },
   captureHttp,
+  readingApi,
   searchHttp,
   webHttp,
   degraded: () => health.degraded(),
@@ -383,6 +434,7 @@ app.listen(PORT, '0.0.0.0', () => {
   const tokenCount = (scope) => apiTokens.list().filter((t) => t.scope === scope).length;
   console.log(`  Capture     : /capture, /funke (${tokenCount('capture')} Capture-Tokens${LEGACY_CAPTURE_TOKEN ? ' + CAPTURE_TOKEN' : ''})${mail ? `, Mail aus „${mail.status().mailbox}“` : ''}`);
   console.log(`  Suche       : /api/search (${tokenCount('search')} Such-Tokens)`);
+  console.log(`  Lesestapel  : /lesestapel/speichern (${tokenCount('lesestapel')} Lesestapel-Tokens)`);
   const z = zunderSource();
   console.log(`  Zunder      : ${z ? `${z} (! → Inbox, Brücke ${bridgeState()})` : `aus (Einstellungen → Zunder), Brücke ${bridgeState()}`}`);
   const e = cockpitSettings.get().embed;
@@ -395,8 +447,11 @@ for (const sig of ['SIGTERM', 'SIGINT']) {
     console.log(`${sig} empfangen — fahre herunter`);
     sync.stop();
     mail?.stop();
+    feedPoller.stop();
+    readingExport.flush();
     index.stop();
     semantic?.close();
+    reading.close();
     app.close(() => process.exit(0));
   });
 }

@@ -78,6 +78,8 @@ export function createHealth({
   zunderAccess = null,
   calendars = null,
   flameNote = null,
+  // Feeds des Lesestapels (src/lesen/feeds.js): liefert den Dienst fertig, je Feed ein Teil.
+  feeds = null,
   now = () => Date.now(),
 }) {
   function secrets() {
@@ -300,7 +302,7 @@ export function createHealth({
       ...(s.summary ? { summary: maskSecrets(s.summary, { secrets: hidden, max: 200 }) } : {}),
       ...(s.items ? { items: s.items.map(clean) } : {}),
     });
-    return [syncService(), ...(index ? [indexService()] : []), embedService(), mailService(), bridgeService(), ...(flameNote ? [flameNoteService()] : []), zunderService(), calendarService()].map(clean);
+    return [syncService(), ...(index ? [indexService()] : []), embedService(), mailService(), bridgeService(), ...(flameNote ? [flameNoteService()] : []), zunderService(), calendarService(), ...(feeds ? [feeds()] : [])].map(clean);
   }
 
   return {

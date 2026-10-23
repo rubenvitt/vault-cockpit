@@ -24,10 +24,11 @@ for (const [title, build] of Object.entries(SHORTCUTS)) {
     assert.equal(target.WFWorkflowActionParameters[q.ParameterKey], '', 'kein Token in der Datei');
   });
 
-  test(`${title}: schickt an /capture mit Bearer-Token`, () => {
+  const path = title === 'Zum Lesestapel' ? '/lesestapel/speichern' : '/capture';
+  test(`${title}: schickt an ${path} mit Bearer-Token`, () => {
     const actions = build({ url }).WFWorkflowActions;
     const post = actions.find((a) => a.WFWorkflowActionIdentifier === 'is.workflow.actions.downloadurl').WFWorkflowActionParameters;
-    assert.equal(post.WFURL, `${url}/capture`);
+    assert.equal(post.WFURL, `${url}${path}`);
     assert.equal(post.WFHTTPMethod, 'POST');
     const [auth] = post.WFHTTPHeaders.Value.WFDictionaryFieldValueItems;
     assert.equal(auth.WFKey.Value.string, 'Authorization');

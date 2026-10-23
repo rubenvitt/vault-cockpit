@@ -6,6 +6,13 @@
 // der ID des Eintrags als `cid`: Kommt eine Antwort nicht an und der Eintrag
 // geht noch einmal raus, legt der Server nichts doppelt an. Ein Eintrag
 // verlässt den Puffer erst, wenn der Server ihn angenommen hat.
+//
+// Die Leseansicht (lesen-doc.js) legt über `cockpitPuffer.queue` Aktionen in
+// denselben Puffer (VCP-80): `{ id, action, fields, label, quiet? }`. Die ID
+// ist der Schlüssel, ein neuer Eintrag mit derselben ID ersetzt den alten
+// (Fortschritt, Status, Notiz: der letzte Stand gilt); neue Markierungen
+// tragen ihre ID als `cid`, damit der Server sie nur einmal anlegt.
+// Das CSRF-Token holt jeder Lauf frisch von `/api/sitzung`, nie ohne Netz.
 (() => {
   'use strict';
 
@@ -21,7 +28,16 @@
 
   // Muss zum Namen in sw.js passen.
   const PAGES = 'cockpit-seiten';
-  const forgetWeek = () => ('caches' in window ? caches.delete(PAGES).catch(() => {}) : Promise.resolve());
+  // Wann zuletzt Lesestoff angefordert wurde; Abmelden setzt es zurück.
+  const FILLED = 'cockpit-lesen-offline';
+  const forgetWeek = () => {
+    try {
+      localStorage.removeItem(FILLED);
+    } catch {
+      /* privater Modus */
+    }
+    return 'caches' in window ? caches.delete(PAGES).catch(() => {}) : Promise.resolve();
+  };
   const toast = (message, opts) => window.cockpit?.toast(message, opts);
   const newId = () => {
     if (crypto.randomUUID) return crypto.randomUUID();
@@ -29,7 +45,11 @@
     return `${Date.now().toString(36)}-${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}`;
   };
   const CID = /^[A-Za-z0-9_.:-]{1,128}$/;
-  const kindOf = (text) => (text.trimStart().startsWith('!') ? 'Aufgabe' : 'Notiz');
+  // Wie articleUrl in src/capture/syntax.js: `> https://…` allein wird ein Artikel.
+  const kindOf = (text) => (text.trimStart().startsWith('!') ? 'Aufgabe' : /^\s*>\s*https?:\/\/\S+\s*$/i.test(text) ? 'Artikel' : 'Notiz');
+  // Einträge der Leseansicht tragen ihre Beschriftung selbst.
+  const kind = (e) => (e.action ? 'Lesen' : kindOf(e.text));
+  const textOf = (e) => e.text ?? e.label ?? '';
   const when = (t) => {
     const d = new Date(t);
     return Number.isNaN(d.getTime()) ? 'unbekannt' : d.toLocaleString('de-DE', { weekday: 'short', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -47,6 +67,19 @@
       },
       () => {},
     );
+  }
+
+  /** Bittet den Service Worker, Lesestoff für unterwegs zu speichern; mit Netz, höchstens alle zehn Minuten. */
+  function fillReading() {
+    const sw = navigator.serviceWorker?.controller;
+    if (!sw || stale || navigator.onLine === false) return;
+    try {
+      if (Date.now() - Number(localStorage.getItem(FILLED) ?? 0) < 10 * 60_000) return;
+      localStorage.setItem(FILLED, String(Date.now()));
+    } catch {
+      /* privater Modus: trotzdem, der Worker holt nur, was fehlt */
+    }
+    sw.postMessage({ type: 'lesen-offline' });
   }
 
   // Abmelden: Die gespeicherte Woche verschwindet, bevor das Formular rausgeht.
@@ -89,6 +122,21 @@
   const all = async () => ((await store('readonly', (s) => s.getAll())) ?? []).sort((a, b) => a.created - b.created);
   const save = (entry) => store('readwrite', (s) => s.put(entry));
   const drop = (id) => store('readwrite', (s) => s.delete(id));
+  /**
+   * Nach dem Senden: löschen bzw. ersetzen nur, wenn noch genau die gesendete
+   * Fassung im Puffer liegt. Eine neuere (gleiche ID, anderer `rev`) bleibt stehen.
+   */
+  const settle = (entry, replacement = null) =>
+    store('readwrite', (s) => {
+      const req = s.get(entry.id);
+      req.onsuccess = () => {
+        const cur = req.result;
+        if (!cur || (cur.rev ?? cur.created) !== (entry.rev ?? entry.created)) return;
+        if (replacement) s.put(replacement);
+        else s.delete(entry.id);
+      };
+      return req;
+    });
   const reload = async () => {
     entries = await all().catch(() => entries);
   };
@@ -122,9 +170,31 @@
 
   // --- Nachsenden ------------------------------------------------------------
 
+  /**
+   * Aktion der Leseansicht in den Puffer (siehe oben); `false`, wenn das Gerät
+   * nichts speichern kann. Mit Netz geht sie gleich raus.
+   */
+  async function queue({ id, action, fields, label, quiet = false }) {
+    try {
+      await save({ id, action, fields, label, quiet, created: Date.now(), rev: newId(), error: null });
+    } catch {
+      return false;
+    }
+    if (!stale && navigator.onLine === false) setNet(false);
+    await reload();
+    render();
+    if (net) flush();
+    return true;
+  }
+
   let flushing = null;
   /** Sendet, was wartet; `retry` nimmt auch Einträge mit Fehler noch einmal. Nie zwei Läufe gleichzeitig, auch nicht über Tabs. */
   function flush({ retry = false } = {}) {
+    // Ohne Netz nicht einmal nach dem Token fragen (VCP-55).
+    if (navigator.onLine === false) {
+      setNet(false);
+      return Promise.resolve();
+    }
     if (!flushing) {
       const run = () => sendAll(retry);
       flushing = (navigator.locks?.request ? navigator.locks.request('cockpit-puffer', run) : run())
@@ -175,7 +245,7 @@
       }
       if (r === 'stop' || r === 'csrf') break;
       if (r === 'failed') failed += 1;
-      else sent.push(r);
+      else if (!entry.quiet) sent.push(r);
     }
     await reload();
     render();
@@ -188,12 +258,13 @@
    * `'csrf'` (Token veraltet) oder `'stop'` (später noch einmal).
    */
   async function sendOne(entry, csrf) {
+    const [path, fields] = entry.action ? [entry.action, entry.fields] : ['/aktion/erfassen', { text: entry.text, cid: entry.id, back: '/' }];
     let res;
     try {
-      res = await fetch('/aktion/erfassen', {
+      res = await fetch(path, {
         method: 'POST',
         headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ text: entry.text, cid: entry.id, csrf, back: '/' }),
+        body: new URLSearchParams({ ...fields, csrf }),
         credentials: 'same-origin',
       });
     } catch {
@@ -202,8 +273,8 @@
     }
     const data = await res.json().catch(() => null);
     if (res.ok && data?.ok) {
-      await drop(entry.id);
-      return data.message || `${kindOf(entry.text)} gesendet`;
+      await settle(entry);
+      return data.message || entry.label || `${kindOf(entry.text)} gesendet`;
     }
     if (res.status === 401) {
       loginNeeded = true;
@@ -212,7 +283,7 @@
     if (res.status === 403 && data?.error === 'csrf') return 'csrf';
     // Keine Antwort vom Cockpit selbst (Proxy während eines Deploys): nichts ist passiert, später noch einmal.
     if (!data?.message && res.status >= 500) return 'stop';
-    await save({ ...entry, error: data?.message || `Fehler ${res.status}`, failedAt: Date.now() });
+    await settle(entry, { ...entry, error: data?.message || `Fehler ${res.status}`, failedAt: Date.now() });
     return 'failed';
   }
 
@@ -240,7 +311,9 @@
   /** Hinweis oben: offline (mit Stand der gespeicherten Woche) oder wieder online. */
   function banner() {
     let text = null;
-    let hint = ' Nur die Schnelleingabe geht; sie sendet nach, sobald wieder Netz da ist.';
+    let hint = document.querySelector('.lesen-reader')
+      ? ' Markieren, Notizen, Fortschritt und Archivieren warten auf dem Gerät und gehen raus, sobald wieder Netz da ist.'
+      : ' Nur die Schnelleingabe geht; sie sendet nach, sobald wieder Netz da ist.';
     if (stale && net) {
       text = 'Wieder online.';
       hint = ' Neu laden zeigt den aktuellen Stand.';
@@ -261,9 +334,11 @@
   /** Zähler „n Einträge warten auf Netz“, darunter jeder Eintrag; Fehler bleiben stehen. */
   function render() {
     let box = document.querySelector('.puffer');
-    if (!entries.length) return box?.remove();
-    const waiting = entries.filter((e) => !e.error).length;
-    const failed = entries.length - waiting;
+    // Stille Einträge (Lesefortschritt) gehen mit raus, stehen aber nur mit Fehler in der Liste.
+    const shown = entries.filter((e) => !e.quiet || e.error);
+    if (!shown.length) return box?.remove();
+    const waiting = shown.filter((e) => !e.error).length;
+    const failed = shown.length - waiting;
     if (!box) {
       box = el('details', { className: 'puffer' });
       place(box);
@@ -273,17 +348,18 @@
     const parts = [];
     if (waiting) parts.push(el('span', { textContent: `${waiting} ${waiting === 1 ? 'Eintrag wartet' : 'Einträge warten'} auf Netz` }));
     if (failed) parts.push(el('span', { className: 'puffer-failed', textContent: `${waiting ? ' · ' : ''}${failed} nicht gesendet` }));
-    const items = entries.map((e) => {
-      const meta = `${kindOf(e.text)} · erfasst ${when(e.created)}${e.error ? ` · Nicht gesendet: ${e.error}` : ' · wartet'}`;
+    const items = shown.map((e) => {
+      const meta = `${kind(e)} · erfasst ${when(e.created)}${e.error ? ` · Nicht gesendet: ${e.error}` : ' · wartet'}`;
+      const text = textOf(e);
       return el(
         'li',
         { className: e.error ? 'failed' : '' },
-        el('span', { className: 'puffer-text', textContent: e.text.length > 280 ? `${e.text.slice(0, 279)}…` : e.text }),
+        el('span', { className: 'puffer-text', textContent: text.length > 280 ? `${text.slice(0, 279)}…` : text }),
         el(
           'span',
           { className: 'puffer-item-actions' },
           // Zurück ins Feld nur, was der Server abgelehnt hat: Das ist sicher nicht angekommen.
-          e.error && capture ? button('Ins Feld', () => backToField(e, capture)) : null,
+          e.error && capture && !e.action ? button('Ins Feld', () => backToField(e, capture)) : null,
           button('Verwerfen', () => discard(e), 'chip danger'),
         ),
         el('span', { className: 'meta', textContent: meta }),
@@ -303,7 +379,7 @@
   }
 
   async function discard(entry) {
-    if (!window.confirm(`${kindOf(entry.text)} verwerfen? Sie wird nicht gesendet.`)) return;
+    if (!window.confirm(`${kind(entry)} verwerfen? Der Eintrag wird nicht gesendet.`)) return;
     await drop(entry.id).catch(() => {});
     await reload();
     render();
@@ -322,10 +398,10 @@
 
   // --- Offline sperren -------------------------------------------------------
 
-  /** Ohne Netz (oder auf einer gespeicherten Seite) gehen nur Schnelleingabe und Abmelden. */
+  /** Ohne Netz (oder auf einer gespeicherten Seite) gehen nur Schnelleingabe, Archivieren in der Leseansicht (puffert lesen-doc.js) und Abmelden. */
   function lock(blocked) {
     for (const form of document.forms) {
-      if (form.method !== 'post' || form.classList.contains('capture') || form.classList.contains('logout')) continue;
+      if (form.method !== 'post' || form.matches('.capture, .logout, [data-archive]')) continue;
       form.classList.toggle('offline-off', blocked);
       for (const field of form.elements) {
         if (blocked && !field.disabled) {
@@ -370,10 +446,16 @@
   // Meldungen von damals gehören nicht zum gespeicherten Stand.
   if (stale) for (const t of document.querySelectorAll('.toasts > .toast')) t.remove();
 
-  addEventListener('online', () => flush());
+  addEventListener('online', () => {
+    flush();
+    fillReading();
+  });
   addEventListener('offline', () => setNet(false));
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') flush();
+    if (document.visibilityState === 'visible') {
+      flush();
+      fillReading();
+    }
   });
   // Funkloch ohne `online`-Ereignis: alle 30 Sekunden nachsehen, solange etwas wartet.
   setInterval(() => {
@@ -381,11 +463,13 @@
   }, 30_000);
 
   setNet(net);
+  fillReading();
   reload().then(() => {
     render();
     if (stale || entries.some((e) => !e.error)) flush();
   });
 
   // Für cockpit.js: Schnelleingabe bei Verbindungsfehler in den Puffer.
-  window.cockpitPuffer = { take, flush };
+  // Für lesen-doc.js: Aktionen puffern, wartende ansehen, offline (oder gespeicherte Seite)?
+  window.cockpitPuffer = { take, flush, queue, pending: () => reload().then(() => entries), offline: () => stale || !net };
 })();

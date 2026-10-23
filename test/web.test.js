@@ -121,9 +121,9 @@ const graph = {
 };
 const search = async (q) => ({ results: [{ path: 'wiki/a.md', title: 'A', snippet: `zu ${q}`, streams: ['text', 'semantic'] }], total: 1, degraded: null });
 
-async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSubjects = ['ruben'], calendars = null, actions = null, notes = null, shortcuts = [], clock = null } = {}) {
+async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSubjects = ['ruben'], calendars = null, actions = null, notes = null, shortcuts = [], clock = null, search: searchFn = search, zunder = true } = {}) {
   const idp = fakeIdp(idpOptions);
-  const settings = createSettingsStore({ defaults: { tz: 'Europe/Berlin', inboxFolder: 'inbox', zunderUrl: 'https://zunder.env', zunderToken: 'zt_env' }, logger: quiet });
+  const settings = createSettingsStore({ defaults: { tz: 'Europe/Berlin', inboxFolder: 'inbox', ...(zunder ? { zunderUrl: 'https://zunder.env', zunderToken: 'zt_env' } : {}) }, logger: quiet });
   const tokens = createTokenStore({ logger: quiet });
   const webHttp = createWebHttp({
     cockpit,
@@ -134,7 +134,7 @@ async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSu
     shortcuts,
     calendars,
     graph,
-    search,
+    search: searchFn,
     oidc: createOidcLogin({ issuer: ISSUER, clientId: CLIENT, clientSecret, redirectUri: 'https://vault.test/auth/callback', allowedSubjects, fetch: idp.fetch }),
     sessionSecret: SECRET,
     publicUrl: 'https://vault.test',
@@ -1278,7 +1278,7 @@ test('Rückblick: Kennzahlen, Balken als SVG ohne Inline-Styles, Navigation', as
 
 test('Kurzbefehle: in den Einstellungen verlinkt, nur angemeldet zu laden', async () => {
   const shortcuts = loadShortcuts();
-  assert.deepEqual(shortcuts.map((s) => s.slug), ['notiz', 'sprachmemo'], 'beide signierten Dateien liegen im Repo');
+  assert.deepEqual(shortcuts.map((s) => s.slug), ['notiz', 'sprachmemo', 'lesestapel'], 'alle signierten Dateien liegen im Repo');
   await withServer(
     async ({ call, login }) => {
       const anon = await call('/kurzbefehle/notiz.shortcut');
@@ -1287,6 +1287,7 @@ test('Kurzbefehle: in den Einstellungen verlinkt, nur angemeldet zu laden', asyn
       const page = await (await call('/einstellungen')).text();
       assert.match(page, /href="\/kurzbefehle\/notiz\.shortcut"/);
       assert.match(page, /href="\/kurzbefehle\/sprachmemo\.shortcut"/);
+      assert.match(page, /href="\/kurzbefehle\/lesestapel\.shortcut"/);
       const file = await call('/kurzbefehle/sprachmemo.shortcut');
       assert.equal(file.status, 200);
       assert.match(file.headers.get('content-disposition'), /attachment;.*Sprachmemo%20ins%20Cockpit\.shortcut/);
@@ -1569,5 +1570,71 @@ test('Offline-Cache: eine Wochenansicht mit wiederhergestelltem Entwurf wird nic
     },
     {},
     { actions, clock },
+  );
+});
+
+test('Wissen: Fragesuche mit Typfilter, Synthese-Kopf und offene Punkte nach Zunder (nur mit Zugang)', async () => {
+  const synth = { path: 'wiki/synthesis/A.md', folder: 'wiki/synthesis', title: 'Architektur statt Disziplin', frontmatter: { type: 'synthesis', status: 'entwurf', summary: 'Struktur statt Willenskraft' }, tags: [], body: '## These eins\n\nText [TODO Quelle prüfen]\n', inInbox: false };
+  const base = fakeNotes();
+  const notes = {
+    ...base,
+    get: (p) => (p === synth.path ? synth : base.get(p)),
+    ofType: (t) => (t === 'synthesis' ? [{ path: synth.path, title: synth.title, status: 'entwurf', updated: '2026-10-20', frontmatter: synth.frontmatter }] : []),
+  };
+  const asked = [];
+  const searchFn = async (q, opts) => {
+    asked.push([q, opts]);
+    return { results: [{ path: synth.path, title: synth.title, snippet: null, streams: ['text'] }], total: 1, degraded: null };
+  };
+  const sent = [];
+  const actions = { ...fakeActions(), synthesisTasks: async (input) => (sent.push(input), { created: 1, existing: sent.length - 1 }) };
+
+  await withServer(
+    async ({ call, login }) => {
+      assert.equal((await call('/wissen?q=Struktur')).status, 303);
+      await login();
+      const page = await call('/wissen?q=Struktur&status=entwurf');
+      assert.equal(page.status, 200);
+      const html = await page.text();
+      assert.match(html, /<h2>Treffer<\/h2><ul class="results"><li><a href="\/notiz\?pfad=wiki%2Fsynthesis%2FA\.md">Architektur statt Disziplin<\/a>/);
+      assert.match(html, /<option selected>entwurf<\/option>/);
+      // Wissen gehört zum Bereich Lesen (VCP-77).
+      assert.match(html, /<a href="\/lesen" class="nav-link" aria-current="page">/);
+      assert.match(html, /<a href="\/wissen" class="subnav-link" aria-current="page">Wissen<\/a>/);
+      // Die Suche, die in der Leiste unten Lesen weichen musste, bleibt von hier erreichbar.
+      assert.match(html, /<a href="\/graph\?q=Struktur">Ganzen Vault durchsuchen<\/a>/);
+      // Die Suche bekommt nur die Synthesen, die die Filter erfüllen.
+      assert.deepEqual(asked[0], ['Struktur', { type: 'synthesis', paths: ['wiki/synthesis/A.md'] }]);
+
+      // Live-Suche und Notizseite.
+      await call('/api/suche?q=Struktur&type=synthesis');
+      assert.deepEqual(asked[1], ['Struktur', { type: 'synthesis' }]);
+      const note = await (await call('/notiz?pfad=wiki%2Fsynthesis%2FA.md')).text();
+      assert.match(note, /<p class="synth-summary">Struktur statt Willenskraft<\/p>[^]*<a href="#h-these-eins">These eins<\/a>[^]*<li>Quelle prüfen<\/li>[^]*Als Aufgaben nach Zunder/);
+
+      // Der Server liest die offenen Punkte selbst; die Seite schickt nur den Pfad.
+      const csrf = csrfFrom(note);
+      const form = { pfad: synth.path, titel: 'untergeschoben', csrf };
+      const first = await (await call('/aktion/synthese/aufgaben', { method: 'POST', form, accept: 'application/json' })).json();
+      assert.equal(first.message, 'Nach Zunder: 1 Aufgabe');
+      assert.deepEqual(sent[0], { path: synth.path, points: ['Quelle prüfen'] });
+      const plain = await call('/aktion/synthese/aufgaben', { method: 'POST', form: { ...form, back: '/notiz?pfad=wiki%2Fsynthesis%2FA.md' } });
+      assert.equal(plain.headers.get('location'), '/notiz?pfad=wiki%2Fsynthesis%2FA.md');
+      const other = await call('/aktion/synthese/aufgaben', { method: 'POST', form: { pfad: '00-inbox/Idee.md', csrf }, accept: 'application/json' });
+      assert.equal(other.status, 404);
+    },
+    {},
+    { actions, notes, search: searchFn },
+  );
+
+  await withServer(
+    async ({ call, login }) => {
+      await login();
+      const note = await (await call('/notiz?pfad=wiki%2Fsynthesis%2FA.md')).text();
+      assert.match(note, /synth-head/);
+      assert.ok(!note.includes('Als Aufgaben nach Zunder'), 'ohne Zunder-Zugang kein Knopf');
+    },
+    {},
+    { actions, notes, search: searchFn, zunder: false },
   );
 });
