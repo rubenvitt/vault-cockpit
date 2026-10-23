@@ -28,15 +28,28 @@ extension Data {
     }
 }
 
-enum LoginError: LocalizedError {
+enum LoginError: LocalizedError, Equatable {
     case stateMismatch, denied, invalidCallback, invalidCookie
+    /// Das Login-Blatt ging gar nicht erst auf, meist weil Apple die Associated Domain nicht bestätigt hat.
+    case notStarted(host: String)
 
     var errorDescription: String? {
         switch self {
         case .stateMismatch, .invalidCallback: "Die Antwort der Anmeldung passt nicht. Bitte noch einmal anmelden."
         case .denied: "Die Anmeldung wurde abgebrochen oder nicht angenommen."
         case .invalidCookie: "Der Server hat kein brauchbares Sitzungs-Cookie geschickt."
+        case .notStarted(let host): "Anmeldung konnte nicht starten. Ist der Server mit dem App-Login schon deployt? (Associated Domains für \(host) nicht bestätigt)"
         }
+    }
+
+    /// Was der Login-Bildschirm zu einem Fehler zeigt; nil: vom Nutzer abgebrochen, nichts zeigen.
+    /// Ohne bestätigte Associated Domain (AASA fehlt) bricht das Login-Blatt mit https-Callback sofort
+    /// mit `canceledLogin` ab, als hätte man „Abbrechen“ getippt.
+    // shortcut: unter einer Sekunde gilt `canceledLogin` als „nicht gestartet“; ersetzen, falls iOS dafür einen eigenen Fehler liefert.
+    static func shown(_ error: Error, elapsed: TimeInterval, host: String) -> Error? {
+        guard let error = error as? ASWebAuthenticationSessionError else { return error }
+        if error.code == .canceledLogin && elapsed >= 1 { return nil }
+        return LoginError.notStarted(host: host)
     }
 }
 
@@ -104,14 +117,21 @@ final class WebAuthenticator: NSObject, ASWebAuthenticationPresentationContextPr
     func authenticate(url: URL, callback: ASWebAuthenticationSession.Callback) async throws -> URL {
         defer { session = nil }
         return try await withCheckedThrowingContinuation { continuation in
+            var resumed = false
             let session = ASWebAuthenticationSession(url: url, callback: callback) { url, error in
+                guard !resumed else { return }
+                resumed = true
                 if let url { continuation.resume(returning: url) } else { continuation.resume(throwing: error ?? LoginError.invalidCallback) }
             }
             session.presentationContextProvider = self
             // Gemeinsame Sitzung mit Safari, damit Pocket ID angemeldet bleibt und Passkeys greifen.
             session.prefersEphemeralWebBrowserSession = false
             self.session = session
-            _ = session.start()
+            // `start()` false kommt ohne Completion: sonst dreht der Spinner für immer.
+            if !session.start(), !resumed {
+                resumed = true
+                continuation.resume(throwing: LoginError.notStarted(host: url.host() ?? ""))
+            }
         }
     }
 

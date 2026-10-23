@@ -17,7 +17,8 @@ make test      # Unit-Tests auf dem ersten verfügbaren iPhone-Simulator
 - `BUILD_NUMBER=…` setzt die Build-Nummer (`CURRENT_PROJECT_VERSION`).
 - Server-URL: Release nutzt `https://vault.rubeen.dev` (`COCKPIT_SERVER_URL` in `project.yml`,
   dazu der Host in `COCKPIT_SERVER_HOST` für Associated Domains und App-Bound Domains).
-  Für Debug `Config/Local.xcconfig.example` nach `Config/Local.xcconfig` kopieren und anpassen.
+  Für Debug `Config/Local.xcconfig.example` nach `Config/Local.xcconfig` kopieren und anpassen
+  (gilt für App und Share Extension).
 
 ## Aufbau der App
 
@@ -74,10 +75,13 @@ make test      # Unit-Tests auf dem ersten verfügbaren iPhone-Simulator
 - **Fortschritt:** nach jedem Satz `POST /api/app/fortschritt`, Anker = Anfang des nächsten
   Satzes, Fortschritt nie sinkend (der Server nimmt jeden Wert), nach dem letzten Satz 1.
 - **Merken:** markiert den laufenden Satz, Anker wie `anchorAt` in `src/lesen/anchor.js`
-  (`quote`, je 32 Zeichen `prefix`/`suffix`, `start`), `cid` = UUID.
+  (`quote`, je 32 Zeichen `prefix`/`suffix`, `start`), `cid` = UUID. Sätze über 4000 Zeichen
+  (`MAX_QUOTE` in `src/lesen/highlights.js`) werden gekürzt. Lehnt der Server ab, zeigt der Player
+  „Nicht gemerkt: …“ mit der Meldung des Servers.
 - **Ohne Netz:** Fortschritt (nur der letzte Stand je Text) und Markierungen (höchstens 100) kommen
   in einen Puffer in den `UserDefaults` der App Group (`player.pending`) und gehen raus, sobald
-  `NWPathMonitor` wieder Netz meldet, beim nächsten Öffnen des Players oder nach dem nächsten Satz.
+  `NWPathMonitor` wieder Netz meldet, beim nächsten Öffnen des Players (vor dem Laden von Liste und Text, damit
+  sie den nachgesendeten Stand zeigen) oder nach dem nächsten Satz.
   Andere 4xx-Antworten als 401/429 verwirft der Puffer. Texte lädt der Player erst, wenn er sie
   braucht: Ohne Netz geht es nach dem laufenden Text nicht weiter.
 - **Zeichen:** Server und Leseansicht zählen in UTF-16 (JS-Strings). `SpeechText` rechnet deshalb
@@ -179,7 +183,10 @@ Schema nicht.
 Nur mit signiertem Build auf dem Gerät (oder einem signierten Simulator-Build) prüfbar: der
 Universal-Link-Callback gegen den echten Server (Apple holt die AASA über sein CDN, das dauert nach
 dem ersten Deploy etwas), Associated Domains und Keychain-Gruppe. Ohne Signieren bricht das
-Login-Blatt mit https-Callback sofort ab (wie „Abbrechen“, ohne Meldung).
+Login-Blatt mit https-Callback sofort ab, ebenso ohne erreichbare AASA (Server ohne App-Login,
+Antwort 404). iOS meldet das wie „Abbrechen“; kommt es in unter einer Sekunde (oder liefert `start()`
+`false`), zeigt die App „Anmeldung konnte nicht starten …“ mit „Erneut versuchen“ und loggt
+Fehler-Domain, Code und Host (Kategorie `login`).
 
 Im Simulator geprüft (iOS 27, ohne Signieren, Testseite auf `localhost:3000`): `localhost` gilt
 als App-Bound Domain, `navigator.serviceWorker` ist da, ein Service Worker registriert sich und

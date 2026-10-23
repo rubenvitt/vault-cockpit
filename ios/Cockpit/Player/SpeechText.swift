@@ -19,6 +19,8 @@ struct SpeechText: Equatable {
 
     /// So viele Einheiten Umgebung nimmt ein Anker mit (`CONTEXT` in `src/lesen/anchor.js`).
     static let context = 32
+    /// Längstes Zitat in UTF-16-Einheiten (`MAX_QUOTE` in `src/lesen/highlights.js`).
+    static let maxQuote = 4000
 
     let id: String
     let sentences: [Sentence]
@@ -52,14 +54,17 @@ struct SpeechText: Equatable {
         slice(sentences[sentence].start, sentences[sentence].end)
     }
 
-    /// Markierung für einen Satz, aufgebaut wie `anchorAt` in `src/lesen/anchor.js`.
+    /// Markierung für einen Satz, aufgebaut wie `anchorAt` in `src/lesen/anchor.js`. Längere Sätze
+    /// werden auf `maxQuote` gekürzt, sonst lehnt der Server ab; das Suffix folgt dem gekürzten Zitat.
     func highlight(of sentence: Int, cid: String) -> NewHighlight {
         let s = sentences[sentence]
+        var end = min(s.end, s.start + Self.maxQuote)
+        if splitsPair(end) { end -= 1 }
         return NewHighlight(
             id: id,
-            quote: slice(s.start, s.end),
+            quote: slice(s.start, end),
             prefix: slice(s.start - Self.context, s.start),
-            suffix: slice(s.end, s.end + Self.context),
+            suffix: slice(end, end + Self.context),
             start: s.start,
             cid: cid
         )

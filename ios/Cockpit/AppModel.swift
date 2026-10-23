@@ -54,6 +54,7 @@ final class AppModel {
         loginError = nil
         notice = nil
         defer { isLoggingIn = false }
+        let started = Date.now
         do {
             let request = LoginRequest(serverURL: config.serverURL)
             let callback = try await authenticator.authenticate(url: request.url, callback: request.callback)
@@ -70,10 +71,12 @@ final class AppModel {
             }
             webViewID = UUID()
             phase = .loggedIn
-        } catch ASWebAuthenticationSessionError.canceledLogin {
-            // Abgebrochen: Login-Knopf bleibt stehen.
         } catch {
-            loginError = error.localizedDescription
+            let host = config.serverURL.host() ?? ""
+            let code = (error as NSError).code
+            log.error("Login: \((error as NSError).domain, privacy: .public) \(code) für \(host, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            // nil: vom Nutzer abgebrochen, der Login-Knopf bleibt stehen.
+            loginError = LoginError.shown(error, elapsed: Date.now.timeIntervalSince(started), host: host)?.localizedDescription
         }
     }
 

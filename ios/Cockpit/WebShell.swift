@@ -175,6 +175,40 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         }
     }
 
+    // MARK: JavaScript-Dialoge
+    // Ohne diese Methoden gelten confirm() und prompt() als abgebrochen: keine Notiz in der
+    // Leseansicht (lesen-doc.js), kein „Verwerfen“ im Offline-Puffer (offline.js).
+
+    func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo) async {
+        _ = await panel(message, cancellable: false)
+    }
+
+    func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo) async -> Bool {
+        await panel(message) != nil
+    }
+
+    func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?, initiatedByFrame frame: WKFrameInfo) async -> String? {
+        await panel(prompt, text: defaultText ?? "")
+    }
+
+    /// Dialog mit „OK“ und „Abbrechen“: bei OK der Text des Feldes ("" ohne Feld), bei Abbrechen nil.
+    private func panel(_ message: String, text: String? = nil, cancellable: Bool = true) async -> String? {
+        // WebKit wartet auf eine Antwort: Ohne Fenster lässt sich nichts zeigen, also gleich abbrechen.
+        guard viewIfLoaded?.window != nil else { return nil }
+        var presenter: UIViewController = self
+        while let next = presenter.presentedViewController { presenter = next }
+        guard !presenter.isBeingDismissed else { return nil }
+        return await withCheckedContinuation { continuation in
+            let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+            if let text { alert.addTextField { $0.text = text } }
+            if cancellable { alert.addAction(UIAlertAction(title: "Abbrechen", style: .cancel) { _ in continuation.resume(returning: nil) }) }
+            alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak alert] _ in
+                continuation.resume(returning: alert?.textFields?.first?.text ?? "")
+            })
+            presenter.present(alert, animated: true)
+        }
+    }
+
     // MARK: Downloads (OPML, Wochenexport)
 
     func download(_ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String) async -> URL? {

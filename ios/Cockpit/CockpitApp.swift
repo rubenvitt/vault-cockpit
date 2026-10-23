@@ -50,7 +50,7 @@ struct LoginView: View {
             Button {
                 Task { await model.login() }
             } label: {
-                if model.isLoggingIn { ProgressView() } else { Text("Anmelden") }
+                if model.isLoggingIn { ProgressView() } else { Text(model.loginError == nil ? "Anmelden" : "Erneut versuchen") }
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
