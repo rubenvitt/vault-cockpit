@@ -99,7 +99,8 @@ export function listenRoutes({ store }) {
       async '/lesen/hoeren'(ctx) {
         const n = Number(ctx.url.searchParams.get('zeit'));
         const zeit = WINDOWS.includes(n) ? n : 15;
-        const { items } = fitToWindow(store.list({ status: 'stapel', limit: -1 }), zeit);
+        // Zu Ende gehörte oder gelesene Texte nicht noch einmal anfangen.
+        const { items } = fitToWindow(store.list({ status: 'stapel', limit: -1 }).filter((d) => d.progress < 1), zeit);
         return { html: readingPage(ctx, { key: 'stapel', title: 'Unterwegs hören', body: `<section>${listenBody(items, zeit, ctx)}</section>`, scripts: [assets.lesenHoeren] }) };
       },
       /** Lesetext und Sätze eines Dokuments für die Sprachausgabe. */

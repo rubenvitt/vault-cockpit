@@ -74,7 +74,8 @@
   async function load(i) {
     for (; i < ids.length; i++) {
       const res = await fetch(`/lesen/hoeren/text?id=${encodeURIComponent(ids[i])}`, { credentials: 'same-origin', headers: { accept: 'application/json' } });
-      if (!res.ok) throw new Error('Text ließ sich nicht laden');
+      // Abgelaufene Sitzung: Der Abruf landet auf der Anmeldeseite statt bei JSON.
+      if (!res.ok || res.redirected) throw new Error('Text ließ sich nicht laden. Noch angemeldet?');
       const d = await res.json();
       if (!d.sentences.length) continue;
       const pos = d.sentences.findIndex(([start]) => start >= d.anchor);
@@ -85,7 +86,8 @@
 
   function speak() {
     const mine = ++gen;
-    synth.cancel();
+    // Nur abbrechen, wenn noch etwas läuft: Nach `end` wäre das nur ein Anlass für Eigenheiten der Sprachausgabe.
+    if (synth.speaking || synth.pending) synth.cancel();
     const u = new SpeechSynthesisUtterance(cur.text.slice(...cur.sentences[cur.pos]));
     u.lang = 'de-DE';
     if (voice) u.voice = voice;
@@ -180,7 +182,8 @@
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible' || !playing) return;
     keepAwake(true);
-    if (cur && !synth.speaking) speak();
+    // `speaking` bleibt auch bei einer vom System angehaltenen Ausgabe wahr.
+    if (cur && (!synth.speaking || synth.paused)) speak();
   });
 
   if (ids.length) advance(0);

@@ -65,11 +65,14 @@ test('Hören: „Das hier merken“ markiert genau den gesprochenen Satz in der 
 test('Hören: Seite listet das Zeitfenster ohne JavaScript, Text als JSON, Link vom Stapel', async () => {
   const { store, doc, html: content, page } = setup();
   store.addDocument({ url: 'https://blatt.test/lang', title: 'Zu lang', status: 'stapel', reading_minutes: 40 });
+  const done = store.addDocument({ url: 'https://blatt.test/fertig', title: 'Schon gehört', status: 'stapel', reading_minutes: 2 }).doc;
+  store.setProgress(done.id, 1);
   const { html } = await page('/lesen/hoeren?zeit=15');
   assert.ok(!/style=|<script>/.test(html), 'keine Inline-Styles oder -Skripte');
   assert.match(html, /<script src="\/static\/lesen-hoeren\.js(\?v=[\w-]+)?" defer><\/script>/);
   assert.match(html, new RegExp(`<li class="lesen-item" data-doc="${doc.id}">\\s*<a href="/lesen/doc\\?id=${doc.id}" class="lesen-title">Vom Lesen</a>`));
   assert.ok(!html.includes('Zu lang'), 'nur, was ins Fenster passt');
+  assert.ok(!html.includes('Schon gehört'), 'Fertiges nicht noch einmal');
   assert.match(html, /class="meta hoeren-nojs">Abspielen braucht JavaScript/);
   assert.match(html, /<div class="hoeren-player" hidden>[^]*name="csrf" value="c"[^]*data-cmd="play"[^]*data-cmd="next"[^]*Das hier merken[^]*data-rate/);
   assert.match(html, /href="\/lesen\/hoeren\?zeit=15" class="chip" aria-current="true"/);
