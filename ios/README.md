@@ -117,7 +117,7 @@ mit dem in Xcode angemeldeten Account (Settings → Accounts):
 XCODE_ACCOUNT=1 ios/scripts/testflight.sh
 ```
 
-Per GitHub: Workflow „iOS TestFlight“ manuell starten. Er braucht die Repo-Secrets
+Per GitHub: Workflow „iOS TestFlight“ manuell starten oder einen Tag `ios/v…` pushen (z. B. `git tag ios/v1.0-1 && git push origin ios/v1.0-1`). Mit einer Xcode-Beta lädt App Store Connect nichts an, lokal geht dann nur `EXPORT_DESTINATION=export`. Er braucht die Repo-Secrets
 `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8_BASE64` (Inhalt der `.p8`, base64) und `APPLE_TEAM_ID`.
 
 ## Wohin mit neuem Code
