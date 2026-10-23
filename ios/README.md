@@ -43,7 +43,9 @@ Per GitHub: Workflow „iOS TestFlight“ manuell starten. Er braucht die Repo-S
 | `CockpitTests/` | Unit-Tests (laufen in der App als Host) |
 | `ShareExtension/` | Share Extension (VCP-93), noch anzulegen |
 
-Neue Dateien in diesen Ordnern nimmt `make project` automatisch auf. Ein neues Target kommt als
+Neue Dateien in diesen Ordnern nimmt `make project` automatisch auf. `Cockpit/Info.plist` und
+`Cockpit/Cockpit.entitlements` schreibt xcodegen bei jedem Lauf neu: Änderungen gehören unter
+`info.properties` bzw. `entitlements.properties` in `project.yml`, nicht direkt in die Dateien. Ein neues Target kommt als
 Eintrag unter `targets:` in `project.yml`, für die Share Extension etwa:
 
 ```yaml
@@ -60,7 +62,12 @@ Eintrag unter `targets:` in `project.yml`, für die Share Extension etwa:
     info:
       path: ShareExtension/Info.plist
       properties:
-        CockpitServerURL: $(COCKPIT_SERVER_URL)   # AppConfiguration liest die eigene Info.plist
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # AppConfiguration liest die eigene Info.plist der Extension
+        CockpitServerURL: $(COCKPIT_SERVER_URL)
+        CockpitAppGroup: group.dev.rubeen.cockpit
+        CockpitKeychainGroup: $(AppIdentifierPrefix)dev.rubeen.cockpit.shared
         NSExtension: { NSExtensionPointIdentifier: com.apple.share-services, … }
     entitlements:
       path: ShareExtension/ShareExtension.entitlements
