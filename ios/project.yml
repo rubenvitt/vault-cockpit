@@ -87,6 +87,9 @@ targets:
     platform: iOS
     sources:
       - ShareExtension
+    # Wie die App: Local.xcconfig gilt auch hier, sonst Produktions-URL mit dem Token des Entwicklungsservers.
+    configFiles:
+      Debug: Config/Debug.xcconfig
     dependencies:
       - package: Shared
         product: CockpitShared

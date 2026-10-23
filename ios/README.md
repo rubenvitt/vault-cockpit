@@ -17,7 +17,8 @@ make test      # Unit-Tests auf dem ersten verfügbaren iPhone-Simulator
 - `BUILD_NUMBER=…` setzt die Build-Nummer (`CURRENT_PROJECT_VERSION`).
 - Server-URL: Release nutzt `https://vault.rubeen.dev` (`COCKPIT_SERVER_URL` in `project.yml`,
   dazu der Host in `COCKPIT_SERVER_HOST` für Associated Domains und App-Bound Domains).
-  Für Debug `Config/Local.xcconfig.example` nach `Config/Local.xcconfig` kopieren und anpassen.
+  Für Debug `Config/Local.xcconfig.example` nach `Config/Local.xcconfig` kopieren und anpassen
+  (gilt für App und Share Extension).
 
 ## Aufbau der App
 
