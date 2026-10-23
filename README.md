@@ -476,6 +476,31 @@ bleibt mit Fehler in der Liste, bis man es erneut sendet, ins Feld zurückholt
 oder verwirft. Notizvorschau, Suche, Einstellungen und die JSON-Schnittstellen
 speichert der Service Worker nie; Abmelden und jeder neue Login löschen die
 gespeicherte Woche (der Puffer bleibt und geht mit der nächsten Anmeldung raus).
+
+**Offline lesen** (VCP-80): Neben der Woche darf genau dieser Lesestoff auf dem
+Gerät liegen, und nichts sonst: die nächsten 30 Artikel des Stapels (Reihenfolge
+wie „Passt jetzt“, mit Lesetext und Markierungen), die Synthesen aus
+`wiki/synthesis` (`type: synthesis`, höchstens 200, zuletzt bewegte zuerst) und
+die Listen `/lesen/stapel` und `/wissen`. Andere Notizen, Eingang, Archiv und
+alles aus vertraulichen oder ausgeschlossenen Ordnern bleiben draußen. Die Liste
+liefert `GET /api/lesen/offline` (nur angemeldet), gefiltert nach derselben
+Policy wie `/notiz`; der Service Worker speichert davon nur Seiten, die er als
+Leseansicht, Synthese oder Liste erkennt und die der Server mit
+`x-cockpit-offline: lesen` ausliefert. Die Seite bittet ihn beim Öffnen, beim
+Zurückholen der App und beim Wiederverbinden darum, höchstens alle zehn Minuten;
+er holt nur, was fehlt oder älter als einen Tag ist, und löscht, was nicht mehr
+auf der Liste steht. Wer einen gespeicherten Artikel mit Netz öffnet, frischt ihn
+auf. Eine Synthese zeigt auch Titel und Pfade verlinkter oder ähnlicher Notizen
+(wie online), deren Inhalt nicht. Ohne Netz gehen in der Leseansicht
+**Markieren, Notizen, Fortschritt und Archivieren** in denselben Puffer wie die
+Schnelleingabe; wartende Markierungen sind gestrichelt unterlegt. Jede neue
+Markierung bekommt auf dem Gerät eine ID, die der Server als ihre ID übernimmt
+(`cid` bei `/aktion/lesen/markierung/neu`): Dieselbe ID legt nie eine zweite an.
+Fortschritt, Status und Notiz gelten mit dem letzten Stand. Das CSRF-Token holt
+sich das Nachsenden wie bei der Schnelleingabe frisch von `/api/sitzung`, und nur
+mit Netz. Abmelden, jeder neue Login und eine abgelaufene Sitzung löschen den
+Lesestoff zusammen mit der Woche (beide liegen im selben Cache).
+
 Nach einem Deploy bringt `/sw.js` eine neue Cache-Version mit (Inhalts-Hash der
 App-Hülle) und räumt die alte weg.
 

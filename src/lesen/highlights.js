@@ -1,4 +1,5 @@
 import { ActionError } from '../cockpit/actions.js';
+import { CAPTURE_ID } from '../capture/router.js';
 import { esc } from '../web/layout.js';
 import { readingPage } from './pages.js';
 import { docLink } from './doc.js';
@@ -10,7 +11,8 @@ import { docLink } from './doc.js';
  * (src/lesen/anchor.js).
  *
  * Formularfelder:
- * - `/aktion/lesen/markierung/neu`: `id` (Dokument), `quote`, `prefix`, `suffix`, `start`, `notiz`?
+ * - `/aktion/lesen/markierung/neu`: `id` (Dokument), `quote`, `prefix`, `suffix`, `start`, `notiz`?,
+ *   `cid`? (ID der Markierung vom Gerät; dieselbe `cid` legt nie eine zweite an, VCP-80)
  * - `/aktion/lesen/markierung/notiz`: `id` (Markierung), `notiz` (leer löscht sie)
  * - `/aktion/lesen/markierung/loeschen`: `id` (Markierung); Rückgängig legt sie neu an
  * - `/aktion/lesen/markierung/inbox`: `markierung` (vorhandene) oder `id` (Dokument) mit `quote`, dazu `notiz`?, `cid`
@@ -93,9 +95,18 @@ export function highlightRoutes({ store, asAction, capture = null, logger = cons
         const doc = docOf(form.get('id'));
         const quote = field(form, 'quote', MAX_QUOTE, 'Die Auswahl');
         if (!quote.trim()) throw new ActionError('Nichts ausgewählt');
+        const cid = form.get('cid') || null;
+        if (cid && !CAPTURE_ID.test(cid)) throw new ActionError('Ungültige Markierungs-ID');
+        // Nachsenden aus dem Offline-Puffer: Kam die erste Antwort nicht an, gibt es die Markierung schon.
+        const known = cid ? store.getHighlight(cid) : null;
+        if (known) {
+          if (known.doc_id !== doc.id) throw new ActionError('Diese Markierungs-ID gehört zu einem anderen Artikel', 409);
+          return { message: 'Schon markiert', highlight: { id: known.id }, duplicate: true };
+        }
         const start = Number.parseInt(form.get('start') ?? '', 10);
         const h = await asAction(() =>
           store.addHighlight({
+            id: cid ?? undefined,
             doc_id: doc.id,
             quote,
             prefix: field(form, 'prefix', MAX_CONTEXT, 'Der Text davor'),

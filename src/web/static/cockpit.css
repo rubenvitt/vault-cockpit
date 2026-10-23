@@ -788,6 +788,10 @@ html[data-read-sans] .lesen-text :is(h1, h2, h3, h4, h5, h6) { font-family: var(
 .wiedersehen-link li { display: grid; gap: 2px; }
 .wiedersehen-link form { margin: 0; }
 
+/* --- Lesen: Offline --- */
+/* Markierungen, die noch im Puffer auf Netz warten (lesen-doc.js, CSS Custom Highlight API) */
+::highlight(lesen-wartet) { background-color: color-mix(in srgb, #facc15 22%, transparent); text-decoration: underline dashed var(--warn); }
+
 /* --- Schmale Bildschirme ------------------------------------------------- */
 @media (max-width: 900px) {
   .feuer, .columns, .settings { grid-template-columns: minmax(0, 1fr); }

@@ -2,11 +2,11 @@ import { ActionError } from '../cockpit/actions.js';
 import { FetchError } from './fetch.js';
 import { ReadingError } from './store.js';
 import { saveUrl } from './save.js';
-import { stackRoutes } from './stack.js';
+import { stackRoutes, upNext } from './stack.js';
 import { inboxRoutes } from './inbox.js';
 import { feedRoutes } from './feeds-page.js';
 import { addRoutes } from './add.js';
-import { docRoutes } from './doc.js';
+import { docRoutes, docLink } from './doc.js';
 import { highlightRoutes } from './highlights.js';
 import { reviewRoutes } from './review-page.js';
 
@@ -21,6 +21,8 @@ import { reviewRoutes } from './review-page.js';
  *   wie die übrigen `/aktion/…`; Fehler als `ActionError`.
  * - `uploads`: Aktion → Größenlimit für Aktionen mit Datei (`multipart/form-data`),
  *   die Dateien liegen dann in `form.files`.
+ *
+ * - `offlineDocs(n)`: Links der nächsten `n` Artikel des Stapels (wie „Passt jetzt“) für den Offline-Cache.
  *
  * Eine neue Seite oder Aktion ist ein Eintrag hier (gern aus einer eigenen Datei).
  * `capture` legt Notizen in der Vault-Inbox an („In Inbox“, src/lesen/highlights.js).
@@ -48,6 +50,7 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
   const wiedersehen = reviewRoutes({ store, capture, logger, ...review });
 
   return {
+    offlineDocs: (n) => upNext(store.list({ status: 'stapel', limit: -1 }), n).map((d) => docLink(d.id)),
     uploads: { ...add.uploads, ...feeds.uploads },
     pages: {
       ...add.pages,

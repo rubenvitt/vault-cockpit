@@ -24,6 +24,9 @@ export const remainingMinutes = (doc) => Math.max(1, Math.ceil((doc.reading_minu
 /** Angefangene zuerst, dann nach Restzeit aufsteigend. */
 const fitsNow = (a, b) => started(b) - started(a) || a.remaining - b.remaining;
 
+/** Die ersten `n` in der Reihenfolge „Passt jetzt“, z. B. für den Offline-Cache (VCP-80). */
+export const upNext = (docs, n) => docs.map((d) => ({ ...d, remaining: remainingMinutes(d) })).sort(fitsNow).slice(0, n);
+
 /**
  * Auswahl für ein Zeitfenster von `minutes` Minuten: erst angefangene Texte
  * (kürzeste Restzeit zuerst), dann die übrigen, längste zuerst, solange sie
