@@ -4,12 +4,18 @@ import XCTest
 /// Antwortet statt des Netzes; `handler` sieht die Anfrage samt Body.
 final class MockURLProtocol: URLProtocol {
     nonisolated(unsafe) static var handler: ((URLRequest, Data) -> (Int, String))?
+    /// Statt einer Antwort ein Netzfehler (z. B. `.notConnectedToInternet`).
+    nonisolated(unsafe) static var failure: URLError?
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func stopLoading() {}
 
     override func startLoading() {
+        if let failure = Self.failure {
+            client?.urlProtocol(self, didFailWithError: failure)
+            return
+        }
         // Im URLProtocol kommt der Body als Stream, nicht als httpBody.
         let body = request.httpBody ?? request.httpBodyStream.map(Self.read) ?? Data()
         let (status, json) = Self.handler!(request, body)

@@ -63,14 +63,53 @@ let saved = try await api.saveToReadingList(url: link, title: title)  // saved.m
 - `KeychainStore`: `token()`, `save(token:)`, `deleteToken()`; Eintrag `dev.rubeen.cockpit` /
   `device-token`, lesbar nach dem ersten Entsperren, nur auf diesem Gerät.
 - `APIClient`: `me()`, `queue(minutes:)`, `text(id:)`, `saveProgress(id:progress:anchor:)`,
-  `addHighlight(_:)`, `saveToReadingList(url:title:)`, statisch `redeem(…)`. Fehler kommen als
+  `addHighlight(_:)`, `saveToReadingList(url:title:id:)`, `saveToReadingList(pdfFile:title:id:)`
+  (Body als Stream aus der Datei), statisch `redeem(…)`. Fehler kommen als
   `APIError` (`status`, `code`, `message`); `isUnauthorized` heißt neu anmelden.
 - Modelle: `Me`, `Queue`/`QueueItem`, `ListenText`, `NewHighlight`, `HighlightResult`,
   `SavedDocument`, `Redemption` (`SessionCookie` mit `httpCookie`, `DeviceToken`).
+- `SharedContent.detect(urls:texts:hasPDF:)`: Inhaltserkennung der Share Extension (rein, getestet).
+- `PendingShares`: Puffer im App-Group-Container (`init(appGroup:)`), `add`, `all`, `remove`,
+  `send`, `flush(using:)`.
 
 Tests (`CockpitTests`): API-Client und Einlösen über einen `URLProtocol`-Mock, Keychain über
 `KeychainBackend` gemockt, dazu PKCE (Testvektor aus RFC 7636), Callback-Prüfung, Cookie-Umwandlung,
-Navigationsregeln und Brücke.
+Navigationsregeln und Brücke. `ShareTests`: Inhaltserkennung, PDF-Upload (Body, Query, Header)
+und Offline-Puffer in einem temporären Verzeichnis.
+
+## Share Extension „Zum Lesestapel“ (VCP-93)
+
+Target `ShareExtension` (`dev.rubeen.cockpit.share`), eingebettet unter `Cockpit.app/PlugIns`.
+`ShareViewController` zeigt eine kleine SwiftUI-Ansicht.
+
+- **Aktivierung** (`NSExtensionActivationRule` als Prädikat): Web-Adresse, Text oder PDF-Datei;
+  andere Dateien (`public.file-url` ohne PDF) nicht.
+- **Erkennung** (`SharedContent.detect`):
+  - Eine PDF-Datei (`UTType.pdf`, aus Dateien oder Mail) hat Vorrang.
+  - Danach kommt eine http(s)-Adresse.
+  - Zuletzt der erste Link in einem Text. Bei „Titel — https://…“ wird der Rest des Textes zum
+    Titel.
+- **Senden**:
+  - Jedes Teilen bekommt eine UUID als `id`. Die Anfrage liegt zuerst in `PendingShares`, beim
+    PDF als kopierte Datei (höchstens 20 MB, vorher geprüft).
+  - Danach geht sie mit dem Token aus der geteilten Keychain an `POST /lesestapel/speichern`;
+    das PDF wird als Datei-Stream hochgeladen.
+  - Nach Erfolg wird der Eintrag gelöscht. Die Ansicht zeigt „Im Eingang: <Titel>“ bzw.
+    „Schon im Lesestapel“ und schließt sich nach 1,5 s.
+- **Fehler**:
+  - Alle Fehler zeigen „Erneut versuchen“ mit derselben `id`.
+  - Ohne Token: „Bitte zuerst in der Cockpit-App anmelden“. Bei 401: „Anmeldung abgelaufen …“.
+  - Ohne Netz und bei 5xx bleibt der Eintrag liegen.
+  - Andere Fehler (z. B. ungültige Adresse) verwirft „Schließen“.
+- **Nachsenden**: Die App ruft `AppModel.sendPendingShares()` auf, sobald sie aktiv und angemeldet
+  ist, also beim Start, im Vordergrund und nach dem Login. Vom Server Abgelehntes wird gelöscht und
+  geloggt. Wird die Extension mitten im Upload beendet, sendet die App ebenfalls nach; die `id`
+  verhindert Doppeltes.
+- **Kein Umschalter „Direkt auf den Stapel“**: Der Server kennt nur `source`
+  (`kurzbefehl`/`import`, nur als Herkunft im Eingang angezeigt), aber keinen Status. Geteiltes
+  landet immer im Eingang.
+- Ohne Signieren (Simulator) fehlen App Group und Keychain-Gruppe. Die Extension zeigt dann
+  „Bitte zuerst in der Cockpit-App anmelden“ und puffert im eigenen temporären Verzeichnis.
 
 ## Lokal testen
 
@@ -127,40 +166,14 @@ Per GitHub: Workflow „iOS TestFlight“ manuell starten. Er braucht die Repo-S
 | `Cockpit/` | App-Target: SwiftUI, Web-Hülle (VCP-92), Login, Player (VCP-94) |
 | `Shared/` | Lokales Swift Package `CockpitShared`: Konfiguration, Keychain, API-Client. Alles, was App und Extension teilen |
 | `CockpitTests/` | Unit-Tests (laufen in der App als Host) |
-| `ShareExtension/` | Share Extension (VCP-93), noch anzulegen |
+| `ShareExtension/` | Share Extension „Zum Lesestapel“ (VCP-93) |
 
 Neue Dateien in diesen Ordnern nimmt `make project` automatisch auf. `Cockpit/Info.plist` und
 `Cockpit/Cockpit.entitlements` schreibt xcodegen bei jedem Lauf neu: Änderungen gehören unter
 `info.properties` bzw. `entitlements.properties` in `project.yml`, nicht direkt in die Dateien. Ein neues Target kommt als
-Eintrag unter `targets:` in `project.yml`, für die Share Extension etwa:
-
-```yaml
-  ShareExtension:
-    type: app-extension
-    platform: iOS
-    sources: [ShareExtension]
-    dependencies:
-      - package: Shared
-        product: CockpitShared
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.rubeen.cockpit.share
-    info:
-      path: ShareExtension/Info.plist
-      properties:
-        CFBundleShortVersionString: $(MARKETING_VERSION)
-        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        # AppConfiguration liest die eigene Info.plist der Extension
-        CockpitServerURL: $(COCKPIT_SERVER_URL)
-        CockpitAppGroup: group.dev.rubeen.cockpit
-        CockpitKeychainGroup: $(AppIdentifierPrefix)dev.rubeen.cockpit.shared
-        NSExtension: { NSExtensionPointIdentifier: com.apple.share-services, … }
-    entitlements:
-      path: ShareExtension/ShareExtension.entitlements
-      properties: { … gleiche App Group und Keychain-Gruppe wie die App … }
-```
-
-Dazu in der App `dependencies: - target: ShareExtension` eintragen, dann wird sie eingebettet.
+Eintrag unter `targets:` in `project.yml`; Muster für eine Extension ist `ShareExtension` (eigene
+Info.plist mit den `Cockpit*`- und Versions-Schlüsseln, Entitlements, in der App unter
+`dependencies: - target: …` eingebettet).
 
 App Group `group.dev.rubeen.cockpit` und Keychain-Gruppe
 `$(AppIdentifierPrefix)dev.rubeen.cockpit.shared` sind in den Entitlements der App eingetragen.

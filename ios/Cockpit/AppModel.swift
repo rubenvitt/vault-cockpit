@@ -80,6 +80,16 @@ final class AppModel {
         Task { await login() }
     }
 
+    /// Sendet, was die Share Extension gepuffert hat (kein Netz, Extension beendet, abgemeldet).
+    func sendPendingShares() async {
+        guard let token = (try? keychain.token()) ?? nil,
+              let pending = PendingShares(appGroup: config.appGroup)
+        else { return }
+        for (share, error) in await pending.flush(using: APIClient(baseURL: config.serverURL, token: token)) {
+            log.error("Geteiltes verworfen (\(share.id, privacy: .public)): \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     /// Geräte-Token auf dem Server widerrufen, dann Cookies, Website-Daten (auch Service Worker und
     /// Offline-Puffer) und Token löschen. Ohne Netz wird trotzdem lokal gelöscht, mit Hinweis.
     func logout() async {

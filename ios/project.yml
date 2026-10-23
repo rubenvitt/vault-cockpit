@@ -37,6 +37,7 @@ targets:
     dependencies:
       - package: Shared
         product: CockpitShared
+      - target: ShareExtension
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.rubeen.cockpit
@@ -79,6 +80,51 @@ targets:
     scheme:
       testTargets:
         - CockpitTests
+
+  # Teilen-Menü „Zum Lesestapel“ (VCP-93), in die App eingebettet.
+  ShareExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - ShareExtension
+    dependencies:
+      - package: Shared
+        product: CockpitShared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.rubeen.cockpit.share
+        TARGETED_DEVICE_FAMILY: "1"
+    info:
+      path: ShareExtension/Info.plist
+      properties:
+        CFBundleDisplayName: Zum Lesestapel
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # AppConfiguration liest die eigene Info.plist der Extension.
+        CockpitServerURL: $(COCKPIT_SERVER_URL)
+        CockpitKeychainGroup: $(AppIdentifierPrefix)dev.rubeen.cockpit.shared
+        CockpitAppGroup: group.dev.rubeen.cockpit
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          # Höchstens eine Web-Adresse, Text oder eine PDF-Datei; andere Dateien (file-url) nicht.
+          NSExtensionAttributes:
+            NSExtensionActivationRule: >-
+              SUBQUERY(extensionItems, $item, SUBQUERY($item.attachments, $a,
+              ANY $a.registeredTypeIdentifiers UTI-CONFORMS-TO "com.adobe.pdf"
+              OR ANY $a.registeredTypeIdentifiers UTI-CONFORMS-TO "public.plain-text"
+              OR (ANY $a.registeredTypeIdentifiers UTI-CONFORMS-TO "public.url"
+              AND NOT (ANY $a.registeredTypeIdentifiers UTI-CONFORMS-TO "public.file-url"))
+              ).@count >= 1).@count == 1
+    entitlements:
+      path: ShareExtension/ShareExtension.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.dev.rubeen.cockpit
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)dev.rubeen.cockpit.shared
 
   CockpitTests:
     type: bundle.unit-test

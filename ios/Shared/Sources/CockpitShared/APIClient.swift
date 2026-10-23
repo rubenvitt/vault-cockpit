@@ -68,10 +68,31 @@ public struct APIClient: Sendable {
         let _: Empty = try await send("api/app/abmelden", body: Empty())
     }
 
-    /// Legt eine Adresse in den Lesestapel (Recht „Lesestapel“ gehört zum App-Token).
-    public func saveToReadingList(url: URL, title: String? = nil) async throws -> SavedDocument {
-        struct Body: Encodable { let url: String; let title: String? }
-        return try await send("lesestapel/speichern", body: Body(url: url.absoluteString, title: title))
+    /// Legt eine Adresse in den Lesestapel (Recht „Lesestapel“ gehört zum App-Token). `id` macht
+    /// das Speichern idempotent: ein zweiter Versuch mit derselben `id` speichert nicht doppelt.
+    public func saveToReadingList(url: URL, title: String? = nil, id: String? = nil) async throws -> SavedDocument {
+        struct Body: Encodable { let url: String; let title: String?; let id: String? }
+        return try await send("lesestapel/speichern", body: Body(url: url.absoluteString, title: title, id: id))
+    }
+
+    /// Lädt eine PDF-Datei (höchstens 20 MB) in den Lesestapel. Der Body kommt als Stream aus der
+    /// Datei, damit sie nicht ganz im Speicher liegt (Share Extension).
+    public func saveToReadingList(pdfFile: URL, title: String? = nil, id: String? = nil) async throws -> SavedDocument {
+        var components = URLComponents(url: baseURL.appending(path: "lesestapel/speichern"), resolvingAgainstBaseURL: false)!
+        // URLSearchParams auf dem Server liest „+“ als Leerzeichen, deshalb auch „+“ kodieren.
+        let allowed = CharacterSet.urlQueryAllowed.subtracting(CharacterSet(charactersIn: "+&="))
+        let query = [("title", title), ("id", id)].compactMap { name, value in
+            value.map { URLQueryItem(name: name, value: $0.addingPercentEncoding(withAllowedCharacters: allowed)) }
+        }
+        if !query.isEmpty { components.percentEncodedQueryItems = query }
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/pdf", forHTTPHeaderField: "Content-Type")
+        let size = try pdfFile.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        request.setValue(String(size), forHTTPHeaderField: "Content-Length")
+        request.httpBodyStream = InputStream(url: pdfFile)
+        return try await Self.perform(request, session: session)
     }
 
     /// Tauscht den Code aus dem Login-Blatt gegen Sitzungs-Cookie und Geräte-Token. Der Code
