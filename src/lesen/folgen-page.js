@@ -51,7 +51,7 @@ function newPage(episodes, store, ctx) {
   const first = Object.keys(KINDS).find((k) => !missing[k]);
   const kinds = Object.entries(KINDS)
     .map(([kind, label]) => {
-      const cost = kind === 'vorlesen' ? `rund ${fmt.format(full)} Zeichen bei ElevenLabs` : `rund 900 Zeichen je Minute bei ElevenLabs, dazu dein Claude-Abo`;
+      const cost = kind === 'vorlesen' ? (full ? `rund ${fmt.format(full)} Zeichen bei ElevenLabs` : 'schon alles gehört, kostet nichts') : `rund 900 Zeichen je Minute bei ElevenLabs, dazu dein Claude-Abo`;
       const off = missing[kind];
       return `<label class="checkline"><input type="radio" name="art" value="${kind}"${off ? ' disabled' : kind === first ? ' checked' : ''}> <b>${label}</b>: ${esc(DESCRIPTIONS[kind])} <span class="meta">${esc(off ?? cost)}</span></label>`;
     })
@@ -62,7 +62,7 @@ function newPage(episodes, store, ctx) {
     <fieldset><legend>Texte</legend><ul class="lesen-list">${docs}</ul></fieldset>
     <fieldset><legend>Art</legend>${kinds}</fieldset>
     <label class="field"><span>Länge bei Podcast und Report</span><select name="laenge">${LENGTHS.map((m) => `<option value="${m}"${m === 10 ? ' selected' : ''}>${m} Minuten</option>`).join('')}</select></label>
-    <p class="meta">Die Folge entsteht im Hintergrund und steht dann unter <a href="/lesen/folgen">Folgen</a>. Das Vorlesen ganzer Texte kostet so viele Zeichen, wie die Texte lang sind.</p>
+    <p class="meta">Die Folge entsteht im Hintergrund und steht dann unter <a href="/lesen/folgen">Folgen</a>. Vorlesen kostet so viele Zeichen, wie die Texte lang sind; Sätze, die du schon gehört oder offline geladen hast, kosten nichts mehr.</p>
     <p><button type="submit" class="btn primary">Folge erzeugen</button></p>
   </form>`;
 }

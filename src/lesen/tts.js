@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, statSync, unlinkSync, utimesSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
+import { mkdirSync, readdirSync, statSync, unlinkSync, utimesSync, readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 
@@ -133,6 +133,10 @@ export function createSpeechCache({ dir = null, maxBytes = 500 * 1024 * 1024, lo
   }
 
   return {
+    /** Liegt der Satz schon da, ohne ihn zu lesen (Kostenschätzung). */
+    has(key) {
+      return dir ? existsSync(join(dir, `${key}.mp3`)) : memory.has(key);
+    },
     get(key) {
       if (!dir) return memory.get(key) ?? null;
       const path = join(dir, `${key}.mp3`);
@@ -172,6 +176,8 @@ export function createSpeech({ settings, cache = createSpeechCache({}), provider
   let current = null;
   let currentKey = null;
   const running = new Map();
+  // Derselbe Schlüssel für Streamen, Offline-Laden und Folgen: Jeder Satz kostet nur einmal.
+  const keyOf = (c, text, previous, next) => createHash('sha256').update(JSON.stringify([c.id, text, previous, next])).digest('hex');
 
   function client() {
     const cfg = settings();
@@ -187,11 +193,17 @@ export function createSpeech({ settings, cache = createSpeechCache({}), provider
     /** Name des Anbieters, `null` ohne Stimme vom Server. */
     voice: () => client()?.name ?? null,
 
+    /** Schon im Cache, also kostenlos? Gleiche Eingabe wie `audio`. */
+    cached({ text, previous = null, next = null }) {
+      const c = client();
+      return Boolean(c) && cache.has(keyOf(c, text, previous, next));
+    },
+
     /** MP3 zu `text`; `previous`/`next` sind die Nachbarsätze für einen durchgehenden Tonfall. */
     async audio({ text, previous = null, next = null }) {
       const c = client();
       if (!c) throw new SpeechError('Keine Stimme auf dem Server eingerichtet (Einstellungen → Vorlesen)', 404);
-      const key = createHash('sha256').update(JSON.stringify([c.id, text, previous, next])).digest('hex');
+      const key = keyOf(c, text, previous, next);
       const cached = cache.get(key);
       if (cached) return cached;
       if (!running.has(key)) {

@@ -9,7 +9,10 @@ import { createElevenLabs, DIALOGUE_CHARS } from './tts.js';
  * Folgen aus dem Lesestapel: eine MP3, im Hintergrund erzeugt, auf Knopfdruck.
  *
  * - **Vorlesen**: die ganzen Texte nacheinander, eine Erzählerstimme (die
- *   Stimme unter Einstellungen → Vorlesen). Ohne Claude.
+ *   Stimme unter Einstellungen → Vorlesen). Ohne Claude. Satz für Satz über
+ *   `speech` (src/lesen/tts.js), mit denselben Nachbarsätzen wie beim Streamen:
+ *   Was schon gehört oder offline geladen wurde, liegt im Cache und kostet
+ *   nichts mehr, und umgekehrt.
  * - **Podcast**: Claude schreibt ein Gespräch zweier Stimmen über die Texte,
  *   ElevenLabs spricht es mit Text-to-Dialogue (`eleven_v3`).
  * - **Report**: Claude schreibt einen Bericht; er kommt als Notiz in die
@@ -27,8 +30,10 @@ export const LENGTHS = [5, 10, 20];
 // Gesprochenes Deutsch: rund 150 Wörter zu 6 Zeichen in der Minute.
 export const CHARS_PER_MINUTE = 900;
 export const MAX_DOCS = 20;
-// Je Anfrage beim Vorlesen; ElevenLabs nimmt mehr, kürzere Stücke scheitern seltener.
+// Je Anfrage bei der Sprechfassung des Reports; ElevenLabs nimmt mehr, kürzere Stücke scheitern seltener.
 const NARRATION_CHARS = 3000;
+// So viele Sätze gleichzeitig beim Vorlesen; mehr erlaubt ElevenLabs je nach Tarif nicht.
+const PARALLEL = 3;
 // So viel Text je Dokument und insgesamt geht an Claude.
 const DOC_INPUT = 60_000;
 const TOTAL_INPUT = 300_000;
@@ -85,15 +90,50 @@ export function stripId3(buf) {
 
 const plain = (doc) => htmlText(doc.content_html ?? '').trim();
 
-/** Stücke zum Vorlesen eines Textes: Titel und Quelle, kurze Pause, dann der Text. */
+/**
+ * Anfragen zum Vorlesen eines Textes: Titel und Quelle mit kurzer Pause, dann
+ * jeder Satz mit Nachbarsätzen genau wie `listenAudio` (src/lesen/listen.js),
+ * damit der Cache für beide gilt.
+ */
 function narration(doc, model) {
   const html = doc.content_html ?? '';
   const text = htmlText(html);
   // Pausen-Tags kennt `eleven_v3` nicht, dort würden sie vorgelesen.
   const pause = /^eleven_v3/.test(model) ? '' : ' <break time="1.5s" />';
-  const head = `${doc.title || doc.site || 'Ohne Titel'}.${doc.site ? ` Von ${doc.site}.` : ''}${pause}`;
-  const body = chunkText(sentences(html).map((s) => text.slice(s.start, s.end)).join(' '), NARRATION_CHARS);
-  return [head, ...body];
+  const head = { text: `${doc.title || doc.site || 'Ohne Titel'}.${doc.site ? ` Von ${doc.site}.` : ''}${pause}`, previous: null, next: null };
+  const list = sentences(html);
+  const say = (s) => (s ? text.slice(s.start, s.end) : null);
+  return [head, ...list.map((s, i) => ({ text: say(s).trim(), previous: i > 0 ? say(list[i - 1]) : null, next: say(list[i + 1]) }))];
+}
+
+/**
+ * Führt `jobs` mit höchstens `n` gleichzeitig aus und reicht die Ergebnisse in
+ * Reihenfolge an `each`. `each` ist synchron: Ohne `await` dazwischen kann kein
+ * zweiter Worker dasselbe Stück schreiben.
+ */
+async function inOrder(jobs, n, each) {
+  const results = new Array(jobs.length);
+  let started = 0;
+  let written = 0;
+  let failed = null;
+  async function worker() {
+    while (started < jobs.length && !failed) {
+      const i = started++;
+      try {
+        results[i] = { value: await jobs[i]() };
+      } catch (err) {
+        failed ??= err;
+        return;
+      }
+      while (written < jobs.length && results[written]) {
+        each(results[written].value, written);
+        results[written] = true;
+        written += 1;
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(n, jobs.length) }, worker));
+  if (failed) throw failed;
 }
 
 /** Texte für Claude, je Text mit Nummer, Titel und Quelle. */
@@ -164,12 +204,13 @@ const cleanTitle = (t, fallback) => String(t ?? '').replace(/[\\/\r\n]+/g, ' ').
 /**
  * - `store`: Lesestapel (src/lesen/store.js).
  * - `tts()`: Stimme aus den Einstellungen (`{ key, voice, model }` oder null).
+ * - `speech`: Stimme mit Satz-Cache (src/lesen/tts.js `createSpeech`) fürs Vorlesen.
  * - `voices()`: `{ host, guest }` für den Podcast.
  * - `writer`: Claude (src/lesen/claude.js), `{ available(), write() }`.
  * - `capture({ title, text, captureId })`: legt die Report-Notiz in der Vault-Inbox an, liefert `{ path }`.
  * - `provider(cfg)`: ElevenLabs-Client (Tests ersetzen ihn).
  */
-export function createEpisodes({ dir, store, tts, voices, writer, capture, provider = (cfg) => createElevenLabs(cfg), logger = console, now = () => new Date() }) {
+export function createEpisodes({ dir, store, tts, speech = null, voices, writer, capture, provider = (cfg) => createElevenLabs(cfg), logger = console, now = () => new Date() }) {
   const file = join(dir, 'folgen.json');
   let episodes = [];
   try {
@@ -209,9 +250,9 @@ export function createEpisodes({ dir, store, tts, voices, writer, capture, provi
     return docs;
   }
 
-  /** Zeichen, die ElevenLabs berechnet (geschätzt bei Podcast und Report). */
+  /** Zeichen, die ElevenLabs berechnet: beim Vorlesen nur, was nicht schon im Cache liegt; bei Podcast und Report geschätzt. */
   function estimate({ kind, docs, minutes }) {
-    if (kind === 'vorlesen') return docs.reduce((sum, d) => sum + narration(d, tts()?.model ?? '').join(' ').length, 0);
+    if (kind === 'vorlesen') return docs.flatMap((d) => narration(d, tts()?.model ?? '')).reduce((sum, p) => sum + (speech?.cached(p) ? 0 : p.text.length), 0);
     return minutes * CHARS_PER_MINUTE;
   }
 
@@ -224,10 +265,16 @@ export function createEpisodes({ dir, store, tts, voices, writer, capture, provi
 
     // Was gesprochen wird: Stücke für eine Stimme oder Gesprächsabschnitte.
     let jobs;
+    // Beim Vorlesen: nur Sätze, die nicht schon im Cache lagen.
+    let billed = null;
     if (ep.kind === 'vorlesen') {
-      const parts = docs.flatMap((d) => narration(d, cfg.model));
-      jobs = parts.map((text, i) => () => el.synthesize({ text, previous: parts[i - 1] ?? null, next: parts[i + 1] ?? null }));
-      ep.chars = parts.join('').length;
+      if (!speech) throw new EpisodeError('Vorlesen braucht die Stimme vom Server');
+      const parts = docs.flatMap((d) => narration(d, cfg.model)).filter((p) => p.text);
+      billed = 0;
+      jobs = parts.map((p) => () => {
+        if (!speech.cached(p)) billed += p.text.length;
+        return speech.audio(p);
+      });
     } else {
       update(ep, { status: 'schreibt' });
       const input = sourceInput(docs);
@@ -257,13 +304,13 @@ export function createEpisodes({ dir, store, tts, voices, writer, capture, provi
     const part = `${audioPath(ep.id)}.part`;
     mkdirSync(dir, { recursive: true });
     writeFileSync(part, Buffer.alloc(0), { mode: 0o600 });
-    for (const [i, job] of jobs.entries()) {
-      const audio = await job();
+    // Satzweise mehrere zugleich (Vorlesen); Gespräch und Report nacheinander, die Stücke sind groß.
+    await inOrder(jobs, ep.kind === 'vorlesen' ? PARALLEL : 1, (audio, i) => {
       appendFileSync(part, i === 0 ? audio : stripId3(audio));
       update(ep, { done: i + 1 });
-    }
+    });
     renameSync(part, audioPath(ep.id));
-    update(ep, { status: 'fertig', bytes: statSync(audioPath(ep.id)).size, finished_at: now().toISOString() });
+    update(ep, { ...(billed === null ? {} : { chars: billed }), status: 'fertig', bytes: statSync(audioPath(ep.id)).size, finished_at: now().toISOString() });
     logger.info?.(`Folge „${ep.title}“ (${KINDS[ep.kind]}) fertig, ${ep.chars} Zeichen`);
   }
 
