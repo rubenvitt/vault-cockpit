@@ -31,6 +31,14 @@ und lädt hoch. Die Build-Nummer ist ein UTC-Zeitstempel (`JJJJMMTT.HHMM`) und s
 selbst. `EXPORT_DESTINATION=export` signiert nur und legt die `.ipa` unter
 `ios/build/testflight/export` ab, ohne Upload. Weitere Variablen stehen im Kopf des Skripts.
 
+Auf diesem Mac (Xcode 27) scheitert das automatische Signieren mit dem API-Key an
+„Authentication failed … bearer token“, obwohl der Key mit der API funktioniert. Lokal deshalb
+mit dem in Xcode angemeldeten Account (Settings → Accounts):
+
+```sh
+XCODE_ACCOUNT=1 ios/scripts/testflight.sh
+```
+
 Per GitHub: Workflow „iOS TestFlight“ manuell starten. Er braucht die Repo-Secrets
 `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8_BASE64` (Inhalt der `.p8`, base64) und `APPLE_TEAM_ID`.
 
