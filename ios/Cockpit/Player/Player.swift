@@ -37,7 +37,7 @@ final class Player {
         didSet { pending.save(to: defaults) }
     }
     /// Laufendes Nachsenden; weitere `flush()` warten darauf, statt sofort zurückzukehren.
-    @ObservationIgnored private var flushing: Task<Void, Never>?
+    @ObservationIgnored private var flushing: Task<[String: String], Never>?
     private var isStarted = false
     @ObservationIgnored private var commandTargets: [(MPRemoteCommand, Any)] = []
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
@@ -126,11 +126,14 @@ final class Player {
     // shortcut: merkt den Satz, der gerade läuft; wer kurz nach einem Satzwechsel tippt, bekommt den neuen (wie im Web).
     func remember() {
         guard let text = machine.text else { return }
-        let highlight = text.highlight(of: machine.sentence, cid: UUID().uuidString)
-        pending.add(highlight)
+        let cid = UUID().uuidString
+        pending.add(text.highlight(of: machine.sentence, cid: cid))
         Task {
-            await flush()
-            message = pending.contains(cid: highlight.cid ?? "") ? "Gemerkt. Wird gesendet, sobald wieder Netz da ist." : "Gemerkt."
+            if let reason = await flush()[cid] {
+                message = "Nicht gemerkt: \(reason)"
+            } else {
+                message = pending.contains(cid: cid) ? "Gemerkt. Wird gesendet, sobald wieder Netz da ist." : "Gemerkt."
+            }
         }
     }
 
@@ -165,20 +168,24 @@ final class Player {
     }
 
     /// Schickt den Puffer ab, bis er leer ist oder das Netz fehlt. Läuft das schon, wartet es darauf;
-    /// die Schleife nimmt auch Aufträge mit, die währenddessen dazukommen.
-    func flush() async {
-        guard let service else { return }
+    /// die Schleife nimmt auch Aufträge mit, die währenddessen dazukommen. Ergebnis je Auftrag:
+    /// gesendet (aus dem Puffer), wartet (bleibt im Puffer) oder abgelehnt (zurückgegeben als
+    /// `cid` → Meldung des Servers, nur Markierungen; abgelehnter Fortschritt wird nur geloggt).
+    @discardableResult
+    func flush() async -> [String: String] {
+        guard let service else { return [:] }
         if flushing == nil {
             flushing = Task {
                 // Ohne `await` dazwischen: Wer nach dem letzten Auftrag kommt, startet ein neues Senden.
                 defer { flushing = nil }
-                await sendPending(using: service)
+                return await sendPending(using: service)
             }
         }
-        await flushing?.value
+        return await flushing?.value ?? [:]
     }
 
-    private func sendPending(using service: any ListenService) async {
+    private func sendPending(using service: any ListenService) async -> [String: String] {
+        var rejected: [String: String] = [:]
         while let job = pending.next {
             do {
                 switch job {
@@ -186,12 +193,14 @@ final class Player {
                 case .highlight(let highlight): _ = try await service.addHighlight(highlight)
                 }
             } catch where PendingListening.shouldRetry(error) {
-                return
+                return rejected
             } catch {
                 log.error("Verworfen: \(error.localizedDescription, privacy: .public)")
+                if case .highlight(let highlight) = job, let cid = highlight.cid { rejected[cid] = error.localizedDescription }
             }
             pending.remove(job)
         }
+        return rejected
     }
 
     // MARK: System

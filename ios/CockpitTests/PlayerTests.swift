@@ -53,6 +53,18 @@ final class SpeechTextTests: XCTestCase {
         XCTAssertFalse((h1.prefix! + h2.suffix!).contains("\u{FFFD}"))
     }
 
+    func testLongSentenceIsCutForTheServer() {
+        let long = String(repeating: "a", count: 4100) + "."
+        let h1 = speechText(text: long, sentences: [[0, 4101]]).highlight(of: 0, cid: "c")
+        XCTAssertEqual(h1.quote.utf16.count, SpeechText.maxQuote)
+        XCTAssertEqual(h1.suffix, String(repeating: "a", count: 32), "Suffix schließt an das gekürzte Zitat an")
+        // Schnitt bei 4000 fiele mitten in 🎉 (Einheiten 3999 und 4000): Zitat davor, Suffix ab dem Emoji.
+        let emoji = String(repeating: "a", count: 3999) + "🎉 Ende."
+        let h2 = speechText(text: emoji, sentences: [[0, 4008]]).highlight(of: 0, cid: "c")
+        XCTAssertEqual(h2.quote, String(repeating: "a", count: 3999))
+        XCTAssertEqual(h2.suffix, "🎉 Ende.")
+    }
+
     func testStartSentenceFromAnchor() {
         XCTAssertEqual(speechText(anchor: 0).startSentence, 0)
         XCTAssertEqual(speechText(anchor: 21).startSentence, 1)
@@ -253,6 +265,7 @@ private actor FakeService: ListenService {
     var offline = false
     var saved: [ProgressUpdate] = []
     var highlights: [NewHighlight] = []
+    var rejectsHighlights = false
     /// Langsames Netz beim Speichern des Fortschritts.
     let saveDelay: Duration
 
@@ -261,6 +274,7 @@ private actor FakeService: ListenService {
     }
 
     func setOffline(_ value: Bool) { offline = value }
+    func setRejectsHighlights(_ value: Bool) { rejectsHighlights = value }
 
     func queue(minutes: Int) async throws -> Queue {
         let list = ["zeit": minutes, "items": [["id": "a", "title": "Erster Text", "url": "https://example.org/a", "site": "example.org", "kind": "article", "minutes": 3, "remaining": 2, "progress": 0.4]]] as [String: Any]
@@ -281,6 +295,7 @@ private actor FakeService: ListenService {
 
     func addHighlight(_ highlight: NewHighlight) async throws -> HighlightResult {
         if offline { throw URLError(.notConnectedToInternet) }
+        if rejectsHighlights { throw APIError(status: 400, code: "bad_request", message: "Die Auswahl ist zu lang (höchstens 4000 Zeichen)") }
         highlights.append(highlight)
         return try JSONDecoder().decode(HighlightResult.self, from: Data(#"{"id":"h","duplicate":false,"message":"ok"}"#.utf8))
     }
@@ -337,5 +352,27 @@ final class PlayerTests: XCTestCase {
         XCTAssertEqual(speech.spoken, ["Dritter 🎉 Satz."], "Text erst nach dem Nachsenden geladen")
         let saved = await service.saved
         XCTAssertEqual(saved, [.init(id: "a", progress: 34.0 / 51, anchor: 35)])
+    }
+
+    func testRejectedHighlightIsNotReportedAsRemembered() async {
+        let defaults = UserDefaults(suiteName: "test-\(UUID())")!
+        let speech = FakeSpeech()
+        let service = FakeService()
+        let player = Player(minutes: 15, service: service, speech: speech, defaults: defaults)
+        defer { player.close() }
+
+        await player.start()
+        await waitUntil { !speech.spoken.isEmpty }
+        await service.setRejectsHighlights(true)
+        player.remember()
+        await waitUntil { player.message != nil }
+        XCTAssertEqual(player.message, "Nicht gemerkt: Die Auswahl ist zu lang (höchstens 4000 Zeichen)")
+        XCTAssertNil(PendingListening(defaults: defaults).next, "Abgelehntes bleibt nicht im Puffer")
+
+        await service.setRejectsHighlights(false)
+        player.message = nil
+        player.remember()
+        await waitUntil { player.message != nil }
+        XCTAssertEqual(player.message, "Gemerkt.")
     }
 }

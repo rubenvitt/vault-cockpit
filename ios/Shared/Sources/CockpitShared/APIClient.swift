@@ -8,6 +8,12 @@ public struct APIError: Error, Equatable, LocalizedError {
     /// Deutscher Satz zum Anzeigen.
     public let message: String
 
+    public init(status: Int, code: String?, message: String) {
+        self.status = status
+        self.code = code
+        self.message = message
+    }
+
     /// Token unbekannt oder widerrufen: neu anmelden.
     public var isUnauthorized: Bool { status == 401 }
     public var errorDescription: String? { message }

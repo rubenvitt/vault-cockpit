@@ -75,7 +75,9 @@ make test      # Unit-Tests auf dem ersten verfügbaren iPhone-Simulator
 - **Fortschritt:** nach jedem Satz `POST /api/app/fortschritt`, Anker = Anfang des nächsten
   Satzes, Fortschritt nie sinkend (der Server nimmt jeden Wert), nach dem letzten Satz 1.
 - **Merken:** markiert den laufenden Satz, Anker wie `anchorAt` in `src/lesen/anchor.js`
-  (`quote`, je 32 Zeichen `prefix`/`suffix`, `start`), `cid` = UUID.
+  (`quote`, je 32 Zeichen `prefix`/`suffix`, `start`), `cid` = UUID. Sätze über 4000 Zeichen
+  (`MAX_QUOTE` in `src/lesen/highlights.js`) werden gekürzt. Lehnt der Server ab, zeigt der Player
+  „Nicht gemerkt: …“ mit der Meldung des Servers.
 - **Ohne Netz:** Fortschritt (nur der letzte Stand je Text) und Markierungen (höchstens 100) kommen
   in einen Puffer in den `UserDefaults` der App Group (`player.pending`) und gehen raus, sobald
   `NWPathMonitor` wieder Netz meldet, beim nächsten Öffnen des Players (vor dem Laden von Liste und Text, damit
