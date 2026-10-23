@@ -124,8 +124,11 @@ ${stack(stackDocs, doc.id)}
 </html>`;
 }
 
-/** Seite und Aktionen der Leseansicht; `asAction` macht Fehler des Speichers zur Meldung. */
-export function docRoutes({ store, asAction }) {
+/**
+ * Seite und Aktionen der Leseansicht; `asAction` macht Fehler des Speichers zur
+ * Meldung, `onChange(docId)` hört Statuswechsel und „fertig gelesen“.
+ */
+export function docRoutes({ store, asAction, onChange = () => {} }) {
   return {
     pages: {
       async '/lesen/doc'(ctx) {
@@ -140,6 +143,7 @@ export function docRoutes({ store, asAction }) {
       async '/aktion/lesen/doc/status'(form) {
         const status = form.get('status');
         const { doc, previous, changed } = await asAction(() => store.setStatus(form.get('id'), status));
+        if (changed) onChange(doc.id);
         return {
           message: `${STATUS_MESSAGE[status]}: ${doc.title ?? doc.url}`,
           doc: { id: doc.id, status: doc.status },
@@ -152,6 +156,7 @@ export function docRoutes({ store, asAction }) {
         if (!progress) throw new ActionError('Fortschritt fehlt');
         const anchor = form.get('anker');
         const doc = await asAction(() => store.setProgress(form.get('id'), progress, /^\d{1,8}$/.test(anchor ?? '') ? anchor : undefined));
+        if (doc.progress >= 1) onChange(doc.id);
         return { message: '', progress: doc.progress };
       },
     },

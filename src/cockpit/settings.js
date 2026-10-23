@@ -32,6 +32,7 @@ const EMPTY = {
   zunder: { url: null, token: null },
   bridge: { enabled: null, tag: null },
   flameNote: { enabled: null },
+  readingNotes: { folder: null },
   mail: { token: null, senders: [], mailbox: null, doneMailbox: null, pollMinutes: null },
   embed: { url: null, model: null },
   calendars: [],
@@ -78,6 +79,12 @@ export function validateSettings(input) {
   const inboxFolder = text(input.inboxFolder, 200, 'Inbox-Ordner')?.replace(/^\/+|\/+$/g, '') || null;
   if (inboxFolder && inboxFolder.split('/').some((p) => p === '..' || p === '.')) {
     throw new SettingsError('Inbox-Ordner muss ein Pfad im Vault sein');
+  }
+
+  // Ordner der Lesestapel-Notizen (VCP-75); vertraulich oder Readwise prüft der Export.
+  const readingFolder = text(input.readingNotes?.folder, 200, 'Lesestapel-Ordner')?.replace(/^\/+|\/+$/g, '') || null;
+  if (readingFolder && readingFolder.split('/').some((p) => p.startsWith('.') || !p.trim())) {
+    throw new SettingsError('Lesestapel-Ordner muss ein Pfad im Vault sein');
   }
 
   const zunderUrl = httpUrl(input.zunder?.url, 'Zunder-Adresse');
@@ -135,7 +142,7 @@ export function validateSettings(input) {
     ? [...new Set(input.hiddenEvents.map((t) => text(t, 200, 'Ausgeblendeter Termin')).filter(Boolean))].slice(0, 50)
     : null;
 
-  return { tz, vaultName: text(input.vaultName, 200, 'Vault-Name'), inboxFolder, zunder: { url: zunderUrl, token: zunderToken }, bridge, flameNote, mail, embed, calendars, hiddenEvents, session: validateSession(input.session) };
+  return { tz, vaultName: text(input.vaultName, 200, 'Vault-Name'), inboxFolder, zunder: { url: zunderUrl, token: zunderToken }, bridge, flameNote, readingNotes: { folder: readingFolder }, mail, embed, calendars, hiddenEvents, session: validateSession(input.session) };
 }
 
 const days = (v, what) => {
@@ -186,6 +193,7 @@ export function createSettingsStore({ file = null, defaults = {}, logger = conso
     bridgeEnabled: true,
     bridgeTag: 'zunder',
     flameNoteEnabled: true,
+    readingNotesFolder: '30-ressourcen/lesestapel',
     mailToken: null,
     mailSenders: [],
     mailbox: 'Vault',
@@ -219,6 +227,7 @@ export function createSettingsStore({ file = null, defaults = {}, logger = conso
         // Ohne Zunder-Zugang ruht die Brücke trotzdem; `enabled` sagt nur, ob sie darf.
         bridge: { enabled: stored.bridge.enabled ?? d.bridgeEnabled, tag: stored.bridge.tag ?? d.bridgeTag },
         flameNote: { enabled: stored.flameNote.enabled ?? d.flameNoteEnabled },
+        readingNotes: { folder: stored.readingNotes?.folder ?? d.readingNotesFolder },
         // Mail-Abruf nur mit Token und freigegebenen Absendern, damit eine fremde Mail nichts anlegt.
         mail:
           mailToken && senders.length

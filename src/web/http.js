@@ -607,6 +607,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       zunder: clear ? { url: null, token: null } : { url: field('zunder.url'), token: field('zunder.token') || stored.zunder.token },
       bridge: { enabled: choice('bridge.enabled'), tag: field('bridge.tag') },
       flameNote: { enabled: choice('flameNote.enabled') },
+      readingNotes: { folder: field('readingNotes.folder') },
       mail: {
         token: form.get('mail.clear') ? null : field('mail.token') || stored.mail.token,
         senders: list('mail.senders'),

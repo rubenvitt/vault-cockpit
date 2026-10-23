@@ -34,11 +34,16 @@ function markers(name) {
   };
 }
 
-/** Der ganze Bereich mit Markern; `label` steht im Startmarker, `eol` wie in der Notiz. */
-export function sectionBlock(name, inner, { label = null, eol = '\n' } = {}) {
+/**
+ * Der ganze Bereich mit Markern; `label` steht im Startmarker, `eol` wie in der
+ * Notiz. `spaced` setzt Leerzeilen innen an die Marker (Markdown-Blöcke wie
+ * Zitate oder Block-IDs kleben dann nicht am Kommentar).
+ */
+export function sectionBlock(name, inner, { label = null, eol = '\n', spaced = false } = {}) {
   markers(name);
   const text = String(inner).replace(/\r\n/g, '\n').trim();
-  return [`<!-- cockpit:${name}:start${label ? ` · ${label}` : ''} -->`, text, `<!-- cockpit:${name}:ende ${sectionChecksum(text)} -->`].join('\n').replaceAll('\n', eol);
+  const body = spaced ? `\n${text}\n` : text;
+  return [`<!-- cockpit:${name}:start${label ? ` · ${label}` : ''} -->`, body, `<!-- cockpit:${name}:ende ${sectionChecksum(text)} -->`].join('\n').replaceAll('\n', eol);
 }
 
 /**
@@ -64,13 +69,13 @@ export function findSection(content, name) {
  * ans Ende der Notiz) oder `{ action: 'skip', reason }`. `create: false` legt
  * keine neuen Marker an.
  */
-export function planSection(content, name, inner, { label = null, heading = null, createHeading = false, create = true } = {}) {
+export function planSection(content, name, inner, { label = null, spaced = false, heading = null, createHeading = false, create = true } = {}) {
   const eol = content.includes('\r\n') ? '\r\n' : '\n';
   const text = String(inner).replace(/\r\n/g, '\n').trim();
   const found = findSection(content, name);
   if (!found) {
     if (!create) return { action: 'keep' };
-    const block = sectionBlock(name, text, { label, eol });
+    const block = sectionBlock(name, text, { label, eol, spaced });
     if (!heading) return { action: 'insert', text: `${eol}${block}`, heading: null };
     if (new RegExp(`^##[ \\t]+${escapeRe(heading)}[ \\t]*#*[ \\t]*$`, 'm').test(content)) {
       // Leerzeile davor, damit der Kommentar nicht an einer Tabelle oder Liste klebt.
@@ -84,7 +89,7 @@ export function planSection(content, name, inner, { label = null, heading = null
     return { action: 'skip', reason: `Im Bereich „${name}“ wurde von Hand geschrieben; das Cockpit lässt ihn stehen (zum Neuschreiben den Bereich zwischen den Markern leeren)` };
   }
   if (found.inner === text) return { action: 'keep' };
-  return { action: 'replace', oldText: content.slice(found.from, found.to), newText: sectionBlock(name, text, { label, eol }) };
+  return { action: 'replace', oldText: content.slice(found.from, found.to), newText: sectionBlock(name, text, { label, eol, spaced }) };
 }
 
 /**

@@ -27,6 +27,7 @@ import { createFeedPoller } from './lesen/feeds.js';
 import { createReadingApi } from './lesen/api.js';
 import { saveUrl } from './lesen/save.js';
 import { createMailReader } from './lesen/mail.js';
+import { createReadingExport } from './lesen/vault-export.js';
 import { createOidcLogin } from './web/oidc.js';
 import { createWebHttp } from './web/http.js';
 import { loadShortcuts } from './web/shortcuts.js';
@@ -190,6 +191,9 @@ const reading = createReadingStore({ path: join(dirname(COCKPIT_SETTINGS_FILE), 
 // eigenen Abstand (Standard 30 min), Fehler verlängern ihn.
 const feedPoller = createFeedPoller({ store: reading });
 feedPoller.start();
+// Gelesene Texte mit Markierungen als Notiz in den Vault (VCP-75), entprellt;
+// `readingExport.addLink` schreibt Wikilinks zu einer Markierung dorthin.
+const readingExport = createReadingExport({ vaultPath: VAULT_PATH, index, editor, policy: POLICY, store: reading, settings: cockpitSettings });
 const captureHttp = createCaptureHttp({ token: LEGACY_CAPTURE_TOKEN, tokens: apiTokens, router: captureRouter, zunderEnabled: () => Boolean(zunder()) });
 const captureEnabled = () => Boolean(LEGACY_CAPTURE_TOKEN) || apiTokens.has('capture');
 // Kurzbefehl „Zum Lesestapel“: nur API-Tokens mit dem Recht „Lesestapel“.
@@ -331,7 +335,7 @@ const webHttp = process.env.WEB_CLIENT_ID
       health,
       // Lesen: Eingang, Stapel, Markiert; Artikel holt src/lesen/fetch.js (SSRF-geschützt).
       // „In Inbox“ aus der Leseansicht nutzt die Schnelleingabe des Cockpits.
-      reading: readingRoutes({ store: reading, capture: (input) => cockpitActions.capture(input) }),
+      reading: readingRoutes({ store: reading, capture: (input) => cockpitActions.capture(input), onChange: (id) => readingExport.changed(id) }),
       oidc: createOidcLogin({
         issuer: ISSUER,
         clientId: process.env.WEB_CLIENT_ID,
@@ -426,6 +430,7 @@ for (const sig of ['SIGTERM', 'SIGINT']) {
     sync.stop();
     mail?.stop();
     feedPoller.stop();
+    readingExport.flush();
     index.stop();
     semantic?.close();
     reading.close();

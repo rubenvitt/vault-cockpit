@@ -564,6 +564,46 @@ alle Markierungen, filterbar nach Quelle und Thema.
 Abhängigkeiten dafür: `@mozilla/readability` und `linkedom` (reines JavaScript,
 feste Versionen).
 
+**Markierungen im Vault** (VCP-75): Der Vault bleibt Quelle der Wahrheit. Wird
+ein Text mit Markierungen archiviert oder fertig gelesen (Fortschritt 1), legt
+das Cockpit über den Editor eine Notiz an, Standard
+`30-ressourcen/lesestapel/<slug>.md` (änderbar unter **Einstellungen →
+Lesestapel**). Ihr Frontmatter hat `type: lesestapel`, `lesestapel_id`,
+`quelle`, `url`, `gespeichert`, `gelesen` und `themen`. Jede Markierung steht
+als Zitat mit eigener Block-ID (`[[vom-lesen#^hl-1a2b3c4d]]`), darunter Notiz und
+Verknüpfungen als Wikilinks:
+
+```markdown
+## Markierungen
+
+<!-- cockpit:markierungen:start · aus dem Lesestapel, das Cockpit schreibt bis zum Endmarker neu -->
+
+> Ein Satz, den man sich merkt.
+
+^hl-1a2b3c4d
+
+Meine Notiz dazu.
+
+Verknüpft: [[Synthese Lesen]]
+
+<!-- cockpit:markierungen:ende 5e6f7a8b -->
+
+## Eigene Gedanken
+```
+
+Danach schreibt das Cockpit bei jeder Änderung an Markierungen nur diesen
+generierten Bereich neu (wie die Flammen in der Feuer-Notiz, mit Prüfsumme),
+gebündelt nach 30 Sekunden Ruhe und beim Herunterfahren. Alles andere, vor
+allem „Eigene Gedanken“, bleibt unberührt. Gefunden wird die Notiz über
+`lesestapel_id` im Index, Umbenennen und Verschieben in Obsidian schaden also
+nicht. Ändert der Sync die Notiz gleichzeitig, bricht das Schreiben ab und
+wird später wiederholt. Wer im Bereich von Hand schreibt, hält das Cockpit davon
+ab, ihn zu überschreiben. In vertraulichen, ausgeschlossenen oder
+Readwise-Ordnern legt es nichts an, und eine dorthin verschobene Notiz fasst es
+nicht mehr an. Wikilinks zu einer Markierung schreibt `addLink` aus
+`src/lesen/vault-export.js` (für „Verknüpfen“). Sie stehen in der Zeile
+„Verknüpft:“ und bleiben beim Neuschreiben erhalten.
+
 **Feeds** (`/lesen/feeds`, VCP-78): Eine Feed-Adresse abonnieren oder einfach die
 Website, das Cockpit findet den Feed dann über `<link rel="alternate">`. Gelesen
 werden RSS 2.0 (auch 1.0), Atom und JSON Feed. Je Feed lässt sich einstellen:

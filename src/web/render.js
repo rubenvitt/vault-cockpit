@@ -581,6 +581,7 @@ export function renderSettings({ stored, defaults, checks = {}, notice = null, e
     ['bruecke', 'Zunder-Brücke', bridge],
     ['feuer-notiz', 'Feuer-Notiz', flameNote],
     ['mail', 'Mail', mail],
+    ['lesestapel', 'Lesestapel', null],
     ['embeddings', 'Embeddings', embed],
     ['anzeige', 'Anzeige', null],
     ['anmeldung', 'Anmeldung', null],
@@ -665,6 +666,13 @@ ${backupHint(backup)}
     </div>
   </details>
   ${stored.mail.token ? '<label class="checkline"><input type="checkbox" name="mail.clear" value="1"> eigenen Token löschen</label>' : ''}
+</section>
+<section id="lesestapel">
+  ${head2('Lesestapel')}
+  <p class="meta">Gelesene Texte mit Markierungen kommen als Notiz in diesen Ordner, jede Markierung mit Block-ID zum Verlinken. Das Cockpit schreibt danach nur den Bereich „Markierungen“ neu; in vertraulichen und Readwise-Ordnern legt es nichts an.</p>
+  <div class="grid">
+    <label>Ordner im Vault<input name="readingNotes.folder" value="${esc(stored.readingNotes?.folder ?? '')}" placeholder="${esc(d.readingNotesFolder ?? '30-ressourcen/lesestapel')}"></label>
+  </div>
 </section>
 <section id="embeddings">
   ${head2('Embeddings', embed)}

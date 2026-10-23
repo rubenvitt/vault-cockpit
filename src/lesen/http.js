@@ -23,8 +23,10 @@ import { highlightRoutes } from './highlights.js';
  *
  * Eine neue Seite oder Aktion ist ein Eintrag hier (gern aus einer eigenen Datei).
  * `capture` legt Notizen in der Vault-Inbox an („In Inbox“, src/lesen/highlights.js).
+ * `onChange(docId)` meldet Archivieren, „fertig gelesen“ und geänderte
+ * Markierungen (für die Lesestapel-Notiz im Vault, src/lesen/vault-export.js).
  */
-export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefined, capture = null, logger = console }) {
+export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefined, capture = null, onChange = () => {}, logger = console }) {
   const feeds = feedRoutes({ store, fetchFeed, logger });
   /** Fehler aus Abruf und Speicher als Meldung für die Seite. */
   const asAction = async (run) => {
@@ -41,8 +43,8 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
 
   const add = addRoutes({ store, asAction, logger });
 
-  const doc = docRoutes({ store, asAction });
-  const marked = highlightRoutes({ store, asAction, capture, logger });
+  const doc = docRoutes({ store, asAction, onChange });
+  const marked = highlightRoutes({ store, asAction, capture, onChange, logger });
 
   return {
     uploads: { ...add.uploads, ...feeds.uploads },
