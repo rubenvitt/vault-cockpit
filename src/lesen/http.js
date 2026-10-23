@@ -9,7 +9,7 @@ import { addRoutes } from './add.js';
 import { docRoutes, docLink } from './doc.js';
 import { highlightRoutes } from './highlights.js';
 import { reviewRoutes } from './review-page.js';
-import { listenRoutes, listenQueue, listenText } from './listen.js';
+import { listenRoutes, listenQueue, listenText, listenAudio } from './listen.js';
 import { connectionRoutes } from './connections.js';
 
 /**
@@ -25,7 +25,7 @@ import { connectionRoutes } from './connections.js';
  *   die Dateien liegen dann in `form.files`.
  *
  * - `offlineDocs(n)`: Links der nächsten `n` Artikel des Stapels (wie „Passt jetzt“) für den Offline-Cache.
- * - `listen`: Wiedergabeliste und Text zum Vorlesen (src/lesen/listen.js), für die App-API.
+ * - `listen`: Wiedergabeliste, Text und Audio zum Vorlesen (src/lesen/listen.js), für die App-API.
  *
  * Eine neue Seite oder Aktion ist ein Eintrag hier (gern aus einer eigenen Datei).
  * `capture` legt Notizen in der Vault-Inbox an („In Inbox“, src/lesen/highlights.js).
@@ -34,11 +34,12 @@ import { connectionRoutes } from './connections.js';
  * (src/lesen/embed-cache.js); ohne gibt es keine Querverbindung im Wiedersehen.
  * `connections` (`index`, `semantic`, `policy`, `exporter`) schaltet die
  * Querverbindungen der Leseansicht ein (src/lesen/connections.js).
+ * `speech` ist die Stimme vom Server (src/lesen/tts.js); ohne liest nur das Gerät vor.
  * `onChange(docId)` meldet Statuswechsel und geänderte Markierungen (für die
  * Lesestapel-Notiz im Vault, src/lesen/vault-export.js). `exporter` schaltet
  * „In den Vault“ und „Im Vault ablegen“ ein (VCP-96, src/lesen/doc.js).
  */
-export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefined, capture = null, review = {}, embedCache = null, connections = null, exporter = null, onChange = () => {}, logger = console }) {
+export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefined, capture = null, review = {}, embedCache = null, connections = null, exporter = null, speech = null, onChange = () => {}, logger = console }) {
   const feeds = feedRoutes({ store, fetchFeed, logger });
   /** Fehler aus Abruf und Speicher als Meldung für die Seite. */
   const asAction = async (run) => {
@@ -62,14 +63,19 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
 
   return {
     offlineDocs: (n) => upNext(store.list({ status: 'stapel', limit: -1 }), n).map((d) => docLink(d.id)),
-    listen: { queue: (zeit) => listenQueue(store, zeit), text: (id) => listenText(store, id) },
+    listen: {
+      queue: (zeit) => listenQueue(store, zeit),
+      text: (id) => listenText(store, id),
+      audio: (params) => listenAudio(store, speech, params),
+      voice: () => speech?.voice() ?? null,
+    },
     uploads: { ...add.uploads, ...feeds.uploads },
     pages: {
       ...add.pages,
       '/lesen': async () => ({ redirect: '/lesen/eingang' }),
       ...inbox.pages,
       ...stackRoutes({ store, vault: Boolean(exporter) }).pages,
-      ...listenRoutes({ store }).pages,
+      ...listenRoutes({ store, speech }).pages,
       ...feeds.pages,
       ...doc.pages,
       ...marked.pages,

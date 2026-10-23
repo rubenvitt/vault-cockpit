@@ -54,6 +54,11 @@ struct SpeechText: Equatable {
         slice(sentences[sentence].start, sentences[sentence].end)
     }
 
+    /// Satz mit seiner Stelle, damit die Stimme vom Server ihn holen kann.
+    func utterance(of sentence: Int) -> Utterance {
+        Utterance(id: id, text: text(of: sentence), start: sentences[sentence].start, end: sentences[sentence].end)
+    }
+
     /// Markierung für einen Satz, aufgebaut wie `anchorAt` in `src/lesen/anchor.js`. Längere Sätze
     /// werden auf `maxQuote` gekürzt, sonst lehnt der Server ab; das Suffix folgt dem gekürzten Zitat.
     func highlight(of sentence: Int, cid: String) -> NewHighlight {

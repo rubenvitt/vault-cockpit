@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
+import { ELEVENLABS_VOICE, ELEVENLABS_MODEL } from '../lesen/tts.js';
 
 /**
  * Einstellungen des Web-Cockpits, gepflegt auf der Seite `/einstellungen` und
@@ -9,7 +10,8 @@ import { randomBytes, randomUUID } from 'node:crypto';
  *
  * Leere Felder bedeuten „Standard“: Sie fallen auf die Umgebungsvariablen
  * zurück, mit denen ältere Deployments eingerichtet wurden (`COCKPIT_TZ`,
- * `OBSIDIAN_VAULT_NAME`, `CAPTURE_FOLDER`, `ZUNDER_*`, `MAIL_*`, `EMBED_*`),
+ * `OBSIDIAN_VAULT_NAME`, `CAPTURE_FOLDER`, `ZUNDER_*`, `MAIL_*`, `EMBED_*`,
+ * `TTS_PROVIDER`, `ELEVENLABS_*`),
  * sonst auf feste Standardwerte. Im Deployment muss dafür nichts stehen.
  * Alles hier wirkt ohne Neustart: Wochenansicht, `!`-Capture, Brücke, Mail,
  * Embeddings und Graph lesen den Stand bei jedem Aufruf bzw. bauen sich nach
@@ -21,6 +23,8 @@ export class SettingsError extends Error {}
 
 export const MAX_CALENDARS = 20;
 const KINDS = ['ical', 'caldav'];
+/** Wer bei „Unterwegs hören“ vorliest: das Gerät oder ElevenLabs über den Server. */
+export const TTS_PROVIDERS = ['geraet', 'elevenlabs'];
 
 /** Termine mit diesen Titeln blendet das Cockpit aus, solange nichts anderes eingestellt ist. */
 export const DEFAULT_HIDDEN_EVENTS = ['Blockiert'];
@@ -35,6 +39,7 @@ const EMPTY = {
   readingNotes: { folder: null },
   mail: { token: null, senders: [], mailbox: null, doneMailbox: null, pollMinutes: null },
   embed: { url: null, model: null },
+  tts: { provider: null, key: null, voice: null, model: null },
   calendars: [],
   hiddenEvents: null,
   session: { idleDays: null, maxDays: null, generation: 0 },
@@ -42,6 +47,8 @@ const EMPTY = {
 
 const SENDER = /^(?:[^@\s]+@|@)[^@\s]+\.[^@\s]+$/;
 const TAG = /^[\p{L}\p{N}_/-]{1,50}$/u;
+const VOICE_ID = /^[A-Za-z0-9]{1,64}$/;
+const MODEL_ID = /^[\w.-]{1,64}$/;
 
 function validZone(tz) {
   try {
@@ -117,6 +124,15 @@ export function validateSettings(input) {
 
   const embed = { url: httpUrl(input.embed?.url, 'Embedding-Server'), model: text(input.embed?.model, 100, 'Embedding-Modell') };
 
+  // `null` = Standard: ElevenLabs, sobald ein Key da ist, sonst das Gerät.
+  const provider = input.tts?.provider ?? null;
+  if (provider !== null && !TTS_PROVIDERS.includes(provider)) throw new SettingsError(`Unbekannter Anbieter fürs Vorlesen „${provider}“`);
+  const voice = text(input.tts?.voice, 64, 'Stimme');
+  if (voice && !VOICE_ID.test(voice)) throw new SettingsError('Stimme: die Voice-ID aus ElevenLabs (nur Buchstaben und Ziffern)');
+  const ttsModel = text(input.tts?.model, 64, 'Sprachmodell');
+  if (ttsModel && !MODEL_ID.test(ttsModel)) throw new SettingsError('Sprachmodell: die Model-ID aus ElevenLabs, z. B. eleven_multilingual_v2');
+  const tts = { provider, key: text(input.tts?.key, 200, 'ElevenLabs-API-Key'), voice, model: ttsModel };
+
   const calendars = (input.calendars ?? []).map((c, i) => {
     const label = `Kalender ${i + 1}`;
     const name = text(c.name, 80, `Name von ${label}`);
@@ -142,7 +158,7 @@ export function validateSettings(input) {
     ? [...new Set(input.hiddenEvents.map((t) => text(t, 200, 'Ausgeblendeter Termin')).filter(Boolean))].slice(0, 50)
     : null;
 
-  return { tz, vaultName: text(input.vaultName, 200, 'Vault-Name'), inboxFolder, zunder: { url: zunderUrl, token: zunderToken }, bridge, flameNote, readingNotes: { folder: readingFolder }, mail, embed, calendars, hiddenEvents, session: validateSession(input.session) };
+  return { tz, vaultName: text(input.vaultName, 200, 'Vault-Name'), inboxFolder, zunder: { url: zunderUrl, token: zunderToken }, bridge, flameNote, readingNotes: { folder: readingFolder }, mail, embed, tts, calendars, hiddenEvents, session: validateSession(input.session) };
 }
 
 const days = (v, what) => {
@@ -201,6 +217,10 @@ export function createSettingsStore({ file = null, defaults = {}, logger = conso
     mailPollMinutes: 5,
     embedUrl: null,
     embedModel: 'bge-m3',
+    ttsProvider: null,
+    elevenlabsKey: null,
+    elevenlabsVoice: ELEVENLABS_VOICE,
+    elevenlabsModel: ELEVENLABS_MODEL,
     sessionIdleDays: 30,
     sessionMaxDays: 90,
     ...defaults,
@@ -219,6 +239,9 @@ export function createSettingsStore({ file = null, defaults = {}, logger = conso
       const mailToken = stored.mail.token ?? d.mailToken;
       const senders = stored.mail.senders.length ? stored.mail.senders : d.mailSenders;
       const embedUrl = stored.embed.url ?? d.embedUrl;
+      const tts = stored.tts ?? EMPTY.tts;
+      const ttsKey = tts.key ?? d.elevenlabsKey;
+      const ttsProvider = tts.provider ?? d.ttsProvider ?? (ttsKey ? 'elevenlabs' : 'geraet');
       return {
         tz: stored.tz ?? d.tz,
         vaultName: stored.vaultName ?? d.vaultName,
@@ -241,6 +264,11 @@ export function createSettingsStore({ file = null, defaults = {}, logger = conso
               }
             : null,
         embed: embedUrl ? { url: embedUrl, model: stored.embed.model ?? d.embedModel, source: stored.embed.url ? 'einstellungen' : 'umgebung' } : null,
+        // Stimme vom Server nur mit Key; sonst liest das Gerät vor.
+        tts:
+          ttsProvider === 'elevenlabs' && ttsKey
+            ? { provider: 'elevenlabs', key: ttsKey, voice: tts.voice ?? d.elevenlabsVoice, model: tts.model ?? d.elevenlabsModel, source: tts.key ? 'einstellungen' : 'umgebung' }
+            : null,
         calendars: stored.calendars,
         hiddenEvents: stored.hiddenEvents ?? DEFAULT_HIDDEN_EVENTS,
         // Ohne Nutzung nie länger als die Obergrenze.

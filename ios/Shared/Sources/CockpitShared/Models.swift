@@ -13,10 +13,13 @@ public struct Me: Codable, Equatable, Sendable {
 public struct Queue: Codable, Equatable, Sendable {
     /// Zeitfenster in Minuten (5, 15, 30 oder 60).
     public let minutes: Int
+    /// Anbieter der Stimme vom Server (z. B. „ElevenLabs“), nil = Sprachausgabe des Geräts.
+    public let voice: String?
     public let items: [QueueItem]
 
     enum CodingKeys: String, CodingKey {
         case minutes = "zeit"
+        case voice = "stimme"
         case items
     }
 }

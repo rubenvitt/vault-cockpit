@@ -9,6 +9,7 @@ import { createTokenStore } from '../src/cockpit/tokens.js';
 import { createReadingStore } from '../src/lesen/store.js';
 import { readingRoutes } from '../src/lesen/http.js';
 import { createReadingApi } from '../src/lesen/api.js';
+import { SpeechError } from '../src/lesen/tts.js';
 
 const ISSUER = 'https://id.test';
 const CLIENT = 'cockpit-web';
@@ -59,13 +60,13 @@ const pkce = () => {
   return { verifier, challenge: createHash('sha256').update(verifier).digest('base64url') };
 };
 
-async function withServer(run, { sub = 'ruben', publicUrl = 'https://vault.test', allowDevScheme = false } = {}) {
+async function withServer(run, { sub = 'ruben', publicUrl = 'https://vault.test', allowDevScheme = false, speech = null } = {}) {
   const idp = fakeIdp({ sub });
   const clock = { t: Date.now() };
   const tokens = createTokenStore({ logger: quiet });
   const store = createReadingStore({ path: ':memory:' });
   const changed = [];
-  const reading = readingRoutes({ store, logger: quiet, onChange: (id) => changed.push(id) });
+  const reading = readingRoutes({ store, speech, logger: quiet, onChange: (id) => changed.push(id) });
   const logs = [];
   const logger = { info: (m) => logs.push(m), warn: (m) => logs.push(m), error: (m) => logs.push(m) };
   const webHttp = createWebHttp({
@@ -308,7 +309,7 @@ test('App-Login: Einlösen ist begrenzt', async () => {
 
 test('App-API: ohne, mit fremdem Recht und mit widerrufenem Token', async () => {
   await withServer(async ({ call, tokens }) => {
-    const reads = ['/api/app/ich', '/api/app/stapel', '/api/app/text?id=a'];
+    const reads = ['/api/app/ich', '/api/app/stapel', '/api/app/text?id=a', '/api/app/audio?id=a&von=0&bis=1'];
     const writes = ['/api/app/fortschritt', '/api/app/markierung'];
     const all = async (bearer, status) => {
       for (const p of reads) assert.equal((await call(p, { bearer })).status, status, p);
@@ -334,5 +335,44 @@ test('App-API: ohne, mit fremdem Recht und mit widerrufenem Token', async () => 
     assert.equal((await call('/api/app/ich', { bearer: other.token })).status, 200);
     // Eine Sitzung ersetzt den Token nicht.
     assert.equal((await call('/api/app/ich')).status, 401);
+  });
+});
+
+test('App-API: Satz als MP3 von der Stimme auf dem Server, `stimme` in der Wiedergabeliste', async () => {
+  const asked = [];
+  const speech = {
+    voice: () => 'ElevenLabs',
+    audio: async (input) => {
+      asked.push(input);
+      if (input.text.startsWith('Zweiter')) throw new SpeechError('ElevenLabs: Kontingent aufgebraucht');
+      return Buffer.from('ID3-mp3');
+    },
+  };
+  await withServer(
+    async ({ call, tokens, store }) => {
+      const bearer = tokens.create('iPhone', 'app').token;
+      const { doc } = store.addDocument({ url: 'https://blatt.test/a', title: 'Vom Lesen', status: 'stapel', reading_minutes: 5, content_html: '<p>Erster Satz hier. Zweiter Satz dort.</p>' });
+      assert.equal((await (await call('/api/app/stapel?zeit=15', { bearer })).json()).stimme, 'ElevenLabs');
+
+      const ok = await call(`/api/app/audio?id=${doc.id}&von=0&bis=17`, { bearer });
+      assert.equal(ok.status, 200);
+      assert.equal(ok.headers.get('content-type'), 'audio/mpeg');
+      assert.equal(Buffer.from(await ok.arrayBuffer()).toString(), 'ID3-mp3');
+      assert.deepEqual(asked[0], { text: 'Erster Satz hier.', previous: null, next: 'Zweiter Satz dort.' });
+
+      const failed = await call(`/api/app/audio?id=${doc.id}&von=18&bis=36`, { bearer });
+      assert.equal(failed.status, 502);
+      assert.equal((await failed.json()).message, 'ElevenLabs: Kontingent aufgebraucht');
+      assert.equal((await call(`/api/app/audio?id=${doc.id}&von=0&bis=999`, { bearer })).status, 400);
+      assert.equal((await call(`/api/app/audio?id=gibtsnicht&von=0&bis=1`, { bearer })).status, 404);
+    },
+    { speech },
+  );
+  // Ohne Stimme: `stimme` ist null, Audio gibt es nicht.
+  await withServer(async ({ call, tokens, store }) => {
+    const bearer = tokens.create('iPhone', 'app').token;
+    const { doc } = store.addDocument({ url: 'https://blatt.test/a', title: 'Vom Lesen', status: 'stapel', reading_minutes: 5, content_html: '<p>Erster Satz hier.</p>' });
+    assert.equal((await (await call('/api/app/stapel?zeit=15', { bearer })).json()).stimme, null);
+    assert.equal((await call(`/api/app/audio?id=${doc.id}&von=0&bis=17`, { bearer })).status, 404);
   });
 });

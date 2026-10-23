@@ -39,6 +39,12 @@ struct PlayerMachine: Equatable {
 
     var currentItem: QueueItem? { index.map { items[$0] } }
     var currentSentence: String? { text?.text(of: sentence) }
+    var currentUtterance: Utterance? { text?.utterance(of: sentence) }
+    /// Der Satz danach im selben Text, zum Vorladen.
+    var nextUtterance: Utterance? {
+        guard let text, sentence + 1 < text.sentences.count else { return nil }
+        return text.utterance(of: sentence + 1)
+    }
 
     mutating func handle(_ event: Event) -> [Effect] {
         switch event {

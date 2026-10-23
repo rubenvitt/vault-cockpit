@@ -55,6 +55,18 @@ public struct APIClient: Sendable {
         try await send("api/app/text", query: [URLQueryItem(name: "id", value: id)])
     }
 
+    /// Ein Stück des Textes als MP3 von der Stimme auf dem Server (`start`/`end` in UTF-16-Einheiten
+    /// wie die Sätze). 404, wenn keine eingerichtet ist; 502, wenn der Anbieter ablehnt.
+    public func audio(id: String, start: Int, end: Int) async throws -> Data {
+        let query = [URLQueryItem(name: "id", value: id), URLQueryItem(name: "von", value: String(start)), URLQueryItem(name: "bis", value: String(end))]
+        var request = URLRequest(url: baseURL.appending(path: "api/app/audio").appending(queryItems: query))
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("audio/mpeg", forHTTPHeaderField: "Accept")
+        let (data, response) = try await session.data(for: request)
+        try Self.check(data, response)
+        return data
+    }
+
     /// Speichert die Lesestelle; `anchor` in Zeichen des Textes. Liefert den Fortschritt laut Server.
     @discardableResult
     public func saveProgress(id: String, progress: Double, anchor: Int? = nil) async throws -> Double {
@@ -132,12 +144,16 @@ public struct APIClient: Sendable {
         var request = request
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         let (data, response) = try await session.data(for: request)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard (200..<300).contains(status) else {
-            let failure = try? JSONDecoder().decode(FailureBody.self, from: data)
-            throw APIError(status: status, code: failure?.error, message: failure?.message ?? HTTPURLResponse.localizedString(forStatusCode: status))
-        }
+        try check(data, response)
         return try decoder.decode(T.self, from: data)
+    }
+
+    /// Wirft `APIError` mit der Meldung des Servers, wenn der Status kein Erfolg ist.
+    private static func check(_ data: Data, _ response: URLResponse) throws {
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard !(200..<300).contains(status) else { return }
+        let failure = try? JSONDecoder().decode(FailureBody.self, from: data)
+        throw APIError(status: status, code: failure?.error, message: failure?.message ?? HTTPURLResponse.localizedString(forStatusCode: status))
     }
 
     /// Datumsangaben kommen als ISO 8601 mit Millisekunden (`2026-11-22T10:00:00.000Z`).

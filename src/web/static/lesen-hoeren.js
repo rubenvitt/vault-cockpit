@@ -6,6 +6,11 @@
 //
 // In der iOS-App schickt „Abspielen“ nur `{type:'hoeren', zeit}` an die App.
 //
+// Mit Stimme vom Server (`data-voice` am Player, z. B. ElevenLabs) kommt jeder
+// Satz als MP3 von `/lesen/hoeren/audio` und läuft über ein `<audio>`-Element,
+// der nächste Satz wird schon geladen. Fällt die Stimme aus, liest für den Rest
+// der Sitzung die Sprachausgabe des Geräts.
+//
 // Text und Sätze kommen von `/lesen/hoeren/text`, in Zeichen des Lesetexts wie
 // src/lesen/anchor.js; „Das hier merken“ bildet den Anker wie `anchorAt`.
 (() => {
@@ -22,9 +27,15 @@
     document.querySelector('.hoeren-nojs')?.setAttribute('hidden', '');
     return;
   }
-  if (!player || !window.cockpit || !('speechSynthesis' in window)) return;
+  const serverVoice = player?.dataset.voice ?? null;
+  if (!player || !window.cockpit || (!serverVoice && !('speechSynthesis' in window))) return;
   const { toast, send, csrf } = window.cockpit;
-  const synth = window.speechSynthesis;
+  const synth = window.speechSynthesis ?? null;
+  // Ein Element für alle Sätze: iOS gibt es nach dem ersten Abspielen aus einem Tipp frei.
+  const audio = serverVoice ? new Audio() : null;
+  let serverDown = !serverVoice;
+  /** Satz-Audio als Blob-URL je `id:start`, nur aktueller und nächster Satz. */
+  const clips = new Map();
   const CONTEXT = 32;
   const ids = [...document.querySelectorAll('.hoeren-list [data-doc]')].map((li) => li.dataset.doc);
   const playButton = player.querySelector('[data-cmd=play]');
@@ -45,8 +56,10 @@
     const de = synth.getVoices().filter((v) => /^de([-_]|$)/i.test(v.lang));
     voice = de.find((v) => v.localService && /^de[-_]DE/i.test(v.lang)) ?? de.find((v) => /^de[-_]DE/i.test(v.lang)) ?? de[0] ?? null;
   }
-  pickVoice();
-  synth.addEventListener?.('voiceschanged', pickVoice);
+  if (synth) {
+    pickVoice();
+    synth.addEventListener?.('voiceschanged', pickVoice);
+  }
 
   const RATE = 'lesen-hoeren-tempo';
   try {
@@ -56,6 +69,7 @@
     /* privater Modus: Standard */
   }
   rateSelect.addEventListener('change', () => {
+    if (audio) audio.playbackRate = Number(rateSelect.value) || 1;
     try {
       localStorage.setItem(RATE, rateSelect.value);
     } catch {
@@ -80,6 +94,10 @@
     player.querySelector('[data-sentence]').textContent = cur ? cur.text.slice(...cur.sentences[cur.pos]) : '';
     playButton.textContent = playing ? 'Pause' : 'Abspielen';
     for (const li of document.querySelectorAll('.hoeren-list [data-doc]')) li.classList.toggle('is-playing', li.dataset.doc === cur?.id);
+    if (audio && navigator.mediaSession) {
+      if (cur && 'MediaMetadata' in window) navigator.mediaSession.metadata = new MediaMetadata({ title: cur.title, artist: 'Cockpit' });
+      navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
+    }
   }
 
   /** Erster Text ab Stelle `i` mit Sätzen, ab der gespeicherten Lesestelle. */
@@ -96,8 +114,76 @@
     return null;
   }
 
+  const clipKey = (d, pos) => `${d.id}:${d.sentences[pos][0]}`;
+
+  /** Lädt Satz `pos` von `d` als Blob-URL (einmal je Satz); wirft mit der Meldung des Servers. */
+  function clip(d, pos) {
+    const key = clipKey(d, pos);
+    if (!clips.has(key)) {
+      const [von, bis] = d.sentences[pos];
+      const entry = { url: null };
+      entry.ready = fetch(`/lesen/hoeren/audio?${new URLSearchParams({ id: d.id, von: String(von), bis: String(bis) })}`, { credentials: 'same-origin' })
+        .then(async (res) => {
+          if (res.redirected) throw new Error('Nicht mehr angemeldet.');
+          if (!res.ok) throw new Error((await res.json().catch(() => null))?.message ?? `HTTP ${res.status}`);
+          entry.url = URL.createObjectURL(await res.blob());
+          return entry.url;
+        })
+        .catch((err) => {
+          if (clips.get(key) === entry) clips.delete(key);
+          throw err;
+        });
+      clips.set(key, entry);
+    }
+    return clips.get(key);
+  }
+
+  /** Behält nur die Sätze `keep` (Schlüssel), gibt den Rest frei. */
+  function trimClips(keep) {
+    for (const [key, entry] of clips) {
+      if (keep.includes(key)) continue;
+      if (entry.url) URL.revokeObjectURL(entry.url);
+      clips.delete(key);
+    }
+  }
+
+  /** Satz über die Stimme vom Server; liegt er schon da, startet er noch im selben Tipp (iOS). */
+  function speakServer(mine) {
+    const next = cur.pos + 1 < cur.sentences.length ? clipKey(cur, cur.pos + 1) : null;
+    trimClips([clipKey(cur, cur.pos), next].filter(Boolean));
+    const entry = clip(cur, cur.pos);
+    const start = (url) => {
+      if (mine !== gen) return;
+      audio.src = url;
+      audio.playbackRate = Number(rateSelect.value) || 1;
+      audio.play().catch((err) => {
+        if (mine !== gen) return;
+        stop();
+        // Ohne Tipp lässt iOS nicht abspielen, wenn der Satz zu spät kam.
+        toast(err.name === 'NotAllowedError' ? 'Noch einmal auf Abspielen tippen.' : `Wiedergabe: ${err.message}`, { kind: 'error' });
+      });
+      // Den nächsten schon holen, damit zwischen den Sätzen keine Pause entsteht.
+      if (cur.pos + 1 < cur.sentences.length) clip(cur, cur.pos + 1).ready.catch(() => {});
+    };
+    if (entry.url) start(entry.url);
+    else
+      entry.ready.then(start, (err) => {
+        if (mine !== gen) return;
+        trimClips([]);
+        if (!synth) {
+          stop();
+          return toast(err.message, { kind: 'error' });
+        }
+        serverDown = true;
+        toast(`${err.message}. Die Gerätestimme liest weiter.`, { kind: 'error' });
+        speak();
+      });
+    show();
+  }
+
   function speak() {
     const mine = ++gen;
+    if (!serverDown) return speakServer(mine);
     // Nur abbrechen, wenn noch etwas läuft: Nach `end` wäre das nur ein Anlass für Eigenheiten der Sprachausgabe.
     if (synth.speaking || synth.pending) synth.cancel();
     const u = new SpeechSynthesisUtterance(cur.text.slice(...cur.sentences[cur.pos]));
@@ -131,9 +217,15 @@
     fetch('/aktion/lesen/doc/fortschritt', { method: 'POST', keepalive: true, credentials: 'same-origin', headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' }, body }).catch(() => {});
   }
 
+  /** Hält jede Ausgabe an: Sprachausgabe und Audio. */
+  function silence() {
+    synth?.cancel();
+    audio?.pause();
+  }
+
   async function advance(i) {
     const mine = ++gen;
-    synth.cancel();
+    silence();
     let next;
     try {
       next = await load(i);
@@ -148,14 +240,18 @@
       return toast('Alles gehört.');
     }
     if (playing) speak();
-    else show();
+    else {
+      // Ersten Satz schon holen, damit „Abspielen“ ihn noch im Tipp starten kann (sonst bleibt iOS stumm).
+      if (!serverDown) clip(cur, cur.pos).ready.catch(() => {});
+      show();
+    }
   }
 
   // Pause bricht den Satz ab und spielt ihn beim Weiterhören neu: `pause()`/`resume()` sind auf Mobilgeräten unzuverlässig.
   function stop() {
     playing = false;
     gen++;
-    synth.cancel();
+    silence();
     keepAwake(false);
     show();
   }
@@ -190,10 +286,26 @@
     if (b.dataset.cmd === 'mark') remember();
   });
 
+  if (audio) {
+    audio.addEventListener('ended', () => {
+      // Nur der Satz, der gerade dran ist; nach Pause oder Sprung kommt kein `ended` mehr durch.
+      if (playing && !serverDown && cur) finished();
+    });
+    // Sperrbildschirm und Kopfhörer: Abspielen, Pause, nächster Text.
+    const session = navigator.mediaSession;
+    session?.setActionHandler?.('play', () => !playing && play());
+    session?.setActionHandler?.('pause', () => playing && stop());
+    session?.setActionHandler?.('nexttrack', () => cur && advance(cur.i + 1));
+  }
+
   // Zurück im Vordergrund: Hat das System den Satz abgebrochen, ihn neu sprechen; die Bildschirmsperre neu holen.
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible' || !playing) return;
     keepAwake(true);
+    if (!serverDown) {
+      if (cur && audio.paused) speak();
+      return;
+    }
     // `speaking` bleibt auch bei einer vom System angehaltenen Ausgabe wahr.
     if (cur && (!synth.speaking || synth.paused)) speak();
   });

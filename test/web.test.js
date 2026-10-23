@@ -489,6 +489,18 @@ test('Einstellungen: Brücke, Mail und Embeddings speichern, Mail-Token bleibt v
     await call('/einstellungen', { method: 'POST', form: { ...form, 'mail.token': '', 'mail.clear': '1' } });
     assert.equal(settings.stored().mail.token, null);
 
+    // Vorlesen: Key bleibt verborgen und beim leeren Feld erhalten.
+    assert.match(again, /name="tts\.provider"/);
+    await call('/einstellungen', { method: 'POST', form: { ...form, 'tts.provider': 'elevenlabs', 'tts.key': 'sk-geheim-7', 'tts.voice': '', 'tts.model': 'eleven_flash_v2_5' } });
+    assert.deepEqual([settings.get().tts.key, settings.get().tts.model], ['sk-geheim-7', 'eleven_flash_v2_5']);
+    const tts = await (await call('/einstellungen')).text();
+    assert.ok(!tts.includes('sk-geheim-7'));
+    assert.match(tts, /<option value="elevenlabs" selected>/);
+    await call('/einstellungen', { method: 'POST', form: { ...form, 'tts.provider': 'elevenlabs', 'tts.key': '' } });
+    assert.equal(settings.stored().tts.key, 'sk-geheim-7');
+    await call('/einstellungen', { method: 'POST', form: { ...form, 'tts.provider': 'elevenlabs', 'tts.clear': '1' } });
+    assert.equal(settings.get().tts, null);
+
     // Capture-Token anlegen.
     const created = await call('/einstellungen/tokens', { method: 'POST', form: { name: 'iPhone', scope: 'capture', csrf } });
     assert.match(await created.text(), /Capture-Token „iPhone“ angelegt/);
