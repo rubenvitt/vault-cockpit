@@ -248,6 +248,32 @@ test('Feeds: direkt auf den Stapel, Stichwort-Filter, Seite nicht erreichbar →
   assert.equal(docsOf(store, feeds.json).length, 0, 'pausiert');
 });
 
+test('Feeds: Gruppe pausiert → keiner ihrer Feeds wird abgerufen; direkt auf den Stapel über die Gruppe', async () => {
+  const { store, feeds, poller, calls, tick } = setup();
+  const { group: paused } = store.addGroup({ name: 'Ruhig', paused: true });
+  const { group: stack } = store.addGroup({ name: 'Wichtig', to_stack: true });
+  for (const f of [feeds.blog, feeds.atom, feeds.kaputt]) store.updateFeed(f.id, { group_id: paused.id });
+  store.updateFeed(feeds.json.id, { group_id: stack.id });
+
+  assert.equal(await poller.runDue(), 2);
+  assert.deepEqual(calls.map((c) => c.url), ['https://json.test/feed.json', 'https://json.test/favicon.ico'], 'nur der Feed außerhalb der pausierten Gruppe');
+  assert.deepEqual(docsOf(store, feeds.json).map((d) => d.status), ['stapel', 'stapel'], 'Gruppe legt auf den Stapel, der Feed selbst nicht');
+
+  // Zustand: Feeds der pausierten Gruppe zählen als aus, nicht als Fehler.
+  const health = poller.health();
+  assert.equal(health.state, 'ok');
+  assert.equal(health.summary, '4 Feeds, 3 pausiert');
+  assert.deepEqual(health.items.map((i) => [i.name, i.state, i.summary]), [['atom.test', 'off', 'pausiert'], ['blog.test', 'off', 'pausiert'], ['kaputt.test', 'off', 'pausiert'], ['JSON-Seite', 'ok', null]]);
+
+  // Gruppe wieder an: ihre Feeds sind sofort dran.
+  store.updateGroup(paused.id, { paused: false });
+  calls.length = 0;
+  tick(1);
+  await poller.runDue();
+  assert.ok(calls.some((c) => c.url === 'https://blog.test/feed'));
+  assert.equal(docsOf(store, feeds.blog)[0].status, 'eingang');
+});
+
 test('safeFetch: eigene Header gehen mit, 304 kommt ohne Inhaltsprüfung zurück, Antwort-Header sind dabei', async () => {
   const server = http.createServer((req, res) => {
     if (req.headers['if-none-match'] === '"v1"') return res.writeHead(304).end();
@@ -284,15 +310,33 @@ const READER_OPML = `<?xml version="1.0" encoding="UTF-8"?>
   </body>
 </opml>`;
 
-test('OPML: verschachtelte outline werden flach importiert, Export wieder lesbar', () => {
+test('OPML: verschachtelte outline werden flach importiert, je Feed der nächste Ordner als Gruppe, Export wieder lesbar', () => {
   const list = parseOpml(READER_OPML);
   assert.deepEqual(list, [
-    { url: 'https://blog.test/feed', title: 'Blog & Co', site_url: 'https://blog.test/' },
-    { url: 'https://atom.test/feed.xml', title: 'Atom', site_url: null },
-    { url: 'https://json.test/feed.json', title: 'JSON', site_url: null },
+    { url: 'https://blog.test/feed', title: 'Blog & Co', site_url: 'https://blog.test/', group: 'Technik' },
+    { url: 'https://atom.test/feed.xml', title: 'Atom', site_url: null, group: 'Unterordner' },
+    { url: 'https://json.test/feed.json', title: 'JSON', site_url: null, group: null },
   ]);
   assert.throws(() => parseOpml('<rss/>'), /Keine OPML/);
   assert.deepEqual(parseOpml(toOpml(list.map((f) => ({ ...f, title: `${f.title} "<x>"` })))).map((f) => f.title), ['Blog & Co "<x>"', 'Atom "<x>"', 'JSON "<x>"']);
+});
+
+test('OPML: Gruppen als Ordner in ihrer Reihenfolge, Round-Trip ergibt dieselben Gruppen je Feed', () => {
+  const store = createReadingStore({ path: ':memory:' });
+  const { group: b } = store.addGroup({ name: 'Zweite & "<x>"' });
+  const { group: a } = store.addGroup({ name: 'Alpha' });
+  store.addGroup({ name: 'Leer' });
+  store.moveGroup(a.id, -1);
+  for (const [url, group] of [['https://blog.test/feed', b], ['https://atom.test/feed.xml', a], ['https://json.test/feed.json', null], ['https://more.test/feed', a]]) {
+    store.addFeed({ url, title: url.split('/')[2], group_id: group?.id });
+  }
+  const opml = toOpml(store.listFeeds(), { groups: store.listGroups() });
+  assert.ok(opml.indexOf('text="Alpha"') < opml.indexOf('text="Zweite &amp; &quot;&lt;x&gt;&quot;"'), 'Gruppenreihenfolge');
+  assert.ok(!opml.includes('Leer'), 'leere Gruppe ohne Ordner');
+  const back = Object.fromEntries(parseOpml(opml).map((f) => [f.url, f.group]));
+  assert.deepEqual(back, Object.fromEntries(store.listFeeds().map((f) => [f.url, store.getGroup(f.group_id)?.name ?? null])));
+  assert.equal(back['https://blog.test/feed'], 'Zweite & "<x>"');
+  assert.equal(back['https://json.test/feed.json'], null);
 });
 
 // --- Seite ---------------------------------------------------------------------

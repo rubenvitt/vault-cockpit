@@ -15,6 +15,9 @@ import { esc } from '../web/layout.js';
  * neuesten fünf und merkt sich den Rest, damit ein neuer Feed den Eingang nicht
  * flutet.
  *
+ * Pausieren und „direkt auf den Stapel“ wirken, wenn Feed ODER seine Gruppe es
+ * gesetzt hat (VCP-97); eine pausierte Gruppe ruft keinen ihrer Feeds ab.
+ *
  * XML liest linkedom; es löst keine Entitäten aus einer DTD auf (auch keine
  * externen), `&xxe;` bleibt Text. Abgerufen wird nur über `safeFetch`, mit
  * dessen Größen- und Zeitlimit; Inhalte gehen immer durch `sanitizeHtml`.
@@ -260,7 +263,7 @@ export function createFeedPoller({ store, fetchFeed = fetchFeedDefault, fetchPag
         store.rememberEntry(feed.id, entry.key, null);
         continue;
       }
-      const { doc, duplicate } = store.addDocument({ ...(await article(entry, site)), kind: 'feed', origin: `feed:${feed.id}`, status: feed.to_stack ? 'stapel' : 'eingang' });
+      const { doc, duplicate } = store.addDocument({ ...(await article(entry, site)), kind: 'feed', origin: `feed:${feed.id}`, status: feed.to_stack || feed.group_to_stack ? 'stapel' : 'eingang' });
       store.rememberEntry(feed.id, entry.key, doc.id);
       if (!duplicate) added += 1;
     }
@@ -296,7 +299,7 @@ export function createFeedPoller({ store, fetchFeed = fetchFeedDefault, fetchPag
     if (running) return running;
     running = (async () => {
       const t = now();
-      const queue = store.listFeeds().filter((f) => !f.paused && (!f.next_fetch_at || Date.parse(f.next_fetch_at) <= t));
+      const queue = store.listFeeds().filter((f) => !f.paused && !f.group_paused && (!f.next_fetch_at || Date.parse(f.next_fetch_at) <= t));
       let added = 0;
       const worker = async () => {
         // Erst warten, dann addieren: `added += await …` läse den Stand vor dem Warten.
@@ -328,8 +331,8 @@ export function createFeedPoller({ store, fetchFeed = fetchFeedDefault, fetchPag
     // shortcut: Ein dauerhaft toter Feed hält den Dienst auf „Fehler“ (Störung in der Kopfzeile, `degraded`), bis man ihn pausiert oder entfernt; wie bei den Kalendern.
     const items = feeds.map((f) => ({
       name: f.title || hostOf(f.url),
-      state: f.paused ? 'off' : f.error_count ? 'error' : f.last_fetch_at ? 'ok' : 'unknown',
-      summary: f.paused ? 'pausiert' : f.error_count ? `${f.error_count}× fehlgeschlagen` : f.last_fetch_at ? null : 'noch nicht abgerufen',
+      state: f.paused || f.group_paused ? 'off' : f.error_count ? 'error' : f.last_fetch_at ? 'ok' : 'unknown',
+      summary: f.paused || f.group_paused ? 'pausiert' : f.error_count ? `${f.error_count}× fehlgeschlagen` : f.last_fetch_at ? null : 'noch nicht abgerufen',
       lastOkAt: f.error_count ? null : f.last_fetch_at,
       lastErrorAt: f.error_count ? f.last_fetch_at : null,
       lastError: f.error_count ? f.last_error : null,
