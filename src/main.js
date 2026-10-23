@@ -343,6 +343,7 @@ const episodes = createEpisodes({
   dir: process.env.FOLGEN_DIR ?? '/data/folgen',
   store: reading,
   tts: () => cockpitSettings.get().tts,
+  speech,
   voices: () => cockpitSettings.get().episodes,
   writer: createClaudeWriter({ model: () => cockpitSettings.get().episodes.model }),
   capture: (input) => cockpitActions.capture(input),

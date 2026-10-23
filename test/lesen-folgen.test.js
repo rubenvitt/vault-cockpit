@@ -10,6 +10,8 @@ import { parseRange } from '../src/lesen/folgen-page.js';
 import { createClaudeWriter, WriterError } from '../src/lesen/claude.js';
 import { createReadingStore } from '../src/lesen/store.js';
 import { readingRoutes } from '../src/lesen/http.js';
+import { createSpeech } from '../src/lesen/tts.js';
+import { listenAudio } from '../src/lesen/listen.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
 const TTS = { key: 'sk', voice: 'Erz', model: 'eleven_multilingual_v2' };
@@ -44,6 +46,8 @@ function setup(dir, { tts = TTS, writer = null } = {}) {
   const b = store.addDocument({ url: 'https://blatt.test/b', title: 'Vom Hören', status: 'stapel', reading_minutes: 2, content_html: '<p>Hören geht auch.</p>' }).doc;
   const calls = { speech: [], dialogue: [], writes: [], notes: [] };
   const provider = (cfg) => ({
+    name: 'ElevenLabs',
+    id: `el\n${cfg.voice}`,
     synthesize: async (input) => {
       calls.speech.push({ ...input, cfg });
       return Buffer.from(`[${input.text}]`);
@@ -62,10 +66,12 @@ function setup(dir, { tts = TTS, writer = null } = {}) {
     },
   };
   let current = tts;
+  const speech = createSpeech({ settings: () => current, provider, logger: quiet });
   const episodes = createEpisodes({
     dir,
     store,
     tts: () => current,
+    speech,
     voices: () => ({ host: 'Host', guest: 'Gast' }),
     writer: fakeWriter,
     capture: async (input) => {
@@ -76,7 +82,7 @@ function setup(dir, { tts = TTS, writer = null } = {}) {
     logger: quiet,
     now: () => new Date('2026-10-23T10:00:00Z'),
   });
-  return { store, a, b, episodes, calls, setTts: (v) => (current = v) };
+  return { store, a, b, episodes, calls, speech, setTts: (v) => (current = v) };
 }
 
 test('Folgen: Vorlesen spricht die ganzen Texte mit der Erzählerstimme, eine MP3', () =>
@@ -88,12 +94,34 @@ test('Folgen: Vorlesen spricht die ganzen Texte mit der Erzählerstimme, eine MP
     await ep.done;
     const done = episodes.get(ep.id);
     assert.equal(done.status, 'fertig');
-    assert.deepEqual(calls.speech.map((c) => c.text), ['Vom Lesen. Von blatt.test. <break time="1.5s" />', 'Erster Satz hier. Zweiter Satz dort.', 'Vom Hören. <break time="1.5s" />', 'Hören geht auch.']);
-    assert.equal(calls.speech[1].previous, 'Vom Lesen. Von blatt.test. <break time="1.5s" />');
-    assert.equal(String(readFileSync(episodes.audioPath(ep.id))), calls.speech.map((c) => `[${c.text}]`).join(''));
-    assert.equal(done.total, 4);
+    assert.deepEqual(calls.speech.map((c) => c.text), ['Vom Lesen. Von blatt.test. <break time="1.5s" />', 'Erster Satz hier.', 'Zweiter Satz dort.', 'Vom Hören. <break time="1.5s" />', 'Hören geht auch.']);
+    assert.deepEqual([calls.speech[1].previous, calls.speech[1].next], [null, 'Zweiter Satz dort.'], 'Nachbarn wie beim Streamen');
+    assert.equal(String(readFileSync(episodes.audioPath(ep.id))), calls.speech.map((c) => `[${c.text}]`).join(''), 'Reihenfolge bleibt, auch parallel');
+    assert.equal(done.total, 5);
     assert.equal(done.bytes, readFileSync(episodes.audioPath(ep.id)).length);
     assert.equal(episodes.list()[0].id, ep.id);
+  }));
+
+test('Folgen: Vorlesen bezahlt nur, was nicht schon gestreamt oder offline geladen wurde', () =>
+  withDir(async (dir) => {
+    const { store, a, episodes, calls, speech } = setup(dir);
+    // Ersten Satz vorher gestreamt, wie /lesen/hoeren/audio bzw. /api/app/audio.
+    await listenAudio(store, speech, { id: a.id, von: '0', bis: '17' });
+    assert.equal(calls.speech.length, 1);
+    const head = 'Vom Lesen. Von blatt.test. <break time="1.5s" />'.length;
+    const preview = episodes.preview({ kind: 'vorlesen', docIds: [a.id] });
+    assert.equal(preview.chars, head + 'Zweiter Satz dort.'.length, 'Schätzung ohne den gehörten Satz');
+    const ep = episodes.create({ kind: 'vorlesen', docIds: [a.id] });
+    await ep.done;
+    assert.deepEqual(calls.speech.slice(1).map((c) => c.text), ['Vom Lesen. Von blatt.test. <break time="1.5s" />', 'Zweiter Satz dort.'], 'gehörter Satz kommt aus dem Cache');
+    assert.equal(episodes.get(ep.id).chars, preview.chars, 'berechnete Zeichen');
+    assert.equal(String(readFileSync(episodes.audioPath(ep.id))), '[Vom Lesen. Von blatt.test. <break time="1.5s" />][Erster Satz hier.][Zweiter Satz dort.]');
+
+    // Noch einmal: alles im Cache, kostet nichts.
+    const again = episodes.create({ kind: 'vorlesen', docIds: [a.id] });
+    assert.equal(again.chars, 0);
+    await again.done;
+    assert.equal(calls.speech.length, 3);
   }));
 
 test('Folgen: Podcast mit zwei Stimmen über Text-to-Dialogue, Texte gehen an Claude', () =>
