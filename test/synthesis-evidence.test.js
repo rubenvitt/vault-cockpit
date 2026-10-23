@@ -185,3 +185,13 @@ test('Kasten auf der Notizseite und Filter „Passt zu meinem Lesen“ auf /wiss
   assert.equal((await wissenView({ notes: desk }, { lesen: true })).recent.length, 3);
   assert.doesNotMatch(renderWissen(await wissenView({ notes: desk })), /Passt zu meinem Lesen/);
 });
+
+test('Von Hand geänderter Bereich: Anhängen und Rückgängig melden einen Konflikt, die Notiz bleibt', () => {
+  const evidence = evidenceWith(fruitEmbedder());
+  put(OBST, read(OBST).replace('Ein alter Beleg', 'Ein von Hand geänderter Beleg'));
+  const before = read(OBST);
+  for (const run of [() => evidence.attach({ path: OBST, highlightId: hl.fresh.id }), () => evidence.detach({ path: OBST, highlightId: hl.fresh.id })]) {
+    assert.throws(run, (err) => err instanceof ActionError && err.status === 409 && /von Hand/.test(err.message));
+  }
+  assert.equal(read(OBST), before);
+});

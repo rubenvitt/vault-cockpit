@@ -40,6 +40,12 @@ test('Bereich in fremder Notiz: ans Ende, unter eine Überschrift oder mit neuer
     assert.match(read(), /- \[\[B\]\]\n<!-- cockpit:aus-dem-lesestapel:ende [0-9a-f]{8} -->\n\nDarunter von Hand\.\n$/);
     assert.equal(read().match(/## Aus dem Lesestapel/g).length, 1);
 
+    // `expect`: beruht `inner` auf einer älteren Fassung des Bereichs, wird nicht geschrieben.
+    const seen = read();
+    assert.throws(() => write('- [[C]]', { heading: 'Aus dem Lesestapel', expect: '- [[A]]' }), /anderweitig geändert/);
+    assert.equal(read(), seen);
+    assert.equal(write('- [[C]]', { heading: 'Aus dem Lesestapel', expect: '- [[A]]\n- [[B]]' }).state, 'geschrieben');
+
     // Ohne Überschrift: ans Ende der Notiz.
     assert.deepEqual(planSection('# Y\n\nText\n', 'z', 'neu'), { action: 'insert', text: `\n${sectionBlock('z', 'neu')}`, heading: null });
   } finally {

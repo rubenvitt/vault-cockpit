@@ -96,12 +96,15 @@ export function planSection(content, name, inner, { label = null, spaced = false
  * Bereich in die Notiz `path` schreiben: frisch lesen, planen, über den Editor
  * ändern. Liefert `{ state: 'aktuell' | 'geschrieben' | 'übersprungen', reason? }`;
  * Fehler des Editors (Notiz gesperrt, gleichzeitig vom Sync geändert) wirft er
- * weiter. Optionen wie bei `planSection`.
+ * weiter. Optionen wie bei `planSection`. `expect` (Inhalt des Bereichs, auf dem
+ * `inner` beruht, `null` = kein Bereich) wirft, wenn der Bereich inzwischen anders aussieht.
  */
-export function writeSection({ vaultPath, editor, path, name, inner, ...options }) {
+export function writeSection({ vaultPath, editor, path, name, inner, expect = undefined, ...options }) {
   const absolute = join(vaultPath, path);
   if (!realpathSync(absolute).startsWith(realpathSync(vaultPath) + sep)) throw new Error(`„${path}“ zeigt aus dem Vault heraus`);
-  const plan = planSection(readFileSync(absolute, 'utf8'), name, inner, options);
+  const content = readFileSync(absolute, 'utf8');
+  if (expect !== undefined && (findSection(content, name)?.inner ?? null) !== expect) throw new Error(`„${path}“ wurde gerade anderweitig geändert`);
+  const plan = planSection(content, name, inner, options);
   if (plan.action === 'keep') return { state: 'aktuell' };
   if (plan.action === 'skip') return { state: 'übersprungen', reason: plan.reason };
   if (plan.action === 'replace') editor.replace({ path, oldText: plan.oldText, newText: plan.newText });

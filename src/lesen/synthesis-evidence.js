@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { ActionError } from '../cockpit/actions.js';
 import { findSection, writeSection } from '../vault/generated-section.js';
 import { esc, formHead } from '../web/render.js';
@@ -105,12 +107,15 @@ export function createSynthesisEvidence({ notes, index, store, exporter, embedCa
 
   /** Bereich frisch lesen, Einträge über `change(blocks)` ändern (null = nichts zu tun) und schreiben. */
   function rewrite(path, change) {
-    const found = findSection(index.getNote(path)?.content ?? '', SECTION);
-    // Von Hand geändert oder kaputt: `writeSection` lässt den Bereich stehen und nennt den Grund.
-    const blocks = found?.inner && !found.broken && !found.edited ? found.inner.split(/\n{2,}/) : [];
+    // Von der Platte, nicht aus dem Index: dieselbe Fassung, auf der `expect` unten prüft.
+    const found = findSection(readFileSync(join(vaultPath, path), 'utf8'), SECTION);
+    if (found?.broken || found?.edited) {
+      throw new ActionError(found.broken ? 'Die Marker des Bereichs „Aus dem Lesestapel“ sind kaputt; bitte in Obsidian aufräumen' : 'Im Bereich „Aus dem Lesestapel“ wurde von Hand geschrieben; das Cockpit lässt ihn stehen', 409);
+    }
+    const blocks = found?.inner ? found.inner.split(/\n{2,}/) : [];
     const next = change(blocks);
     if (!next) return { state: 'aktuell' };
-    const r = writeSection({ vaultPath, editor, path, name: SECTION, inner: next.join('\n\n'), label: LABEL, spaced: true, heading: HEADING, createHeading: true });
+    const r = writeSection({ vaultPath, editor, path, name: SECTION, inner: next.join('\n\n'), expect: found?.inner ?? null, label: LABEL, spaced: true, heading: HEADING, createHeading: true });
     if (r.state === 'übersprungen') throw new ActionError(r.reason, 409);
     return r;
   }
