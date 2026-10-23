@@ -70,6 +70,8 @@ Betrieb und Pfade im Container (die Compose-Datei setzt sie, sonst passen die St
 | `SYNC_ADAPTER` | `obsidian-headless` (Standard) oder `none` (keine Dateibeobachtung, kein Sync-Status) |
 | `SYNC_STATUS_FILE` | Statusdatei des Sync-Sidecars, z. B. `/sync-status/sync.json` |
 | `CAPTURE_STATE_FILE` | Merkzettel gegen doppelte Aufgaben, Standard `/data/capture-state.json` |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Abo-Token aus `claude setup-token` (ein Jahr gültig) für [Folgen](#lesen) „Podcast“ und „Report“; ohne gibt es nur „Vorlesen“. `ANTHROPIC_API_KEY` reicht das Cockpit bewusst nicht an die CLI weiter |
+| `FOLGEN_DIR` | Folgen (MP3 und Stand), Standard `/data/folgen` |
 | `TTS_CACHE_DIR`, `TTS_CACHE_MB` | Cache der [Stimme vom Server](#lesen) (ein MP3 je Satz), Standard `/data/tts-cache` und 500 MB; darüber fliegen die am längsten nicht gehörten Sätze |
 
 **Übergang für ältere Deployments:** `CAPTURE_TOKEN`, `ZUNDER_URL`/`ZUNDER_TOKEN`,
@@ -100,6 +102,7 @@ Die übrigen lassen sich nicht neu bauen, ohne sie ist alles neu einzurichten:
 | `api-tokens.json` | API-Tokens für Kurzbefehle, Funke und Suche (nur Hashes; fehlen sie, müssen alle Kurzbefehle neue Tokens bekommen) |
 | `capture-state.json` | Merkzettel von Capture und Brücke (keine doppelten Aufgaben, zuletzt gesehene Checkbox-Stände) |
 | `session-secret` | Secret des Sitzungs-Cookies (bei gesetztem `SESSION_SECRET` ohne Bedeutung) |
+| `folgen/` | erzeugte [Folgen](#lesen) als MP3 mit `folgen.json`; fehlen sie, lassen sie sich neu erzeugen, das kostet aber noch einmal Zeichen bei ElevenLabs |
 | `lesestapel.db` | [Lesestapel](#lesen): gespeicherte Artikel samt Text, Markierungen, Feeds (SQLite) |
 
 Die Obsidian-Anmeldung des Sync-Sidecars liegt nicht hier, sondern in
@@ -664,6 +667,33 @@ Kopfhörer), lädt den nächsten Satz schon vorab und den ersten beim Öffnen, d
 „Abspielen“ ihn noch im Tipp startet (sonst bleibt iOS stumm). Tempo über
 `playbackRate`. Lehnt ElevenLabs ab (Kontingent, Key, Stimme) oder fehlt das Netz,
 meldet die Seite das einmal und liest mit der Gerätestimme weiter.
+
+**Folgen** (`/lesen/folgen`, im Stapel „Folge erzeugen“): eine MP3 aus Texten des
+Stapels, im Hintergrund erzeugt. Auf `/lesen/folgen/neu?zeit=30` stehen die Texte
+des Zeitfensters zum Abhaken, die Art und die geschätzten Zeichen bei ElevenLabs.
+
+- **Vorlesen**: die ganzen Texte nacheinander mit der Stimme vom Vorlesen, je Text
+  Titel und Quelle vorweg. Ohne Claude; kostet so viele Zeichen, wie die Texte lang sind.
+- **Podcast** (5, 10 oder 20 Minuten): Claude schreibt ein Gespräch, A moderiert,
+  B ordnet ein; ElevenLabs spricht es mit Text-to-Dialogue (`eleven_v3`, höchstens
+  1800 Zeichen je Anfrage, die Abschnitte hängen in einer MP3 hintereinander).
+  Stimmen unter **Einstellungen → Vorlesen → Folgen** (Standard: Moderation = Stimme
+  vom Vorlesen, Gast „Sarah“ `EXAVITQu4vr4xnSDxMaL`).
+- **Report** (5, 10 oder 20 Minuten): Claude schreibt einen Bericht mit Überblick,
+  Kernaussagen je Text, Querverbindungen und offenen Fragen. Er kommt als Notiz
+  (mit Quellenliste) über die Schnelleingabe in die Vault-Inbox, und eine Stimme
+  liest die Sprechfassung.
+
+Claude läuft über die Claude Code CLI im Container (`claude -p`, im Image
+installiert, Version per Build-Arg `CLAUDE_CODE_VERSION`, leer = ohne) mit dem
+Abo-Token `CLAUDE_CODE_OAUTH_TOKEN`: keine Werkzeuge (`--tools ""`), `--safe-mode`
+(kein CLAUDE.md, keine Hooks, Skills, Plugins oder MCP-Server), leeres
+Arbeitsverzeichnis, die Texte über stdin, das Ergebnis als JSON nach
+`--json-schema`. Modell unter **Einstellungen → Vorlesen → Folgen**, Standard
+`sonnet`, das schont das Abo-Limit. Es entsteht immer nur eine Folge zugleich;
+was ein Neustart unterbricht, steht danach als Fehler da (neu anstoßen kostet
+noch einmal). Die MP3 kommt mit `Range` (`/lesen/folgen/audio?id=…`), damit Safari
+sie spielt und Vorspulen geht.
 
 Kosten: ElevenLabs rechnet nach Zeichen. Ein Text mit 15 Minuten Lesezeit hat
 rund 20 000 Zeichen; mit `eleven_multilingual_v2` kostet das 20 000 Credits, mit
