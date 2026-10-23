@@ -3,6 +3,7 @@ import { zonedParts, zonedToUtc } from '../cockpit/week.js';
 import { esc, assets } from '../web/layout.js';
 import { hidden } from '../web/render.js';
 import { readingPage, saveForm } from './pages.js';
+import { groupChips, groupFilter } from './stack.js';
 
 /**
  * Eingang sortieren (VCP-70): eine Karte nach der anderen, je Karte Weg,
@@ -10,7 +11,9 @@ import { readingPage, saveForm } from './pages.js';
  * Formular. Ohne JavaScript ein Formular mit drei Knöpfen und
  * Weiterleitung; mit JavaScript schickt `/static/cockpit.js` es als JSON
  * (Formular `.act`, mit Rückgängig in der Meldung) und lädt `main` neu,
- * `/static/lesen-eingang.js` macht Wischen und Tasten daraus.
+ * `/static/lesen-eingang.js` macht Wischen und Tasten daraus. `?gruppe=`
+ * schränkt Karte, Zähler und „Heute x von y“ auf eine Feed-Gruppe ein
+ * (VCP-97); `back` und das Neuladen tragen die Query mit.
  */
 
 const SORT = '/aktion/lesen/sortieren';
@@ -65,7 +68,7 @@ const arrow = (a) => `<span aria-hidden="true">${a}</span>`;
 const choice = (ziel, label, key, keys, cls = '') =>
   `<button type="submit" name="ziel" value="${ziel}" class="btn${cls}" aria-keyshortcuts="${keys}">${label} <kbd aria-hidden="true">${key}</kbd></button>`;
 
-export function renderInboxPage({ doc, left, today }, ctx, { getFeed, vault = false }) {
+export function renderInboxPage({ doc, left, today, filter }, ctx, { getFeed, vault = false }) {
   const write = { csrf: ctx.write.csrf, back: ctx.write.back };
   const total = today.count + left;
   const progress = total
@@ -90,7 +93,7 @@ export function renderInboxPage({ doc, left, today }, ctx, { getFeed, vault = fa
     : '';
   const row = undo || file ? `<div class="inbox-row">${undo}${file}</div>` : '';
   const actions = row || decide ? `<div class="inbox-actions">${row}${decide}</div>` : '';
-  const body = `<div class="inbox">${progress}${stack}${actions}</div>
+  const body = `${groupChips('/lesen/eingang', filter)}<div class="inbox">${progress}${stack}${actions}</div>
 <details class="more inbox-save"${doc ? '' : ' open'}><summary>Adresse speichern</summary>${saveForm(ctx)}</details>`;
   return readingPage(ctx, { key: 'eingang', title: 'Eingang', body, scripts: [assets.inbox] });
 }
@@ -100,8 +103,10 @@ export function inboxRoutes({ store, vault = false, now = () => Date.now() }) {
   return {
     pages: {
       '/lesen/eingang': async (ctx) => {
-        const [doc = null] = store.list({ status: 'eingang', limit: 1 });
-        const model = { doc, left: store.counts().eingang, today: store.leftInboxSince(dayStart(now(), ctx.tz)) };
+        const filter = groupFilter(store, ctx.url);
+        const { group } = filter;
+        const [doc = null] = store.list({ status: 'eingang', group, limit: 1 });
+        const model = { doc, left: store.counts({ group }).eingang, today: store.leftInboxSince(dayStart(now(), ctx.tz), { group }), filter };
         return { html: renderInboxPage(model, ctx, { getFeed: store.getFeed, vault }) };
       },
     },

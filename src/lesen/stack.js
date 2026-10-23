@@ -1,12 +1,14 @@
 import { esc } from '../web/layout.js';
 import { hidden } from '../web/render.js';
 import { readingPage } from './pages.js';
+import { NO_FEED } from './store.js';
 
 /**
  * Stapel nach Zeitfenster (VCP-72): `/lesen/stapel?zeit=15` füllt die Zeit
  * mit passenden Texten, ohne `zeit` steht der ganze Stapel da, sortiert nach
  * `?sort=passt|neu|kurz`. Links und je Eintrag „Im Vault ablegen“ als
- * Formular (VCP-96), funktioniert ohne JavaScript.
+ * Formular (VCP-96), funktioniert ohne JavaScript. `?gruppe=` schränkt auf
+ * eine Feed-Gruppe oder „ohne Feed“ ein (VCP-97), auch im Eingang.
  */
 
 export const WINDOWS = [5, 15, 30, 60];
@@ -61,10 +63,31 @@ function stackItem(d, file) {
 
 const list = (docs, file) => `<ul class="lesen-list">${docs.map((d) => stackItem(d, file)).join('')}</ul>`;
 
-const chip = (href, label, current) => `<a href="${href}" class="chip"${current ? ' aria-current="true"' : ''}>${label}</a>`;
+const chip = (href, label, current) => `<a href="${esc(href)}" class="chip"${current ? ' aria-current="true"' : ''}>${label}</a>`;
 
-function windowPicker(zeit) {
-  const links = [chip('/lesen/stapel', 'Alle', !zeit), ...WINDOWS.map((m) => chip(`/lesen/stapel?zeit=${m}`, `${m} Min.`, zeit === m))];
+/** Adresse mit Query; leere Werte fallen weg. */
+const link = (path, params) => {
+  const q = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null)).toString();
+  return q ? `${path}?${q}` : path;
+};
+
+/** `?gruppe=`: eine bekannte Gruppen-ID oder `ohne`, alles andere heißt ungefiltert (`group: null`). */
+export function groupFilter(store, url) {
+  const groups = store.listGroups();
+  const g = url.searchParams.get('gruppe');
+  return { groups, group: g === NO_FEED || groups.some((x) => x.id === g) ? g : null };
+}
+
+/** Chips Alle · je Gruppe · Ohne Feed, nur mit Gruppen oder aktivem Filter; `params` bleiben erhalten. */
+export function groupChips(path, { groups, group }, params = {}) {
+  if (!groups.length && !group) return '';
+  const to = (gruppe) => link(path, { ...params, gruppe });
+  const links = [chip(to(null), 'Alle', !group), ...groups.map((g) => chip(to(g.id), esc(g.name), group === g.id)), chip(to(NO_FEED), 'Ohne Feed', group === NO_FEED)];
+  return `<nav class="chips lesen-gruppe" aria-label="Gruppe">${links.join('')}</nav>`;
+}
+
+function windowPicker(zeit, gruppe) {
+  const links = [chip(link('/lesen/stapel', { gruppe }), 'Alle', !zeit), ...WINDOWS.map((m) => chip(link('/lesen/stapel', { zeit: m, gruppe }), `${m} Min.`, zeit === m))];
   return `<nav class="chips stapel-zeit" aria-label="Zeitfenster">${links.join('')}</nav>`;
 }
 
@@ -83,12 +106,12 @@ function windowBody(docs, zeit, file) {
   ${rest ? `<p class="meta stapel-rest">${rest} weitere warten</p>` : ''}`;
 }
 
-function allBody(docs, sort, file) {
+function allBody(docs, sort, file, gruppe) {
   const all = docs.map((d) => ({ ...d, remaining: remainingMinutes(d) }));
   // `neu`: Reihenfolge aus dem Speicher, neueste zuerst.
   if (sort === 'kurz') all.sort((a, b) => a.remaining - b.remaining);
   if (sort === 'passt') all.sort(fitsNow);
-  const sorter = `<nav class="chips stapel-sort" aria-label="Sortierung">${SORTS.map(([key, label]) => chip(`/lesen/stapel?sort=${key}`, label, sort === key)).join('')}</nav>`;
+  const sorter = `<nav class="chips stapel-sort" aria-label="Sortierung">${SORTS.map(([key, label]) => chip(link('/lesen/stapel', { sort: key, gruppe }), label, sort === key)).join('')}</nav>`;
   return `${sorter}${list(all, file)}`;
 }
 
@@ -101,13 +124,16 @@ export function stackRoutes({ store, vault = false }) {
         const sortParam = ctx.url.searchParams.get('sort');
         const sort = SORTS.some(([key]) => key === sortParam) ? sortParam : 'passt';
         // SQLite: LIMIT -1 heißt ohne Grenze; kurze Texte sollen auch hinter den neuesten 100 passen.
-        const docs = store.list({ status: 'stapel', limit: -1 });
+        const filter = groupFilter(store, ctx.url);
+        const docs = store.list({ status: 'stapel', group: filter.group, limit: -1 });
         // Im Vault ablegen (VCP-96): je Eintrag ein Formular, die Aktion steht in src/lesen/doc.js.
         const file = vault
           ? (d) => `<form method="post" action="/aktion/lesen/ablegen" class="act lesen-ablegen">${hidden({ csrf: ctx.write.csrf, back: ctx.write.back, id: d.id })}<button type="submit" class="btn quiet">Im Vault ablegen<span class="sr-only">: ${esc(d.title || d.url)}</span></button></form>`
           : null;
-        const content = !docs.length ? '<p class="empty">Auf dem Stapel liegt nichts.</p>' : minutes ? windowBody(docs, minutes, file) : allBody(docs, sort, file);
-        return { html: readingPage(ctx, { key: 'stapel', title: 'Stapel', body: `<section>${windowPicker(minutes)}<p class="stapel-hoeren"><a href="/lesen/hoeren?zeit=${minutes ?? 15}" class="btn quiet">Unterwegs hören</a></p>${content}</section>` }) };
+        const content = !docs.length ? '<p class="empty">Auf dem Stapel liegt nichts.</p>' : minutes ? windowBody(docs, minutes, file) : allBody(docs, sort, file, filter.group);
+        const groups = groupChips('/lesen/stapel', filter, { zeit: minutes, sort: sortParam === sort && !minutes ? sort : null });
+        // „Unterwegs hören“ ohne `gruppe`: /lesen/hoeren kennt nur `zeit`.
+        return { html: readingPage(ctx, { key: 'stapel', title: 'Stapel', body: `<section>${groups}${windowPicker(minutes, filter.group)}<p class="stapel-hoeren"><a href="/lesen/hoeren?zeit=${minutes ?? 15}" class="btn quiet">Unterwegs hören</a></p>${content}</section>` }) };
       },
     },
     actions: {},
