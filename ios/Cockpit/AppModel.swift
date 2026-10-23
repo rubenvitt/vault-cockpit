@@ -38,6 +38,10 @@ final class AppModel {
         keychain = KeychainStore(accessGroup: config.keychainGroup)
         // Ohne Token gleich der Login; ist nur das Cookie abgelaufen, fängt die Web-Hülle `/login` ab.
         phase = ((try? keychain.token()) ?? nil) == nil ? .loggedOut : .loggedIn
+        #if DEBUG
+        // Player ohne Anmeldung im Simulator vorführen (`-PlayerDemo`, siehe ios/README.md).
+        if DemoListenService.isRequested { listening = ListenRequest(minutes: 15) }
+        #endif
     }
 
     var startURL: URL {

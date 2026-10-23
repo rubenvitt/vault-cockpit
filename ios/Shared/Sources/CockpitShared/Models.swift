@@ -47,8 +47,8 @@ public struct ListenText: Codable, Equatable, Sendable {
     public let anchor: Int
 }
 
-/// Body für `POST /api/app/markierung`. `cid` macht das Senden idempotent.
-public struct NewHighlight: Encodable, Equatable, Sendable {
+/// Body für `POST /api/app/markierung`. `cid` macht das Senden idempotent. Codable, damit der Player ihn puffern kann.
+public struct NewHighlight: Codable, Equatable, Sendable {
     public let id: String
     public let quote: String
     public let prefix: String?

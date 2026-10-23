@@ -46,8 +46,59 @@ make test      # Unit-Tests auf dem ersten verfügbaren iPhone-Simulator
   ist signiert und ohne Zustand auf dem Server: `POST /logout` löscht es nur im Client, eine Kopie
   gilt bis zum Ablauf oder bis „Überall abmelden“.
 - **Brücke** `cockpit` (`window.webkit.messageHandlers.cockpit`): `/lesen/hoeren` schickt
-  `{type: 'hoeren', zeit}`; die App öffnet `PlayerView(minutes:)`, bis VCP-94 nur ein Platzhalter.
+  `{type: 'hoeren', zeit}`; die App öffnet den nativen Player `PlayerView(minutes:)` (unten).
   Nachrichten nimmt die App nur vom Hauptframe des eigenen Hosts an.
+
+## Player „Unterwegs hören“ (VCP-94)
+
+`speechSynthesis` in der PWA stoppt beim Sperren des Bildschirms, der native Player nicht
+(Hintergrundmodus `audio`). Er öffnet sich über die Brücke und spielt gleich los.
+
+- **Ablauf** wie `src/web/static/lesen-hoeren.js`: Wiedergabeliste aus `GET /api/app/stapel`
+  (5/15/30/60 Min., Start mit `zeit` der Seite), je Text `GET /api/app/text`, satzweise ab dem
+  ersten Satz mit `start >= anchor`. Texte ohne Sätze und gelöschte (404) überspringt er.
+- **Bedienung:** Abspielen/Pause, Satz zurück, nächster Satz, nächster Text, Tempo 0,8–1,8
+  (`UserDefaults`, Schlüssel `player.tempo`), Liste mit Restzeit, „Das hier merken“. Pause bricht
+  den Satz ab, Weiterhören beginnt ihn neu (auch nach Anruf oder abgezogenem Kopfhörer).
+- **Stimme:** beste installierte `de-DE`-Stimme (Premium vor Enhanced, ohne Spaß- und eigene
+  Stimme), sonst die Standardstimme. `AVAudioSession` `.playback`/`.spokenAudio`, aktiv ab dem
+  ersten Satz; bei Pause bleibt sie aktiv, damit Sperrbildschirm und AirPods bei der App bleiben.
+- **Sperrbildschirm:** `MPNowPlayingInfoCenter` mit Titel, Quelle, Dauer und Stelle als Schätzung
+  (15 Zeichen pro Sekunde bei Tempo 1) und Tempo. `MPRemoteCommandCenter`: Play, Pause, Umschalten,
+  nächster Titel = nächster Text, vorheriger Titel = Satz zurück (einen vorigen Text gibt es nicht),
+  `skipBackward`/`skipForward` = Satz zurück/vor, `changePlaybackRate`, `like` und `bookmark` =
+  merken. Mit Skip-Befehlen zeigt der Sperrbildschirm Skip-Knöpfe statt Titel-Knöpfen.
+  AirPods schicken Play/Pause, Doppeltipp (nächster Titel) und Dreifachtipp (vorheriger Titel);
+  `like`/`bookmark` kommen von AirPods nicht, ob Sperrbildschirm oder CarPlay sie anbieten, ist
+  auf dem Gerät noch zu prüfen.
+- **Fortschritt:** nach jedem Satz `POST /api/app/fortschritt`, Anker = Anfang des nächsten
+  Satzes, Fortschritt nie sinkend (der Server nimmt jeden Wert), nach dem letzten Satz 1.
+- **Merken:** markiert den laufenden Satz, Anker wie `anchorAt` in `src/lesen/anchor.js`
+  (`quote`, je 32 Zeichen `prefix`/`suffix`, `start`), `cid` = UUID.
+- **Ohne Netz:** Fortschritt (nur der letzte Stand je Text) und Markierungen (höchstens 100) kommen
+  in einen Puffer in den `UserDefaults` der App Group (`player.pending`) und gehen raus, sobald
+  `NWPathMonitor` wieder Netz meldet, beim nächsten Öffnen des Players oder nach dem nächsten Satz.
+  Andere 4xx-Antworten als 401/429 verwirft der Puffer. Texte lädt der Player erst, wenn er sie
+  braucht: Ohne Netz geht es nach dem laufenden Text nicht weiter.
+- **Zeichen:** Server und Leseansicht zählen in UTF-16 (JS-Strings). `SpeechText` rechnet deshalb
+  über `String.UTF16View`; fällt eine Kontextgrenze mitten in ein Emoji, rückt sie nach innen.
+
+Code in `Cockpit/Player/`: `SpeechText` (Sätze, Anker, Fortschritt), `PlayerMachine`
+(Zustandsmaschine: Ereignisse rein, Wirkungen raus), `PendingListening` (Puffer) sind reine
+Typen mit Tests in `CockpitTests/PlayerTests.swift`. `SpeechOutput` kapselt `AVSpeechSynthesizer`,
+`ListenService` den Server (`APIClient`), `Player` verbindet alles mit dem System.
+
+Im Simulator ohne Anmeldung vorführen (Debug-Build, fester Text statt Server):
+
+```sh
+make build
+xcrun simctl install booted build/Build/Products/Debug-iphonesimulator/Cockpit.app
+xcrun simctl launch booted dev.rubeen.cockpit -PlayerDemo
+```
+
+Der erste Satz braucht im Simulator einige Sekunden, bis die Sprachausgabe geladen ist.
+Nur auf dem Gerät prüfbar: gesperrter Bildschirm, AirPods-Gesten, CarPlay-Audio, Premium-Stimme
+(Einstellungen → Bedienungshilfen → Gesprochene Inhalte → Stimmen → Deutsch laden).
 
 ## `CockpitShared` für Share Extension (VCP-93) und Player (VCP-94)
 
@@ -163,7 +214,7 @@ Per GitHub: Workflow „iOS TestFlight“ manuell starten oder einen Tag `ios/v�
 
 | Ordner | Inhalt |
 | --- | --- |
-| `Cockpit/` | App-Target: SwiftUI, Web-Hülle (VCP-92), Login, Player (VCP-94) |
+| `Cockpit/` | App-Target: SwiftUI, Web-Hülle (VCP-92), Login, Player (VCP-94, `Cockpit/Player/`) |
 | `Shared/` | Lokales Swift Package `CockpitShared`: Konfiguration, Keychain, API-Client. Alles, was App und Extension teilen |
 | `CockpitTests/` | Unit-Tests (laufen in der App als Host) |
 | `ShareExtension/` | Share Extension „Zum Lesestapel“ (VCP-93) |
