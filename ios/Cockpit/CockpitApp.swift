@@ -3,16 +3,32 @@ import SwiftUI
 
 @main
 struct CockpitApp: App {
+    @State private var model = AppModel()
+
     var body: some Scene {
         WindowGroup {
-            StartView(serverURL: AppConfiguration().serverURL)
+            Group {
+                switch model.phase {
+                case .loggedIn:
+                    WebShell(model: model)
+                        .id(model.webViewID)
+                        .ignoresSafeArea()
+                case .loggedOut:
+                    LoginView(model: model)
+                }
+            }
+            .sheet(item: $model.listening) { PlayerView(minutes: $0.minutes) }
+            .confirmationDialog("Cockpit", isPresented: $model.showsMenu) {
+                Button("Abmelden", role: .destructive) { Task { await model.logout() } }
+            } message: {
+                Text("Angemeldet bei \(model.config.serverURL.host() ?? "")")
+            }
         }
     }
 }
 
-/// Platzhalter bis zur Web-Hülle (VCP-92).
-struct StartView: View {
-    let serverURL: URL
+struct LoginView: View {
+    let model: AppModel
 
     var body: some View {
         VStack(spacing: 16) {
@@ -22,15 +38,30 @@ struct StartView: View {
                 .accessibilityHidden(true)
             Text("Cockpit")
                 .font(.largeTitle.bold())
-            Text(serverURL.absoluteString)
+            Text(model.config.serverURL.absoluteString)
                 .font(.footnote.monospaced())
                 .foregroundStyle(.secondary)
-                .accessibilityLabel("Server: \(serverURL.absoluteString)")
+                .accessibilityLabel("Server: \(model.config.serverURL.absoluteString)")
+            Button {
+                Task { await model.login() }
+            } label: {
+                if model.isLoggingIn { ProgressView() } else { Text("Anmelden") }
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(model.isLoggingIn)
+            .padding(.top)
+            if let error = model.loginError {
+                Text(error)
+                    .font(.callout)
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+            }
         }
         .padding()
     }
 }
 
 #Preview {
-    StartView(serverURL: URL(string: "https://vault.rubeen.dev")!)
+    LoginView(model: AppModel(config: AppConfiguration(info: ["CockpitServerURL": "https://vault.rubeen.dev"])))
 }
