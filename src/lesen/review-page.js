@@ -161,10 +161,12 @@ export function reviewRoutes({ store, capture = null, embedder = () => null, onO
     if (!e || items.length < 2 || Date.now() < pausedUntil) return null;
     const key = (h) => `${e.model}\n${h.quote}`;
     const missing = items.filter((h) => !cache.has(key(h)));
+    // Auf einen Auftrag, den eine frühere Anfrage gestartet hat, wartet die Seite nicht (Ollama kann hängen oder ein Modell laden).
+    let job = null;
     if (missing.length && !pending) {
       // shortcut: alles leeren statt verdrängen, wenn der Speicher voll ist; reicht bei Wochen mit wenigen hundert Markierungen.
       if (cache.size > 2000) cache.clear();
-      pending = e
+      job = pending = e
         .embed(missing.map((h) => h.quote))
         .then(
           (vecs) => missing.forEach((h, i) => cache.set(key(h), vecs[i])),
@@ -175,7 +177,7 @@ export function reviewRoutes({ store, capture = null, embedder = () => null, onO
         )
         .finally(() => (pending = null));
     }
-    if (pending) await Promise.race([pending, delay(EMBED_WAIT_MS, null, { ref: false })]);
+    if (job) await Promise.race([job, delay(EMBED_WAIT_MS, null, { ref: false })]);
     return items.every((h) => cache.has(key(h))) ? items.map((h) => cache.get(key(h))) : null;
   }
 

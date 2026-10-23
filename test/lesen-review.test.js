@@ -3,6 +3,11 @@ import assert from 'node:assert/strict';
 import { createReadingStore } from '../src/lesen/store.js';
 import { BOX_DAYS, dueAt, isDue, keep, letGo, findClusters } from '../src/lesen/review.js';
 import { reviewRoutes } from '../src/lesen/review-page.js';
+import { readingRoutes } from '../src/lesen/http.js';
+import { createApp } from '../src/http/app.js';
+import { createWebHttp } from '../src/web/http.js';
+import { createCookieSigner } from '../src/web/session.js';
+import { createSettingsStore } from '../src/cockpit/settings.js';
 
 const DAY = 24 * 60 * 60 * 1000;
 const T0 = Date.parse('2026-10-19T08:00:00.000Z'); // Montag, KW 43
@@ -153,4 +158,76 @@ test('Wiedersehen: Woche mit Themen-Balken, Querverbindung nur mit Embedder, Exp
   assert.match(md.body, /## \[Erster Text\]\(https:\/\/a\.test\/1\)\n\n> Zitat \d/);
   const empty = await withVectors.routes.pages['/lesen/wiedersehen.md'](withVectors.ctx('?woche=2026-W40'));
   assert.match(empty.body, /Keine Markierungen/);
+});
+
+test('Wiedersehen über das Cockpit: ohne JavaScript Behalten → Rückgängig aus der Meldung, Export als Download', async () => {
+  const SECRET = 'x'.repeat(40);
+  let clock = T0;
+  const store = createReadingStore({ path: ':memory:', now: () => clock });
+  const { doc } = store.addDocument({ url: 'https://a.test/1', title: 'Text' });
+  const h = store.addHighlight({ doc_id: doc.id, quote: 'Zitat' });
+  clock += DAY;
+  const webHttp = createWebHttp({
+    cockpit: { week: async () => null },
+    settings: createSettingsStore({ defaults: { tz: 'Europe/Berlin' }, logger: quiet }),
+    reading: readingRoutes({ store, logger: quiet, review: { now: () => clock } }),
+    oidc: {},
+    sessionSecret: SECRET,
+    publicUrl: 'https://vault.test',
+    allowedSubjects: ['ruben'],
+    logger: quiet,
+  });
+  const app = createApp({
+    config: { publicUrl: 'https://vault.test', resource: 'https://vault.test/mcp', issuer: 'https://id.test', supportedScopes: [], allowedHosts: ['vault.test'], trustProxy: true },
+    verifyToken: async () => {
+      throw new Error('nicht benutzt');
+    },
+    mcpHandler: async () => {},
+    webHttp,
+    logger: quiet,
+  });
+  app.listen(0, '127.0.0.1');
+  await new Promise((res) => app.once('listening', res));
+  const base = `http://127.0.0.1:${app.address().port}`;
+  const t = Math.floor(Date.now() / 1000);
+  const jar = { vc_session: createCookieSigner(SECRET).seal({ sub: 'ruben', sid: 's1', gen: 0, iat: t, seen: t, exp: t + 3600 }) };
+  const call = async (path, form = null) => {
+    const headers = { 'x-forwarded-host': 'vault.test', cookie: Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ') };
+    if (form) headers['content-type'] = 'application/x-www-form-urlencoded';
+    const res = await fetch(base + path, { method: form ? 'POST' : 'GET', redirect: 'manual', headers, body: form ? new URLSearchParams(form).toString() : undefined });
+    for (const c of res.headers.getSetCookie()) {
+      const [pair, ...attrs] = c.split('; ');
+      const [k, v] = pair.split('=');
+      if (attrs.includes('Max-Age=0')) delete jar[k];
+      else if (k !== 'vc_session') jar[k] = v;
+    }
+    return res;
+  };
+  try {
+    let html = await (await call('/lesen/wiedersehen')).text();
+    assert.ok(!/style=|<script>/.test(html), 'keine Inline-Styles oder -Skripte');
+    assert.match(html, /<a href="\/lesen\/wiedersehen" class="subnav-link" aria-current="page">Wiedersehen<\/a>/);
+    assert.equal(cardId(html), h.id);
+    assert.doesNotMatch(html, /In eigenen Worten/, 'ohne Inbox kein Textfeld');
+    const csrf = html.match(/name="csrf" value="([^"]+)"/)[1];
+
+    const res = await call('/aktion/lesen/wiedersehen', { csrf, back: '/lesen/wiedersehen', id: h.id, ziel: 'behalten' });
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get('location'), '/lesen/wiedersehen');
+    assert.equal(store.getHighlight(h.id).review_box, 2);
+
+    html = await (await call('/lesen/wiedersehen')).text();
+    assert.match(html, /Nichts fällig/);
+    const undo = html.match(/<form method="post" action="\/aktion\/lesen\/wiedersehen\/zurueck" class="act">(.*?)<\/form>/)[1];
+    const fields = Object.fromEntries([...undo.matchAll(/name="([^"]+)" value="([^"]*)"/g)].map((m) => [m[1], m[2]]));
+    assert.equal((await call('/aktion/lesen/wiedersehen/zurueck', fields)).status, 303);
+    assert.equal(cardId(await (await call('/lesen/wiedersehen')).text()), h.id);
+
+    const md = await call('/lesen/wiedersehen.md?woche=2026-W43');
+    assert.equal(md.status, 200);
+    assert.match(md.headers.get('content-disposition'), /attachment; filename="markierungen-2026-W43\.md"/);
+    assert.match(await md.text(), /> Zitat/);
+  } finally {
+    app.close();
+  }
 });
