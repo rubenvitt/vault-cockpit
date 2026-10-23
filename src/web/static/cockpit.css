@@ -823,6 +823,14 @@ html[data-read-sans] .lesen-text :is(h1, h2, h3, h4, h5, h6) { font-family: var(
   .lesen-links.is-open .lesen-links-close { display: inline-flex; }
 }
 
+/* --- Wissen: Aus dem Lesestapel --- */
+/* Kasten unter einer Synthese (src/lesen/synthesis-evidence.js) und Filter „Passt zu meinem Lesen“ auf /wissen */
+.synth-reading ul { display: grid; gap: var(--s-3); margin: 0; padding: 0; list-style: none; }
+.synth-reading li { display: grid; gap: var(--s-1); overflow-wrap: anywhere; }
+.synth-reading .meta { margin: 0; }
+.synth-reading form { margin: 0; }
+.wissen-form .wissen-check { display: inline-flex; align-items: center; gap: var(--s-1); min-height: 34px; font-size: var(--t-sm); }
+
 /* --- Schmale Bildschirme ------------------------------------------------- */
 @media (max-width: 900px) {
   .feuer, .columns, .settings { grid-template-columns: minmax(0, 1fr); }

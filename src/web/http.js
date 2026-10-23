@@ -20,6 +20,7 @@ import { restoredMessage } from './backup-render.js';
 import { placement } from '../capture/syntax.js';
 import { wissenPage } from './wissen-page.js';
 import { openPoints, SYNTHESIS } from './synthesis-render.js';
+import { evidenceRoutes } from '../lesen/synthesis-evidence.js';
 
 const staticFile = (name, enc) => readFileSync(new URL(`./static/${name}`, import.meta.url), enc);
 const CLIENT_JS = staticFile('cockpit.js', 'utf8');
@@ -158,7 +159,10 @@ for (const [path, file] of offlineFiles(PUBLIC, { html: HTML_HEADERS }).entries)
  *   (verlinkt in den Einstellungen).
  * - `GET /wissen?q=…&art=…&status=…` sucht in den Synthesen (`type: synthesis`),
  *   `POST /aktion/synthese/aufgaben` legt die offenen Punkte einer Synthese
- *   als Zunder-Aufgaben an (je Punkt höchstens einmal).
+ *   als Zunder-Aufgaben an (je Punkt höchstens einmal). Mit `evidence`
+ *   (src/lesen/synthesis-evidence.js) zeigt eine Synthese passende neue
+ *   Markierungen, `POST /aktion/synthese/beleg` hängt eine an, `/wissen?lesen=1`
+ *   filtert danach.
  * - `GET /zustand` zeigt den Zustand der Hintergrunddienste (`health`, siehe
  *   src/health/collect.js); meldet einer einen Fehler, trägt die Kopfzeile der
  *   Wochenansicht einen Hinweis dorthin.
@@ -173,7 +177,7 @@ for (const [path, file] of offlineFiles(PUBLIC, { html: HTML_HEADERS }).entries)
  * Die Sitzung ist ein signiertes Cookie und nur für diese Routen gültig; die
  * MCP-Schnittstelle prüft weiter ausschließlich Bearer-Tokens.
  */
-export function createWebHttp({ cockpit, settings, actions = null, notes = null, plan = null, reading = null, tokens = null, shortcuts = [], captureEnabled = false, calendars = null, graph = null, search = null, health = null, backup = null, restart = () => {}, oidc, sessionSecret, publicUrl, allowedSubjects = [], logger = console, now = () => Date.now() }) {
+export function createWebHttp({ cockpit, settings, actions = null, notes = null, plan = null, reading = null, tokens = null, shortcuts = [], captureEnabled = false, calendars = null, graph = null, search = null, evidence = null, health = null, backup = null, restart = () => {}, oidc, sessionSecret, publicUrl, allowedSubjects = [], logger = console, now = () => Date.now() }) {
   const signer = createCookieSigner(sessionSecret);
   const secure = publicUrl.startsWith('https://');
   const sessions = createSessions({ signer, settings, allowedSubjects, secure, now });
@@ -313,6 +317,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       // Vorschläge zum Ablegen nur für Inbox-Notizen und nur, wenn die Seite schreiben darf.
       suggestions: actions && note.inInbox ? (notes.suggest?.(note.path, related) ?? null) : null,
       zunder: Boolean(actions && settings.get().zunder),
+      evidence: evidence && note.frontmatter?.type === SYNTHESIS ? await evidence.suggest(note.path) : null,
     });
     // Synthesen darf der Service Worker für offline behalten (VCP-80), aber nie mit einem Entwurf im Feld.
     const offline = status === 200 && !kept && !draft && note.path.startsWith(`${SYNTHESIS_FOLDER}/`) ? { [OFFLINE_MARK]: 'lesen' } : {};
@@ -492,6 +497,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
                 const message = r.created ? `Nach Zunder: ${r.created} ${r.created === 1 ? 'Aufgabe' : 'Aufgaben'}${r.existing ? `, ${r.existing} schon dort` : ''}` : 'Alle offenen Punkte sind schon in Zunder';
                 return { message, path: note.path };
               },
+              ...(evidence ? evidenceRoutes(evidence, { logger }) : {}),
               async '/aktion/notiz/checkbox'(form) {
                 const done = form.get('erledigt') === '1';
                 const r = notes.toggle(form.get('pfad'), form.get('n'), form.get('line'), done);
@@ -934,7 +940,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       if (path === '/graph') return graphPage(req, res, url, session);
       if (READING_PAGES[path]) return readingPage(req, res, url, session);
       if (path === '/notiz') return notePage(req, res, url, session);
-      if (path === '/wissen') return send(res, 200, await wissenPage({ notes, search, url, user: session.name ?? session.sub }), url.search ? {} : { [OFFLINE_MARK]: 'lesen' });
+      if (path === '/wissen') return send(res, 200, await wissenPage({ notes, search, evidence, url, user: session.name ?? session.sub }), url.search ? {} : { [OFFLINE_MARK]: 'lesen' });
       if (path === '/rueckblick') return reviewPage(req, res, url, session);
       if (path === '/planen' && plan) return planPage(req, res, url, session);
       if (path === '/zustand' && health) return healthPage(req, res, session);

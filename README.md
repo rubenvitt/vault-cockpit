@@ -408,6 +408,21 @@ Zunder-Inbox an; ein Merkzettel (`capture-state.json`) hält je Notiz und Punkt
 die Aufgabe fest, ein zweiter Klick legt also nichts doppelt an. Ohne
 Zunder-Zugang fehlt der Knopf.
 
+**Aus dem Lesestapel passt dazu:** Unter einer Synthese stehen bis zu fünf
+Markierungen, die seit ihrem `updated` (sonst seit der letzten Änderung der
+Datei) entstanden sind und inhaltlich passen: Kosinus zwischen der Markierung
+und dem ähnlichsten Abschnitt der Synthese im semantischen Index, mindestens
+0,6. Schon verlinkte Markierungen (`#^hl-…` in der Synthese) kommen nicht
+wieder. **Als Beleg anhängen** schreibt nur in den generierten Bereich
+`aus-dem-lesestapel` unter „## Aus dem Lesestapel“ (legt die Überschrift
+notfalls am Ende an): je Beleg das Zitat, darunter `[[lesestapel-notiz#^hl-…]]`
+und die Quelle; die Lesestapel-Notiz entsteht dabei notfalls. Bestehende
+Einträge bleiben, „Rückgängig“ nimmt den Eintrag wieder heraus. Hat der Sync die
+Synthese gerade geändert, kommt eine Meldung und nichts wird geschrieben. Ohne
+Embeddings fehlt der Kasten. Auf `/wissen` zeigt **Passt zu meinem Lesen** nur
+die Synthesen unter den 20 zuletzt bewegten, zu denen es solche Markierungen
+gibt.
+
 **Flammen in der Feuer-Notiz:** Das Cockpit trägt die Flammen der Woche aus
 Zunder in den Abschnitt „## Flammen“ der Feuer-Notiz ein (Tag, Flamme mit Link,
 geplanter Tag aus der Fälligkeit, gemessene Minuten, Status), damit Obsidian

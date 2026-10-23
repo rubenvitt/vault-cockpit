@@ -2,6 +2,7 @@ import { esc, formHead, flashToast, obsidianLink } from './render.js';
 import { renderMarkdown, inlineMd } from './markdown-render.js';
 import { head, appHeader } from './layout.js';
 import { synthesisHead, SYNTHESIS } from './synthesis-render.js';
+import { evidenceBox } from '../lesen/synthesis-evidence.js';
 
 const noteHref = (path) => `/notiz?pfad=${encodeURIComponent(path)}`;
 const graphHref = (path) => `/graph?pfad=${encodeURIComponent(path)}`;
@@ -73,9 +74,10 @@ function suggestSection(s, note, ctx) {
  * Vault lesen, ohne Obsidian zu öffnen. `related` kommt von `notes.related`,
  * `graph` verlinkt den Graphen der Notiz, `suggestions` (nur Inbox) kommt von
  * `notes.suggest`. Eine Synthese (`type: synthesis`) bekommt oben ihren Kopf
- * (siehe `synthesisHead`); `zunder` sagt, ob ein Zunder-Zugang eingerichtet ist.
+ * (siehe `synthesisHead`); `zunder` sagt, ob ein Zunder-Zugang eingerichtet ist,
+ * `evidence` sind passende neue Markierungen (src/lesen/synthesis-evidence.js).
  */
-export function renderNote(note, { user = null, write = null, back = '/', flash = null, draft = null, targets = [], archive = null, vaultName = null, related = null, graph = false, suggestions = null, zunder = false } = {}) {
+export function renderNote(note, { user = null, write = null, back = '/', flash = null, draft = null, targets = [], archive = null, vaultName = null, related = null, graph = false, suggestions = null, zunder = false, evidence = null } = {}) {
   const ctx = { write, back };
   const obsidian = obsidianLink(note.path, vaultName);
   const checkbox = write
@@ -127,6 +129,7 @@ ${appHeader({ user })}
     ${frontmatter(fm, note.links ?? null)}
     <div class="md">${md || '<p class="empty">Die Notiz ist leer.</p>'}</div>
   </article>
+  ${evidenceBox(evidence, note, ctx)}
   ${relatedSection(related)}
   </div>
   ${panel}
