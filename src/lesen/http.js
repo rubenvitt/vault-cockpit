@@ -9,6 +9,7 @@ import { addRoutes } from './add.js';
 import { docRoutes } from './doc.js';
 import { highlightRoutes } from './highlights.js';
 import { reviewRoutes } from './review-page.js';
+import { listenRoutes } from './listen.js';
 
 /**
  * Routen des Bereichs „Lesen“, eingebunden in src/web/http.js (Sitzung, CSRF,
@@ -56,6 +57,7 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
       '/lesen': async () => ({ redirect: '/lesen/eingang' }),
       ...inbox.pages,
       ...stackRoutes({ store }).pages,
+      ...listenRoutes({ store }).pages,
       ...feeds.pages,
       ...doc.pages,
       ...marked.pages,

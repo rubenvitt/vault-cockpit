@@ -98,7 +98,7 @@ export function stackRoutes({ store }) {
         // SQLite: LIMIT -1 heißt ohne Grenze; kurze Texte sollen auch hinter den neuesten 100 passen.
         const docs = store.list({ status: 'stapel', limit: -1 });
         const content = !docs.length ? '<p class="empty">Auf dem Stapel liegt nichts.</p>' : minutes ? windowBody(docs, minutes) : allBody(docs, sort);
-        return { html: readingPage(ctx, { key: 'stapel', title: 'Stapel', body: `<section>${windowPicker(minutes)}${content}</section>` }) };
+        return { html: readingPage(ctx, { key: 'stapel', title: 'Stapel', body: `<section>${windowPicker(minutes)}<p class="stapel-hoeren"><a href="/lesen/hoeren?zeit=${minutes ?? 15}" class="btn quiet">Unterwegs hören</a></p>${content}</section>` }) };
       },
     },
     actions: {},

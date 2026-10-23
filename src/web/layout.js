@@ -11,7 +11,7 @@ export const esc = (s) =>
  * Adressen der eigenen Dateien. `createWebHttp` hängt beim Start einen
  * Inhalts-Hash an, damit nach einem Deploy kein altes CSS aus dem Cache kommt.
  */
-export const assets = { css: '/static/cockpit.css', js: '/static/cockpit.js', graph: '/static/graph.js', graphLib: '/static/vendor/graph-lib.js', offline: '/static/offline.js', inbox: '/static/lesen-eingang.js', lesenDoc: '/static/lesen-doc.js' };
+export const assets = { css: '/static/cockpit.css', js: '/static/cockpit.js', graph: '/static/graph.js', graphLib: '/static/vendor/graph-lib.js', offline: '/static/offline.js', inbox: '/static/lesen-eingang.js', lesenDoc: '/static/lesen-doc.js', lesenHoeren: '/static/lesen-hoeren.js' };
 
 export function versionAssets(versions) {
   for (const [key, v] of Object.entries(versions)) if (v && assets[key]) assets[key] = `${assets[key].split('?')[0]}?v=${v}`;

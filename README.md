@@ -563,6 +563,46 @@ Ausliefern als `<mark>` nur um Textstücke. „In Inbox“ legt das Zitat mit Qu
 über die Schnelleingabe als Notiz in der Vault-Inbox an. Unter **Markiert** stehen
 alle Markierungen, filterbar nach Quelle und Thema.
 
+**Unterwegs hören** (`/lesen/hoeren?zeit=15`, VCP-79, Link auf dem Stapel): Die
+Texte des Zeitfensters werden zur Wiedergabeliste. Vorgelesen wird auf dem Gerät
+mit der Web Speech API (`speechSynthesis`, deutsche Stimme bevorzugt), ohne
+Serverkosten. Bedienung: Abspielen/Pause, Nächster Text, Tempo (0,8× bis 1,8×,
+im Browser gemerkt) und **Das hier merken**, das den gerade gesprochenen Satz
+markiert. Den Text liefert der Server (`/lesen/hoeren/text?id=…`): Lesetext und
+Sätze mit Zeichenpositionen wie in `src/lesen/anchor.js`. Nach jedem Satz
+speichert die Seite den Anfang des nächsten als Lesestelle; die Leseansicht
+springt mit `#weiter` genau dorthin, und das nächste Hören setzt dort fort. Ohne
+JavaScript listet die Seite nur die Texte. Das Zeitfenster rechnet mit 220 Wörtern
+pro Minute; vorgelesen dauert es oft länger.
+
+Was über iOS bekannt ist, und was nicht:
+
+- Bekannt aus Berichten, nicht selbst geprüft: Web-Audio und Sprachausgabe einer
+  Home-Screen-App hören auf, sobald sie nicht mehr im Vordergrund ist oder der
+  Bildschirm sperrt ([WebKit-Bug 198277](https://bugs.webkit.org/show_bug.cgi?id=198277),
+  Stand 2019/2020). Selbst nativ pausiert `AVSpeechSynthesizer` laut einem Bericht
+  beim Sperren und spricht erst nach dem Entsperren weiter
+  ([Apple-Forum](https://developer.apple.com/forums/thread/849627)).
+  `speechSynthesis` unterbricht außerdem andere Medien wie Musik oder Podcasts
+  ([WebKit-Bug 218815](https://bugs.webkit.org/show_bug.cgi?id=218815)).
+- Deshalb hält die Seite beim Abspielen den Bildschirm wach (Screen Wake Lock,
+  falls der Browser ihn kennt). Das hilft nur, solange das Gerät nicht gesperrt
+  und die App vorn ist. Ob Wake Lock in der Home-Screen-App greift, ist **ungeprüft**.
+- Wird die Seite wieder sichtbar und spricht nichts mehr, liest sie den aktuellen
+  Satz neu. Weil jeder Satz erst nach dem vorigen angestoßen wird, hört die
+  Wiedergabe spätestens nach dem laufenden Satz auf, wenn iOS das Script anhält.
+- **Ungeprüft** ist das Verhalten auf aktuellem iOS insgesamt, als Safari-Tab wie
+  als Home-Screen-App. Auf dem iPhone prüfen: Bildschirm mitten im Satz sperren
+  (spricht es weiter, und geht es nach dem Satz weiter?), App wechseln,
+  mit AirPods, Tempo, ob eine deutsche Stimme da ist (Einstellungen →
+  Bedienungshilfen → Gesprochene Inhalte → Stimmen) und ob die Leseansicht danach
+  an der richtigen Stelle steht.
+
+Reicht das für den Spaziergang nicht, ist die Alternative (nicht gebaut): Der
+Server erzeugt je Text eine Audiodatei mit lokalem TTS (z. B. Piper), die Seite
+spielt sie über `<audio>` mit Media Session für die Steuerung im Sperrbildschirm.
+Die Lesestelle käme dann aus Zeitmarken je Satz.
+
 **Wiedersehen** (`/lesen/wiedersehen`, VCP-74) holt Markierungen nach einem
 einfachen Leitner-Schema zurück: Box 1 bis 5 mit 1, 3, 7, 21 und 60 Tagen
 Abstand, eine neue Markierung ist nach einem Tag dran. Je Karte: **Behalten**
