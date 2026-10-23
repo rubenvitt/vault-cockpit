@@ -46,10 +46,12 @@ for (const [net, bits] of [
   ['240.0.0.0', 4], // reserviert, Broadcast
 ]) BLOCKED_V4.addSubnet(net, bits, 'ipv4');
 for (const [net, bits] of [
-  ['::', 128],
-  ['::1', 128],
+  ['::', 96], // unspezifiziert, Loopback und IPv4-kompatibel (::a.b.c.d)
   ['::ffff:0:0', 96], // IPv4-mapped, auch in Hex-Schreibweise
   ['64:ff9b::', 96], // NAT64
+  ['64:ff9b:1::', 48], // NAT64 lokal
+  ['2001::', 32], // Teredo, bettet eine IPv4 ein
+  ['2002::', 16], // 6to4, bettet eine IPv4 ein
   ['100::', 64],
   ['2001:db8::', 32],
   ['fc00::', 7], // unique local

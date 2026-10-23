@@ -107,7 +107,8 @@ export function extractArticle(html, url) {
   const firstParagraph = squash(clean.querySelector('p')?.textContent);
   return {
     url,
-    canonical_url: canonical && canonical !== url && /^https?:/.test(canonical) ? canonical : null,
+    // Nur gleiche Herkunft: Sonst könnte eine Seite sich per Canonical über einen fremden Artikel legen.
+    canonical_url: canonical && canonical !== url && new URL(canonical).origin === new URL(url).origin ? canonical : null,
     title: squash(article?.title) || pageTitle || new URL(url).hostname,
     author: squash(article?.byline) || null,
     site: squash(article?.siteName) || new URL(url).hostname.replace(/^www\./, ''),

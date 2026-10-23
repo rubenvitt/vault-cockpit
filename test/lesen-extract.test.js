@@ -81,3 +81,8 @@ test('Speichern: holt einmal, legt im Eingang ab; dieselbe Adresse oder client_i
   assert.equal(store.list().length, 1);
   await assert.rejects(saveUrl({ store, url: 'ftp://x.test', fetchPage }), /Nur http/);
 });
+
+test('extractArticle: fremde Canonical-URL wird ignoriert', () => {
+  const html = '<!doctype html><html><head><title>T</title><link rel="canonical" href="https://fremd.test/artikel"></head><body><article><p>Text.</p></article></body></html>';
+  assert.equal(extractArticle(html, 'https://beispiel.test/a').canonical_url, null);
+});
