@@ -72,6 +72,10 @@ test('/lesestapel/speichern: Adresse als Text, eigener Titel und Quelle', async 
     assert.equal(text.status, 201);
     assert.equal(store.get((await text.json()).id).url, 'https://blatt.test/lesen');
   });
+  await withApi(async ({ call }) => {
+    // Der Kurzbefehl schickt immer JSON, auch wenn eine App „Titel — Adresse“ teilt.
+    assert.equal((await call({ url: 'Lesenswert — https://blatt.test/lesen' })).status, 201);
+  });
   await withApi(async ({ call, store }) => {
     const res = await call({ url: 'https://blatt.test/lesen', title: 'Mein Titel', source: 'import' });
     const doc = store.get((await res.json()).id);

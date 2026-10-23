@@ -8,17 +8,17 @@ import { createTokenStore } from '../src/cockpit/tokens.js';
 import { createReadingStore, ReadingError } from '../src/lesen/store.js';
 import { readingRoutes } from '../src/lesen/http.js';
 import { createReadingApi } from '../src/lesen/api.js';
-import { savePdf, paragraphsOf, MAX_PDF } from '../src/lesen/pdf.js';
+import { savePdf, paragraphsOf, MAX_PDF, LIMITS } from '../src/lesen/pdf.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
 const SECRET = 'x'.repeat(40);
 
 /** Kleinstes gültiges PDF mit einer Seite; jede Zeile ein Textstück in Helvetica. */
-function makePdf(lines, { title = null } = {}) {
+function makePdf(lines, { title = null, pages = 1 } = {}) {
   const content = `BT /F1 12 Tf 72 720 Td ${lines.map((l, i) => `${i ? '0 -16 Td ' : ''}(${l}) Tj`).join(' ')} ET`;
   const objs = [
     '<< /Type /Catalog /Pages 2 0 R >>',
-    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    `<< /Type /Pages /Kids [${'3 0 R '.repeat(pages).trim()}] /Count ${pages} >>`,
     '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
     `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
     '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
@@ -64,6 +64,17 @@ test('PDF: Text wird Lesetext mit Lesezeit, Titel aus den Metadaten oder dem Dat
   const meta = (await savePdf({ store, data: makePdf(['Anderer Text.'], { title: 'Echter Titel' }), filename: 'x.pdf' })).doc;
   assert.equal(meta.title, 'Echter Titel');
   assert.equal(meta.author, 'Ada');
+});
+
+test('PDF: höchstens LIMITS.pages Seiten, darüber 413 mit verständlicher Meldung', async () => {
+  const store = createReadingStore({ path: ':memory:' });
+  const ok = await savePdf({ store, data: makePdf(['Eine Seite von vielen.'], { pages: LIMITS.pages }) });
+  assert.equal(ok.doc.kind, 'pdf');
+  await assert.rejects(
+    savePdf({ store, data: makePdf(['Eine Seite zu viel.'], { pages: LIMITS.pages + 1 }) }),
+    (e) => e instanceof ReadingError && e.status === 413 && /501 Seiten, höchstens 500/.test(e.message),
+  );
+  assert.equal(store.list().length, 1);
 });
 
 test('PDF: Vertrauensgrenze (keine PDF, kaputt, zu groß, ohne Text)', async () => {

@@ -94,7 +94,8 @@ export function createMailCapture({
           '#ids': { resultOf: 'q', name: 'Email/query', path: '/ids' },
           properties: ['id', 'messageId', 'from', 'subject', 'receivedAt', 'textBody', 'htmlBody', 'bodyValues'],
           fetchTextBodyValues: true,
-          // HTML für Newsletter im Lesestapel; längere Werte schneidet JMAP ab, der Rest ist dann weg.
+          // HTML für Newsletter im Lesestapel.
+          // shortcut: JMAP schneidet Werte über 500 KB ab, der Rest eines langen Newsletters fehlt; bei Bedarf den Blob über downloadUrl holen.
           fetchHTMLBodyValues: Boolean(readingMail),
           maxBodyValueBytes: readingMail ? 500_000 : 100_000,
         },

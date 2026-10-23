@@ -25,7 +25,7 @@ export function readingRoutes({ store, fetchPage = undefined, logger = console }
       return await run();
     } catch (err) {
       if (err instanceof FetchError) throw new ActionError(err.message, err.status);
-      if (err instanceof ReadingError) throw new ActionError(err.message, 400);
+      if (err instanceof ReadingError) throw new ActionError(err.message, err.status ?? 400);
       throw err;
     }
   };

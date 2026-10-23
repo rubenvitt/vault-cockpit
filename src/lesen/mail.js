@@ -56,7 +56,9 @@ export function createMailReader({ store, fetchPage = undefined, logger = consol
     const html = bodyOf(email, email.htmlBody, 'text/html');
     let content = textFields(html ? sanitizeHtml(html) : paragraphs(text));
 
-    const only = /^https?:\/\/\S+$/i.exec((text || content.content_text || subject).trim())?.[0];
+    // Signatur (`-- `) und „Von meinem iPhone gesendet“ zählen nicht mit.
+    const bare = (text || content.content_text || subject).replace(/\n-- ?\n[\s\S]*$/, '').replace(/^(?:Von meinem|Sent from my) .*$/gim, '').trim();
+    const only = /^https?:\/\/\S+$/i.exec(bare)?.[0];
     if (only) {
       try {
         return await saveUrl({ store, url: only, origin: 'mail', clientId, ...(fetchPage ? { fetchPage } : {}) });

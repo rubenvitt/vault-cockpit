@@ -71,8 +71,7 @@ export function createReadingApi({ tokens, store, fetchPage = undefined, logger 
       }
       if (typeof input !== 'object' || input === null || Array.isArray(input)) throw new ApiError('JSON-Objekt erwartet');
     } else if (!PDF.test(type)) {
-      const text = body.toString('utf8');
-      input = { url: text.match(/https?:\/\/\S+/i)?.[0] ?? text.trim() };
+      input = { url: body.toString('utf8') };
     }
     for (const field of ['url', 'title', 'source', 'id']) {
       if (input[field] !== undefined && input[field] !== null && typeof input[field] !== 'string') throw new ApiError(`Feld "${field}" muss Text sein`);
@@ -83,8 +82,10 @@ export function createReadingApi({ tokens, store, fetchPage = undefined, logger 
     if (clientId !== null && !CAPTURE_ID.test(clientId)) throw new ApiError('Ungültige ID (Buchstaben, Ziffern und _ . : -, höchstens 128 Zeichen)');
     const title = (input.title ?? url.searchParams.get('title'))?.trim().slice(0, 300) || null;
     if (PDF.test(type)) return { pdf: body, title, origin, clientId };
-    if (!input.url?.trim()) throw new ApiError('Adresse fehlt');
-    return { url: input.url.trim(), title, origin, clientId };
+    const raw = input.url?.trim();
+    if (!raw) throw new ApiError('Adresse fehlt');
+    // Geteilt wird oft „Titel — https://…“: die erste http(s)-Adresse zählt.
+    return { url: raw.match(/https?:\/\/\S+/i)?.[0] ?? raw, title, origin, clientId };
   }
 
   return {
@@ -107,7 +108,7 @@ export function createReadingApi({ tokens, store, fetchPage = undefined, logger 
         return json(res, duplicate ? 200 : 201, { ok: true, duplicate, id: doc.id, title: doc.title, url: doc.url, kind: doc.kind, message: duplicate ? `Schon im Lesestapel: ${name}` : `Im Lesestapel: ${name}` });
       } catch (err) {
         if (err instanceof ApiError || err instanceof FetchError || err instanceof FormError) return fail(res, err.status, err.message);
-        if (err instanceof ReadingError) return fail(res, 400, err.message);
+        if (err instanceof ReadingError) return fail(res, err.status ?? 400, err.message);
         throw err;
       }
     },

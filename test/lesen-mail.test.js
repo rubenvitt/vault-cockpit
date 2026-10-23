@@ -71,7 +71,7 @@ test('Mail mit nur einer Adresse speichert den Artikel; nicht holbar wird es die
   const page = '<html><head><title>Vom Lesen</title></head><body><article><p>Ein Absatz über das Lesen.</p></article></body></html>';
   const fetchPage = async (url) => (url === 'https://blatt.test/lesen' ? { url, body: page } : safeFetch(url));
   const reader = createMailReader({ store, fetchPage, logger: quiet });
-  const { doc } = await reader.save(mail({ id: 'u1', subject: '[lesen]', text: '  https://blatt.test/lesen \n' }));
+  const { doc } = await reader.save(mail({ id: 'u1', subject: '[lesen]', text: '  https://blatt.test/lesen \n\nVon meinem iPhone gesendet\n-- \nRuben' }));
   assert.equal(doc.url, 'https://blatt.test/lesen');
   assert.equal(doc.kind, 'artikel');
   assert.equal(doc.origin, 'mail');
