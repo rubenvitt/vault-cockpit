@@ -9,7 +9,7 @@ import { addRoutes } from './add.js';
 import { docRoutes, docLink } from './doc.js';
 import { highlightRoutes } from './highlights.js';
 import { reviewRoutes } from './review-page.js';
-import { listenRoutes } from './listen.js';
+import { listenRoutes, listenQueue, listenText } from './listen.js';
 import { connectionRoutes } from './connections.js';
 
 /**
@@ -25,6 +25,7 @@ import { connectionRoutes } from './connections.js';
  *   die Dateien liegen dann in `form.files`.
  *
  * - `offlineDocs(n)`: Links der nächsten `n` Artikel des Stapels (wie „Passt jetzt“) für den Offline-Cache.
+ * - `listen`: Wiedergabeliste und Text zum Vorlesen (src/lesen/listen.js), für die App-API.
  *
  * Eine neue Seite oder Aktion ist ein Eintrag hier (gern aus einer eigenen Datei).
  * `capture` legt Notizen in der Vault-Inbox an („In Inbox“, src/lesen/highlights.js).
@@ -60,6 +61,7 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
 
   return {
     offlineDocs: (n) => upNext(store.list({ status: 'stapel', limit: -1 }), n).map((d) => docLink(d.id)),
+    listen: { queue: (zeit) => listenQueue(store, zeit), text: (id) => listenText(store, id) },
     uploads: { ...add.uploads, ...feeds.uploads },
     pages: {
       ...add.pages,
