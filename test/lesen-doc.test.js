@@ -75,7 +75,7 @@ async function withDoc(run) {
   }
 }
 
-test('Leseansicht: Lesetext, Fortschritt, Archivieren als Formular, Spalten und Kürzel; ohne Inline-Skripte', async () => {
+test('Leseansicht: Lesetext, Fortschritt, „Fertig, weg“ als Formular, Spalten und Kürzel; ohne Inline-Skripte', async () => {
   await withDoc(async ({ call, store, doc, page }) => {
     store.setProgress(doc.id, 0.5, String(htmlText(doc.content_html).indexOf('Ein zweiter')));
     const html = await page();
@@ -85,10 +85,12 @@ test('Leseansicht: Lesetext, Fortschritt, Archivieren als Formular, Spalten und 
     assert.match(html, /<h1>Vom &lt;Lesen&gt; &quot;&gt;&lt;img/);
     assert.match(html, /<progress max="1" value="0.5" aria-label="Gelesen"><\/progress>\s*<span class="meta" data-rest>noch 5 min<\/span>\s*<a href="#weiter"/);
     assert.match(html, /<div class="lesen-text"><h2>Anfang<\/h2><p>Der Stapel wächst &amp; wächst\.<\/p><p><span id="weiter" class="lesen-weiter"><\/span>Ein zweiter/);
-    assert.match(html, /<form method="post" action="\/aktion\/lesen\/doc\/status" class="act" data-archive>[^]*?name="status" value="archiv"[^]*?Archivieren <kbd>E<\/kbd>/);
+    assert.match(html, /<form method="post" action="\/aktion\/lesen\/doc\/fertig" class="act" data-decide="fertig">[^]*?Fertig, weg <kbd>E<\/kbd>/);
+    assert.ok(!html.includes('data-decide="vault"'), 'ohne Lesestapel-Notizen kein „In den Vault“');
+    assert.ok(!html.includes('data-decide="zurueck"'), 'noch nicht entschieden');
     assert.match(html, /aria-label="Bereiche"[^]*aria-label="Stapel"[^]*aria-current="page"/);
     assert.match(html, /Querverbindungen/);
-    for (const k of ['H', 'N', 'L', 'E', 'J / K']) assert.ok(html.includes(`<kbd>${k}</kbd>`), `Kürzel ${k}`);
+    for (const k of ['H', 'N', 'L', 'E', 'V', 'J / K']) assert.ok(html.includes(`<kbd>${k}</kbd>`), `Kürzel ${k}`);
     assert.match(html, /data-cmd="mark"[^]*data-cmd="note"[^]*data-cmd="link"[^]*data-cmd="inbox"/);
 
     assert.equal((await call('/lesen/doc?id=gibtsnicht')).status, 404);

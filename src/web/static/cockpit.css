@@ -624,7 +624,7 @@ main.refreshing { transition: opacity var(--mid); }
 .inbox-empty-title { font-size: var(--t-lg); font-weight: 650; }
 .inbox-actions { display: grid; gap: var(--s-2); }
 .inbox-actions form { margin: 0; }
-.inbox-undo { justify-self: start; }
+.inbox-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
 .inbox-decide { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s-2); }
 .inbox-decide .btn { min-height: 48px; }
 .inbox-weg { color: var(--danger); }
@@ -639,7 +639,7 @@ main.refreshing { transition: opacity var(--mid); }
 /* iPhone: Entscheidung im unteren Drittel über der Leiste, Meldungen darüber */
 @media (max-width: 700px) {
   .inbox-actions { position: fixed; z-index: 10; left: var(--gutter); right: var(--gutter); bottom: calc(var(--tabbar) + env(safe-area-inset-bottom) + var(--s-3)); }
-  .inbox-undo .btn { background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+  .inbox-row .btn { background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
   .inbox-decide .btn { min-height: 60px; font-size: var(--t-base); box-shadow: var(--shadow-2); }
   main.lesen:has(.inbox-actions) { padding-bottom: 150px; }
   body:has(.inbox-actions) .toasts { bottom: calc(var(--tabbar) + env(safe-area-inset-bottom) + 136px); }
@@ -683,7 +683,7 @@ main.lesen-doc { grid-template-columns: 160px 220px minmax(0, 1fr) 280px; align-
 .lesen-progress progress::-webkit-progress-value { background: var(--accent); }
 .lesen-progress progress::-moz-progress-bar { background: var(--accent); }
 .lesen-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s-2); margin-bottom: var(--s-5); }
-.lesen-tools form { margin: 0 0 0 auto; }
+.lesen-tools form { margin: 0; }
 /* Schriftgröße und Schriftart stellt erst das Script ein (lesen-doc.js setzt .lesen-js). */
 .lesen-view { display: none; gap: 2px; }
 .lesen-js .lesen-view { display: flex; }
@@ -830,6 +830,14 @@ html[data-read-sans] .lesen-text :is(h1, h2, h3, h4, h5, h6) { font-family: var(
 .synth-reading .meta { margin: 0; }
 .synth-reading form { margin: 0; }
 .wissen-form .wissen-check { display: inline-flex; align-items: center; gap: var(--s-1); min-height: 34px; font-size: var(--t-sm); }
+
+/* --- Lesen: Entscheiden nach dem Lesen und Ablegen (VCP-96) --- */
+/* Leseansicht: Fertig, weg · In den Vault (mit Volltext) · Zurück; Eingang und Stapel: Im Vault ablegen */
+.lesen-decide { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--s-2); margin-left: auto; }
+.lesen-decide form[data-decide=vault] { display: flex; align-items: center; gap: var(--s-2); }
+.lesen-volltext { display: inline-flex; align-items: center; gap: var(--s-1); min-height: 34px; font-size: var(--t-sm); color: var(--text-2); cursor: pointer; }
+.inbox-ablegen { margin-left: auto; }
+.lesen-ablegen { margin: var(--s-1) 0 0; justify-self: start; }
 
 /* --- Schmale Bildschirme ------------------------------------------------- */
 @media (max-width: 900px) {

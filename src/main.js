@@ -199,7 +199,7 @@ const reading = createReadingStore({ path: join(dirname(COCKPIT_SETTINGS_FILE), 
 // eigenen Abstand (Standard 30 min), Fehler verlängern ihn.
 const feedPoller = createFeedPoller({ store: reading });
 feedPoller.start();
-// Gelesene Texte mit Markierungen als Notiz in den Vault (VCP-75), entprellt;
+// Texte als Notiz in den Vault (VCP-75, VCP-96), Markierungen entprellt;
 // `readingExport.addLink` schreibt Wikilinks zu einer Markierung dorthin.
 const readingExport = createReadingExport({ vaultPath: VAULT_PATH, index, editor, policy: POLICY, store: reading, settings: cockpitSettings });
 const captureHttp = createCaptureHttp({ token: LEGACY_CAPTURE_TOKEN, tokens: apiTokens, router: captureRouter, zunderEnabled: () => Boolean(zunder()) });
@@ -353,6 +353,8 @@ const webHttp = process.env.WEB_CLIENT_ID
         embedCache,
         // Querverbindungen in der Leseansicht (VCP-73): Wikilinks nur in die Lesestapel-Notiz.
         connections: { index, semantic: currentSemantic, policy: POLICY, exporter: readingExport },
+        // „In den Vault“ und „Im Vault ablegen“ (VCP-96) schreiben die Lesestapel-Notiz sofort.
+        exporter: readingExport,
         onChange: (id) => readingExport.changed(id),
       }),
       oidc: createOidcLogin({

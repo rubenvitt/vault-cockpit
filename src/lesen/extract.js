@@ -132,3 +132,124 @@ export function textFields(contentHtml) {
     reading_minutes: wordCount ? readingMinutes(wordCount) : 0,
   };
 }
+
+// --- Lesetext als Markdown (VCP-96) ---------------------------------------------
+
+// Blöcke im gesäuberten HTML; alles andere aus KEEP steht im Fließtext.
+const MD_BLOCKS = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'blockquote', 'pre', 'ul', 'ol', 'li', 'dl', 'dt', 'dd', 'figure', 'figcaption', 'table', 'div', 'section', 'article', 'aside', 'details', 'summary']);
+const MD_WRAP = { strong: '**', b: '**', em: '*', i: '*', s: '~~', del: '~~', mark: '==' };
+
+/** Text, der in Markdown und Obsidian nichts auslöst: kein Tag, keine Formel, kein Wikilink, kein Kommentar, kein Marker. */
+const escapeText = (s) => s.replace(/[\\`*_[\]<>#|~$]/g, '\\$&').replace(/==/g, '=\\=').replace(/%%/g, '%\\%').replace(/&(?=#?\w+;)/g, '\\&');
+
+/** Zeilenanfang, der sonst eine Liste würde (`- `, `+ `, `1. `). */
+const escapeLineStart = (line) => line.replace(/^([-+])(?=\s|$)/, '\\$1').replace(/^(\d+)([.)])(?=\s|$)/, '$1\\$2');
+
+/** Leerraum außerhalb der Auszeichnung, sonst greift `**` nicht. */
+function wrap(mark, s) {
+  const [, lead, core, trail] = /^(\s*)([^]*?)(\s*)$/.exec(s);
+  return core ? `${lead}${mark}${core}${mark}${trail}` : s;
+}
+
+/** Zaun aus `ch`, länger als jede Folge von `ch` im Text, mindestens `min`. */
+const fenceFor = (text, ch, min) => ch.repeat(Math.max(min, ...[...text.matchAll(new RegExp(`\\${ch}+`, 'g'))].map((m) => m[0].length + 1)));
+
+function inlineMd(node) {
+  if (node.nodeType === 3) return escapeText(node.textContent.replace(/\s+/g, ' '));
+  if (node.nodeType !== 1) return '';
+  const tag = node.localName;
+  const inner = () => [...node.childNodes].map(inlineMd).join('');
+  if (tag === 'br') return '\n';
+  if (MD_WRAP[tag]) return wrap(MD_WRAP[tag], inner());
+  if (tag === 'code' || tag === 'kbd' || tag === 'samp') {
+    const text = node.textContent.replace(/\s+/g, ' ');
+    if (!text.trim()) return text;
+    const pad = /^`|`$/.test(text) ? ' ' : '';
+    const fence = fenceFor(text, '`', 1);
+    return `${fence}${pad}${text}${pad}${fence}`;
+  }
+  if (tag === 'a') {
+    const text = inner().replace(/\s+/g, ' ').trim();
+    const href = node.getAttribute('href');
+    if (!href) return text;
+    return `[${text || escapeText(href)}](<${href.replace(/[<>\s]/g, encodeURIComponent)}>)`;
+  }
+  // Ein Block mitten im Fließtext (etwa ein Absatz in einem Link) wird Text.
+  return MD_BLOCKS.has(tag) ? ` ${inner()} ` : inner();
+}
+
+/** Kinder als Markdown-Blöcke; Fließtext zwischen Blöcken wird ein Absatz. */
+function blocksMd(node) {
+  const out = [];
+  let run = '';
+  const flush = () => {
+    const text = run.split('\n').map((l) => escapeLineStart(l.replace(/ {2,}/g, ' ').trim())).filter(Boolean).join('\n');
+    if (text) out.push(text);
+    run = '';
+  };
+  for (const child of node.childNodes) {
+    if (child.nodeType === 1 && MD_BLOCKS.has(child.localName)) {
+      flush();
+      const block = blockMd(child);
+      if (block) out.push(block);
+    } else run += inlineMd(child);
+  }
+  flush();
+  return out;
+}
+
+function listMd(el) {
+  let n = Number(el.getAttribute('start')) || 1;
+  return [...el.children]
+    .filter((li) => li.localName === 'li')
+    .map((li) => {
+      const marker = el.localName === 'ol' ? `${n++}. ` : '- ';
+      // Enge Liste: ein Punkt ohne Leerzeilen, Folgezeilen unter dem Text eingerückt.
+      const lines = blocksMd(li).join('\n').split('\n');
+      return marker + lines.map((l, i) => (i && l ? ' '.repeat(marker.length) + l : l)).join('\n');
+    })
+    .join('\n');
+}
+
+function tableMd(el) {
+  const rows = [...el.querySelectorAll('tr')]
+    .filter((tr) => tr.closest('table') === el)
+    .map((tr) => [...tr.children].map((cell) => blocksMd(cell).join(' ').replace(/\n/g, ' ')));
+  if (!rows.length) return '';
+  const width = Math.max(...rows.map((r) => r.length));
+  const line = (cells) => `| ${Array.from({ length: width }, (_, i) => cells[i] ?? '').join(' | ')} |`;
+  return [line(rows[0]), line(Array(width).fill('---')), ...rows.slice(1).map(line)].join('\n');
+}
+
+function blockMd(el) {
+  const tag = el.localName;
+  const heading = /^h([1-6])$/.exec(tag);
+  if (heading) {
+    // Zwei Ebenen tiefer: Der Text steht unter „## Text“ der Lesestapel-Notiz.
+    const text = inlineMd(el).replace(/\s+/g, ' ').trim();
+    return text && `${'#'.repeat(Math.min(6, Number(heading[1]) + 2))} ${text}`;
+  }
+  if (tag === 'hr') return '---';
+  if (tag === 'pre') {
+    const code = el.textContent.replace(/\n$/, '');
+    const fence = fenceFor(code, '`', 3);
+    return `${fence}\n${code}\n${fence}`;
+  }
+  if (tag === 'ul' || tag === 'ol') return listMd(el);
+  if (tag === 'table') return tableMd(el);
+  const body = blocksMd(el).join('\n\n');
+  return tag === 'blockquote' ? body.split('\n').map((l) => (l ? `> ${l}` : '>')).join('\n') : body;
+}
+
+/**
+ * Gesäubertes HTML (`sanitizeHtml`) als Markdown für den Vault: Absätze,
+ * Überschriften (zwei Ebenen tiefer), Listen, Zitate, Code, Links,
+ * Hervorhebungen, einfache Tabellen; Bilder sind dort schon Links. Zeichen, die
+ * in Markdown oder Obsidian etwas auslösen würden, sind mit `\` maskiert.
+ */
+export function htmlToMarkdown(html) {
+  const { document } = parseHTML(`<!doctype html><html><body>${html ?? ''}</body></html>`);
+  // linkedom teilt Text an Entitäten (`&amp;copy;` → „&“ + „copy;“); zusammengefügt greift das Maskieren.
+  document.body.normalize();
+  return blocksMd(document.body).join('\n\n').trim();
+}

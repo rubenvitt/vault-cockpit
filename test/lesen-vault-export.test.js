@@ -9,7 +9,9 @@ import { createEditor } from '../src/vault/edit.js';
 import { createSettingsStore } from '../src/cockpit/settings.js';
 import { createReadingStore } from '../src/lesen/store.js';
 import { readingRoutes } from '../src/lesen/http.js';
-import { createReadingExport, blockId, parseLinks, slugOf, DEFAULT_FOLDER } from '../src/lesen/vault-export.js';
+import { createReadingExport, blockId, parseLinks, slugOf, DEFAULT_FOLDER, TEXT_SECTION } from '../src/lesen/vault-export.js';
+import { findSection } from '../src/vault/generated-section.js';
+import { sanitizeHtml } from '../src/lesen/extract.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
 const FOLDER = '30-ressourcen/lesestapel';
@@ -73,6 +75,7 @@ lesestapel_id: "${doc.id}"
 quelle: "Blatt"
 url: "https://blatt.test/a"
 gespeichert: 2026-10-20
+lesestatus: gelesen
 gelesen: 2026-10-20
 themen:
   - "Lesen"
@@ -107,16 +110,21 @@ Stimmt.
   assert.equal(exporter.status().lastWrite.path, r.path);
 });
 
-test('Fertig gelesen (Fortschritt 1) reicht auch; Titel doppelt → eigener Dateiname', () => {
+test('Fortschritt 1 allein legt nichts an (erst die Entscheidung, VCP-96); Titel doppelt → eigener Dateiname', () => {
   const { doc: other } = store.addDocument({ url: 'https://blatt.test/b', title: 'Vom Lesen: über Stapel!' });
   for (const d of [doc, other]) {
     store.setProgress(d.id, 1);
     store.addHighlight({ doc_id: d.id, quote: 'Satz' });
     exporter.changed(d.id);
   }
+  assert.deepEqual(exporter.flush().map((r) => r.state), ['wartet', 'wartet']);
+  for (const d of [doc, other]) {
+    store.setStatus(d.id, 'archiv');
+    exporter.changed(d.id);
+  }
   const paths = exporter.flush().map((r) => r.path);
   assert.deepEqual(paths, [`${FOLDER}/vom-lesen-ueber-stapel.md`, `${FOLDER}/vom-lesen-ueber-stapel-${blockId(other.id).slice(3)}.md`]);
-  assert.match(read(paths[0]), /^gelesen: 2026-10-23$/m);
+  assert.match(read(paths[0]), /^gelesen: 2026-10-20$/m);
   assert.equal(slugOf('  ?? '), 'text');
 });
 
@@ -279,7 +287,7 @@ test('Vertraulich: kein Anlegen im vertraulichen Ordner, keine zweite Notiz nach
   for (const folder of ['../raus', '.ablage/x']) assert.throws(() => settings.save({ readingNotes: { folder }, calendars: [] }), /Pfad im Vault/);
 });
 
-test('Verdrahtung: Archivieren, Fortschritt 1 und Markierungs-Aktionen melden das Dokument', async () => {
+test('Verdrahtung: Statuswechsel und Markierungs-Aktionen melden das Dokument, Fortschritt nicht', async () => {
   const seen = [];
   const routes = readingRoutes({ store, onChange: (id) => seen.push(id), logger: quiet });
   const act = (path, fields) => routes.actions[path](new URLSearchParams(fields), { sub: 'ruben' });
@@ -291,7 +299,7 @@ test('Verdrahtung: Archivieren, Fortschritt 1 und Markierungs-Aktionen melden da
   const { highlight } = await act('/aktion/lesen/markierung/neu', { id: doc.id, quote: 'Satz' });
   await act('/aktion/lesen/markierung/notiz', { id: highlight.id, notiz: 'Gut' });
   await act('/aktion/lesen/markierung/loeschen', { id: highlight.id });
-  assert.deepEqual(seen, Array(5).fill(doc.id));
+  assert.deepEqual(seen, Array(4).fill(doc.id));
 });
 
 test('Lesedatum: vorzeitig angelegte Notiz hat kein „gelesen“, beim Abschluss wird es nachgetragen', () => {
@@ -303,6 +311,136 @@ test('Lesedatum: vorzeitig angelegte Notiz hat kein „gelesen“, beim Abschlus
   exporter.flush();
   assert.match(read(r.path), /^gelesen: 2026-10-2\d$/m);
   assert.match(read(r.path), /Verknüpft: \[\[Start\]\]/);
+});
+
+// --- Entscheiden nach dem Lesen (VCP-96) -------------------------------------------
+
+const ARTICLE = sanitizeHtml('<h2>Erster Teil</h2><p>Der Stapel *wächst* &amp; wächst.</p><ul><li>eins</li><li>zwei</li></ul>');
+const decideRoutes = () => {
+  const routes = readingRoutes({ store, exporter, logger: quiet });
+  const act = (path, fields) => routes.actions[path](new URLSearchParams(fields), { sub: 'ruben' });
+  const page = (path, query = '') => routes.pages[path]({ url: new URL(`https://vault.test${path}${query}`), user: 'ruben', tz: 'Europe/Berlin', write: { csrf: 'c', back: path }, flash: null });
+  return { act, page };
+};
+const textOf = (path) => findSection(read(path), TEXT_SECTION)?.inner ?? null;
+const ids = (status) => store.list({ status }).map((d) => d.id);
+
+test('In den Vault: gelesen ohne Markierungen → Notiz mit Kurzfassung, ohne Volltext; mit Häkchen mit Volltext; Rückgängig lässt die Notiz stehen', async () => {
+  store.updateDocument(doc.id, { excerpt: 'Kurz # gesagt, mit [[Link]].', content_html: ARTICLE });
+  const { act, page } = decideRoutes();
+  const { html } = await page('/lesen/doc', `?id=${doc.id}`);
+  assert.match(html, /data-decide="vault">[^]*?<input type="checkbox" name="volltext" value="1"> mit Volltext<\/label><button type="submit" class="btn primary">In den Vault <kbd>V<\/kbd>/);
+
+  const r = await act('/aktion/lesen/doc/vault', { id: doc.id });
+  assert.equal(r.message, 'Im Vault: Vom Lesen: Über Stapel');
+  assert.equal(store.get(doc.id).status, 'archiv');
+  const path = pathOf();
+  const text = read(path);
+  assert.match(text, /^lesestatus: gelesen\ngelesen: 2026-10-20$/m);
+  assert.match(text, /\[Original\]\(<https:\/\/blatt\.test\/a>\)\n\nKurz \\# gesagt, mit \\\[\\\[Link\\\]\\\]\.\n\n## Markierungen\n\n<!-- cockpit:markierungen:start[^]*Keine Markierungen\.[^]*## Eigene Gedanken\n$/);
+  assert.equal(textOf(path), null, 'ohne Häkchen kein Volltext');
+
+  // Rückgängig: zurück auf den Stapel, die Notiz bleibt (und die Meldung sagt es).
+  const undone = await act(r.undo.action, r.undo.fields);
+  assert.equal(store.get(doc.id).status, 'stapel');
+  assert.match(undone.message, /die Notiz im Vault bleibt/);
+  assert.equal(read(path), text);
+
+  const { doc: other } = store.addDocument({ url: 'https://blatt.test/c', title: 'Mit Text', status: 'stapel', content_html: ARTICLE });
+  assert.equal((await act('/aktion/lesen/doc/vault', { id: other.id, volltext: '1' })).message, 'Mit Volltext im Vault: Mit Text');
+  const full = read(exporter.notePath(other.id));
+  assert.match(full, /## Markierungen\n[^]*\n## Text\n\n<!-- cockpit:text:start · Volltext[^]*-->\n\n#### Erster Teil\n\nDer Stapel \\\*wächst\\\* & wächst\.\n\n- eins\n- zwei\n\n<!-- cockpit:text:ende [0-9a-f]{8} -->\n\n## Eigene Gedanken\n$/);
+});
+
+test('Fertig, weg: keine Notiz, auch nach Fortschritt 1 mit Markierungen; raus aus dem Stapel; Rückgängig stellt ihn wieder her', async () => {
+  const { act } = decideRoutes();
+  store.addHighlight({ doc_id: doc.id, quote: 'Stelle' });
+  await act('/aktion/lesen/doc/fortschritt', { id: doc.id, fortschritt: '1' });
+  const r = await act('/aktion/lesen/doc/fertig', { id: doc.id });
+  assert.equal(r.message, 'Fertig, weg: Vom Lesen: Über Stapel');
+  const done = store.get(doc.id);
+  assert.equal(done.status, 'weg');
+  assert.ok(done.read_at, 'gelesen, anders als „Weg“ im Eingang');
+  exporter.changed(doc.id);
+  exporter.flush();
+  assert.equal(pathOf(), null);
+  assert.ok(!existsSync(join(root, FOLDER)));
+  assert.deepEqual(ids('stapel'), []);
+
+  await act(r.undo.action, r.undo.fields);
+  assert.deepEqual(ids('stapel'), [doc.id]);
+
+  // Eine schon geschriebene Notiz bleibt unangetastet.
+  await act('/aktion/lesen/doc/vault', { id: doc.id });
+  const before = read(pathOf());
+  await act('/aktion/lesen/doc/fertig', { id: doc.id });
+  exporter.changed(doc.id);
+  exporter.flush();
+  assert.equal(read(pathOf()), before);
+});
+
+test('Im Vault ablegen aus dem Eingang: Volltext, lesestatus ungelesen, ohne gelesen; weder im Eingang noch im Stapel; Rückgängig', async () => {
+  const { act, page } = decideRoutes();
+  const { doc: fresh } = store.addDocument({ url: 'https://blatt.test/neu', title: 'Neu im Eingang', excerpt: 'Anriss.', content_html: ARTICLE });
+  const inbox = (await page('/lesen/eingang')).html;
+  assert.match(inbox, /<form method="post" action="\/aktion\/lesen\/ablegen" class="act inbox-ablegen">[^]*?name="id" value="[^"]+"[^]*?Im Vault ablegen <kbd aria-hidden="true">A<\/kbd>/);
+  assert.match((await page('/lesen/stapel')).html, /<li class="lesen-item">[^]*?<form method="post" action="\/aktion\/lesen\/ablegen" class="act lesen-ablegen">/);
+
+  const r = await act('/aktion/lesen/ablegen', { id: fresh.id });
+  assert.equal(r.message, 'Im Vault abgelegt: Neu im Eingang');
+  assert.equal(store.get(fresh.id).status, 'abgelegt');
+  assert.equal(store.get(fresh.id).read_at, null);
+  assert.ok(!ids('eingang').includes(fresh.id) && !ids('stapel').includes(fresh.id));
+  const path = exporter.notePath(fresh.id);
+  const text = read(path);
+  assert.match(text, /^lesestatus: ungelesen$/m);
+  assert.doesNotMatch(text, /^gelesen:/m);
+  assert.match(text, /\nAnriss\.\n/);
+  assert.match(textOf(path), /^#### Erster Teil/);
+  assert.equal(idx.getNote(path).frontmatter.lesestatus, 'ungelesen');
+
+  // Rückgängig über den Eingang (Taste Z): wieder im Eingang, die Notiz bleibt.
+  const back = await act('/aktion/lesen/sortieren', { id: fresh.id, ziel: 'eingang' });
+  assert.equal(back.message, 'Zurück im Eingang: Neu im Eingang');
+  assert.ok(ids('eingang').includes(fresh.id));
+  assert.equal(read(path), text);
+  // Nur aus Eingang und Stapel.
+  store.setStatus(fresh.id, 'archiv');
+  await assert.rejects(act('/aktion/lesen/ablegen', { id: fresh.id }), /Liegt nicht mehr in Eingang oder Stapel/);
+});
+
+test('Später gelesen und In den Vault: lesestatus gelesen, gelesen nachgetragen, Volltext unverändert, eigene Gedanken bleiben', async () => {
+  const { act } = decideRoutes();
+  store.updateDocument(doc.id, { content_html: ARTICLE });
+  await act('/aktion/lesen/ablegen', { id: doc.id });
+  const path = pathOf();
+  writeFileSync(join(root, path), `${read(path)}\nMein Gedanke mit [[Start]].\n`);
+  idx.refresh(path);
+  const fullText = textOf(path);
+
+  store.addHighlight({ doc_id: doc.id, quote: 'Der Stapel' });
+  for (const volltext of ['', '1']) {
+    await act('/aktion/lesen/doc/vault', { id: doc.id, volltext });
+    const text = read(path);
+    assert.match(text, /^lesestatus: gelesen$/m);
+    assert.equal(text.match(/^gelesen: .*$/gm).join(), 'gelesen: 2026-10-20');
+    assert.equal(textOf(path), fullText);
+    assert.match(text, /> Der Stapel/);
+    assert.ok(text.endsWith('## Eigene Gedanken\n\nMein Gedanke mit [[Start]].\n'));
+  }
+  assert.equal(store.get(doc.id).status, 'archiv');
+});
+
+test('Volltext nachträglich: vorhandene Notiz bekommt „## Text“ vor „## Eigene Gedanken“, eigene Gedanken bleiben', async () => {
+  const { act } = decideRoutes();
+  store.updateDocument(doc.id, { content_html: ARTICLE });
+  await act('/aktion/lesen/doc/vault', { id: doc.id });
+  const path = pathOf();
+  writeFileSync(join(root, path), `${read(path)}\nMein Gedanke.\n`);
+  idx.refresh(path);
+  await act('/aktion/lesen/doc/vault', { id: doc.id, volltext: '1' });
+  const text = read(path);
+  assert.match(text, /<!-- cockpit:markierungen:ende [0-9a-f]{8} -->\n\n## Text\n\n<!-- cockpit:text:start[^]*<!-- cockpit:text:ende [0-9a-f]{8} -->\n\n## Eigene Gedanken\n\nMein Gedanke\.\n$/);
 });
 
 test('blockId: verschieden auch bei Client-IDs mit gleichem Anfang', () => {
