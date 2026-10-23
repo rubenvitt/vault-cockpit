@@ -241,7 +241,7 @@ HTTP-Status nicht sieht.
 `GET <PUBLIC_URL>/api/search?q=…` mit Header `Authorization: Bearer vct_…`
 durchsucht den Vault für Clients ohne OAuth, nur lesend und nur in eigenen Notizen
 ohne vertrauliche Ordner. Parameter: `q` (Pflicht), `mode` (`hybrid` Standard oder
-`semantic`), `folder`, `limit` (Standard 10, höchstens 50), `offset`. Antwort:
+`semantic`), `folder`, `type` (Frontmatter-`type`, z. B. `synthesis`), `limit` (Standard 10, höchstens 50), `offset`. Antwort:
 `200 {"results":[{"path","title","streams","similarity","score",…}],"total","hasMore","degraded"}`,
 Pfade relativ zum Vault mit `/`. `400` bei falscher Eingabe, `401` ohne gültigen Token. Den Token im Web-Cockpit
 unter **Einstellungen → API-Tokens** anlegen; er wird nur einmal angezeigt, gespeichert
@@ -385,6 +385,18 @@ unter `/rueckblick` (in der Navigation, `?woche=` für frühere Wochen) zeigt je
 Bereich, was erledigt war und was geplant war (Phönix-Schritte und in der Woche
 Fälliges), was außerdem erledigt wurde, die Flammen-Zeit der Woche und was offen
 blieb.
+
+**Wissen:** `/wissen` sucht mit einer Frage in den Synthesen (Frontmatter
+`type: synthesis`, Hybrid-Suche mit Typfilter; `/api/suche` kennt `type` auch),
+filtert nach Querverbindung (`art`) und Status (z. B. Entwurf) und listet die
+zuletzt bewegten nach `updated`; alles über ein GET-Formular ohne JavaScript.
+Eine Synthese zeigt auf ihrer Notizseite oben die Zusammenfassung (`summary`),
+Art, Status und Vertrauen (`confidence`), die Thesen (H2-Überschriften als
+Sprungmarken) und die offenen Punkte (`[TODO …]` im Text und offene Einträge
+unter „Offene Punkte“). **Als Aufgaben nach Zunder** legt sie in der
+Zunder-Inbox an; ein Merkzettel (`capture-state.json`) hält je Notiz und Punkt
+die Aufgabe fest, ein zweiter Klick legt also nichts doppelt an. Ohne
+Zunder-Zugang fehlt der Knopf.
 
 **Flammen in der Feuer-Notiz:** Das Cockpit trägt die Flammen der Woche aus
 Zunder in den Abschnitt „## Flammen“ der Feuer-Notiz ein (Tag, Flamme mit Link,

@@ -104,6 +104,9 @@ export function createNoteDesk({ index, editor, policy, settings, vaultPath = nu
       return suggestFiling({ index, policy, inboxFolder, bridgeTag: bridge?.tag ?? null }, note, similar);
     },
 
+    /** Sichtbare Notizen mit diesem Frontmatter-`type` samt Frontmatter und `updated` (z. B. Synthesen für `/wissen`). */
+    ofType: (type) => index.notesOfType(type).filter((r) => listed(r.path)),
+
     /** Bild aus dem Vault zum Ausliefern öffnen, siehe `createAttachments().open`. */
     openImage: (path) => attachments?.open(path) ?? null,
 

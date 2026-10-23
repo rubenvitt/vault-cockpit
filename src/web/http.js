@@ -18,6 +18,8 @@ import { BackupError, MAX_BACKUP } from '../cockpit/backup.js';
 import { readMultipart, FormError } from './multipart.js';
 import { restoredMessage } from './backup-render.js';
 import { placement } from '../capture/syntax.js';
+import { wissenPage } from './wissen-page.js';
+import { openPoints, SYNTHESIS } from './synthesis-render.js';
 
 const staticFile = (name, enc) => readFileSync(new URL(`./static/${name}`, import.meta.url), enc);
 const CLIENT_JS = staticFile('cockpit.js', 'utf8');
@@ -146,6 +148,9 @@ for (const [path, file] of offlineFiles(PUBLIC, { html: HTML_HEADERS }).entries)
  *   (`restart`); ist es nicht leer, nur mit `ersetzen=1`.
  * - `GET /kurzbefehle/<slug>.shortcut` liefert die signierten iOS-Kurzbefehle
  *   (verlinkt in den Einstellungen).
+ * - `GET /wissen?q=…&art=…&status=…` sucht in den Synthesen (`type: synthesis`),
+ *   `POST /aktion/synthese/aufgaben` legt die offenen Punkte einer Synthese
+ *   als Zunder-Aufgaben an (je Punkt höchstens einmal).
  * - `GET /zustand` zeigt den Zustand der Hintergrunddienste (`health`, siehe
  *   src/health/collect.js); meldet einer einen Fehler, trägt die Kopfzeile der
  *   Wochenansicht einen Hinweis dorthin.
@@ -294,6 +299,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       graph: Boolean(graph),
       // Vorschläge zum Ablegen nur für Inbox-Notizen und nur, wenn die Seite schreiben darf.
       suggestions: actions && note.inInbox ? (notes.suggest?.(note.path, related) ?? null) : null,
+      zunder: Boolean(actions && settings.get().zunder),
     });
     return send(res, status, html);
   }
@@ -459,6 +465,16 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
                 const r = notes.createFeuer(form.get('woche'), form.get('ziel'), form.get('zug'));
                 logger.info?.(`Cockpit: ${r.path} angelegt (${session.sub})`);
                 return { message: `${r.title} angelegt`, path: r.path };
+              },
+              async '/aktion/synthese/aufgaben'(form, session) {
+                const note = notes.get(form.get('pfad'));
+                if (note?.frontmatter.type !== SYNTHESIS) throw new ActionError('Diese Synthese gibt es nicht oder das Cockpit darf sie nicht zeigen', 404);
+                const points = openPoints(note.body);
+                if (!points.length) throw new ActionError('Die Synthese hat keine offenen Punkte');
+                const r = await actions.synthesisTasks({ path: note.path, points });
+                logger.info?.(`Cockpit: ${r.created} offene Punkte aus ${note.path} nach Zunder (${session.sub})`);
+                const message = r.created ? `Nach Zunder: ${r.created} ${r.created === 1 ? 'Aufgabe' : 'Aufgaben'}${r.existing ? `, ${r.existing} schon dort` : ''}` : 'Alle offenen Punkte sind schon in Zunder';
+                return { message, path: note.path };
               },
               async '/aktion/notiz/checkbox'(form) {
                 const done = form.get('erledigt') === '1';
@@ -734,11 +750,11 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     return send(res, 200, renderGraph(g, { vaultName, user, tz, write: writeContext(req), back: url.pathname + url.search, flash: takeFlash(req, res), notes: Boolean(notes) }));
   }
 
-  /** Live-Suche: die besten Treffer, knapp. */
+  /** Live-Suche: die besten Treffer, knapp; `type` filtert nach Frontmatter-`type` (z. B. `synthesis`). */
   async function searchApi(req, res, url) {
     const q = (url.searchParams.get('q') ?? '').trim().slice(0, 500);
     if (!q || !search) return json(res, 200, { query: q, results: [], total: 0 });
-    const r = await search(q);
+    const r = await search(q, { type: url.searchParams.get('type') || null });
     const results = r.results.slice(0, 8).map((x) => ({ path: x.path, title: x.title ?? x.path, snippet: x.snippet ?? null, streams: x.streams ?? [] }));
     return json(res, 200, { query: q, results, total: r.total, degraded: r.degraded ?? null });
   }
@@ -764,6 +780,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   const ACTION_ROUTES = new Set(Object.keys(ACTIONS));
   const SHORTCUT_ROUTES = new Map(shortcuts.map((s) => [`/kurzbefehle/${s.slug}.shortcut`, s]));
   const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...PUBLIC.keys(), '/', '/api/woche', '/api/sitzung', '/api/suche', ...(actions ? ['/api/erfassen/vorschau'] : []), '/rueckblick', ...(notes ? ['/notiz', '/notiz/bild'] : []), ...(plan ? ['/planen'] : []), '/graph', '/api/graph', '/einstellungen', ...(health ? ['/zustand'] : []), ...(tokens ? Object.keys(TOKEN_ROUTES) : []), ...Object.keys(BACKUP_ROUTES), '/einstellungen/abmelden', '/login', '/auth/callback', '/logout']);
+  if (notes) ROUTES.add('/wissen');
 
   return {
     matches: (path) => ROUTES.has(path),
@@ -867,6 +884,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       if (!session) return redirect(res, `/login?next=${encodeURIComponent(url.pathname + url.search)}`);
       if (path === '/graph') return graphPage(req, res, url, session);
       if (path === '/notiz') return notePage(req, res, url, session);
+      if (path === '/wissen') return send(res, 200, await wissenPage({ notes, search, url, user: session.name ?? session.sub }));
       if (path === '/rueckblick') return reviewPage(req, res, url, session);
       if (path === '/planen' && plan) return planPage(req, res, url, session);
       if (path === '/zustand' && health) return healthPage(req, res, session);

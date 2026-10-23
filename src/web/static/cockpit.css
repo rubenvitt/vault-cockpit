@@ -637,3 +637,20 @@ main.refreshing { transition: opacity var(--mid); }
 @media (max-width: 700px) { .page-head .search { max-width: none; flex-basis: 100%; } }
 .page-review .page-head { max-width: 960px; }
 .page-note .page-head { max-width: 1100px; }
+
+/* --- Wissen: Synthesen suchen (/wissen) und Synthese-Kopf auf der Notizseite --- */
+.wissen-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--s-2); flex: 1; max-width: 760px; margin: 0; }
+.wissen-form input[type=search] { flex: 1 1 240px; min-width: 0; }
+.wissen-form label { display: grid; gap: 2px; font-size: var(--t-xs); }
+.page-wissen .results .synth-chips { margin: var(--s-1) 0 0; }
+.synth-head { display: grid; gap: var(--s-3); margin: 0 0 var(--s-4); padding: 0 0 var(--s-4); border-bottom: 1px solid var(--line); }
+.synth-summary { margin: 0; font-size: var(--t-lg); line-height: 1.45; color: var(--text); }
+.synth-chips { display: flex; flex-wrap: wrap; gap: var(--s-2); margin: 0; }
+.synth-chip { display: inline-flex; gap: var(--s-1); align-items: baseline; padding: 2px 10px; font-size: var(--t-sm);
+  background: var(--accent-soft); border: 1px solid var(--accent-line); border-radius: var(--r-full); color: var(--text); }
+.synth-head h2 { margin: 0 0 var(--s-1); }
+.synth-outline ol { margin: 0; padding-left: 22px; }
+.synth-outline li { padding: 2px 0; }
+.synth-open ul { margin: 0 0 var(--s-2); padding-left: 22px; list-style: disc; }
+.synth-open li { padding: 2px 0; overflow-wrap: anywhere; }
+.synth-open form { margin: 0; }

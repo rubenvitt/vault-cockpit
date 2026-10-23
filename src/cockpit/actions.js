@@ -70,6 +70,7 @@ export function createCockpitActions({ vaultPath, settings, policy, state, zunde
     if (!task) throw new ActionError('Zunder hat die Aufgabe nicht zurückgegeben', 502);
     return task;
   };
+  let synthesisQueue = Promise.resolve();
   const summary = (task) => ({
     id: task.id,
     ref: task.ref ?? null,
@@ -185,6 +186,42 @@ export function createCockpitActions({ vaultPath, settings, policy, state, zunde
     async previewCapture(text) {
       const router = createCaptureRouter({ capture: null, zunder: zunder(), state, tz: settings.get().tz, now, logger });
       return router.preview({ text: String(text ?? '').slice(0, 2000) });
+    },
+
+    /**
+     * Offene Punkte einer Synthese als Aufgaben in die Zunder-Inbox. Der
+     * Merkzettel (`state`) hält je Notiz und Punkt die angelegte Aufgabe fest,
+     * gleich nach jedem Anlegen; ein zweiter Klick oder ein neuer Versuch nach
+     * einem Fehler legt nichts doppelt an. Aufrufe laufen nacheinander, damit
+     * auch zwei gleichzeitige Klicks den Merkzettel sehen. Liefert `{ created, existing }`.
+     */
+    synthesisTasks({ path, points }) {
+      const job = async () => {
+        const z = zunderOrFail();
+        const name = path.replace(/\.md$/i, '');
+        let created = 0;
+        let existing = 0;
+        for (const point of points) {
+          // shortcut: Schlüssel ist Pfad + Wortlaut; nach Umbenennen der Notiz oder des Punkts entsteht eine neue Aufgabe, bei Bedarf über Zunder-`vault_links` abgleichen.
+          const key = `synthese:${path}\n${point}`;
+          if (state.get(key)) {
+            existing += 1;
+            continue;
+          }
+          let task;
+          try {
+            task = await z.createTask({ title: point, description: `Offener Punkt aus der Synthese [[${name}]] (\`${path}\`).\n\n_Angelegt im Vault Cockpit_`, vaultLinks: [path] });
+          } catch (err) {
+            throw new ActionError(`${created ? `${created} angelegt, dann: ` : ''}${err.message}`, 502);
+          }
+          state.set(key, task);
+          created += 1;
+        }
+        return { created, existing };
+      };
+      const run = synthesisQueue.then(job);
+      synthesisQueue = run.catch(() => {});
+      return run;
     },
   };
   return { ...actions, capture: singleFlight(actions.capture) };
