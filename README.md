@@ -421,6 +421,9 @@ den Markern leeren). Ändert der Sync die Notiz gleichzeitig, bricht der
 Schreibvorgang ab und der nächste Lauf versucht es wieder. Ohne Feuer-Notiz der
 Woche legt das Cockpit keine an, in vertraulichen Ordnern schreibt es nicht.
 Abschalten unter **Einstellungen → Feuer-Notiz**.
+Die Marker-Mechanik ist allgemein (`src/vault/generated-section.js`, „generierter
+Bereich“ `<!-- cockpit:<name>:start -->` … `<!-- cockpit:<name>:ende <prüfsumme> -->`)
+und taugt auch für andere Notizen, etwa die des Lesestapels.
 
 **Woche planen** (`/planen?woche=…`, verlinkt als „Woche planen“ bei den Big
 Rocks und „Einplanen“ bei den Flammen): Zunder-Aufgaben per Volltext oder
