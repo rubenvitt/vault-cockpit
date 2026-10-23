@@ -23,6 +23,7 @@ import { createTokenStore } from './cockpit/tokens.js';
 import { createBackup } from './cockpit/backup.js';
 import { createReadingStore } from './lesen/store.js';
 import { readingRoutes } from './lesen/http.js';
+import { createReadingApi } from './lesen/api.js';
 import { createOidcLogin } from './web/oidc.js';
 import { createWebHttp } from './web/http.js';
 import { loadShortcuts } from './web/shortcuts.js';
@@ -184,6 +185,8 @@ const LEGACY_CAPTURE_TOKEN = process.env.CAPTURE_TOKEN || null;
 const reading = createReadingStore({ path: join(dirname(COCKPIT_SETTINGS_FILE), 'lesestapel.db') });
 const captureHttp = createCaptureHttp({ token: LEGACY_CAPTURE_TOKEN, tokens: apiTokens, router: captureRouter, zunderEnabled: () => Boolean(zunder()) });
 const captureEnabled = () => Boolean(LEGACY_CAPTURE_TOKEN) || apiTokens.has('capture');
+// Kurzbefehl „Zum Lesestapel“: nur API-Tokens mit dem Recht „Lesestapel“.
+const readingApi = createReadingApi({ tokens: apiTokens, store: reading });
 const searchHttp = createSearchHttp({ tokens: apiTokens, index, semantic: currentSemantic });
 
 // Mail-Abruf: läuft, sobald Token und Absender in den Einstellungen stehen;
@@ -373,6 +376,7 @@ const app = createApp({
     return principal;
   },
   captureHttp,
+  readingApi,
   searchHttp,
   webHttp,
   degraded: () => health.degraded(),
@@ -393,6 +397,7 @@ app.listen(PORT, '0.0.0.0', () => {
   const tokenCount = (scope) => apiTokens.list().filter((t) => t.scope === scope).length;
   console.log(`  Capture     : /capture, /funke (${tokenCount('capture')} Capture-Tokens${LEGACY_CAPTURE_TOKEN ? ' + CAPTURE_TOKEN' : ''})${mail ? `, Mail aus „${mail.status().mailbox}“` : ''}`);
   console.log(`  Suche       : /api/search (${tokenCount('search')} Such-Tokens)`);
+  console.log(`  Lesestapel  : /lesestapel/speichern (${tokenCount('lesestapel')} Lesestapel-Tokens)`);
   const z = zunderSource();
   console.log(`  Zunder      : ${z ? `${z} (! → Inbox, Brücke ${bridgeState()})` : `aus (Einstellungen → Zunder), Brücke ${bridgeState()}`}`);
   const e = cockpitSettings.get().embed;

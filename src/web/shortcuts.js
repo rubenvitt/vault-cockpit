@@ -13,6 +13,11 @@ export const SHORTCUTS = [
     title: 'Sprachmemo ins Cockpit',
     text: 'Nimmt auf, transkribiert auf dem iPhone und legt den Text als Notiz ab.',
   },
+  {
+    slug: 'lesestapel',
+    title: 'Zum Lesestapel',
+    text: 'Aus Safari teilen: Der Artikel landet im Eingang des Lesestapels. Braucht einen Token mit dem Recht „Lesestapel“.',
+  },
 ];
 
 /**

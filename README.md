@@ -549,6 +549,29 @@ von fremden Servern.
 Abhängigkeiten dafür: `@mozilla/readability` und `linkedom` (reines JavaScript,
 feste Versionen).
 
+#### Von außen speichern
+
+Artikel kommen über dieselben Wege wie Notizen in den Eingang (VCP-69):
+
+| Weg | So geht's |
+|---|---|
+| iOS-Kurzbefehl | Unter **Einstellungen → API-Tokens** einen Token mit dem Recht **Lesestapel** anlegen, „Zum Lesestapel“ unter **Einstellungen → Kurzbefehle** laden, importieren und beim Import den Token eintragen. Dann in Safari teilen → „Zum Lesestapel“; die Mitteilung nennt den Titel. |
+
+`POST <PUBLIC_URL>/lesestapel/speichern` mit Header `Authorization: Bearer vct_…`
+nimmt die Adresse als Text (die erste `http(s)`-Adresse darin) oder JSON
+`{"url", "title"?, "source"?, "id"?}`; `source` ist `kurzbefehl` (Standard) oder
+`import`. Mit `id` ist das Speichern idempotent wie bei `/capture`, ohne `id`
+greift die Adresse. Antworten: `201 {"ok","id","title","url","kind","duplicate","message"}`,
+`200` für ein schon gespeichertes Dokument, `400` bei falscher oder lokaler
+Adresse, `401` ohne gültigen Token, `403` für einen Token ohne das Recht
+**Lesestapel** (ein Capture-Token bekommt es nicht automatisch), `413` über 16 KB
+Body. Fehler tragen wie bei `/capture` `status` und `message` im Body. Geholt wird
+über denselben SSRF-geschützten Abruf wie im Formular.
+
+Der Kurzbefehl muss wie die anderen auf einem Mac signiert werden
+(`node scripts/kurzbefehle/build.js`, dann `scripts/kurzbefehle/sign.sh`, siehe
+[Capture](#capture)); bis dahin fehlt er unter **Einstellungen → Kurzbefehle**.
+
 ### Semantische Suche und Graph
 
 Das Cockpit bettet alle eigenen Notizen (ohne Readwise-Importe) abschnittsweise mit

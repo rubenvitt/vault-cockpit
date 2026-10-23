@@ -5,8 +5,9 @@ import { SettingsError, writePrivate } from './settings.js';
 /**
  * API-Tokens, erzeugt auf der Seite `/einstellungen`. Jeder Token hat genau ein
  * Recht (`scope`): `search` für `GET /api/search`, `capture` für `/capture` und
- * `/funke` (iOS-Kurzbefehle, Funke). Tokens aus der Zeit vor den Rechten gelten
- * als `search`.
+ * `/funke` (iOS-Kurzbefehle, Funke), `lesestapel` für `/lesestapel/speichern`
+ * (Artikel und PDFs in den Lesestapel). Tokens aus der Zeit vor den Rechten
+ * gelten als `search`; ein Token bekommt nie nachträglich ein weiteres Recht.
  *
  * Gespeichert wird nur der SHA-256 eines Tokens, nie der Klartext; den sieht
  * man genau einmal direkt nach dem Anlegen. Eigene Datei neben den
@@ -14,7 +15,7 @@ import { SettingsError, writePrivate } from './settings.js';
  */
 
 export const MAX_TOKENS = 20;
-export const SCOPES = ['search', 'capture'];
+export const SCOPES = ['search', 'capture', 'lesestapel'];
 const PREFIX = 'vct_';
 
 const sha256 = (s) => createHash('sha256').update(s).digest();
