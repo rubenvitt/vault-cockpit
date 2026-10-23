@@ -1,0 +1,87 @@
+# Erzeugt Cockpit.xcodeproj mit `make project` (xcodegen). Das .xcodeproj nicht einchecken.
+name: Cockpit
+
+options:
+  bundleIdPrefix: dev.rubeen
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    DEVELOPMENT_TEAM: H95J852PKP
+    CODE_SIGN_STYLE: Automatic
+    MARKETING_VERSION: "1.0"
+    # Build-Nummer: CI bzw. scripts/testflight.sh überschreiben sie per CURRENT_PROJECT_VERSION=…
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.0"
+    # Hier statt im xcconfig, weil dort `//` einen Kommentar beginnt.
+    # Debug-Überschreibung: Config/Local.xcconfig (siehe Local.xcconfig.example).
+    COCKPIT_SERVER_URL: https://vault.rubeen.dev
+
+packages:
+  Shared:
+    path: Shared
+
+targets:
+  Cockpit:
+    type: application
+    platform: iOS
+    sources:
+      - Cockpit
+    configFiles:
+      Debug: Config/Debug.xcconfig
+    dependencies:
+      - package: Shared
+        product: CockpitShared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.rubeen.cockpit
+        PRODUCT_NAME: Cockpit
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_PREVIEWS: YES
+    info:
+      path: Cockpit/Info.plist
+      properties:
+        CFBundleDisplayName: Cockpit
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CockpitServerURL: $(COCKPIT_SERVER_URL)
+        CockpitKeychainGroup: $(AppIdentifierPrefix)dev.rubeen.cockpit.shared
+        CockpitAppGroup: group.dev.rubeen.cockpit
+        CFBundleURLTypes:
+          - CFBundleURLName: dev.rubeen.cockpit
+            CFBundleURLSchemes: [cockpit]
+        UIBackgroundModes: [audio]
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        # Nur für einen lokalen Entwicklungsserver per http (Debug-Überschreibung).
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    entitlements:
+      path: Cockpit/Cockpit.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.dev.rubeen.cockpit
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)dev.rubeen.cockpit.shared
+    scheme:
+      testTargets:
+        - CockpitTests
+
+  CockpitTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - CockpitTests
+    dependencies:
+      - target: Cockpit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.rubeen.cockpit.tests
+        GENERATE_INFOPLIST_FILE: YES
