@@ -177,6 +177,7 @@ test('Kasten auf der Notizseite und Filter „Passt zu meinem Lesen“ auf /wiss
   const items = await evidence.suggest(OBST);
   const html = renderNote(desk.get(OBST), { write: { csrf: 't' }, evidence: items });
   assert.match(html, /Aus dem Lesestapel passt dazu[^]*action="\/aktion\/synthese\/beleg"[^]*name="markierung" value="[^"]+"[^]*Als Beleg anhängen/);
+  assert.doesNotMatch(html, /<li><a href="#h-aus-dem-lesestapel">/, 'der Bereich ist keine These');
 
   const m = await wissenView({ notes: desk, evidence }, { lesen: true });
   assert.deepEqual(m.recent.map((n) => n.path).sort(), ['wiki/obst.md', 'wiki/ohne-datum.md']);

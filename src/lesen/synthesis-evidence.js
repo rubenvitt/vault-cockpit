@@ -129,9 +129,9 @@ export function createSynthesisEvidence({ notes, index, store, exporter, embedCa
     /** Bis zu `limit` passende neue Markierungen `{ id, text, title, href, score }`; leer ohne Embeddings. */
     suggest: async (path, { waitMs } = {}) => (await scan([path], { waitMs })).get(path) ?? [],
 
-    /** Die Synthesen unter `paths` mit mindestens einem Vorschlag (wartet nicht auf Embeddings). */
+    /** Die Synthesen unter `paths` mit mindestens einem Vorschlag; wartet wie `suggest` höchstens kurz auf Embeddings. */
     async matching(paths) {
-      const hits = await scan(paths, { waitMs: 0 });
+      const hits = await scan(paths);
       return new Set([...hits].filter(([, h]) => h.length).map(([p]) => p));
     },
 

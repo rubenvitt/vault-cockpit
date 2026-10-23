@@ -68,7 +68,8 @@ export function synthesisChips({ art = null, status = null, confidence = null })
 export function synthesisHead(note, html, { ctx, zunder = false }) {
   const fm = note.frontmatter ?? {};
   const summary = fmValue(fm.summary);
-  const theses = [...html.matchAll(/<h3 id="([^"]+)">(.*?)<\/h3>/g)].map(([, id, label]) => `<li><a href="#${id}">${label.replace(/<[^>]*>/g, '')}</a></li>`);
+  // Der Bereich mit Belegen aus dem Lesestapel (src/lesen/synthesis-evidence.js) ist keine These.
+  const theses = [...html.matchAll(/<h3 id="([^"]+)">(.*?)<\/h3>/g)].filter(([, , label]) => label !== 'Aus dem Lesestapel').map(([, id, label]) => `<li><a href="#${id}">${label.replace(/<[^>]*>/g, '')}</a></li>`);
   const points = openPoints(note.body);
   const button = points.length && zunder && ctx.write ? `${formHead(ctx, '/aktion/synthese/aufgaben', { pfad: note.path })}<button type="submit" class="chip">Als Aufgaben nach Zunder</button></form>` : '';
   return `<section class="synth-head">
