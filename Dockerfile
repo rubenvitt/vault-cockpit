@@ -8,8 +8,19 @@ COPY . .
 
 FROM node:26-alpine
 ENV NODE_ENV=production
-WORKDIR /app
+# Claude Code CLI für Folgen „Podcast“ und „Report“ (src/lesen/claude.js); leer = ohne.
+ARG CLAUDE_CODE_VERSION=2.1.309
 RUN apk add --no-cache wget && mkdir -p /data && chown node:node /data
+# Unter /tmp installieren: Als root nach / hängt die Installation sonst manchmal.
+WORKDIR /tmp
+RUN if [ -n "$CLAUDE_CODE_VERSION" ]; then \
+      apk add --no-cache libgcc libstdc++ ripgrep && \
+      npm install -g --no-audit --no-fund "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION" && \
+      npm cache clean --force; \
+    fi
+# Systemeigenes ripgrep statt des mitgelieferten (musl).
+ENV USE_BUILTIN_RIPGREP=0 DISABLE_UPDATES=1
+WORKDIR /app
 COPY --from=build --chown=node:node /app /app
 USER node
 EXPOSE 3000

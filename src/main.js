@@ -31,6 +31,8 @@ import { createReadingExport } from './lesen/vault-export.js';
 import { createEmbedCache } from './lesen/embed-cache.js';
 import { createSynthesisEvidence } from './lesen/synthesis-evidence.js';
 import { createSpeech, createSpeechCache } from './lesen/tts.js';
+import { createClaudeWriter } from './lesen/claude.js';
+import { createEpisodes } from './lesen/folgen.js';
 import { createOidcLogin } from './web/oidc.js';
 import { createWebHttp } from './web/http.js';
 import { APP_TEAM_ID, APP_BUNDLE_ID } from './web/app-access.js';
@@ -334,6 +336,18 @@ const cockpitActions = createCockpitActions({
   onFlame: (task) => flameNote.afterFlame(task),
 });
 
+// Folgen aus dem Stapel (Vorlesen, Podcast, Report): ElevenLabs aus den
+// Einstellungen, Claude über die CLI mit CLAUDE_CODE_OAUTH_TOKEN; die MP3s und
+// der Stand liegen unter /data/folgen. Der Report kommt in die Vault-Inbox.
+const episodes = createEpisodes({
+  dir: process.env.FOLGEN_DIR ?? '/data/folgen',
+  store: reading,
+  tts: () => cockpitSettings.get().tts,
+  voices: () => cockpitSettings.get().episodes,
+  writer: createClaudeWriter({ model: () => cockpitSettings.get().episodes.model }),
+  capture: (input) => cockpitActions.capture(input),
+});
+
 // Vault-Notizen ansehen und verarbeiten, über denselben Editor wie vault_edit;
 // Bilder aus dem Vault und ähnliche Notizen für die Vorschau.
 const noteDesk = createNoteDesk({ index, editor, policy: POLICY, settings: cockpitSettings, vaultPath: VAULT_PATH, semantic: currentSemantic });
@@ -364,6 +378,7 @@ const webHttp = process.env.WEB_CLIENT_ID
         capture: (input) => cockpitActions.capture(input),
         embedCache,
         speech,
+        episodes,
         // Querverbindungen in der Leseansicht (VCP-73): Wikilinks nur in die Lesestapel-Notiz.
         connections: { index, semantic: currentSemantic, policy: POLICY, exporter: readingExport },
         // „In den Vault“ und „Im Vault ablegen“ (VCP-96) schreiben die Lesestapel-Notiz sofort.
@@ -460,6 +475,7 @@ app.listen(PORT, '0.0.0.0', () => {
   const e = cockpitSettings.get().embed;
   console.log(`  Semantik    : ${e ? `${e.model} über ${e.url}` : 'aus (Einstellungen → Embeddings)'}`);
   const t = cockpitSettings.get().tts;
+  console.log(`  Folgen      : ${process.env.CLAUDE_CODE_OAUTH_TOKEN ? 'Vorlesen, Podcast und Report' : 'nur Vorlesen (Podcast und Report brauchen CLAUDE_CODE_OAUTH_TOKEN)'}`);
   console.log(`  Vorlesen    : ${t ? `ElevenLabs (${t.model}, Stimme ${t.voice})` : 'Gerätestimme (Einstellungen → Vorlesen)'}`);
   console.log(`  Cockpit     : ${webHttp ? `${PUBLIC_URL}/ (${cockpitSettings.get().calendars.length} Kalender, Einstellungen unter /einstellungen)` : 'aus (WEB_CLIENT_ID)'}`);
 });

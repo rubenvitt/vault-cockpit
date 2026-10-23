@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { ELEVENLABS_VOICE, ELEVENLABS_MODEL } from '../lesen/tts.js';
+import { ELEVENLABS_VOICE, ELEVENLABS_MODEL, ELEVENLABS_GUEST_VOICE } from '../lesen/tts.js';
 
 /**
  * Einstellungen des Web-Cockpits, gepflegt auf der Seite `/einstellungen` und
@@ -40,6 +40,7 @@ const EMPTY = {
   mail: { token: null, senders: [], mailbox: null, doneMailbox: null, pollMinutes: null },
   embed: { url: null, model: null },
   tts: { provider: null, key: null, voice: null, model: null },
+  episodes: { host: null, guest: null, model: null },
   calendars: [],
   hiddenEvents: null,
   session: { idleDays: null, maxDays: null, generation: 0 },
@@ -133,6 +134,16 @@ export function validateSettings(input) {
   if (ttsModel && !MODEL_ID.test(ttsModel)) throw new SettingsError('Sprachmodell: die Model-ID aus ElevenLabs, z. B. eleven_multilingual_v2');
   const tts = { provider, key: text(input.tts?.key, 200, 'ElevenLabs-API-Key'), voice, model: ttsModel };
 
+  // Folgen: Stimmen im Podcast und Claude-Modell (Alias wie sonnet oder ein voller Name).
+  const voiceOf = (v, what) => {
+    const s = text(v, 64, what);
+    if (s && !VOICE_ID.test(s)) throw new SettingsError(`${what}: die Voice-ID aus ElevenLabs (nur Buchstaben und Ziffern)`);
+    return s;
+  };
+  const claudeModel = text(input.episodes?.model, 64, 'Claude-Modell');
+  if (claudeModel && !MODEL_ID.test(claudeModel)) throw new SettingsError('Claude-Modell: ein Alias wie sonnet oder opus oder ein voller Modellname');
+  const episodes = { host: voiceOf(input.episodes?.host, 'Moderation'), guest: voiceOf(input.episodes?.guest, 'Gast'), model: claudeModel };
+
   const calendars = (input.calendars ?? []).map((c, i) => {
     const label = `Kalender ${i + 1}`;
     const name = text(c.name, 80, `Name von ${label}`);
@@ -158,7 +169,7 @@ export function validateSettings(input) {
     ? [...new Set(input.hiddenEvents.map((t) => text(t, 200, 'Ausgeblendeter Termin')).filter(Boolean))].slice(0, 50)
     : null;
 
-  return { tz, vaultName: text(input.vaultName, 200, 'Vault-Name'), inboxFolder, zunder: { url: zunderUrl, token: zunderToken }, bridge, flameNote, readingNotes: { folder: readingFolder }, mail, embed, tts, calendars, hiddenEvents, session: validateSession(input.session) };
+  return { tz, vaultName: text(input.vaultName, 200, 'Vault-Name'), inboxFolder, zunder: { url: zunderUrl, token: zunderToken }, bridge, flameNote, readingNotes: { folder: readingFolder }, mail, embed, tts, episodes, calendars, hiddenEvents, session: validateSession(input.session) };
 }
 
 const days = (v, what) => {
@@ -221,6 +232,8 @@ export function createSettingsStore({ file = null, defaults = {}, logger = conso
     elevenlabsKey: null,
     elevenlabsVoice: ELEVENLABS_VOICE,
     elevenlabsModel: ELEVENLABS_MODEL,
+    episodeGuestVoice: ELEVENLABS_GUEST_VOICE,
+    episodeModel: 'sonnet',
     sessionIdleDays: 30,
     sessionMaxDays: 90,
     ...defaults,
@@ -269,6 +282,12 @@ export function createSettingsStore({ file = null, defaults = {}, logger = conso
           ttsProvider === 'elevenlabs' && ttsKey
             ? { provider: 'elevenlabs', key: ttsKey, voice: tts.voice ?? d.elevenlabsVoice, model: tts.model ?? d.elevenlabsModel, source: tts.key ? 'einstellungen' : 'umgebung' }
             : null,
+        // Moderation spricht mit der Stimme vom Vorlesen, solange keine eigene gewählt ist.
+        episodes: {
+          host: stored.episodes?.host ?? tts.voice ?? d.elevenlabsVoice,
+          guest: stored.episodes?.guest ?? d.episodeGuestVoice,
+          model: stored.episodes?.model ?? d.episodeModel,
+        },
         calendars: stored.calendars,
         hiddenEvents: stored.hiddenEvents ?? DEFAULT_HIDDEN_EVENTS,
         // Ohne Nutzung nie länger als die Obergrenze.

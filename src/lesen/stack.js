@@ -115,7 +115,7 @@ function allBody(docs, sort, file, gruppe) {
   return `${sorter}${list(all, file)}`;
 }
 
-export function stackRoutes({ store, vault = false }) {
+export function stackRoutes({ store, vault = false, folgen = false }) {
   return {
     pages: {
       async '/lesen/stapel'(ctx) {
@@ -133,7 +133,7 @@ export function stackRoutes({ store, vault = false }) {
         const content = !docs.length ? '<p class="empty">Auf dem Stapel liegt nichts.</p>' : minutes ? windowBody(docs, minutes, file) : allBody(docs, sort, file, filter.group);
         const groups = groupChips('/lesen/stapel', filter, { zeit: minutes, sort: sortParam === sort && !minutes ? sort : null });
         // „Unterwegs hören“ ohne `gruppe`: /lesen/hoeren kennt nur `zeit`.
-        return { html: readingPage(ctx, { key: 'stapel', title: 'Stapel', body: `<section>${groups}${windowPicker(minutes, filter.group)}<p class="stapel-hoeren"><a href="/lesen/hoeren?zeit=${minutes ?? 15}" class="btn quiet">Unterwegs hören</a></p>${content}</section>` }) };
+        return { html: readingPage(ctx, { key: 'stapel', title: 'Stapel', body: `<section>${groups}${windowPicker(minutes, filter.group)}<p class="stapel-hoeren"><a href="/lesen/hoeren?zeit=${minutes ?? 15}" class="btn quiet">Unterwegs hören</a>${folgen ? ` <a href="/lesen/folgen/neu?zeit=${minutes ?? 30}" class="btn quiet">Folge erzeugen</a>` : ''}</p>${content}</section>` }) };
       },
     },
     actions: {},

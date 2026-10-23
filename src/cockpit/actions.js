@@ -151,8 +151,9 @@ export function createCockpitActions({ vaultPath, settings, policy, state, zunde
      * Nachsenden aus dem Offline-Puffer die ID des Eintrags) macht doppeltes
      * Absenden harmlos. Liefert das Ergebnis des Capture-Routers.
      */
-    async capture({ text, captureId = null }) {
-      const url = saveArticle ? articleUrl(text) : null;
+    /** `title` nur für Notizen (z. B. Report einer Folge); ohne heißt die Notiz nach Quelle und Zeit. */
+    async capture({ text, title = null, captureId = null }) {
+      const url = saveArticle && !title ? articleUrl(text) : null;
       if (url) {
         if (captureId && !CAPTURE_ID.test(captureId)) throw new ActionError('Ungültige Capture-ID');
         let saved;
@@ -183,7 +184,7 @@ export function createCockpitActions({ vaultPath, settings, policy, state, zunde
       });
       let result;
       try {
-        result = await router.route({ text, source: 'cockpit', captureId: captureId || null });
+        result = await router.route({ text, ...(title ? { title } : {}), source: 'cockpit', captureId: captureId || null });
       } catch (err) {
         if (err instanceof CaptureError) {
           if (err.status === 503) throw new ActionError('Für Aufgaben mit ! fehlt der Zunder-Zugang (Einstellungen → Zunder)', 503);

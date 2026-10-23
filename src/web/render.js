@@ -712,6 +712,13 @@ ${backupHint(backup)}
     </div>
   </details>
   ${tts.key ? '<label class="checkline"><input type="checkbox" name="tts.clear" value="1"> eigenen Key löschen</label>' : ''}
+  <h3>Folgen</h3>
+  <p class="meta">Podcast und Report aus dem Stapel (Lesen → Folgen). Claude schreibt sie über die Claude Code CLI mit deinem Abo; den Token aus <code>claude setup-token</code> bekommt das Deployment als <code>CLAUDE_CODE_OAUTH_TOKEN</code>. Ohne eigene Stimme moderiert die Stimme vom Vorlesen.</p>
+  <div class="grid">
+    <label><span>Moderation <span class="hint">Voice-ID</span></span><input name="episodes.host" value="${esc(stored.episodes?.host ?? '')}" placeholder="${esc(tts.voice ?? d.elevenlabsVoice ?? '')}"></label>
+    <label><span>Gast <span class="hint">Voice-ID</span></span><input name="episodes.guest" value="${esc(stored.episodes?.guest ?? '')}" placeholder="${esc(d.episodeGuestVoice ?? '')}"></label>
+    <label><span>Claude-Modell <span class="hint">sonnet schont das Abo</span></span><input name="episodes.model" value="${esc(stored.episodes?.model ?? '')}" placeholder="${esc(d.episodeModel ?? 'sonnet')}"></label>
+  </div>
 </section>
 <section id="anzeige">
   ${head2('Anzeige')}

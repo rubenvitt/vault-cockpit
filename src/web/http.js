@@ -650,6 +650,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
         voice: field('tts.voice'),
         model: field('tts.model'),
       },
+      episodes: { host: field('episodes.host'), guest: field('episodes.guest'), model: field('episodes.model') },
       calendars: calendarsIn,
       hiddenEvents: form.has('hiddenEvents') ? field('hiddenEvents').split(',') : stored.hiddenEvents,
       // Die Generation ändert nur „Überall abmelden“.
@@ -836,7 +837,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
 
   /** Seite aus dem Bereich Lesen (src/lesen/http.js). */
   async function readingPage(req, res, url, session) {
-    const r = await READING_PAGES[url.pathname]({ url, user: session.name ?? session.sub, tz: settings.get().tz, write: { csrf: csrfOf(req), back: url.pathname + url.search }, flash: takeFlash(req, res) });
+    const r = await READING_PAGES[url.pathname]({ url, range: req.headers.range ?? null, user: session.name ?? session.sub, tz: settings.get().tz, write: { csrf: csrfOf(req), back: url.pathname + url.search }, flash: takeFlash(req, res) });
     if (r.redirect) return redirect(res, r.redirect);
     // Leseansicht und Stapel darf der Service Worker für offline behalten (VCP-80); welche Artikel, sagt `/api/lesen/offline`.
     const offline = r.html && (r.status ?? 200) === 200 && (url.pathname === '/lesen/doc' || (url.pathname === '/lesen/stapel' && !url.search)) ? { [OFFLINE_MARK]: 'lesen' } : {};
