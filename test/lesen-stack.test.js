@@ -90,3 +90,27 @@ test('Stapel-Seite: ohne Zeitfenster alle Texte, Sortierung umschaltbar, falsche
   assert.deepEqual(order(await page(store, '?zeit=7&sort=quatsch')), ['Halb', 'Alt', 'Neu']);
   assert.match(await page(createReadingStore({ path: ':memory:' }), '?zeit=15'), /Auf dem Stapel liegt nichts/);
 });
+
+test('Stapel-Seite: nach Gruppe gefiltert, Zeitfenster- und Sortier-Chips tragen `gruppe`, Hören nicht', async () => {
+  const { store } = stackStore([['Gespeichert', 5]]);
+  const tech = store.addGroup({ name: 'Tech' }).group;
+  const feed = store.addFeed({ url: 'https://a.test/feed', title: 'A', group_id: tech.id }).feed;
+  store.addDocument({ url: 'https://a.test/1', title: 'Aus Tech', reading_minutes: 4, status: 'stapel', origin: `feed:${feed.id}` });
+  const titles = (html) => [...html.matchAll(/class="lesen-title">([^<]+)</g)].map((m) => m[1]);
+  const g = `gruppe=${tech.id}`;
+
+  const html = await page(store, `?${g}`);
+  assert.deepEqual(titles(html), ['Aus Tech']);
+  assert.match(html, new RegExp(`<a href="/lesen/stapel\\?${g}" class="chip" aria-current="true">Alle</a><a href="/lesen/stapel\\?zeit=5`));
+  assert.match(html, new RegExp(`<a href="/lesen/stapel\\?zeit=15&amp;${g}" class="chip">15 Min\\.</a>`));
+  assert.match(html, new RegExp(`<a href="/lesen/stapel\\?sort=kurz&amp;${g}" class="chip">Kürzeste</a>`));
+  assert.match(html, /href="\/lesen\/hoeren\?zeit=15"/);
+  assert.deepEqual(titles(await page(store, '?gruppe=ohne')), ['Gespeichert']);
+  assert.deepEqual(titles(await page(store, '?gruppe=quatsch&sort=neu')), ['Aus Tech', 'Gespeichert']);
+
+  // Gruppen-Chips behalten das Zeitfenster.
+  const window = await page(store, `?zeit=15&${g}`);
+  assert.match(window, new RegExp(`<a href="/lesen/stapel\\?zeit=15&amp;${g}" class="chip" aria-current="true">Tech</a>`));
+  assert.match(window, /<a href="\/lesen\/stapel\?zeit=15&amp;gruppe=ohne" class="chip">Ohne Feed<\/a>/);
+  assert.ok(!(await page(stackStore([['X', 5]]).store)).includes('lesen-gruppe'), 'ohne Gruppen keine Gruppen-Chips');
+});

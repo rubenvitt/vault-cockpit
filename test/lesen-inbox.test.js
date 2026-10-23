@@ -96,6 +96,7 @@ test('Eingang: Karte mit Quelle, Art, Lesezeit, Themen und Herkunft; ohne JavaSc
     assert.match(html, /value="stapel"[^>]*>.*Stapel/);
     assert.match(html, /value="lesen"[^>]*>Jetzt lesen/);
     assert.match(html, /<form method="post" action="\/aktion\/lesen\/speichern"/, 'URL speichern bleibt auf der Seite');
+    assert.ok(!html.includes('aria-label="Gruppe"'), 'ohne Gruppen keine Gruppen-Chips');
     const csrf = csrfFrom(html);
 
     const res = await call(SORT, { form: { csrf, back: '/lesen/eingang', id: doc.id, ziel: 'weg' } });
@@ -163,6 +164,48 @@ test('Eingang: mit JavaScript als JSON, Jetzt lesen legt auf den Stapel und öff
     assert.match(html, /Heute 2 von 2 gesichtet/);
     assert.ok(!/inbox-decide/.test(html), 'ohne Karte keine Knöpfe');
     assert.match(html, /<details class="more inbox-save" open>/);
+  });
+});
+
+test('Eingang lässt sich auf eine Gruppe einschränken: Karte, Zähler, Rückgängig; ohne = Gespeichertes und Mail; Unbekanntes = alle', async () => {
+  await withInbox(async ({ call, store }) => {
+    const tech = store.addGroup({ name: 'Tech' }).group;
+    store.addGroup({ name: 'News' });
+    const a = store.addFeed({ url: 'https://a.test/feed', title: 'A', group_id: tech.id }).feed;
+    const b = store.addFeed({ url: 'https://b.test/feed', title: 'B' }).feed;
+    store.addDocument({ url: 'https://m.test/1', title: 'Mail', origin: 'mail' });
+    store.addDocument({ url: 'https://a.test/1', title: 'A1', origin: `feed:${a.id}` });
+    const { doc: a2 } = store.addDocument({ url: 'https://a.test/2', title: 'A2', origin: `feed:${a.id}` });
+    store.addDocument({ url: 'https://k.test/1', title: 'Gespeichert', origin: 'kurzbefehl' });
+    store.addDocument({ url: 'https://b.test/1', title: 'B1', origin: `feed:${b.id}` });
+    const filtered = `/lesen/eingang?gruppe=${tech.id}`;
+    const at = async (path) => (await call(path)).text();
+    const title = (html) => html.match(/<h2 class="inbox-title">([^<]+)</)[1];
+
+    let html = await at(filtered);
+    assert.equal(title(html), 'A2');
+    assert.match(html, /Heute 0 von 2 gesichtet/);
+    assert.match(html, /<nav class="chips lesen-gruppe" aria-label="Gruppe"><a href="\/lesen\/eingang" class="chip">Alle<\/a>/);
+    assert.match(html, new RegExp(`<a href="/lesen/eingang\\?gruppe=${tech.id}" class="chip" aria-current="true">Tech</a>`));
+    assert.match(html, /<a href="\/lesen\/eingang\?gruppe=ohne" class="chip">Ohne Feed<\/a>/);
+    // `back` trägt die Query: ohne JavaScript zurück in den gefilterten Eingang.
+    assert.match(html, new RegExp(`name="back" value="${filtered.replace('?', '\\?')}"`));
+    const res = await call(SORT, { form: { csrf: csrfFrom(html), back: filtered, id: a2.id, ziel: 'stapel' } });
+    assert.equal(res.headers.get('location'), filtered);
+    html = await at(filtered);
+    assert.equal(title(html), 'A1');
+    assert.match(html, /Heute 1 von 2 gesichtet/);
+    assert.match(html, new RegExp(`class="act inbox-undo">.*name="id" value="${a2.id}"`));
+
+    html = await at('/lesen/eingang?gruppe=ohne');
+    assert.equal(title(html), 'Gespeichert');
+    assert.match(html, /Heute 0 von 2 gesichtet/);
+    assert.ok(!/inbox-undo/.test(html), 'die Entscheidung in Tech zählt hier nicht');
+
+    html = await at('/lesen/eingang?gruppe=quatsch');
+    assert.equal(title(html), 'B1');
+    assert.match(html, /Heute 1 von 5 gesichtet/);
+    assert.match(html, /<a href="\/lesen\/eingang" class="chip" aria-current="true">Alle<\/a>/);
   });
 });
 
