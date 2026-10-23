@@ -297,6 +297,8 @@ export function createReadingStore({ path, now = () => Date.now() }) {
     rememberEntry(feedId, guid, docId = null) {
       return db.prepare('INSERT OR IGNORE INTO feed_entries (feed_id, guid, doc_id) VALUES (?, ?, ?)').run(feedId, guid, docId).changes > 0;
     },
+    /** Alle bekannten Einträge eines Feeds (GUID bzw. Adresse) als Set; leer heißt: noch nie abgerufen. */
+    knownEntries: (feedId) => new Set(db.prepare('SELECT guid FROM feed_entries WHERE feed_id = ?').all(String(feedId ?? '')).map((r) => r.guid)),
 
     // --- Sicherung ------------------------------------------------------------
 

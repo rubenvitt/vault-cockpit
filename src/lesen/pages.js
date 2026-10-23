@@ -13,6 +13,7 @@ const SUB = [
   ['stapel', '/lesen/stapel', 'Stapel'],
   ['markiert', '/lesen/markiert', 'Markiert'],
   ['wissen', '/wissen', 'Wissen'],
+  ['feeds', '/lesen/feeds', 'Feeds'],
 ];
 
 export function readingNav(current) {

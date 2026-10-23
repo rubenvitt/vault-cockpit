@@ -23,6 +23,7 @@ import { createTokenStore } from './cockpit/tokens.js';
 import { createBackup } from './cockpit/backup.js';
 import { createReadingStore } from './lesen/store.js';
 import { readingRoutes } from './lesen/http.js';
+import { createFeedPoller } from './lesen/feeds.js';
 import { createOidcLogin } from './web/oidc.js';
 import { createWebHttp } from './web/http.js';
 import { loadShortcuts } from './web/shortcuts.js';
@@ -182,6 +183,10 @@ const LEGACY_CAPTURE_TOKEN = process.env.CAPTURE_TOKEN || null;
 // Lesestapel (VCP-77): Artikel, Markierungen und Feeds, neben den Einstellungen
 // unter /data. Lässt sich nicht neu bauen, gehört deshalb in die Sicherung.
 const reading = createReadingStore({ path: join(dirname(COCKPIT_SETTINGS_FILE), 'lesestapel.db') });
+// Feeds (VCP-78): jede Minute nachsehen, welche dran sind; jeder Feed hat seinen
+// eigenen Abstand (Standard 30 min), Fehler verlängern ihn.
+const feedPoller = createFeedPoller({ store: reading });
+feedPoller.start();
 const captureHttp = createCaptureHttp({ token: LEGACY_CAPTURE_TOKEN, tokens: apiTokens, router: captureRouter, zunderEnabled: () => Boolean(zunder()) });
 const captureEnabled = () => Boolean(LEGACY_CAPTURE_TOKEN) || apiTokens.has('capture');
 const searchHttp = createSearchHttp({ tokens: apiTokens, index, semantic: currentSemantic });
@@ -280,6 +285,7 @@ const health = createHealth({
   zunderAccess,
   calendars,
   flameNote,
+  feeds: () => feedPoller.health(),
 });
 
 const graph = createGraph({ index, semantic: currentSemantic, zunder, calendar: calendarForGraph(calendars), tz: () => cockpitSettings.get().tz });
@@ -405,6 +411,7 @@ for (const sig of ['SIGTERM', 'SIGINT']) {
     console.log(`${sig} empfangen — fahre herunter`);
     sync.stop();
     mail?.stop();
+    feedPoller.stop();
     index.stop();
     semantic?.close();
     reading.close();
