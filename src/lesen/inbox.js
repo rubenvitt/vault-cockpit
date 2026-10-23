@@ -22,7 +22,7 @@ const href = (u) => (/^https?:\/\//i.test(u ?? '') ? u : '#');
 const dateLabel = (iso, tz) => new Date(iso).toLocaleDateString('de-DE', { day: 'numeric', month: 'short', timeZone: tz });
 
 /** Beginn des heutigen Tages in der Zeitzone, als ISO-Text wie in der Datenbank. */
-function dayStart(ms, tz) {
+export function dayStart(ms, tz) {
   const { year, month, day } = zonedParts(new Date(ms), tz);
   return zonedToUtc({ year, month, day }, tz).toISOString();
 }

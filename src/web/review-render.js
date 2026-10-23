@@ -64,6 +64,7 @@ ${appHeader({ current: 'rueckblick', user, links: { woche: `/?woche=${w.id}`, ru
 </div>
 <main class="review-page">
 ${body}
+<section><p class="meta"><a href="/lesen/wiedersehen?woche=${esc(w.id)}">Markierungen dieser Woche wiedersehen</a></p></section>
 </main>
 </body>
 </html>`;

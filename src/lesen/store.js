@@ -268,8 +268,10 @@ export function createReadingStore({ path, now = () => Date.now() }) {
       if (!fields.quote) throw new ReadingError('Zitat fehlt');
       const t = iso();
       const id = randomUUID();
-      db.prepare('INSERT INTO highlights (id, doc_id, quote, prefix, suffix, start_hint, note, color, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)').run(
-        id, fields.doc_id, fields.quote, fields.prefix ?? '', fields.suffix ?? '', fields.start_hint ?? null, fields.note ?? null, fields.color ?? 'gelb', t, t,
+      // Wiedersehen (src/lesen/review.js): erstmals einen Tag später fällig.
+      const due = new Date(Date.parse(t) + 24 * 60 * 60 * 1000).toISOString();
+      db.prepare('INSERT INTO highlights (id, doc_id, quote, prefix, suffix, start_hint, note, color, created_at, updated_at, review_due) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(
+        id, fields.doc_id, fields.quote, fields.prefix ?? '', fields.suffix ?? '', fields.start_hint ?? null, fields.note ?? null, fields.color ?? 'gelb', t, t, due,
       );
       return getHighlight(id);
     },

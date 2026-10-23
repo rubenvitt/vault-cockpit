@@ -520,7 +520,7 @@ steht nur auf `/zustand`.
 ### Lesen
 
 Der Lesestapel ist ein Bereich im Cockpit (VCP-77): **Lesen** in der Kopfzeile
-und in der Leiste unten, darunter **Eingang · Stapel · Markiert · Wissen · Feeds**. In der
+und in der Leiste unten, darunter **Eingang · Stapel · Markiert · Wiedersehen · Wissen · Feeds**. In der
 Leiste unten nimmt „Lesen“ den Platz der Suche ein; die Suche erreicht man dort
 über Lesen → Wissen → „Ganzen Vault durchsuchen“, im Kopf steht sie weiter.
 
@@ -557,6 +557,20 @@ oder Umformatieren wieder richtig. Eingesetzt werden die Markierungen beim
 Ausliefern als `<mark>` nur um Textstücke. „In Inbox“ legt das Zitat mit Quelle
 über die Schnelleingabe als Notiz in der Vault-Inbox an. Unter **Markiert** stehen
 alle Markierungen, filterbar nach Quelle und Thema.
+
+**Wiedersehen** (`/lesen/wiedersehen`, VCP-74) holt Markierungen nach einem
+einfachen Leitner-Schema zurück: Box 1 bis 5 mit 1, 3, 7, 21 und 60 Tagen
+Abstand, eine neue Markierung ist nach einem Tag dran. Je Karte: **Behalten**
+rückt eine Box weiter, **In eigenen Worten** legt Zitat, eigene Worte und Quelle
+als Notiz in der Vault-Inbox an und rückt ebenfalls weiter, **Loslassen** nimmt
+die Markierung nur aus der Wiederholung (gelöscht wird nichts). Rückgängig steht
+in der Meldung, alles geht auch ohne JavaScript. Höchstens 20 Karten am Tag, der
+Rest kommt morgen. Darunter die Woche (`?woche=2026-W43`, aus dem
+Wochenrückblick verlinkt): Zahlen, Balken je Thema (ohne Thema je Quelle) und
+Export als Markdown. Ist ein Embedding-Server eingestellt, bettet das Cockpit die
+Markierungen der Woche ein (nur im Speicher) und zeigt ähnliche aus
+verschiedenen Texten als „Querverbindung entdeckt“, mit „Als eigene Notiz
+anlegen“. Ohne Embedder oder wenn Ollama nicht antwortet, fehlt der Kasten.
 
 Abhängigkeiten dafür: `@mozilla/readability` und `linkedom` (reines JavaScript,
 feste Versionen).
@@ -670,7 +684,7 @@ npm ci && npm test
 - `src/search/` — lesender Such-Endpunkt `/api/search` mit eigenem Token
 - `src/graph/` — Graph um eine Notiz mit Aufgaben- und Termin-Knoten
 - `src/health/` — Zustand der Hintergrunddienste für `/zustand` und `/health`, Maskieren von Fehlertexten
-- `src/lesen/` — Lesestapel: SQLite-Speicher (`store.js`), SSRF-sicheres Holen (`fetch.js`), Readability und Säubern (`extract.js`), Seiten und Routen (`pages.js`, `http.js`), Leseansicht und Markierungen (`doc.js`, `highlights.js`, Textanker in `anchor.js`)
+- `src/lesen/` — Lesestapel: SQLite-Speicher (`store.js`), SSRF-sicheres Holen (`fetch.js`), Readability und Säubern (`extract.js`), Seiten und Routen (`pages.js`, `http.js`), Leseansicht und Markierungen (`doc.js`, `highlights.js`, Textanker in `anchor.js`), Wiedersehen (Planung und Clustering in `review.js`, Seite in `review-page.js`)
 - `src/web/` — Web-Cockpit: OIDC-Login mit PKCE, signiertes Sitzungs-Cookie, HTML der Wochenansicht, Einstellungen, Suche und Graph
 - `sync/` — Image des Sidecars `vault-sync` (Obsidian Headless mit Status-Wrapper)
 

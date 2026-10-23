@@ -8,6 +8,7 @@ import { feedRoutes } from './feeds-page.js';
 import { addRoutes } from './add.js';
 import { docRoutes } from './doc.js';
 import { highlightRoutes } from './highlights.js';
+import { reviewRoutes } from './review-page.js';
 
 /**
  * Routen des Bereichs „Lesen“, eingebunden in src/web/http.js (Sitzung, CSRF,
@@ -23,8 +24,9 @@ import { highlightRoutes } from './highlights.js';
  *
  * Eine neue Seite oder Aktion ist ein Eintrag hier (gern aus einer eigenen Datei).
  * `capture` legt Notizen in der Vault-Inbox an („In Inbox“, src/lesen/highlights.js).
+ * `review` geht an das Wiedersehen (`embedder`, `onOwnWords`, src/lesen/review-page.js).
  */
-export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefined, capture = null, logger = console }) {
+export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefined, capture = null, review = {}, logger = console }) {
   const feeds = feedRoutes({ store, fetchFeed, logger });
   /** Fehler aus Abruf und Speicher als Meldung für die Seite. */
   const asAction = async (run) => {
@@ -43,6 +45,7 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
 
   const doc = docRoutes({ store, asAction });
   const marked = highlightRoutes({ store, asAction, capture, logger });
+  const wiedersehen = reviewRoutes({ store, capture, logger, ...review });
 
   return {
     uploads: { ...add.uploads, ...feeds.uploads },
@@ -54,12 +57,14 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
       ...feeds.pages,
       ...doc.pages,
       ...marked.pages,
+      ...wiedersehen.pages,
     },
     actions: {
       ...inbox.actions,
       ...add.actions,
       ...doc.actions,
       ...marked.actions,
+      ...wiedersehen.actions,
       async '/aktion/lesen/speichern'(form, session) {
         const url = (form.get('url') ?? '').trim();
         if (!url) throw new ActionError('Bitte eine Adresse eingeben');
