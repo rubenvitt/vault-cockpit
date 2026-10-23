@@ -432,3 +432,126 @@ test('Feeds-Seite: Website abonnieren, einstellen, OPML importieren und exportie
     { 'https://atom.test/': site, 'https://atom.test/feed.xml': ATOM, 'https://leer.test/': '<html><head></head></html>' },
   );
 });
+
+// --- Gruppen (VCP-97) ----------------------------------------------------------
+
+const csrfOf = async (call) => (await (await call('/lesen/feeds')).text()).match(/name="csrf" value="([^"]+)"/)[1];
+const toastAfter = async (call, res) => (await (await call('/lesen/feeds', { cookie: res.headers.getSetCookie() })).text()).match(/toast-text">([^<]*)</)?.[1];
+const groupAt = (page, name) => page.indexOf(`feed-group-name">${name}<`);
+
+test('Feeds-Seite: Gruppen anlegen, umbenennen, einstellen, ordnen, löschen', async () => {
+  await withWeb(async ({ call, store }) => {
+    const csrf = await csrfOf(call);
+    const form = (path, fields) => call(path, { form: { csrf, back: '/lesen/feeds', ...fields } });
+    assert.equal((await form('/aktion/lesen/gruppe/anlegen', { name: ' Tech ' })).status, 303);
+    await form('/aktion/lesen/gruppe/anlegen', { name: 'Politik' });
+    assert.equal(await toastAfter(call, await form('/aktion/lesen/gruppe/anlegen', { name: 'tech' })), 'Gibt es schon: Tech');
+    assert.equal(await toastAfter(call, await form('/aktion/lesen/gruppe/anlegen', { name: '  ' })), 'Name der Gruppe fehlt');
+    const [tech, politik] = store.listGroups();
+
+    const dup = await form('/aktion/lesen/gruppe/aendern', { id: politik.id, name: 'TECH' });
+    assert.equal(dup.status, 303);
+    assert.equal(await toastAfter(call, dup), 'Eine Gruppe „TECH“ gibt es schon');
+    await form('/aktion/lesen/gruppe/aendern', { id: tech.id, name: 'Technik & Co', pausiert: '1', stapel: '1' });
+    const changed = store.getGroup(tech.id);
+    assert.deepEqual([changed.name, changed.paused, changed.to_stack], ['Technik & Co', true, true]);
+
+    await form('/aktion/lesen/gruppe/verschieben', { id: politik.id, richtung: 'hoch' });
+    assert.deepEqual(store.listGroups().map((g) => g.name), ['Politik', 'Technik & Co']);
+    const page = await (await call('/lesen/feeds')).text();
+    assert.ok(groupAt(page, 'Politik') > 0 && groupAt(page, 'Politik') < groupAt(page, 'Technik &amp; Co'));
+    assert.match(page, /value="hoch" class="btn quiet" disabled>Nach oben<span class="sr-only">: Politik/);
+    assert.match(page, /zusätzlich zu deren eigener Einstellung/);
+    assert.match(page, /Die Feeds bleiben, dann ohne Gruppe/);
+    assert.equal(await toastAfter(call, await form('/aktion/lesen/gruppe/verschieben', { id: politik.id, richtung: 'quer' })), 'Unbekannte Richtung');
+
+    const { feed } = store.addFeed({ url: 'https://blog.test/feed', group_id: tech.id });
+    const del = await form('/aktion/lesen/gruppe/entfernen', { id: tech.id });
+    assert.match(await toastAfter(call, del), /Gruppe gelöscht: Technik &amp; Co\. Ihre Feeds bleiben/);
+    assert.equal(store.getGroup(tech.id), null);
+    assert.equal(store.getFeed(feed.id).group_id, null);
+    assert.equal(await toastAfter(call, await form('/aktion/lesen/gruppe/entfernen', { id: tech.id })), 'Diese Gruppe gibt es nicht mehr');
+  });
+});
+
+test('Feeds-Seite: Feeds einer Gruppe zuordnen, nach Gruppe anzeigen mit neuen Einträgen', async () => {
+  await withWeb(
+    async ({ call, store }) => {
+      const { group: tech } = store.addGroup({ name: 'Tech', paused: true, to_stack: true });
+      store.addGroup({ name: 'Leer' });
+      const csrf = await csrfOf(call);
+      const form = (path, fields) => call(path, { form: { csrf, back: '/lesen/feeds', ...fields } });
+
+      await form('/aktion/lesen/feed/abonnieren', { url: 'https://atom.test/feed.xml', gruppe: tech.id });
+      await form('/aktion/lesen/feed/abonnieren', { url: 'https://json.test/feed.json', gruppe: '' });
+      const atom = store.listFeeds().find((f) => f.url.startsWith('https://atom.test'));
+      const json = store.listFeeds().find((f) => f.url.startsWith('https://json.test'));
+      assert.deepEqual([atom.group_id, json.group_id], [tech.id, null]);
+      const unknown = await form('/aktion/lesen/feed/abonnieren', { url: 'https://blog.test/feed', gruppe: 'gibts-nicht' });
+      assert.equal(unknown.status, 303);
+      assert.equal(await toastAfter(call, unknown), 'Diese Gruppe gibt es nicht');
+
+      // Ohne Feld `gruppe` bleibt die Zuordnung, leer heißt ohne Gruppe.
+      await form('/aktion/lesen/feed/aendern', { id: atom.id, intervall: '60' });
+      assert.equal(store.getFeed(atom.id).group_id, tech.id);
+      await form('/aktion/lesen/feed/aendern', { id: json.id, intervall: '60', gruppe: tech.id });
+      assert.equal(store.getFeed(json.id).group_id, tech.id);
+      await form('/aktion/lesen/feed/aendern', { id: json.id, intervall: '60', gruppe: '' });
+      assert.equal(store.getFeed(json.id).group_id, null);
+
+      store.addDocument({ url: 'https://atom.test/a/1', origin: `feed:${atom.id}` });
+      store.addDocument({ url: 'https://atom.test/a/2', origin: `feed:${atom.id}` });
+      const page = await (await call('/lesen/feeds')).text();
+      assert.match(page, /<details open class="feed-group">\s*<summary><span class="feed-group-name">Tech<\/span> <span class="count-badge">2 neu<\/span><\/summary>/);
+      assert.ok(page.includes(`<a href="/lesen/eingang?gruppe=${tech.id}">2 neue Einträge im Eingang</a>`));
+      assert.match(page, /Noch keine Feeds in dieser Gruppe/);
+      assert.ok(groupAt(page, 'Tech') < groupAt(page, 'Leer') && groupAt(page, 'Leer') < groupAt(page, 'Ohne Gruppe'));
+      assert.match(page, /pausiert \(Gruppe\)/);
+      assert.match(page, /direkt auf den Stapel \(Gruppe\)/);
+      assert.ok(page.includes(`<option value="${tech.id}" selected>Tech</option>`));
+      assert.match(page, /<span class="sr-only">Gruppe<\/span><select name="gruppe"><option value="">ohne Gruppe<\/option>/);
+      assert.ok(!/style=|<script>/.test(page), 'keine Inline-Styles oder -Skripte');
+    },
+    { 'https://atom.test/feed.xml': ATOM, 'https://json.test/feed.json': JSON_FEED, 'https://blog.test/feed': rss([rssItem(1)]) },
+  );
+});
+
+// Braucht `group` (Ordnername) aus parseOpml, das kommt mit src/lesen/opml.js für VCP-97.
+const FOLDER_OPML = `<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0"><body>
+  <outline text="Tech">
+    <outline text="Atom" type="rss" xmlUrl="https://atom.test/feed.xml"/>
+    <outline text="JSON" type="rss" xmlUrl="https://json.test/feed.json"/>
+    <outline text="Blog" type="rss" xmlUrl="https://blog.test/feed"/>
+  </outline>
+  <outline text="Ohne Ordner" type="rss" xmlUrl="https://solo.test/feed"/>
+  <outline text="Politik">
+    <outline text="Zweit" type="rss" xmlUrl="https://zweit.test/feed"/>
+  </outline>
+</body></opml>`;
+
+test('Feeds-Seite: OPML-Import legt Ordner als Gruppen an, vorhandene Zuordnung bleibt', async () => {
+  await withWeb(async ({ call, store }) => {
+    const { group: politik } = store.addGroup({ name: 'Politik' });
+    const known = store.addFeed({ url: 'https://json.test/feed.json' }).feed;
+    const kept = store.addFeed({ url: 'https://blog.test/feed', group_id: politik.id }).feed;
+    const body = new FormData();
+    body.append('csrf', await csrfOf(call));
+    body.append('back', '/lesen/feeds');
+    body.append('datei', new Blob([FOLDER_OPML], { type: 'text/x-opml' }), 'abos.opml');
+    const imp = await call('/aktion/lesen/feeds/import', { body });
+    assert.equal(await toastAfter(call, imp), '3 Feeds importiert, 2 schon abonniert');
+
+    const [, tech] = store.listGroups();
+    assert.deepEqual(store.listGroups().map((g) => g.name), ['Politik', 'Tech']);
+    assert.deepEqual(Object.fromEntries(store.listFeeds().map((f) => [f.url, f.group_id])), {
+      'https://atom.test/feed.xml': tech.id,
+      'https://json.test/feed.json': tech.id,
+      'https://blog.test/feed': politik.id,
+      'https://solo.test/feed': null,
+      'https://zweit.test/feed': politik.id,
+    });
+    assert.equal(store.getFeed(known.id).group_id, tech.id, 'schon abonniert, ohne Gruppe: wird zugeordnet');
+    assert.equal(store.getFeed(kept.id).group_id, politik.id, 'vorhandene Zuordnung bleibt');
+  });
+});
