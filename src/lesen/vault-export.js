@@ -237,6 +237,12 @@ export function createReadingExport({ vaultPath, index, editor, policy, store, s
       return exportDoc(h.doc_id, { force: true, link: { id: blockId(h.id), target: t } });
     },
 
+    /**
+     * Notiz zum Dokument anlegen, auch ungelesen, oder ihren Bereich auffrischen
+     * (Ziel eines Links aus „Verknüpfen“). Zustand wie `addLink`.
+     */
+    ensureNote: (docId) => exportDoc(String(docId), { force: true }),
+
     /** Pfad der Lesestapel-Notiz zum Dokument oder null. */
     notePath: (docId) => locate(String(docId))?.path ?? null,
     pending: () => [...pending],

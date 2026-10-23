@@ -345,6 +345,8 @@ const webHttp = process.env.WEB_CLIENT_ID
         store: reading,
         capture: (input) => cockpitActions.capture(input),
         embedCache,
+        // Querverbindungen in der Leseansicht (VCP-73): Wikilinks nur in die Lesestapel-Notiz.
+        connections: { index, semantic: currentSemantic, policy: POLICY, exporter: readingExport },
         onChange: (id) => readingExport.changed(id),
       }),
       oidc: createOidcLogin({

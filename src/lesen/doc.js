@@ -79,7 +79,7 @@ function renderDoc(doc, { highlights, stackDocs, counts }, ctx) {
   const nav = ['eingang', 'stapel'].includes(doc.status) ? doc.status : null;
   return `<!doctype html>
 <html lang="de">
-${head(doc.title || doc.url, { script: true, scripts: [assets.lesenDoc] })}
+${head(doc.title || doc.url, { script: true, scripts: [assets.lesenDoc, assets.lesenLinks] })}
 <body class="page-lesen page-lesen-doc">
 ${appHeader({ current: 'lesen', user: ctx.user })}
 ${readingNav(nav)}
@@ -107,7 +107,7 @@ ${stack(stackDocs, doc.id)}
   <div class="lesen-text">${text}</div>
 </article>
 <aside class="lesen-side">
-  <section class="lesen-links" data-verbindungen><h2>Querverbindungen</h2><p class="empty">Noch keine Querverbindungen.</p></section>
+  <section class="lesen-links" data-verbindungen><h2>Querverbindungen</h2><p class="empty">Markierung antippen oder Text auswählen, dann „Verbinden“: passende Stellen aus anderen Texten, Synthesen und Konzepten.</p></section>
   <section><h2>Markierungen</h2>${highlightList(highlights, orphans, ctx)}</section>
   <section class="lesen-keys"><h2>Tastenkürzel</h2><dl>${KEYS.map(([k, label]) => `<div><dt><kbd>${k}</kbd></dt><dd>${label}</dd></div>`).join('')}</dl></section>
 </aside>

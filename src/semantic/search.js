@@ -103,7 +103,7 @@ function graphStream(index, seeds, allowed) {
 }
 
 /** Kurzer Ausschnitt für Treffer ohne Volltext-Snippet: der Abschnitt mit dem ähnlichsten Text. */
-function excerpt(index, path, heading, max = 220) {
+export function excerpt(index, path, heading, max = 220) {
   const note = index.getNote(path);
   if (!note?.content) return null;
   let body = parseNote(note.content).body;

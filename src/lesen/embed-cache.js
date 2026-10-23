@@ -41,9 +41,9 @@ export function createEmbedCache({ embedder = () => null, waitMs = WAIT_MS, paus
       const e = current();
       if (!e) return null;
       const key = (t) => `${e.model}\n${t}`;
-      const missing = [...new Set(texts)].filter((t) => !cache.has(key(t)) && !inflight.has(key(t)));
       // shortcut: alles leeren statt verdrängen, wenn der Speicher voll ist; reicht bei einigen tausend Markierungen.
-      if (cache.size + missing.length > max) cache.clear();
+      if (cache.size + texts.filter((t) => !cache.has(key(t))).length > max) cache.clear();
+      const missing = [...new Set(texts)].filter((t) => !cache.has(key(t)) && !inflight.has(key(t)));
       // Pakete nacheinander; ein späterer Aufruf (frische Auswahl) kommt dazwischen dran.
       let prev = Promise.resolve();
       for (let i = 0; i < missing.length; i += batch) {
