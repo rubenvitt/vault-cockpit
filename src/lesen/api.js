@@ -4,6 +4,7 @@ import { readLimited, FormError } from '../web/multipart.js';
 import { FetchError } from './fetch.js';
 import { ReadingError } from './store.js';
 import { saveUrl } from './save.js';
+import { savePdf, MAX_PDF } from './pdf.js';
 
 /**
  * `POST /lesestapel/speichern`: Artikel von außen in den Eingang des
@@ -18,6 +19,8 @@ import { saveUrl } from './save.js';
  * - Text (`text/plain`): die erste http(s)-Adresse darin.
  * - JSON `{url, title?, source?, id?}`: `source` ist `kurzbefehl` (Standard)
  *   oder `import`, `id` macht das Speichern idempotent wie bei `/capture`.
+ * - `application/pdf`: die Datei (höchstens `MAX_PDF`), `title`, `source` und
+ *   `id` dann als Query-Parameter. Siehe src/lesen/pdf.js.
  *
  * Antwort mit `message` als fertigem Satz für die Mitteilung auf dem iPhone,
  * Fehler zusätzlich mit `status` im Body (der Kurzbefehl sieht den HTTP-Status nicht).
@@ -26,6 +29,7 @@ import { saveUrl } from './save.js';
 export const PATH = '/lesestapel/speichern';
 const MAX_BODY = 16 * 1024;
 const ORIGINS = ['kurzbefehl', 'import'];
+const PDF = /^application\/pdf\b/i;
 
 class ApiError extends Error {
   constructor(message, status = 400) {
@@ -56,9 +60,9 @@ export function createReadingApi({ tokens, store, fetchPage = undefined, logger 
     return SCOPES.some((s) => tokens.verify(m[1], s)) ? 403 : 401;
   };
 
-  function parse(req, url, body) {
-    const type = String(req.headers['content-type'] ?? '');
-    let input;
+  /** Bei einem PDF kommen die Felder nur aus der Query. */
+  function parse(type, url, body) {
+    let input = {};
     if (type.includes('application/json')) {
       try {
         input = JSON.parse(body.toString('utf8') || '{}');
@@ -66,7 +70,7 @@ export function createReadingApi({ tokens, store, fetchPage = undefined, logger 
         throw new ApiError('Kein gültiges JSON');
       }
       if (typeof input !== 'object' || input === null || Array.isArray(input)) throw new ApiError('JSON-Objekt erwartet');
-    } else {
+    } else if (!PDF.test(type)) {
       const text = body.toString('utf8');
       input = { url: text.match(/https?:\/\/\S+/i)?.[0] ?? text.trim() };
     }
@@ -77,8 +81,9 @@ export function createReadingApi({ tokens, store, fetchPage = undefined, logger 
     if (!ORIGINS.includes(origin)) throw new ApiError(`Unbekannte Quelle "${origin}" (möglich: ${ORIGINS.join(', ')})`);
     const clientId = input.id ?? url.searchParams.get('id') ?? null;
     if (clientId !== null && !CAPTURE_ID.test(clientId)) throw new ApiError('Ungültige ID (Buchstaben, Ziffern und _ . : -, höchstens 128 Zeichen)');
+    const title = (input.title ?? url.searchParams.get('title'))?.trim().slice(0, 300) || null;
+    if (PDF.test(type)) return { pdf: body, title, origin, clientId };
     if (!input.url?.trim()) throw new ApiError('Adresse fehlt');
-    const title = input.title?.trim().slice(0, 300) || null;
     return { url: input.url.trim(), title, origin, clientId };
   }
 
@@ -90,9 +95,12 @@ export function createReadingApi({ tokens, store, fetchPage = undefined, logger 
       if (denied) return fail(res, denied, denied === 401 ? 'unauthorized' : 'forbidden');
       if (req.method !== 'POST') return fail(res, 405, 'method not allowed');
       try {
-        const body = await readLimited(req, MAX_BODY);
-        const input = parse(req, url, body);
-        let { doc, duplicate } = await saveUrl({ store, url: input.url, origin: input.origin, clientId: input.clientId, ...(fetchPage ? { fetchPage } : {}) });
+        const type = String(req.headers['content-type'] ?? '');
+        const body = await readLimited(req, PDF.test(type) ? MAX_PDF : MAX_BODY);
+        const input = parse(type, url, body);
+        let { doc, duplicate } = input.pdf
+          ? await savePdf({ store, data: input.pdf, origin: input.origin, clientId: input.clientId })
+          : await saveUrl({ store, url: input.url, origin: input.origin, clientId: input.clientId, ...(fetchPage ? { fetchPage } : {}) });
         if (!duplicate && input.title) doc = store.updateDocument(doc.id, { title: input.title });
         if (!duplicate) logger.info?.(`Lesestapel (${input.origin}) → ${doc.url}`);
         const name = doc.title ?? doc.url;

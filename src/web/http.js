@@ -506,7 +506,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
    */
   async function action(req, res, path, session) {
     const wantsJson = String(req.headers.accept ?? '').includes('application/json');
-    const form = await readForm(req, res);
+    const form = await readForm(req, res, reading?.uploads?.[path]);
     if (!form) return;
     const back = safeNext(form.get('back'));
     if (!csrfOk(req, form.get('csrf'))) {
@@ -621,11 +621,25 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   // Zusätzlich zu SameSite=Lax: Formulare nur von dieser Seite annehmen.
   const foreignOrigin = (req) => req.headers.origin && req.headers.origin !== new URL(publicUrl).origin;
 
-  /** Formular lesen; `null`, wenn schon mit 403/413 geantwortet wurde. */
-  async function readForm(req, res) {
+  /**
+   * Formular lesen; `null`, wenn schon mit 403/413 geantwortet wurde. Mit
+   * `uploadLimit` (nur Aktionen aus `reading.uploads`) auch `multipart/form-data`
+   * bis zu dieser Größe, die Dateien dann in `form.files`.
+   */
+  async function readForm(req, res, uploadLimit = 0) {
     if (foreignOrigin(req)) {
       json(res, 403, { error: 'forbidden', error_description: 'fremde Herkunft' });
       return null;
+    }
+    if (uploadLimit && /^multipart\/form-data/i.test(req.headers['content-type'] ?? '')) {
+      try {
+        const { fields, files } = await readMultipart(req, { limit: uploadLimit });
+        return Object.assign(fields, { files });
+      } catch (err) {
+        if (!(err instanceof FormError)) throw err;
+        if (!res.destroyed) json(res, err.status, { error: 'bad_form', message: err.message });
+        return null;
+      }
     }
     try {
       return new URLSearchParams(await readBody(req));
