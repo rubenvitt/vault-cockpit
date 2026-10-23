@@ -24,11 +24,13 @@ import { reviewRoutes } from './review-page.js';
  *
  * Eine neue Seite oder Aktion ist ein Eintrag hier (gern aus einer eigenen Datei).
  * `capture` legt Notizen in der Vault-Inbox an („In Inbox“, src/lesen/highlights.js).
- * `review` geht an das Wiedersehen (`embedder`, `onOwnWords`, src/lesen/review-page.js).
+ * `review` geht an das Wiedersehen (`onOwnWords`, src/lesen/review-page.js).
+ * `embedCache` ist der gemeinsame Speicher für Embeddings von Markierungen
+ * (src/lesen/embed-cache.js); ohne gibt es keine Querverbindung im Wiedersehen.
  * `onChange(docId)` meldet Archivieren, „fertig gelesen“ und geänderte
  * Markierungen (für die Lesestapel-Notiz im Vault, src/lesen/vault-export.js).
  */
-export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefined, capture = null, review = {}, onChange = () => {}, logger = console }) {
+export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefined, capture = null, review = {}, embedCache = null, onChange = () => {}, logger = console }) {
   const feeds = feedRoutes({ store, fetchFeed, logger });
   /** Fehler aus Abruf und Speicher als Meldung für die Seite. */
   const asAction = async (run) => {
@@ -47,7 +49,7 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
 
   const doc = docRoutes({ store, asAction, onChange });
   const marked = highlightRoutes({ store, asAction, capture, onChange, logger });
-  const wiedersehen = reviewRoutes({ store, capture, logger, ...review });
+  const wiedersehen = reviewRoutes({ store, capture, logger, embedCache, ...review });
 
   return {
     uploads: { ...add.uploads, ...feeds.uploads },

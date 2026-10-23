@@ -28,6 +28,7 @@ import { createReadingApi } from './lesen/api.js';
 import { saveUrl } from './lesen/save.js';
 import { createMailReader } from './lesen/mail.js';
 import { createReadingExport } from './lesen/vault-export.js';
+import { createEmbedCache } from './lesen/embed-cache.js';
 import { createOidcLogin } from './web/oidc.js';
 import { createWebHttp } from './web/http.js';
 import { loadShortcuts } from './web/shortcuts.js';
@@ -135,8 +136,9 @@ const cockpitSettings = createSettingsStore({
 const VECTOR_DB = process.env.VECTOR_DB ?? '/data/vectors.db';
 let semantic = null;
 let semanticKey = null;
-// Derselbe Embedder bettet im Wiedersehen die Markierungen der Woche ein.
+// Derselbe Embedder bettet Markierungen ein (Wiedersehen, Querverbindungen), über einen gemeinsamen Speicher.
 let embedder = null;
+const embedCache = createEmbedCache({ embedder: () => embedder });
 function applyEmbed() {
   const e = cockpitSettings.get().embed;
   const key = e ? `${e.url}\n${e.model}` : null;
@@ -342,7 +344,7 @@ const webHttp = process.env.WEB_CLIENT_ID
       reading: readingRoutes({
         store: reading,
         capture: (input) => cockpitActions.capture(input),
-        review: { embedder: () => embedder },
+        embedCache,
         onChange: (id) => readingExport.changed(id),
       }),
       oidc: createOidcLogin({
