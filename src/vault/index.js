@@ -224,6 +224,7 @@ export function openIndex(dbOrPath, { vaultPath = process.env.VAULT_PATH ?? '/va
         tag = null,
         folder = null,
         type = null,
+        paths = null,
         limit = 10,
         offset = 0,
         any = false,
@@ -250,6 +251,11 @@ export function openIndex(dbOrPath, { vaultPath = process.env.VAULT_PATH ?? '/va
       if (tag) {
         where.push('EXISTS (SELECT 1 FROM note_tags t WHERE t.path = n.path AND t.tag = ?)');
         params.push(tag);
+      }
+      // Nur diese Pfade (z. B. die Synthesen, die die Filter von /wissen erfüllen).
+      if (paths) {
+        where.push('n.path IN (SELECT value FROM json_each(?))');
+        params.push(JSON.stringify([...paths]));
       }
 
       const clause = where.join(' AND ');
@@ -364,7 +370,7 @@ export function openIndex(dbOrPath, { vaultPath = process.env.VAULT_PATH ?? '/va
     },
 
     /** Pfade, die die Filter der Suche erfüllen (ohne Suchbegriff), für die Vektorsuche. */
-    filterPaths({ include = ['core'], includeSensitive = false, tag = null, folder = null, type = null } = {}) {
+    filterPaths({ include = ['core'], includeSensitive = false, tag = null, folder = null, type = null, paths = null } = {}) {
       const where = [`class IN (${include.map(() => '?').join(',')})`];
       const params = [...include];
       if (!includeSensitive) where.push('sensitivity IS NULL');
@@ -379,6 +385,10 @@ export function openIndex(dbOrPath, { vaultPath = process.env.VAULT_PATH ?? '/va
       if (tag) {
         where.push('EXISTS (SELECT 1 FROM note_tags t WHERE t.path = notes.path AND t.tag = ?)');
         params.push(tag);
+      }
+      if (paths) {
+        where.push('path IN (SELECT value FROM json_each(?))');
+        params.push(JSON.stringify([...paths]));
       }
       return new Set(db.prepare(`SELECT path FROM notes WHERE ${where.join(' AND ')}`).all(...params).map((r) => r.path));
     },

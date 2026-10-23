@@ -10,7 +10,9 @@ const noteHref = (path) => `/notiz?pfad=${encodeURIComponent(path)}`;
  * Daten für `/wissen`: alle Synthesen, die das Cockpit zeigen darf
  * (`notes.ofType`, dieselbe Grenze wie `/notiz`), gefiltert nach `art`
  * (Querverbindung) und `status` (Entwurf). Mit Frage `q` kommen die Treffer
- * der Hybrid-Suche mit Typfilter `synthesis` in deren Reihenfolge dazu.
+ * der Hybrid-Suche mit Typfilter `synthesis` in deren Reihenfolge dazu; die
+ * Suche bekommt nur die Pfade, die die Filter erfüllen, sonst fielen passende
+ * Synthesen hinter der Trefferbegrenzung weg.
  * „Zuletzt bewegt“ sortiert nach `updated`, Notizen ohne Datum zuletzt.
  * `lesen` („Passt zu meinem Lesen“) behält nur die Synthesen unter den
  * zuletzt bewegten `RECENT`, zu denen `evidence` neue passende Markierungen kennt.
@@ -33,7 +35,7 @@ export async function wissenView({ notes, search = null, evidence = null }, { q 
   let degraded = null;
   if (q && search) {
     const byPath = new Map(all.map((n) => [n.path, n]));
-    const r = await search(q, { type: SYNTHESIS });
+    const r = await search(q, { type: SYNTHESIS, paths: all.filter(keep).map((n) => n.path) });
     hits = r.results.map((h) => byPath.get(h.path)).filter((n) => n && keep(n));
     degraded = r.degraded ?? null;
   }
