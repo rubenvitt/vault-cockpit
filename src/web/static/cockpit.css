@@ -800,6 +800,10 @@ html[data-read-sans] .lesen-text :is(h1, h2, h3, h4, h5, h6) { font-family: var(
 .hoeren-rate { display: inline-flex; align-items: center; gap: var(--s-2); color: var(--text-2); }
 .hoeren-list .is-playing .lesen-title { color: var(--accent); }
 
+/* --- Lesen: Offline --- */
+/* Markierungen, die noch im Puffer auf Netz warten (lesen-doc.js, CSS Custom Highlight API) */
+::highlight(lesen-wartet) { background-color: color-mix(in srgb, #facc15 22%, transparent); text-decoration: underline dashed var(--warn); }
+
 /* --- Schmale Bildschirme ------------------------------------------------- */
 @media (max-width: 900px) {
   .feuer, .columns, .settings { grid-template-columns: minmax(0, 1fr); }

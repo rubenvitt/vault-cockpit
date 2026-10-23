@@ -10,7 +10,7 @@ import { renderNote, NOTE_CSS } from './note-render.js';
 import { renderReview, REVIEW_CSS } from './review-render.js';
 import { renderPlan, planRoutes, PLAN_CSS } from './plan-page.js';
 import { renderHealth, healthAlert, HEALTH_CSS } from './health-render.js';
-import { offlineFiles, OFFLINE_CSS, OFFLINE_MARK } from './offline.js';
+import { offlineFiles, readingOfflineUrls, OFFLINE_CSS, OFFLINE_MARK, SYNTHESIS_FOLDER } from './offline.js';
 import { SettingsError, MAX_CALENDARS } from '../cockpit/settings.js';
 import { describeWeek, weekOf } from '../cockpit/week.js';
 import { ActionError, SETTABLE } from '../cockpit/actions.js';
@@ -165,6 +165,8 @@ for (const [path, file] of offlineFiles(PUBLIC, { html: HTML_HEADERS }).entries)
  * - `GET /sw.js` (Service Worker) und `GET /offline` (App-Hülle ohne Netz) gibt
  *   es ohne Sitzung; `GET /api/sitzung` liefert das CSRF-Token der Sitzung, mit
  *   dem der Offline-Puffer die Schnelleingabe nachsendet (401 ohne Sitzung).
+ *   `GET /api/lesen/offline` nennt die Seiten, die der Service Worker als
+ *   Lesestoff für unterwegs speichern darf (src/web/offline.js).
  *
  * Die Sitzung ist ein signiertes Cookie und nur für diese Routen gültig; die
  * MCP-Schnittstelle prüft weiter ausschließlich Bearer-Tokens.
@@ -310,7 +312,9 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       suggestions: actions && note.inInbox ? (notes.suggest?.(note.path, related) ?? null) : null,
       zunder: Boolean(actions && settings.get().zunder),
     });
-    return send(res, status, html);
+    // Synthesen darf der Service Worker für offline behalten (VCP-80), aber nie mit einem Entwurf im Feld.
+    const offline = status === 200 && !kept && !draft && note.path.startsWith(`${SYNTHESIS_FOLDER}/`) ? { [OFFLINE_MARK]: 'lesen' } : {};
+    return send(res, status, html, offline);
   }
 
   /**
@@ -806,7 +810,9 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   async function readingPage(req, res, url, session) {
     const r = await READING_PAGES[url.pathname]({ url, user: session.name ?? session.sub, tz: settings.get().tz, write: { csrf: csrfOf(req), back: url.pathname + url.search }, flash: takeFlash(req, res) });
     if (r.redirect) return redirect(res, r.redirect);
-    return send(res, r.status ?? 200, r.html ?? r.body, r.headers);
+    // Leseansicht und Stapel darf der Service Worker für offline behalten (VCP-80); welche Artikel, sagt `/api/lesen/offline`.
+    const offline = r.html && (r.status ?? 200) === 200 && (url.pathname === '/lesen/doc' || (url.pathname === '/lesen/stapel' && !url.search)) ? { [OFFLINE_MARK]: 'lesen' } : {};
+    return send(res, r.status ?? 200, r.html ?? r.body, { ...r.headers, ...offline });
   }
 
   const TOKEN_ROUTES = { '/einstellungen/tokens': createToken, '/einstellungen/tokens/widerrufen': revokeToken };
@@ -815,6 +821,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   const SHORTCUT_ROUTES = new Map(shortcuts.map((s) => [`/kurzbefehle/${s.slug}.shortcut`, s]));
   const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...PUBLIC.keys(), '/', '/api/woche', '/api/sitzung', '/api/suche', ...(actions ? ['/api/erfassen/vorschau'] : []), '/rueckblick', ...(notes ? ['/notiz', '/notiz/bild'] : []), ...(plan ? ['/planen'] : []), '/graph', '/api/graph', ...Object.keys(READING_PAGES), '/einstellungen', ...(health ? ['/zustand'] : []), ...(tokens ? Object.keys(TOKEN_ROUTES) : []), ...Object.keys(BACKUP_ROUTES), '/einstellungen/abmelden', '/login', '/auth/callback', '/logout']);
   if (notes) ROUTES.add('/wissen');
+  if (notes || reading) ROUTES.add('/api/lesen/offline');
 
   return {
     matches: (path) => ROUTES.has(path),
@@ -900,6 +907,10 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
         if (!session) return json(res, 401, { error: 'unauthorized', message: 'Die Anmeldung ist abgelaufen. Bitte neu anmelden.' });
         return json(res, 200, { ok: true, csrf: csrfOf(req) });
       }
+      if (path === '/api/lesen/offline') {
+        if (!session) return json(res, 401, { error: 'unauthorized', message: 'Die Anmeldung ist abgelaufen. Bitte neu anmelden.' });
+        return json(res, 200, { ok: true, urls: readingOfflineUrls({ reading, notes }) });
+      }
       if (path === '/api/suche') {
         if (!session) return json(res, 401, { error: 'unauthorized', error_description: 'Anmeldung unter /login nötig' });
         return searchApi(req, res, url);
@@ -919,7 +930,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       if (path === '/graph') return graphPage(req, res, url, session);
       if (READING_PAGES[path]) return readingPage(req, res, url, session);
       if (path === '/notiz') return notePage(req, res, url, session);
-      if (path === '/wissen') return send(res, 200, await wissenPage({ notes, search, url, user: session.name ?? session.sub }));
+      if (path === '/wissen') return send(res, 200, await wissenPage({ notes, search, url, user: session.name ?? session.sub }), url.search ? {} : { [OFFLINE_MARK]: 'lesen' });
       if (path === '/rueckblick') return reviewPage(req, res, url, session);
       if (path === '/planen' && plan) return planPage(req, res, url, session);
       if (path === '/zustand' && health) return healthPage(req, res, session);

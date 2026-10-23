@@ -13,6 +13,11 @@
 // - `lesen:markierung` (`detail`: { action, ...Antwort }) – nach jeder Änderung an
 //   Markierungen über diese Seite mit JavaScript. Verlässlich auch ohne Script sind
 //   die Aktionen in src/lesen/highlights.js.
+//
+// Ohne Netz oder auf der gespeicherten Seite (VCP-80) gehen Markieren, Notiz,
+// Fortschritt und Archivieren in den Puffer von /static/offline.js
+// (`window.cockpitPuffer`) und von dort später raus. Neue Markierungen tragen
+// dafür immer eine eigene ID (`cid`); wartende zeigt die Seite per CSS-Highlight.
 (() => {
   'use strict';
 
@@ -28,6 +33,15 @@
   const newId = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
   const html = document.documentElement;
   html.classList.add('lesen-js');
+  // offline.js läuft nach diesem Skript: erst beim Aufruf nachsehen.
+  const puffer = () => window.cockpitPuffer;
+  const NEW = '/aktion/lesen/markierung/neu';
+  const BUFFERED = {
+    [NEW]: 'Markierung',
+    '/aktion/lesen/markierung/notiz': 'Notiz',
+    '/aktion/lesen/doc/fortschritt': 'Lesefortschritt',
+    '/aktion/lesen/doc/status': 'Status',
+  };
 
   /** Zeichen im Lesetext vor (`node`, `offset`). */
   function offsetOf(root, node, offset) {
@@ -111,12 +125,12 @@
   async function run(cmd) {
     const s = current;
     if (!s) return;
-    if (cmd === 'mark' && s.anchor) return post('/aktion/lesen/markierung/neu', { id: docId(), ...s.anchor });
+    if (cmd === 'mark' && s.anchor) return post(NEW, { id: docId(), ...s.anchor, cid: newId() });
     if (cmd === 'note') {
       // shortcut: Notiz über prompt(); ein eigenes Eingabefeld in der Leiste, wenn längere Notizen üblich werden.
       const note = window.prompt('Notiz zur Markierung', s.id ? noteOf(s.id) : '');
       if (note === null) return;
-      return s.id ? post('/aktion/lesen/markierung/notiz', { id: s.id, notiz: note }) : post('/aktion/lesen/markierung/neu', { id: docId(), ...s.anchor, notiz: note });
+      return s.id ? post('/aktion/lesen/markierung/notiz', { id: s.id, notiz: note }) : post(NEW, { id: docId(), ...s.anchor, notiz: note, cid: newId() });
     }
     if (cmd === 'delete' && s.id) return post('/aktion/lesen/markierung/loeschen', { id: s.id });
     if (cmd === 'inbox') return post('/aktion/lesen/markierung/inbox', s.id ? { markierung: s.id } : { id: docId(), ...s.anchor, cid: newId() }, { reload: false });
@@ -127,6 +141,7 @@
   }
 
   async function post(action, fields, { reload = true } = {}) {
+    if (BUFFERED[action] && puffer()?.offline()) return buffer(action, fields);
     try {
       const data = await send(action, new URLSearchParams({ ...fields, csrf: csrf() }));
       hide();
@@ -135,9 +150,92 @@
       document.dispatchEvent(new CustomEvent('lesen:markierung', { detail: { action, ...data } }));
       toast(data.message, data.undo ? { action: { label: 'Rückgängig', run: () => post(data.undo.action, data.undo.fields) } } : {});
     } catch (err) {
+      if (err.offline && BUFFERED[action] && (await buffer(action, fields))) return;
       toast(err.message, { kind: 'error' });
     }
   }
+
+  // --- Ohne Netz: Puffer -------------------------------------------------------
+
+  /**
+   * Legt die Aktion in den Puffer. Schlüssel: neue Markierung ihre `cid`, sonst
+   * Aktion und Ziel, damit nur der letzte Stand rausgeht. `true`, wenn es geklappt hat.
+   */
+  async function buffer(action, fields, { quiet = false } = {}) {
+    const p = puffer();
+    const title = document.querySelector('.lesen-doc-head h1')?.textContent ?? '';
+    const id = action === NEW ? fields.cid : `${action}:${fields.id}`;
+    const ok = p ? await p.queue({ id, action, fields, label: `${BUFFERED[action]}: ${title}`, quiet }) : false;
+    if (quiet) return ok;
+    if (!ok) {
+      toast('Ohne Netz, und dieses Gerät kann gerade nichts zwischenspeichern. Nichts gespeichert.', { kind: 'error' });
+      return false;
+    }
+    hide();
+    if (action === NEW) {
+      paint(fields);
+      getSelection().removeAllRanges();
+    }
+    toast(`${BUFFERED[action]} wartet auf Netz und geht automatisch raus.`);
+    return true;
+  }
+
+  // Wartende Markierungen als CSS-Highlight: ändert den Text nicht, die Anker stimmen weiter.
+  const waiting = window.Highlight && CSS.highlights ? new Highlight() : null;
+  if (waiting) CSS.highlights.set('lesen-wartet', waiting);
+
+  /** Bereich im Lesetext von Zeichen `start` bis `end`, gezählt wie `offsetOf`. */
+  function rangeAt(root, start, end) {
+    const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const range = document.createRange();
+    let pos = 0;
+    let begun = false;
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      const len = n.data.length;
+      if (!begun && start <= pos + len) {
+        range.setStart(n, start - pos);
+        begun = true;
+      }
+      if (begun && end <= pos + len) {
+        range.setEnd(n, end - pos);
+        return range;
+      }
+      pos += len;
+    }
+    return null;
+  }
+
+  function paint(fields) {
+    const root = textEl();
+    const start = Number(fields.start);
+    if (!waiting || !root || !Number.isFinite(start)) return;
+    const range = rangeAt(root, start, start + fields.quote.length);
+    if (range && range.toString() === fields.quote) waiting.add(range);
+  }
+
+  // Beim Öffnen: Was für diesen Artikel noch im Puffer wartet, wieder zeigen.
+  document.addEventListener('DOMContentLoaded', async () => {
+    for (const e of (await puffer()?.pending().catch(() => [])) ?? []) if (e.action === NEW && !e.error && e.fields.id === docId()) paint(e.fields);
+  });
+
+  // Archivieren ohne Netz: in den Puffer, Knopf schaltet um (noch einmal drücken nimmt es zurück).
+  // shortcut: Im Funkloch mit `navigator.onLine` true geht Archivieren über cockpit.js und meldet nur den Fehler;
+  // „Entfernen“ und „In Inbox“ puffern gar nicht. Bei Bedarf dort auf `err.offline` hin puffern.
+  document.addEventListener(
+    'submit',
+    async (e) => {
+      const form = e.target;
+      if (!(form instanceof HTMLFormElement) || !form.hasAttribute('data-archive') || !puffer()?.offline()) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      const status = form.elements.status.value;
+      if (!(await buffer('/aktion/lesen/doc/status', { id: docId(), status }))) return;
+      form.elements.status.value = status === 'archiv' ? 'stapel' : 'archiv';
+      const label = form.querySelector('button')?.firstChild;
+      if (label) label.textContent = status === 'archiv' ? 'Zurück auf den Stapel ' : 'Archivieren ';
+    },
+    true,
+  );
 
   /** Lesetext und Seitenleiste neu vom Server, mit den Markierungen an ihrer Stelle. */
   async function refresh() {
@@ -196,8 +294,11 @@
     const p = position(true);
     if (!p) return;
     // Zurückblättern senkt den Fortschritt nicht, verschiebt aber die Stelle zum Weiterlesen.
-    const body = new URLSearchParams({ csrf: csrf(), id: docId(), fortschritt: Math.max(best, p.progress).toFixed(3), anker: String(p.anchor) });
-    fetch('/aktion/lesen/doc/fortschritt', { method: 'POST', keepalive, credentials: 'same-origin', headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' }, body }).catch(() => {});
+    const fields = { id: docId(), fortschritt: Math.max(best, p.progress).toFixed(3), anker: String(p.anchor) };
+    const later = () => buffer('/aktion/lesen/doc/fortschritt', fields, { quiet: true });
+    if (puffer()?.offline()) return void later();
+    const body = new URLSearchParams({ csrf: csrf(), ...fields });
+    fetch('/aktion/lesen/doc/fortschritt', { method: 'POST', keepalive, credentials: 'same-origin', headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' }, body }).catch(later);
   }
 
   addEventListener(

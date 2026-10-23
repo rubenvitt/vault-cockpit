@@ -135,7 +135,7 @@ test('Service Worker: ohne Sitzung, nie aus dem HTTP-Cache, eigene CSP, App-Hül
 });
 
 test('Versions-Hash: ändert sich mit jeder Datei der App-Hülle, sonst nicht', () => {
-  const files = new Map([assets.css, assets.js, assets.offline, '/manifest.webmanifest', '/static/icon.svg', '/static/icons/icon-192.png', '/static/icons/icon-512.png', '/static/icons/icon-maskable-512.png', '/static/icons/apple-touch-icon.png'].map((p) => [p.split('?')[0], { body: `Inhalt von ${p}` }]));
+  const files = new Map([assets.css, assets.js, assets.offline, assets.lesenDoc, '/manifest.webmanifest', '/static/icon.svg', '/static/icons/icon-192.png', '/static/icons/icon-512.png', '/static/icons/icon-maskable-512.png', '/static/icons/apple-touch-icon.png'].map((p) => [p.split('?')[0], { body: `Inhalt von ${p}` }]));
   const html = { 'content-type': 'text/html; charset=utf-8' };
   const a = offlineFiles(files, { html });
   assert.equal(offlineFiles(files, { html }).version, a.version);
@@ -274,6 +274,8 @@ function fakeCaches() {
       async addAll(urls) {
         for (const u of urls) m.set(key(u), new Response(`Hülle ${u}`));
       },
+      keys: async () => [...m.keys()].map((url) => ({ url })),
+      delete: async (k) => m.delete(key(k)),
     };
   };
   return { stores, open, keys: async () => [...stores.keys()], delete: async (name) => stores.delete(name) };
@@ -360,6 +362,88 @@ test('Service Worker: speichert nur die freigegebene Woche, zeigt sie offline mi
     await sw.dispatch('fetch', { request: sw.request('/') });
     next = () => ({ type: 'opaqueredirect', ok: false, status: 0, headers: new Headers() });
     await sw.dispatch('fetch', { request: sw.request('/') });
+    assert.equal(sw.caches.stores.has('cockpit-seiten'), false);
+  });
+});
+
+test('Service Worker: Lesestoff nur nach Liste und Freigabe, offline mit Stand, weg beim Abmelden (VCP-80)', async () => {
+  await withCockpit(async ({ call }) => {
+    const body = await (await call('/sw.js', { anon: true })).text();
+    assert.equal(swConfig(body).synthesis, 'wiki/synthesis');
+    let online = true;
+    let listStatus = 200;
+    let gate = null;
+    const fetched = [];
+    const page = (text, mark = 'lesen') => new Response(`<!doctype html>\n<html lang="de"><body>${text}</body></html>`, { headers: { 'content-type': 'text/html; charset=utf-8', ...(mark ? { [OFFLINE_MARK]: mark } : {}) } });
+    const urls = [
+      '/lesen/stapel',
+      '/lesen/doc?id=a',
+      '/lesen/doc?id=ohne-freigabe',
+      '/wissen',
+      '/notiz?pfad=wiki%2Fsynthesis%2FA.md',
+      // Schummelt sich etwas in die Liste, bleibt es trotzdem draußen.
+      '/notiz?pfad=inbox%2Fa.md',
+      '/notiz?pfad=wiki%2Fsynthesis%2F..%2F..%2Fprivat%2Fx.md',
+      '/einstellungen',
+    ];
+    const sw = await loadWorker(body, async (req) => {
+      if (!online) throw new TypeError('Failed to fetch');
+      const u = new URL(typeof req === 'string' ? req : req.url, 'https://vault.test');
+      const path = u.pathname + u.search;
+      fetched.push(path);
+      if (u.pathname === '/api/lesen/offline') return new Response(JSON.stringify({ ok: true, urls }), { status: listStatus, headers: { 'content-type': 'application/json' } });
+      if (gate && u.pathname !== '/logout') await gate;
+      if (path === '/') return page('KW 42', 'woche');
+      if (path === '/lesen/doc?id=ohne-freigabe') return page('Artikel ohne Freigabe', null);
+      return page(`Seite ${path}`);
+    });
+    const stored = () => [...(sw.caches.stores.get('cockpit-seiten')?.keys() ?? [])].map((k) => k.replace('https://vault.test', '')).sort();
+    const fill = () => sw.dispatch('message', { data: { type: 'lesen-offline' } });
+
+    await sw.dispatch('install');
+    await sw.dispatch('fetch', { request: sw.request('/') });
+    await (await sw.caches.open('cockpit-seiten')).put('/lesen/doc?id=archiviert', page('alt'));
+    await fill();
+    assert.deepEqual(stored(), ['/', '/lesen/doc?id=a', '/lesen/stapel', '/notiz?pfad=wiki%2Fsynthesis%2FA.md', '/wissen']);
+    assert.ok(!fetched.some((p) => p.includes('inbox') || p.includes('privat') || p === '/einstellungen'), 'nicht freigegebene Seiten werden nicht einmal geholt');
+
+    // Noch frisch: Ein zweites Befüllen holt nur die Liste und, was noch fehlt.
+    fetched.length = 0;
+    await fill();
+    assert.deepEqual(fetched, ['/api/lesen/offline', '/lesen/doc?id=ohne-freigabe']);
+
+    // Mit Netz frischt Öffnen nur Gespeichertes auf; ein Artikel außerhalb der Liste kommt nicht dazu.
+    await sw.dispatch('fetch', { request: sw.request('/lesen/doc?id=neu') });
+    assert.ok(!stored().includes('/lesen/doc?id=neu'));
+
+    // Ohne Netz: gespeicherte Leseseite mit Stand (gleich wie verlinkt), andere Notizen zeigen die Hülle.
+    online = false;
+    const offline = await (await sw.dispatch('fetch', { request: sw.request('/lesen/doc?id=a') })).text();
+    assert.match(offline, /<html data-offline-stand="\d{4}-\d{2}-\d{2}T[\d:.]+Z" lang="de"><body>Seite \/lesen\/doc\?id=a/);
+    assert.match(await (await sw.dispatch('fetch', { request: sw.request('/notiz?pfad=wiki/synthesis/A.md') })).text(), /Seite \/notiz/);
+    assert.equal(await (await sw.dispatch('fetch', { request: sw.request('/notiz?pfad=inbox%2Fa.md') })).text(), 'Hülle /offline');
+
+    // Abmelden löscht Woche und Lesestoff.
+    await sw.dispatch('fetch', { request: sw.request('/logout', { method: 'POST' }) });
+    assert.equal(sw.caches.stores.has('cockpit-seiten'), false);
+
+    // Abmelden während des Befüllens: Danach landet nichts mehr im Cache.
+    online = true;
+    let release;
+    gate = new Promise((r) => (release = r));
+    const running = fill();
+    await new Promise((r) => setTimeout(r, 10));
+    await sw.dispatch('fetch', { request: sw.request('/logout', { method: 'POST' }) });
+    release();
+    gate = null;
+    await running;
+    assert.deepEqual(stored(), []);
+
+    // Sitzung abgelaufen: Die Liste antwortet 401, alles Gespeicherte verschwindet.
+    await fill();
+    assert.ok(stored().length > 0);
+    listStatus = 401;
+    await fill();
     assert.equal(sw.caches.stores.has('cockpit-seiten'), false);
   });
 });

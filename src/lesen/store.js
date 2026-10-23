@@ -262,12 +262,15 @@ export function createReadingStore({ path, now = () => Date.now() }) {
 
     // --- Markierungen ---------------------------------------------------------
 
-    /** `{ doc_id, quote, prefix, suffix, start_hint, note, color }`; Anker = Zitat mit Umgebung. */
+    /**
+     * `{ doc_id, quote, prefix, suffix, start_hint, note, color }`; Anker = Zitat mit Umgebung.
+     * `id` optional: die ID vom Gerät (Offline-Puffer), sonst eine neue.
+     */
     addHighlight(fields) {
       must(get(fields?.doc_id), 'Dieses Dokument');
       if (!fields.quote) throw new ReadingError('Zitat fehlt');
       const t = iso();
-      const id = randomUUID();
+      const id = fields.id ?? randomUUID();
       // Wiedersehen (src/lesen/review.js): erstmals einen Tag später fällig.
       const due = new Date(Date.parse(t) + 24 * 60 * 60 * 1000).toISOString();
       db.prepare('INSERT INTO highlights (id, doc_id, quote, prefix, suffix, start_hint, note, color, created_at, updated_at, review_due) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(
