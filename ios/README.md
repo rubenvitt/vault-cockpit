@@ -71,8 +71,8 @@ Navigationsregeln und Brücke.
 ## Lokal testen
 
 Gegen einen lokalen Server (`PUBLIC_URL=http://localhost:3000`) gibt es keine Universal Links,
-dafür fehlt https. Der Server schickt deshalb nur bei `PUBLIC_URL` ohne https auf
-`cockpit://login`, und nur ein Debug-Build nimmt bei einer http-Server-URL das Schema an
+dafür fehlt https. Der Server schickt deshalb nur bei `PUBLIC_URL` ohne https (und ohne
+`NODE_ENV=production`) auf `cockpit://login`, und nur ein Debug-Build nimmt bei einer http-Server-URL das Schema an
 (`.customScheme("cockpit")`, ohne Eintrag in `CFBundleURLTypes`). Ein Release-Build kennt das
 Schema nicht.
 
@@ -84,9 +84,13 @@ Schema nicht.
 
 Nur mit signiertem Build auf dem Gerät (oder einem signierten Simulator-Build) prüfbar: der
 Universal-Link-Callback gegen den echten Server (Apple holt die AASA über sein CDN, das dauert nach
-dem ersten Deploy etwas), Associated Domains, Keychain-Gruppe, Service Worker und Offline-Lesen
-unter App-Bound Domains. Ohne Signieren bricht das Login-Blatt mit https-Callback sofort ab.
-`localhost` als App-Bound Domain funktioniert im Simulator (iOS 27).
+dem ersten Deploy etwas), Associated Domains und Keychain-Gruppe. Ohne Signieren bricht das
+Login-Blatt mit https-Callback sofort ab (wie „Abbrechen“, ohne Meldung).
+
+Im Simulator geprüft (iOS 27, ohne Signieren, Testseite auf `localhost:3000`): `localhost` gilt
+als App-Bound Domain, `navigator.serviceWorker` ist da, ein Service Worker registriert sich und
+wird aktiv, die Brücke `cockpit` ist sichtbar, `/login` öffnet das Login-Blatt. Offline-Lesen
+(VCP-80) mit dem echten Cockpit ist noch nicht auf dem Gerät geprüft.
 
 ## TestFlight
 

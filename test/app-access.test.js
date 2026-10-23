@@ -59,7 +59,7 @@ const pkce = () => {
   return { verifier, challenge: createHash('sha256').update(verifier).digest('base64url') };
 };
 
-async function withServer(run, { sub = 'ruben', publicUrl = 'https://vault.test' } = {}) {
+async function withServer(run, { sub = 'ruben', publicUrl = 'https://vault.test', allowDevScheme = false } = {}) {
   const idp = fakeIdp({ sub });
   const clock = { t: Date.now() };
   const tokens = createTokenStore({ logger: quiet });
@@ -77,6 +77,7 @@ async function withServer(run, { sub = 'ruben', publicUrl = 'https://vault.test'
     sessionSecret: 'x'.repeat(40),
     publicUrl,
     appId: 'TEAM123.dev.example.cockpit',
+    allowDevScheme,
     allowedSubjects: ['ruben'],
     logger,
     now: () => clock.t,
@@ -245,7 +246,7 @@ test('App-Login: Redirect immer auf /app/angemeldet, nie auf cockpit://, ungült
   });
 });
 
-test('App-Login: cockpit://login nur bei PUBLIC_URL ohne https (lokaler Entwicklungsserver)', async () => {
+test('App-Login: cockpit://login nur bei PUBLIC_URL ohne https und außerhalb der Produktion', async () => {
   await withServer(
     async ({ appLogin, redeem }) => {
       const { verifier, challenge } = pkce();
@@ -256,8 +257,15 @@ test('App-Login: cockpit://login nur bei PUBLIC_URL ohne https (lokaler Entwickl
       assert.equal(res.status, 200);
       assert.equal((await res.json()).cookie.secure, false);
     },
-    { publicUrl: 'http://vault.test' },
+    { publicUrl: 'http://vault.test', allowDevScheme: true },
   );
+  // Mit https nie, auch wenn erlaubt; ohne Erlaubnis (NODE_ENV=production) auch nicht bei http.
+  for (const options of [{ publicUrl: 'https://vault.test', allowDevScheme: true }, { publicUrl: 'http://vault.test', allowDevScheme: false }]) {
+    await withServer(async ({ appLogin }) => {
+      const back = await appLogin({ challenge: pkce().challenge });
+      assert.equal(`${back.origin}${back.pathname}`, `${options.publicUrl}/app/angemeldet`);
+    }, options);
+  }
 });
 
 test('Universal Link: apple-app-site-association und /app/angemeldet ohne Anmeldung', async () => {

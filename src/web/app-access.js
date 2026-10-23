@@ -23,7 +23,8 @@ import { readLimited, FormError } from './multipart.js';
  * Der Code lebt nur im Speicher, 60 Sekunden, und gilt für genau einen
  * Versuch: Wer ihn abfängt, hat den Verifier nicht. Der Redirect geht nur auf
  * das feste `/app/angemeldet`. Ein eigenes Schema (`cockpit://login`) gibt es
- * nur bei `PUBLIC_URL` ohne https, also für einen lokalen Entwicklungsserver:
+ * nur bei `PUBLIC_URL` ohne https und außerhalb von `NODE_ENV=production`
+ * (`allowDevScheme`), also für einen lokalen Entwicklungsserver:
  * Dort gibt es keine Universal Links, und eine fremde App mit demselben Schema
  * könnte sich sonst selbst einen Login holen.
  *
@@ -65,9 +66,9 @@ class AppError extends Error {
  * `sessions` aus src/web/sessions.js, `tokens` aus src/cockpit/tokens.js,
  * `reading` aus src/lesen/http.js (Aktionen und `listen`).
  */
-export function createAppAccess({ sessions, tokens, reading, publicUrl, appId = `${APP_TEAM_ID}.${APP_BUNDLE_ID}`, logger = console, now = () => Date.now() }) {
+export function createAppAccess({ sessions, tokens, reading, publicUrl, appId = `${APP_TEAM_ID}.${APP_BUNDLE_ID}`, allowDevScheme = false, logger = console, now = () => Date.now() }) {
   const codes = new Map();
-  const redirectTo = publicUrl.startsWith('https://') ? new URL(APP_CALLBACK_PATH, publicUrl).href : DEV_REDIRECT;
+  const redirectTo = !publicUrl.startsWith('https://') && allowDevScheme ? DEV_REDIRECT : new URL(APP_CALLBACK_PATH, publicUrl).href;
   let attempts = [];
 
   const json = (res, status, body) => {
@@ -192,7 +193,7 @@ export function createAppAccess({ sessions, tokens, reading, publicUrl, appId = 
       webcredentials: { apps: [appId] },
     },
 
-    /** Nach erfolgreichem OIDC: einmaliger Code, Ziel immer `/app/angemeldet` (lokal ohne https `cockpit://login`). */
+    /** Nach erfolgreichem OIDC: einmaliger Code, Ziel immer `/app/angemeldet` (lokal ohne https und ohne Produktionsmodus `cockpit://login`). */
     finish(app, user) {
       const t = now();
       for (const [c, e] of codes) if (e.exp <= t) codes.delete(c);

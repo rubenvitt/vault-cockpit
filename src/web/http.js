@@ -182,13 +182,13 @@ for (const [path, file] of offlineFiles(PUBLIC, { html: HTML_HEADERS }).entries)
  * Die Sitzung ist ein signiertes Cookie und nur für diese Routen gültig; die
  * MCP-Schnittstelle prüft weiter ausschließlich Bearer-Tokens.
  */
-export function createWebHttp({ cockpit, settings, actions = null, notes = null, plan = null, reading = null, tokens = null, shortcuts = [], captureEnabled = false, calendars = null, graph = null, search = null, evidence = null, health = null, backup = null, restart = () => {}, oidc, sessionSecret, publicUrl, appId = undefined, allowedSubjects = [], logger = console, now = () => Date.now() }) {
+export function createWebHttp({ cockpit, settings, actions = null, notes = null, plan = null, reading = null, tokens = null, shortcuts = [], captureEnabled = false, calendars = null, graph = null, search = null, evidence = null, health = null, backup = null, restart = () => {}, oidc, sessionSecret, publicUrl, appId = undefined, allowDevScheme = false, allowedSubjects = [], logger = console, now = () => Date.now() }) {
   const signer = createCookieSigner(sessionSecret);
   const secure = publicUrl.startsWith('https://');
   const sessions = createSessions({ signer, settings, allowedSubjects, secure, now });
   const READING_PAGES = reading?.pages ?? {};
   // iOS-App: Login über das System-Blatt, Geräte-Token, JSON-API (VCP-91).
-  const appAccess = tokens && reading ? createAppAccess({ sessions, tokens, reading, publicUrl, appId, logger, now }) : null;
+  const appAccess = tokens && reading ? createAppAccess({ sessions, tokens, reading, publicUrl, appId, allowDevScheme, logger, now }) : null;
 
   const send = (res, status, body, headers = {}) => {
     res.writeHead(status, { ...HTML_HEADERS, ...headers });

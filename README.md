@@ -806,9 +806,10 @@ Universal Link `<PUBLIC_URL>/app/angemeldet`) und bekommt danach ein Sitzungs-Co
    `/app/angemeldet` im Browser öffnet, sieht nur „Zurück zur App …“; der Code
    darin wird dort nicht verarbeitet.
 
-   Nur für einen lokalen Entwicklungsserver: Ist `PUBLIC_URL` nicht `https://`,
-   geht der Redirect stattdessen auf `cockpit://login?…`, weil es ohne https
-   keine Universal Links gibt. Die App nimmt das Schema nur in Debug-Builds an
+   Nur für einen lokalen Entwicklungsserver: Ist `PUBLIC_URL` nicht `https://`
+   und `NODE_ENV` nicht `production` (das Image setzt es), geht der Redirect
+   stattdessen auf `cockpit://login?…`, weil es ohne https keine Universal
+   Links gibt. Die App nimmt das Schema nur in Debug-Builds an
    (siehe `ios/README.md`), ein Release-Build kennt es nicht.
 3. `state` prüfen, dann innerhalb von 60 Sekunden einlösen:
 
@@ -971,8 +972,8 @@ npm ci && npm test
   gebunden (wie PKCE). Den Link bekommt nur die App mit der App-ID aus der
   `apple-app-site-association`; eine fremde App kann keinen eigenen Login
   starten und den Code abholen, wie es mit einem eigenen Schema ginge. Das
-  Schema `cockpit://` gibt es nur bei `PUBLIC_URL` ohne https (lokale
-  Entwicklung) und nur in Debug-Builds der App. Der Geräte-Token ist ein
+  Schema `cockpit://` gibt es nur bei `PUBLIC_URL` ohne https außerhalb von
+  `NODE_ENV=production` (lokale Entwicklung) und nur in Debug-Builds der App. Der Geräte-Token ist ein
   normaler API-Token (nur Hash gespeichert, widerrufbar), das Einlösen ist
   begrenzt.
 - **Readwise-Importe** sind eine eigene Indexklasse und standardmäßig aus der Suche
