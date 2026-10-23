@@ -12,8 +12,10 @@ const noteHref = (path) => `/notiz?pfad=${encodeURIComponent(path)}`;
  * (Querverbindung) und `status` (Entwurf). Mit Frage `q` kommen die Treffer
  * der Hybrid-Suche mit Typfilter `synthesis` in deren Reihenfolge dazu.
  * „Zuletzt bewegt“ sortiert nach `updated`, Notizen ohne Datum zuletzt.
+ * `lesen` („Passt zu meinem Lesen“) behält nur die Synthesen unter den
+ * zuletzt bewegten `RECENT`, zu denen `evidence` neue passende Markierungen kennt.
  */
-export async function wissenView({ notes, search = null }, { q = '', art = '', status = '' } = {}) {
+export async function wissenView({ notes, search = null, evidence = null }, { q = '', art = '', status = '', lesen = false } = {}) {
   const all = notes.ofType(SYNTHESIS).map((r) => ({
     path: r.path,
     title: r.title ?? r.path.split('/').pop().replace(/\.md$/i, ''),
@@ -24,7 +26,9 @@ export async function wissenView({ notes, search = null }, { q = '', art = '', s
     updated: r.updated ?? null,
   }));
   const choices = (k) => [...new Set(all.map((n) => n[k]).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de'));
-  const keep = (n) => (!art || n.art === art) && (!status || n.status === status);
+  const byUpdated = (a, b) => (b.updated ?? '').localeCompare(a.updated ?? '');
+  const fits = lesen && evidence ? await evidence.matching([...all].sort(byUpdated).slice(0, RECENT).map((n) => n.path)) : null;
+  const keep = (n) => (!art || n.art === art) && (!status || n.status === status) && (!fits || fits.has(n.path));
   let hits = null;
   let degraded = null;
   if (q && search) {
@@ -33,8 +37,8 @@ export async function wissenView({ notes, search = null }, { q = '', art = '', s
     hits = r.results.map((h) => byPath.get(h.path)).filter((n) => n && keep(n));
     degraded = r.degraded ?? null;
   }
-  const recent = all.filter(keep).sort((a, b) => (b.updated ?? '').localeCompare(a.updated ?? '')).slice(0, RECENT);
-  return { q, art, status, arts: choices('art'), statuses: choices('status'), hits, recent, degraded, total: all.length };
+  const recent = all.filter(keep).sort(byUpdated).slice(0, RECENT);
+  return { q, art, status, lesen: Boolean(fits), reading: Boolean(evidence), arts: choices('art'), statuses: choices('status'), hits, recent, degraded, total: all.length };
 }
 
 const select = (name, label, value, options) =>
@@ -59,6 +63,7 @@ ${readingNav('wissen')}
     <input type="search" name="q" value="${esc(m.q)}" placeholder="Frage an die Synthesen" aria-label="Frage an die Synthesen" enterkeyhint="search" autocomplete="off">
     ${select('art', 'Querverbindung', m.art, m.arts)}
     ${select('status', 'Status', m.status, m.statuses)}
+    ${m.reading ? `<label class="wissen-check"><input type="checkbox" name="lesen" value="1"${m.lesen ? ' checked' : ''}> Passt zu meinem Lesen</label>` : ''}
     <button type="submit" class="btn">Suchen</button>
   </form>
 </div>
@@ -71,8 +76,8 @@ ${hits}
 </html>`;
 }
 
-/** `/wissen?q=…&art=…&status=…` als fertige Seite. */
-export async function wissenPage({ notes, search, url, user }) {
+/** `/wissen?q=…&art=…&status=…&lesen=1` als fertige Seite. */
+export async function wissenPage({ notes, search, evidence = null, url, user }) {
   const p = (k) => (url.searchParams.get(k) ?? '').trim().slice(0, 500);
-  return renderWissen(await wissenView({ notes, search }, { q: p('q'), art: p('art'), status: p('status') }), { user });
+  return renderWissen(await wissenView({ notes, search, evidence }, { q: p('q'), art: p('art'), status: p('status'), lesen: p('lesen') === '1' }), { user });
 }

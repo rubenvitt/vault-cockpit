@@ -29,6 +29,7 @@ import { saveUrl } from './lesen/save.js';
 import { createMailReader } from './lesen/mail.js';
 import { createReadingExport } from './lesen/vault-export.js';
 import { createEmbedCache } from './lesen/embed-cache.js';
+import { createSynthesisEvidence } from './lesen/synthesis-evidence.js';
 import { createOidcLogin } from './web/oidc.js';
 import { createWebHttp } from './web/http.js';
 import { loadShortcuts } from './web/shortcuts.js';
@@ -320,6 +321,10 @@ const cockpitActions = createCockpitActions({
   onFlame: (task) => flameNote.afterFlame(task),
 });
 
+// Vault-Notizen ansehen und verarbeiten, über denselben Editor wie vault_edit;
+// Bilder aus dem Vault und ähnliche Notizen für die Vorschau.
+const noteDesk = createNoteDesk({ index, editor, policy: POLICY, settings: cockpitSettings, vaultPath: VAULT_PATH, semantic: currentSemantic });
+
 // Web-Cockpit (Schritt 3): Wochenansicht mit eigenem Browser-Login. Aus, bis
 // WEB_CLIENT_ID gesetzt ist.
 const webHttp = process.env.WEB_CLIENT_ID
@@ -328,9 +333,7 @@ const webHttp = process.env.WEB_CLIENT_ID
       actions: cockpitActions,
       // Woche planen: Zunder-Aufgaben holen, Flammen einplanen (VCP-47).
       plan: createWeekPlanner({ settings: cockpitSettings, zunder }),
-      // Vault-Notizen ansehen und verarbeiten, über denselben Editor wie vault_edit;
-      // Bilder aus dem Vault und ähnliche Notizen für die Vorschau.
-      notes: createNoteDesk({ index, editor, policy: POLICY, settings: cockpitSettings, vaultPath: VAULT_PATH, semantic: currentSemantic }),
+      notes: noteDesk,
       settings: cockpitSettings,
       tokens: apiTokens,
       shortcuts: loadShortcuts(),
@@ -338,6 +341,8 @@ const webHttp = process.env.WEB_CLIENT_ID
       calendars,
       graph,
       search: (query, { type = null } = {}) => hybridSearch({ index, semantic: currentSemantic, query, type, limit: 30 }),
+      // Synthesen: passende neue Markierungen als Belege anhängen (VCP-82).
+      evidence: createSynthesisEvidence({ notes: noteDesk, index, store: reading, exporter: readingExport, embedCache, semantic: currentSemantic, vaultPath: VAULT_PATH, editor }),
       health,
       // Lesen: Eingang, Stapel, Markiert; Artikel holt src/lesen/fetch.js (SSRF-geschützt).
       // „In Inbox“ aus der Leseansicht nutzt die Schnelleingabe des Cockpits.
