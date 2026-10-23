@@ -3,6 +3,7 @@ import { FetchError } from './fetch.js';
 import { ReadingError } from './store.js';
 import { saveUrl } from './save.js';
 import { renderInbox, renderStack, renderHighlights } from './pages.js';
+import { inboxRoutes } from './inbox.js';
 
 /**
  * Routen des Bereichs „Lesen“, eingebunden in src/web/http.js (Sitzung, CSRF,
@@ -27,14 +28,17 @@ export function readingRoutes({ store, fetchPage = undefined, logger = console }
     }
   };
 
+  const inbox = inboxRoutes({ store });
+
   return {
     pages: {
       '/lesen': async () => ({ redirect: '/lesen/eingang' }),
-      '/lesen/eingang': async (ctx) => ({ html: renderInbox(store.list({ status: 'eingang' }), ctx) }),
+      ...inbox.pages,
       '/lesen/stapel': async (ctx) => ({ html: renderStack(store.list({ status: 'stapel' }), ctx) }),
       '/lesen/markiert': async (ctx) => ({ html: renderHighlights(store.listHighlights(), ctx) }),
     },
     actions: {
+      ...inbox.actions,
       async '/aktion/lesen/speichern'(form, session) {
         const url = (form.get('url') ?? '').trim();
         if (!url) throw new ActionError('Bitte eine Adresse eingeben');
