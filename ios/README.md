@@ -183,7 +183,10 @@ Schema nicht.
 Nur mit signiertem Build auf dem Gerät (oder einem signierten Simulator-Build) prüfbar: der
 Universal-Link-Callback gegen den echten Server (Apple holt die AASA über sein CDN, das dauert nach
 dem ersten Deploy etwas), Associated Domains und Keychain-Gruppe. Ohne Signieren bricht das
-Login-Blatt mit https-Callback sofort ab (wie „Abbrechen“, ohne Meldung).
+Login-Blatt mit https-Callback sofort ab, ebenso ohne erreichbare AASA (Server ohne App-Login,
+Antwort 404). iOS meldet das wie „Abbrechen“; kommt es in unter einer Sekunde (oder liefert `start()`
+`false`), zeigt die App „Anmeldung konnte nicht starten …“ mit „Erneut versuchen“ und loggt
+Fehler-Domain, Code und Host (Kategorie `login`).
 
 Im Simulator geprüft (iOS 27, ohne Signieren, Testseite auf `localhost:3000`): `localhost` gilt
 als App-Bound Domain, `navigator.serviceWorker` ist da, ein Service Worker registriert sich und
