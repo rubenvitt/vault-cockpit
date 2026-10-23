@@ -1278,7 +1278,7 @@ test('Rückblick: Kennzahlen, Balken als SVG ohne Inline-Styles, Navigation', as
 
 test('Kurzbefehle: in den Einstellungen verlinkt, nur angemeldet zu laden', async () => {
   const shortcuts = loadShortcuts();
-  assert.deepEqual(shortcuts.map((s) => s.slug), ['notiz', 'sprachmemo'], 'beide signierten Dateien liegen im Repo');
+  assert.deepEqual(shortcuts.map((s) => s.slug), ['notiz', 'sprachmemo', 'lesestapel'], 'alle signierten Dateien liegen im Repo');
   await withServer(
     async ({ call, login }) => {
       const anon = await call('/kurzbefehle/notiz.shortcut');
@@ -1287,6 +1287,7 @@ test('Kurzbefehle: in den Einstellungen verlinkt, nur angemeldet zu laden', asyn
       const page = await (await call('/einstellungen')).text();
       assert.match(page, /href="\/kurzbefehle\/notiz\.shortcut"/);
       assert.match(page, /href="\/kurzbefehle\/sprachmemo\.shortcut"/);
+      assert.match(page, /href="\/kurzbefehle\/lesestapel\.shortcut"/);
       const file = await call('/kurzbefehle/sprachmemo.shortcut');
       assert.equal(file.status, 200);
       assert.match(file.headers.get('content-disposition'), /attachment;.*Sprachmemo%20ins%20Cockpit\.shortcut/);
