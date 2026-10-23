@@ -318,6 +318,8 @@ test('OPML: verschachtelte outline werden flach importiert, je Feed der nächste
     { url: 'https://json.test/feed.json', title: 'JSON', site_url: null, group: null },
   ]);
   assert.throws(() => parseOpml('<rss/>'), /Keine OPML/);
+  // Leeres `title` am Ordner: dann zählt `text`.
+  assert.equal(parseOpml('<opml><body><outline text="Tech" title=""><outline xmlUrl="https://t.test/feed"/></outline></body></opml>')[0].group, 'Tech');
   assert.deepEqual(parseOpml(toOpml(list.map((f) => ({ ...f, title: `${f.title} "<x>"` })))).map((f) => f.title), ['Blog & Co "<x>"', 'Atom "<x>"', 'JSON "<x>"']);
 });
 

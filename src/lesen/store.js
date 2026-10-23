@@ -176,6 +176,8 @@ export function createReadingStore({ path, now = () => Date.now() }) {
     if (!n) throw new ReadingError('Name der Gruppe fehlt');
     return n;
   };
+  // NOCASE in SQLite kennt nur ASCII; „Ökologie“ und „ökologie“ sollen dieselbe Gruppe sein.
+  const groupByName = (name, exceptId = null) => listGroups().find((g) => g.id !== exceptId && g.name.toLocaleLowerCase('de') === name.toLocaleLowerCase('de')) ?? null;
   /** `group_id` im Patch: leer heißt ohne Gruppe, eine unbekannte ist ein Fehler (statt Fremdschlüssel-Fehler). */
   const withGroup = (patch) => {
     if (!patch || !('group_id' in patch)) return patch;
@@ -384,8 +386,8 @@ export function createReadingStore({ path, now = () => Date.now() }) {
     /** Neue Gruppe ans Ende; idempotent per Name (ohne Groß/klein), `duplicate` sagt, ob es sie schon gab. */
     addGroup(fields) {
       const name = groupName(fields?.name);
-      const existing = db.prepare('SELECT * FROM feed_groups WHERE name = ?').get(name);
-      if (existing) return { group: groupRow(existing), duplicate: true };
+      const existing = groupByName(name);
+      if (existing) return { group: existing, duplicate: true };
       const id = randomUUID();
       const { p } = db.prepare('SELECT COALESCE(MAX(position), -1) + 1 AS p FROM feed_groups').get();
       db.prepare('INSERT INTO feed_groups (id, name, position, created_at) VALUES (?, ?, ?, ?)').run(id, name, p, iso());
@@ -401,8 +403,7 @@ export function createReadingStore({ path, now = () => Date.now() }) {
       const p = { ...patch };
       if ('name' in p) {
         p.name = groupName(p.name);
-        const other = db.prepare('SELECT id FROM feed_groups WHERE name = ? AND id != ?').get(p.name, String(id));
-        if (other) throw new ReadingError(`Eine Gruppe „${p.name}“ gibt es schon`);
+        if (groupByName(p.name, String(id))) throw new ReadingError(`Eine Gruppe „${p.name}“ gibt es schon`);
       }
       update('feed_groups', id, p, GROUP_EDIT);
       return getGroup(id);
