@@ -6,7 +6,8 @@ on:
   pull_request:
 
 jobs:
-  test:
+  # Pflicht-Check für main (Ruleset „main schützen“).
+  node-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,7 +19,7 @@ jobs:
       - run: npm test
 
   image:
-    needs: test
+    needs: node-test
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
