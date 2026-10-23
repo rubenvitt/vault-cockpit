@@ -285,14 +285,20 @@ private actor FakeService: ListenService {
     func setOffline(_ value: Bool) { offline = value }
     func setRejectsHighlights(_ value: Bool) { rejectsHighlights = value }
     func setVoice(_ value: String?) { voice = value }
+    func setAudioData(_ value: Data?) { audioData = value }
+    /// Kein Netz für Liste, Text und Audio (anders als `offline`, das nur das Senden trifft).
+    var unreachable = false
+    func setUnreachable(_ value: Bool) { unreachable = value }
 
     func queue(minutes: Int) async throws -> Queue {
+        if unreachable { throw URLError(.notConnectedToInternet) }
         var list = ["zeit": minutes, "items": [["id": "a", "title": "Erster Text", "url": "https://example.org/a", "site": "example.org", "kind": "article", "minutes": 3, "remaining": 2, "progress": 0.4]]] as [String: Any]
         if let voice { list["stimme"] = voice }
         return try JSONDecoder().decode(Queue.self, from: JSONSerialization.data(withJSONObject: list))
     }
 
     func audio(id: String, start: Int, end: Int) async throws -> Data {
+        if unreachable { throw URLError(.notConnectedToInternet) }
         audioRequests.append([start, end])
         guard let audioData else { throw APIError(status: 502, code: "bad_request", message: "ElevenLabs: Kontingent aufgebraucht") }
         return audioData
@@ -300,7 +306,8 @@ private actor FakeService: ListenService {
 
     /// Wie der Server: die zuletzt gespeicherte Lesestelle, sonst Satz 2.
     func text(id: String) async throws -> ListenText {
-        listenText(id: id, anchor: saved.last { $0.id == id }?.anchor ?? 21)
+        if unreachable { throw URLError(.notConnectedToInternet) }
+        return listenText(id: id, anchor: saved.last { $0.id == id }?.anchor ?? 21)
     }
 
     func saveProgress(id: String, progress: Double, anchor: Int?) async throws -> Double {
@@ -454,5 +461,81 @@ final class ServerSpeechTests: XCTestCase {
         await waitUntil { !speech.spoken.isEmpty }
         XCTAssertEqual(speech.voices, ["ElevenLabs"])
         XCTAssertEqual(speech.prepared, [Utterance(id: "a", text: "Dritter 🎉 Satz.", start: 35, end: 51)])
+    }
+}
+
+@MainActor
+final class OfflineTests: XCTestCase {
+    private func waitUntil(_ condition: () async -> Bool) async {
+        for _ in 0..<200 where !(await condition()) { try? await Task.sleep(for: .milliseconds(10)) }
+    }
+
+    private func store() -> OfflineStore {
+        OfflineStore(root: FileManager.default.temporaryDirectory.appending(path: "offline-\(UUID())", directoryHint: .isDirectory))
+    }
+
+    func testDownloadKeepsTextAndEverySentenceAndWorksWithoutNetwork() async {
+        let online = FakeService()
+        await online.setVoice("ElevenLabs")
+        await online.setAudioData(Data("mp3".utf8))
+        let offline = store()
+        let service = OfflineListenService(online: online, offline: offline)
+        let speech = FakeSpeech()
+        let player = Player(minutes: 15, service: service, speech: speech, defaults: UserDefaults(suiteName: "test-\(UUID())")!, offline: offline)
+        defer { player.close() }
+
+        await player.start()
+        await waitUntil { !speech.spoken.isEmpty }
+        let item = player.machine.items[0]
+        player.download(item)
+        await waitUntil { player.offlineIDs.contains(item.id) }
+        XCTAssertEqual(player.message, "Offline gespeichert: Erster Text")
+        let requests = await online.audioRequests
+        XCTAssertEqual(requests, [[0, 20], [21, 34], [35, 51]], "alle Sätze, jeder einmal")
+        let entries = await offline.entries()
+        XCTAssertEqual(entries.map(\.item.id), ["a"])
+        XCTAssertEqual(entries.first?.voice, "ElevenLabs")
+
+        // Ohne Netz: Liste und Text aus der Kopie, Audio von der Platte.
+        await online.setUnreachable(true)
+        let queue = try? await service.queue(minutes: 15)
+        XCTAssertEqual(queue?.items.map(\.id), ["a"])
+        XCTAssertEqual(queue?.voice, "ElevenLabs")
+        let text = try? await service.text(id: "a")
+        XCTAssertEqual(text?.text, sample)
+        let audio = try? await service.audio(id: "a", start: 21, end: 34)
+        XCTAssertEqual(audio, Data("mp3".utf8))
+
+        // Fortschritt geht in die Kopie, damit es offline an der richtigen Stelle weitergeht.
+        _ = try? await service.saveProgress(id: "a", progress: 0.7, anchor: 35)
+        let moved = await offline.entry(id: "a")
+        XCTAssertEqual(moved?.text.anchor, 35)
+        XCTAssertEqual(moved?.text.progress, 0.7)
+
+        player.removeOffline(item)
+        await waitUntil { await offline.entries().isEmpty }
+        XCTAssertFalse(player.offlineIDs.contains(item.id))
+    }
+
+    func testWithoutServerVoiceOnlyTheTextIsStored() async {
+        let online = FakeService()
+        let offline = store()
+        let player = Player(minutes: 15, service: OfflineListenService(online: online, offline: offline), speech: FakeSpeech(), defaults: UserDefaults(suiteName: "test-\(UUID())")!, offline: offline)
+        defer { player.close() }
+        await player.start()
+        await waitUntil { !player.machine.items.isEmpty }
+        player.download(player.machine.items[0])
+        await waitUntil { !player.offlineIDs.isEmpty }
+        let requests = await online.audioRequests
+        XCTAssertEqual(requests, [], "Gerätestimme braucht kein Audio")
+        let entry = await offline.entry(id: "a")
+        XCTAssertNil(entry?.voice)
+    }
+
+    func testRejectedTokenIsNotHiddenByOfflineCopies() async {
+        XCTAssertTrue(OfflineListenService.isUnreachable(URLError(.notConnectedToInternet)))
+        XCTAssertTrue(OfflineListenService.isUnreachable(APIError(status: 502, code: nil, message: "")))
+        XCTAssertFalse(OfflineListenService.isUnreachable(APIError(status: 401, code: "unauthorized", message: "")))
+        XCTAssertFalse(OfflineListenService.isUnreachable(APIError(status: 404, code: "not_found", message: "")))
     }
 }

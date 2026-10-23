@@ -22,6 +22,13 @@ public struct Queue: Codable, Equatable, Sendable {
         case voice = "stimme"
         case items
     }
+
+    /// Für die Wiedergabeliste aus Offline-Kopien.
+    public init(minutes: Int, voice: String?, items: [QueueItem]) {
+        self.minutes = minutes
+        self.voice = voice
+        self.items = items
+    }
 }
 
 public struct QueueItem: Codable, Equatable, Identifiable, Sendable {
@@ -48,6 +55,20 @@ public struct ListenText: Codable, Equatable, Sendable {
     public let progress: Double
     /// Lesestelle in Zeichen des Textes, 0 ohne.
     public let anchor: Int
+
+    /// Derselbe Text mit neuer Lesestelle, für Offline-Kopien.
+    public func at(progress: Double, anchor: Int) -> ListenText {
+        ListenText(id: id, title: title, text: text, sentences: sentences, progress: progress, anchor: anchor)
+    }
+
+    public init(id: String, title: String, text: String, sentences: [[Int]], progress: Double, anchor: Int) {
+        self.id = id
+        self.title = title
+        self.text = text
+        self.sentences = sentences
+        self.progress = progress
+        self.anchor = anchor
+    }
 }
 
 /// Body für `POST /api/app/markierung`. `cid` macht das Senden idempotent. Codable, damit der Player ihn puffern kann.
