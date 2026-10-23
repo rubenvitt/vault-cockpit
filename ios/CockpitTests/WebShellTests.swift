@@ -1,0 +1,41 @@
+@testable import Cockpit
+import XCTest
+
+final class WebShellTests: XCTestCase {
+    private let server = URL(string: "https://vault.test")!
+
+    private func decide(_ url: String, method: String = "GET", mainFrame: Bool = true) -> NavigationDecision {
+        NavigationDecision.decide(URL(string: url)!, method: method, server: server, isMainFrame: mainFrame)
+    }
+
+    func testOwnPagesStayInWebView() {
+        XCTAssertEqual(decide("https://vault.test/lesen/stapel?zeit=15"), .allow)
+        XCTAssertEqual(decide("https://vault.test/logout"), .allow, "nur POST meldet ab")
+        XCTAssertEqual(decide("about:blank"), .allow)
+    }
+
+    func testLoginStartsNativeLogin() {
+        XCTAssertEqual(decide("https://vault.test/login?next=%2Flesen%2Fstapel"), .login(next: "/lesen/stapel"))
+        XCTAssertEqual(decide("https://vault.test/login"), .login(next: "/"))
+        XCTAssertEqual(decide("https://vault.test/login?next=%2F%2Fevil.test"), .login(next: "/"))
+        XCTAssertEqual(decide("https://vault.test/login?next=https%3A%2F%2Fevil.test"), .login(next: "/"))
+        XCTAssertEqual(decide("https://vault.test/logout", method: "POST"), .logout)
+    }
+
+    func testForeignHostsLeaveTheApp() {
+        XCTAssertEqual(decide("https://blatt.test/a"), .external(URL(string: "https://blatt.test/a")!))
+        XCTAssertEqual(decide("https://vault.test.evil/login"), .external(URL(string: "https://vault.test.evil/login")!))
+        XCTAssertEqual(decide("https://blatt.test/a", mainFrame: false), .allow)
+        XCTAssertEqual(decide("mailto:ich@example.org"), .system(URL(string: "mailto:ich@example.org")!))
+        let local = URL(string: "http://localhost:3000")!
+        XCTAssertEqual(NavigationDecision.decide(URL(string: "http://localhost:3000/login")!, method: "GET", server: local, isMainFrame: true), .login(next: "/"))
+        XCTAssertEqual(NavigationDecision.decide(URL(string: "http://localhost:8080/")!, method: "GET", server: local, isMainFrame: true), .external(URL(string: "http://localhost:8080/")!))
+    }
+
+    func testBridgeMessage() {
+        XCTAssertEqual(BridgeMessage(["type": "hoeren", "zeit": NSNumber(value: 30)]), .listen(minutes: 30))
+        XCTAssertEqual(BridgeMessage(["type": "hoeren"]), .listen(minutes: 15))
+        XCTAssertNil(BridgeMessage(["type": "anders"]))
+        XCTAssertNil(BridgeMessage("hoeren"))
+    }
+}

@@ -1,5 +1,5 @@
 // swift-tools-version:5.9
-// Gemeinsamer Code für App und Extensions (Konfiguration, später Keychain und API-Client).
+// Gemeinsamer Code für App und Extensions: Konfiguration, Keychain, API-Client.
 import PackageDescription
 
 let package = Package(

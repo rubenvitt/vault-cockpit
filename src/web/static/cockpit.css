@@ -792,7 +792,7 @@ html[data-read-sans] .lesen-text :is(h1, h2, h3, h4, h5, h6) { font-family: var(
 /* /lesen/hoeren (src/lesen/listen.js, /static/lesen-hoeren.js): Wiedergabe über der Liste, große Knöpfe für unterwegs */
 .stapel-hoeren { margin: 0 0 var(--s-4); }
 .hoeren-player { display: grid; gap: var(--s-3); margin-bottom: var(--s-4); padding: var(--s-4); border: 1px solid var(--line); border-radius: var(--r-lg); }
-.hoeren-player[hidden], .hoeren-nojs[hidden] { display: none; }
+.hoeren-player[hidden], .hoeren-player [hidden], .hoeren-nojs[hidden] { display: none; }
 .hoeren-now { display: grid; gap: var(--s-1); margin: 0; }
 .hoeren-sentence { font: var(--t-md)/1.5 var(--font-read); overflow-wrap: anywhere; }
 .hoeren-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }

@@ -59,7 +59,7 @@ const pkce = () => {
   return { verifier, challenge: createHash('sha256').update(verifier).digest('base64url') };
 };
 
-async function withServer(run, { sub = 'ruben' } = {}) {
+async function withServer(run, { sub = 'ruben', publicUrl = 'https://vault.test', allowDevScheme = false } = {}) {
   const idp = fakeIdp({ sub });
   const clock = { t: Date.now() };
   const tokens = createTokenStore({ logger: quiet });
@@ -75,7 +75,9 @@ async function withServer(run, { sub = 'ruben' } = {}) {
     reading,
     oidc: createOidcLogin({ issuer: ISSUER, clientId: CLIENT, redirectUri: 'https://vault.test/auth/callback', allowedSubjects: ['ruben'], fetch: idp.fetch }),
     sessionSecret: 'x'.repeat(40),
-    publicUrl: 'https://vault.test',
+    publicUrl,
+    appId: 'TEAM123.dev.example.cockpit',
+    allowDevScheme,
     allowedSubjects: ['ruben'],
     logger,
     now: () => clock.t,
@@ -108,7 +110,7 @@ async function withServer(run, { sub = 'ruben' } = {}) {
     }
     return res;
   };
-  /** App-Login bis zum Redirect auf `cockpit://login`; liefert dessen Parameter. */
+  /** App-Login bis zum Redirect auf den Universal Link; liefert dessen Parameter. */
   const appLogin = async ({ challenge, state = 'zustand-123', extra = '' }) => {
     const start = await call(`/login?app=1&state=${state}&challenge=${challenge}${extra}`);
     assert.equal(start.status, 303);
@@ -125,11 +127,11 @@ async function withServer(run, { sub = 'ruben' } = {}) {
   }
 }
 
-test('App-Login: cockpit://login, Einlösen, Cookie öffnet /lesen/eingang, Token die App-API', async () => {
+test('App-Login: Universal Link, Einlösen, Cookie öffnet /lesen/eingang, Token die App-API', async () => {
   await withServer(async ({ base, call, appLogin, redeem, clock, tokens, store, changed, logs, sheet }) => {
     const { verifier, challenge } = pkce();
     const back = await appLogin({ challenge });
-    assert.equal(`${back.protocol}//${back.host}${back.pathname}`, 'cockpit://login');
+    assert.equal(`${back.origin}${back.pathname}`, 'https://vault.test/app/angemeldet');
     assert.equal(back.searchParams.get('state'), 'zustand-123');
     const code = back.searchParams.get('code');
     assert.match(code, /^[\w-]{43}$/);
@@ -229,18 +231,59 @@ test('App-Login: falscher Verifier verbraucht den Code, abgelaufener gilt nicht'
   });
 });
 
-test('App-Login: Redirect immer auf cockpit://login, ungültige Challenge 400', async () => {
+test('App-Login: Redirect immer auf /app/angemeldet, nie auf cockpit://, ungültige Challenge 400', async () => {
   await withServer(async ({ call, appLogin }) => {
     const { challenge } = pkce();
     const back = await appLogin({ challenge, extra: `&next=${encodeURIComponent('https://evil.test/')}&redirect_uri=${encodeURIComponent('evil://login')}` });
-    assert.match(back.href, /^cockpit:\/\/login\?code=/);
+    assert.match(back.href, /^https:\/\/vault\.test\/app\/angemeldet\?code=/);
     assert.equal((await call(`/login?app=1&state=zustand-123&challenge=zu-kurz`)).status, 400);
     assert.equal((await call(`/login?app=1&challenge=${challenge}`)).status, 400);
     // Abbruch bei Pocket ID geht zurück an die App, ohne Code.
     const start = await call(`/login?app=1&state=zustand-123&challenge=${challenge}`);
     const state = new URL(start.headers.get('location')).searchParams.get('state');
     const cancel = await call(`/auth/callback?error=access_denied&state=${state}`);
-    assert.equal(cancel.headers.get('location'), 'cockpit://login?error=access_denied&state=zustand-123');
+    assert.equal(cancel.headers.get('location'), 'https://vault.test/app/angemeldet?error=access_denied&state=zustand-123');
+  });
+});
+
+test('App-Login: cockpit://login nur bei PUBLIC_URL ohne https und außerhalb der Produktion', async () => {
+  await withServer(
+    async ({ appLogin, redeem }) => {
+      const { verifier, challenge } = pkce();
+      const back = await appLogin({ challenge });
+      assert.equal(`${back.protocol}//${back.host}${back.pathname}`, 'cockpit://login');
+      assert.equal(back.searchParams.get('state'), 'zustand-123');
+      const res = await redeem({ code: back.searchParams.get('code'), verifier, device: 'Simulator' });
+      assert.equal(res.status, 200);
+      assert.equal((await res.json()).cookie.secure, false);
+    },
+    { publicUrl: 'http://vault.test', allowDevScheme: true },
+  );
+  // Mit https nie, auch wenn erlaubt; ohne Erlaubnis (NODE_ENV=production) auch nicht bei http.
+  for (const options of [{ publicUrl: 'https://vault.test', allowDevScheme: true }, { publicUrl: 'http://vault.test', allowDevScheme: false }]) {
+    await withServer(async ({ appLogin }) => {
+      const back = await appLogin({ challenge: pkce().challenge });
+      assert.equal(`${back.origin}${back.pathname}`, `${options.publicUrl}/app/angemeldet`);
+    }, options);
+  }
+});
+
+test('Universal Link: apple-app-site-association und /app/angemeldet ohne Anmeldung', async () => {
+  await withServer(async ({ call }) => {
+    const aasa = await call('/.well-known/apple-app-site-association', { jar: {} });
+    assert.equal(aasa.status, 200);
+    assert.equal(aasa.headers.get('content-type'), 'application/json');
+    assert.deepEqual(await aasa.json(), {
+      applinks: { details: [{ appIDs: ['TEAM123.dev.example.cockpit'], components: [{ '/': '/app/angemeldet*' }] }] },
+      webcredentials: { apps: ['TEAM123.dev.example.cockpit'] },
+    });
+    const page = await call('/app/angemeldet?code=abc&state=zustand-123', { jar: {} });
+    assert.equal(page.status, 200);
+    assert.match(page.headers.get('content-type'), /^text\/html/);
+    assert.equal(page.headers.get('cache-control'), 'no-store');
+    const html = await page.text();
+    assert.match(html, /Zurück zur App/);
+    assert.doesNotMatch(html, /abc/, 'der Code bleibt unbenutzt');
   });
 });
 
@@ -248,7 +291,7 @@ test('App-Login: nur ALLOWED_SUBJECTS', async () => {
   await withServer(
     async ({ appLogin }) => {
       const back = await appLogin({ challenge: pkce().challenge });
-      assert.equal(back.href, 'cockpit://login?error=access_denied&state=zustand-123');
+      assert.equal(back.href, 'https://vault.test/app/angemeldet?error=access_denied&state=zustand-123');
     },
     { sub: 'fremd' },
   );
@@ -278,6 +321,17 @@ test('App-API: ohne, mit fremdem Recht und mit widerrufenem Token', async () => 
     assert.equal((await call('/api/app/ich', { bearer: device.token })).status, 200);
     tokens.revoke(device.id);
     await all(device.token, 401);
+    // Abmelden in der App widerruft genau diesen Token.
+    const phone = tokens.create('iPhone', 'app');
+    const other = tokens.create('iPad', 'app');
+    assert.equal((await call('/api/app/abmelden', { bearer: phone.token })).status, 405);
+    assert.equal((await call('/api/app/abmelden', { method: 'POST', body: {} })).status, 401);
+    const out = await call('/api/app/abmelden', { method: 'POST', bearer: phone.token, body: {} });
+    assert.equal(out.status, 200);
+    assert.deepEqual(await out.json(), { ok: true });
+    await all(phone.token, 401);
+    assert.equal((await call('/api/app/abmelden', { method: 'POST', bearer: phone.token, body: {} })).status, 401);
+    assert.equal((await call('/api/app/ich', { bearer: other.token })).status, 200);
     // Eine Sitzung ersetzt den Token nicht.
     assert.equal((await call('/api/app/ich')).status, 401);
   });

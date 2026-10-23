@@ -15,8 +15,86 @@ make test      # Unit-Tests auf dem ersten verfügbaren iPhone-Simulator
 
 - `DESTINATION='platform=iOS Simulator,name=iPhone 17'` wählt einen anderen Simulator.
 - `BUILD_NUMBER=…` setzt die Build-Nummer (`CURRENT_PROJECT_VERSION`).
-- Server-URL: Release nutzt `https://vault.rubeen.dev` (`COCKPIT_SERVER_URL` in `project.yml`).
+- Server-URL: Release nutzt `https://vault.rubeen.dev` (`COCKPIT_SERVER_URL` in `project.yml`,
+  dazu der Host in `COCKPIT_SERVER_HOST` für Associated Domains und App-Bound Domains).
   Für Debug `Config/Local.xcconfig.example` nach `Config/Local.xcconfig` kopieren und anpassen.
+
+## Aufbau der App
+
+- **Login** (`Login.swift`, `AppModel.swift`): Login-Blatt des Systems
+  (`ASWebAuthenticationSession`, `prefersEphemeralWebBrowserSession = false`, damit Pocket ID
+  angemeldet bleibt und Passkeys greifen) auf `/login?app=1&state&challenge` mit PKCE. Der Callback
+  ist der Universal Link `https://<Host>/app/angemeldet` (`callback: .https(host:path:)`, ab
+  iOS 17.4). Dafür stehen `applinks:` und `webcredentials:` des Hosts in den Entitlements, und der
+  Server liefert `/.well-known/apple-app-site-association` (siehe README im Repo, „iOS-App: Login
+  und App-API“). Danach `POST /api/app/einloesen`: das Cookie mit allen Attributen in
+  `WKWebsiteDataStore.default().httpCookieStore`, der Geräte-Token in die geteilte Keychain-Gruppe.
+  Gerätename: „iPhone · iPhone17,1 · 23.10.2026“ (`UIDevice.name` ist nur „iPhone“).
+- **Web-Hülle** (`WebShell.swift`): WKWebView randlos (die Seite nutzt `viewport-fit=cover` und
+  `env(safe-area-inset-*)`), Ziehen zum Neuladen, Zurück-Geste. Fremde Hosts öffnen sich in
+  `SFSafariViewController`, `mailto:` usw. im System. Datei-Upload zeigt WebKit selbst an; Antworten
+  mit `Content-Disposition: attachment` (OPML, Wochenexport `.md`) werden geladen und ins
+  Teilen-Blatt gegeben. Navigation auf `/login` (Sitzung abgelaufen) startet den nativen Login und
+  danach `next`. Service Worker laufen in einem WKWebView nur für App-Bound Domains:
+  `WKAppBoundDomains` in der Info.plist, `limitsNavigationsToAppBoundDomains = true`.
+- **Abmelden**: „Abmelden“ im Cockpit (`POST /logout`) geht normal zum Server; die Weiterleitung
+  danach auf `/login` meldet nativ ab statt neu an. Dasselbe macht das native Menü (mit zwei Fingern
+  lange drücken). Nativ abmelden heißt: `POST /api/app/abmelden` widerruft den Geräte-Token auf dem
+  Server, dann werden Cookies, alle Website-Daten (auch Service Worker und Offline-Puffer) und der
+  Token in der Keychain gelöscht. Ohne Netz wird lokal trotzdem gelöscht, und der Login-Bildschirm
+  sagt, dass man den Token unter Einstellungen → API-Tokens widerrufen soll. Das Sitzungs-Cookie
+  ist signiert und ohne Zustand auf dem Server: `POST /logout` löscht es nur im Client, eine Kopie
+  gilt bis zum Ablauf oder bis „Überall abmelden“.
+- **Brücke** `cockpit` (`window.webkit.messageHandlers.cockpit`): `/lesen/hoeren` schickt
+  `{type: 'hoeren', zeit}`; die App öffnet `PlayerView(minutes:)`, bis VCP-94 nur ein Platzhalter.
+  Nachrichten nimmt die App nur vom Hauptframe des eigenen Hosts an.
+
+## `CockpitShared` für Share Extension (VCP-93) und Player (VCP-94)
+
+```swift
+let config = AppConfiguration()
+guard let token = try KeychainStore(accessGroup: config.keychainGroup).token() else {
+    // nicht angemeldet: „Bitte in der Cockpit-App anmelden“
+}
+let api = APIClient(baseURL: config.serverURL, token: token)
+let saved = try await api.saveToReadingList(url: link, title: title)  // saved.message anzeigen
+```
+
+- `KeychainStore`: `token()`, `save(token:)`, `deleteToken()`; Eintrag `dev.rubeen.cockpit` /
+  `device-token`, lesbar nach dem ersten Entsperren, nur auf diesem Gerät.
+- `APIClient`: `me()`, `queue(minutes:)`, `text(id:)`, `saveProgress(id:progress:anchor:)`,
+  `addHighlight(_:)`, `saveToReadingList(url:title:)`, statisch `redeem(…)`. Fehler kommen als
+  `APIError` (`status`, `code`, `message`); `isUnauthorized` heißt neu anmelden.
+- Modelle: `Me`, `Queue`/`QueueItem`, `ListenText`, `NewHighlight`, `HighlightResult`,
+  `SavedDocument`, `Redemption` (`SessionCookie` mit `httpCookie`, `DeviceToken`).
+
+Tests (`CockpitTests`): API-Client und Einlösen über einen `URLProtocol`-Mock, Keychain über
+`KeychainBackend` gemockt, dazu PKCE (Testvektor aus RFC 7636), Callback-Prüfung, Cookie-Umwandlung,
+Navigationsregeln und Brücke.
+
+## Lokal testen
+
+Gegen einen lokalen Server (`PUBLIC_URL=http://localhost:3000`) gibt es keine Universal Links,
+dafür fehlt https. Der Server schickt deshalb nur bei `PUBLIC_URL` ohne https (und ohne
+`NODE_ENV=production`) auf `cockpit://login`, und nur ein Debug-Build nimmt bei einer http-Server-URL das Schema an
+(`.customScheme("cockpit")`, ohne Eintrag in `CFBundleURLTypes`). Ein Release-Build kennt das
+Schema nicht.
+
+1. `cp Config/Local.xcconfig.example Config/Local.xcconfig` (Server `http://localhost:3000`).
+2. Server lokal mit `PUBLIC_URL=http://localhost:3000` starten.
+3. App in Xcode auf einem Simulator starten. Mit Signieren (Team eingetragen) gibt es die
+   Keychain-Gruppe; der Simulator-Build aus `make build` hat keine Entitlements, dort scheitert das
+   Speichern des Tokens (wird geloggt, die Web-Hülle läuft über das Cookie trotzdem).
+
+Nur mit signiertem Build auf dem Gerät (oder einem signierten Simulator-Build) prüfbar: der
+Universal-Link-Callback gegen den echten Server (Apple holt die AASA über sein CDN, das dauert nach
+dem ersten Deploy etwas), Associated Domains und Keychain-Gruppe. Ohne Signieren bricht das
+Login-Blatt mit https-Callback sofort ab (wie „Abbrechen“, ohne Meldung).
+
+Im Simulator geprüft (iOS 27, ohne Signieren, Testseite auf `localhost:3000`): `localhost` gilt
+als App-Bound Domain, `navigator.serviceWorker` ist da, ein Service Worker registriert sich und
+wird aktiv, die Brücke `cockpit` ist sichtbar, `/login` öffnet das Login-Blatt. Offline-Lesen
+(VCP-80) mit dem echten Cockpit ist noch nicht auf dem Gerät geprüft.
 
 ## TestFlight
 
