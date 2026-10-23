@@ -24,6 +24,9 @@ import { createBackup } from './cockpit/backup.js';
 import { createReadingStore } from './lesen/store.js';
 import { readingRoutes } from './lesen/http.js';
 import { createFeedPoller } from './lesen/feeds.js';
+import { createReadingApi } from './lesen/api.js';
+import { saveUrl } from './lesen/save.js';
+import { createMailReader } from './lesen/mail.js';
 import { createOidcLogin } from './web/oidc.js';
 import { createWebHttp } from './web/http.js';
 import { loadShortcuts } from './web/shortcuts.js';
@@ -189,6 +192,8 @@ const feedPoller = createFeedPoller({ store: reading });
 feedPoller.start();
 const captureHttp = createCaptureHttp({ token: LEGACY_CAPTURE_TOKEN, tokens: apiTokens, router: captureRouter, zunderEnabled: () => Boolean(zunder()) });
 const captureEnabled = () => Boolean(LEGACY_CAPTURE_TOKEN) || apiTokens.has('capture');
+// Kurzbefehl „Zum Lesestapel“: nur API-Tokens mit dem Recht „Lesestapel“.
+const readingApi = createReadingApi({ tokens: apiTokens, store: reading });
 const searchHttp = createSearchHttp({ tokens: apiTokens, index, semantic: currentSemantic });
 
 // Mail-Abruf: läuft, sobald Token und Absender in den Einstellungen stehen;
@@ -214,6 +219,8 @@ function applyMail() {
       doneMailbox: m.doneMailbox,
       allowedSenders: m.senders,
       router: captureRouter,
+      // `[lesen]` im Betreff: Artikel oder Newsletter in den Lesestapel.
+      readingMail: createMailReader({ store: reading }),
     });
     mail.start(m.pollMinutes);
     console.log(`Mail-Capture: „${m.mailbox}“ alle ${m.pollMinutes} Minuten`);
@@ -303,6 +310,8 @@ const webHttp = process.env.WEB_CLIENT_ID
         state: captureState,
         zunder,
         index,
+        // `> https://…` in der Schnelleingabe geht in den Lesestapel.
+        saveArticle: ({ url, clientId }) => saveUrl({ store: reading, url, origin: 'schnelleingabe', clientId }),
         onFlame: (task) => flameNote.afterFlame(task),
       }),
       // Woche planen: Zunder-Aufgaben holen, Flammen einplanen (VCP-47).
@@ -379,6 +388,7 @@ const app = createApp({
     return principal;
   },
   captureHttp,
+  readingApi,
   searchHttp,
   webHttp,
   degraded: () => health.degraded(),
@@ -399,6 +409,7 @@ app.listen(PORT, '0.0.0.0', () => {
   const tokenCount = (scope) => apiTokens.list().filter((t) => t.scope === scope).length;
   console.log(`  Capture     : /capture, /funke (${tokenCount('capture')} Capture-Tokens${LEGACY_CAPTURE_TOKEN ? ' + CAPTURE_TOKEN' : ''})${mail ? `, Mail aus „${mail.status().mailbox}“` : ''}`);
   console.log(`  Suche       : /api/search (${tokenCount('search')} Such-Tokens)`);
+  console.log(`  Lesestapel  : /lesestapel/speichern (${tokenCount('lesestapel')} Lesestapel-Tokens)`);
   const z = zunderSource();
   console.log(`  Zunder      : ${z ? `${z} (! → Inbox, Brücke ${bridgeState()})` : `aus (Einstellungen → Zunder), Brücke ${bridgeState()}`}`);
   const e = cockpitSettings.get().embed;

@@ -1,5 +1,6 @@
 import { createCapture } from '../vault/capture.js';
-import { createCaptureRouter, CaptureError } from '../capture/router.js';
+import { createCaptureRouter, CaptureError, CAPTURE_ID } from '../capture/router.js';
+import { articleUrl } from '../capture/syntax.js';
 import { localDate, addDays, parseWeekId } from './week.js';
 
 /** Status, die das Cockpit setzen darf: abhaken, zurücknehmen, anfangen, parken, verwerfen. */
@@ -44,12 +45,13 @@ export class ActionError extends Error {
  * Schreibende Aktionen des Web-Cockpits. Aufgaben ändert Zunder, das Cockpit
  * speichert keine eigenen. Notizen entstehen über dieselbe Capture-Logik wie
  * `/capture`: `!` vorne → Zunder-Inbox, sonst eine neue Notiz im Inbox-Ordner
- * aus den Einstellungen.
+ * aus den Einstellungen. `> https://…` ist mit `saveArticle` ein Artikel für
+ * den Lesestapel (`({ url, clientId }) → { doc, duplicate }`, src/lesen/save.js).
  *
  * Zunder-Zugang und Inbox-Ordner werden bei jedem Aufruf frisch gelesen, damit
  * eine Änderung unter `/einstellungen` sofort gilt.
  */
-export function createCockpitActions({ vaultPath, settings, policy, state, zunder, index = null, onFlame = null, now = () => new Date(), logger = console }) {
+export function createCockpitActions({ vaultPath, settings, policy, state, zunder, index = null, saveArticle = null, onFlame = null, now = () => new Date(), logger = console }) {
   const zunderOrFail = () => {
     const z = zunder();
     if (!z) throw new ActionError('Zunder ist nicht eingerichtet (Einstellungen → Zunder)', 503);
@@ -150,6 +152,20 @@ export function createCockpitActions({ vaultPath, settings, policy, state, zunde
      * Absenden harmlos. Liefert das Ergebnis des Capture-Routers.
      */
     async capture({ text, captureId = null }) {
+      const url = saveArticle ? articleUrl(text) : null;
+      if (url) {
+        if (captureId && !CAPTURE_ID.test(captureId)) throw new ActionError('Ungültige Capture-ID');
+        let saved;
+        try {
+          saved = await saveArticle({ url, clientId: captureId || null });
+        } catch (err) {
+          // FetchError trägt den passenden Status, ReadingError ist eine falsche Eingabe.
+          throw new ActionError(err.message, err.status ?? 400);
+        }
+        const { doc, duplicate } = saved;
+        if (!duplicate) logger.info?.(`Schnelleingabe → Lesestapel ${doc.url}`);
+        return { kind: 'article', id: doc.id, title: doc.title ?? doc.url, duplicate };
+      }
       const { inboxFolder } = settings.get();
       // Der Inbox-Ordner ist frei einstellbar; in einen vertraulichen oder
       // ausgeschlossenen Ordner schreibt das Cockpit trotzdem nicht.
@@ -184,6 +200,7 @@ export function createCockpitActions({ vaultPath, settings, policy, state, zunde
      * `{ kind, summary, title?, due?, location?, phoenix?, notes? }`. Legt nichts an.
      */
     async previewCapture(text) {
+      if (saveArticle && articleUrl(text)) return { kind: 'article', summary: 'Artikel · Lesestapel' };
       const router = createCaptureRouter({ capture: null, zunder: zunder(), state, tz: settings.get().tz, now, logger });
       return router.preview({ text: String(text ?? '').slice(0, 2000) });
     },

@@ -570,6 +570,35 @@ und auf `/zustand` steht der Fehler beim Feed. Icons werden einmal geholt und al
 lädt. Unten auf der Seite: OPML importieren (Datei aus einem anderen Reader,
 Ordner werden flach übernommen) und exportieren.
 
+#### Von außen speichern
+
+Artikel kommen über dieselben Wege wie Notizen in den Eingang (VCP-69):
+
+| Weg | So geht's |
+|---|---|
+| iOS-Kurzbefehl | Unter **Einstellungen → API-Tokens** einen Token mit dem Recht **Lesestapel** anlegen, „Zum Lesestapel“ unter **Einstellungen → Kurzbefehle** laden, importieren und beim Import den Token eintragen. Dann in Safari teilen → „Zum Lesestapel“; die Mitteilung nennt den Titel. |
+| Schnelleingabe | `> https://…` (nur die Adresse nach `>`) wird ein Artikel statt einer Notiz, die Vorschau zeigt „Artikel · Lesestapel“. Ein Markdown-Zitat wie `> Ein kluger Satz` bleibt eine Notiz. Ohne Netz puffert das Cockpit den Eintrag wie jede Schnelleingabe und sendet ihn mit derselben ID nach; doppelt kommt er nicht an. |
+| Mail | An die Capture-Adresse (siehe [Capture](#capture), gleicher Ordner, gleiche freigegebenen Absender) mit `[lesen]` irgendwo im Betreff (auch nach „Fwd:“) oder `>` vorn. Steht in der Mail nur eine Adresse, wird der Artikel geholt. Sonst wird die Mail selbst ein Dokument der Art `newsletter`: HTML gesäubert wie Artikel (kein Skript, Zählpixel fallen weg, Bilder werden Links), ohne HTML der Text in Absätzen; die Adresse ist `mid:<Message-ID>`, Titel der Betreff ohne Kürzel. Newsletter also mit `[lesen]` an die Adresse weiterleiten. Lässt sich die eine Adresse nicht holen, wird die Mail mit dem Link gespeichert, statt bei jedem Abruf liegen zu bleiben. |
+| PDF | Im Cockpit unter `/lesen/hinzufuegen` hochladen (dort auch eine Adresse speichern), oder an den Endpunkt mit `Content-Type: application/pdf` (Felder dann als Query: `?title=…&id=…`). Höchstens 20 MB. Das Cockpit zieht den Text heraus und macht daraus Absätze als Lesetext mit Lesezeit; die Datei selbst wird nicht gespeichert. Titel aus den PDF-Metadaten, sonst Dateiname oder erste Zeile. Dieselbe Datei liegt nur einmal im Stapel (Adresse `pdf:sha256-…`). Gescannte PDFs ohne Text werden abgelehnt. |
+
+`POST <PUBLIC_URL>/lesestapel/speichern` mit Header `Authorization: Bearer vct_…`
+nimmt die Adresse als Text (die erste `http(s)`-Adresse darin) oder JSON
+`{"url", "title"?, "source"?, "id"?}`; `source` ist `kurzbefehl` (Standard) oder
+`import`. Mit `id` ist das Speichern idempotent wie bei `/capture`, ohne `id`
+greift die Adresse. Antworten: `201 {"ok","id","title","url","kind","duplicate","message"}`,
+`200` für ein schon gespeichertes Dokument, `400` bei falscher oder lokaler
+Adresse, `401` ohne gültigen Token, `403` für einen Token ohne das Recht
+**Lesestapel** (ein Capture-Token bekommt es nicht automatisch), `413` über 16 KB
+Body. Fehler tragen wie bei `/capture` `status` und `message` im Body. Geholt wird
+über denselben SSRF-geschützten Abruf wie im Formular.
+
+PDF-Text liest `unpdf` (reines JavaScript, bündelt pdf.js, feste Version, ohne das
+optionale native Canvas-Modul).
+
+Der Kurzbefehl muss wie die anderen auf einem Mac signiert werden
+(`node scripts/kurzbefehle/build.js`, dann `scripts/kurzbefehle/sign.sh`, siehe
+[Capture](#capture)); bis dahin fehlt er unter **Einstellungen → Kurzbefehle**.
+
 ### Semantische Suche und Graph
 
 Das Cockpit bettet alle eigenen Notizen (ohne Readwise-Importe) abschnittsweise mit

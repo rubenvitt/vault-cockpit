@@ -19,6 +19,8 @@ import { parseOpml, toOpml } from './opml.js';
 const back = '/lesen/feeds';
 const MIN_INTERVAL = 5;
 const MAX_INTERVAL = 24 * 60;
+/** Größte OPML-Datei für den Import. */
+const MAX_OPML = 2 * 1024 * 1024;
 
 const asAction = async (run) => {
   try {
@@ -101,6 +103,7 @@ export function feedRoutes({ store, fetchFeed = fetchFeedDefault, logger = conso
     return feed;
   };
   return {
+    uploads: { '/aktion/lesen/feeds/import': MAX_OPML },
     pages: {
       '/lesen/feeds': async (ctx) => ({ html: renderFeeds(store.listFeeds(), ctx) }),
       '/lesen/feeds.opml': async () => ({

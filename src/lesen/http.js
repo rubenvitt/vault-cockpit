@@ -6,6 +6,7 @@ import { renderHighlights } from './pages.js';
 import { stackRoutes } from './stack.js';
 import { inboxRoutes } from './inbox.js';
 import { feedRoutes } from './feeds-page.js';
+import { addRoutes } from './add.js';
 
 /**
  * Routen des Bereichs „Lesen“, eingebunden in src/web/http.js (Sitzung, CSRF,
@@ -15,8 +16,9 @@ import { feedRoutes } from './feeds-page.js';
  *   nur angemeldet, nur GET. `ctx` siehe src/lesen/pages.js; `body` mit
  *   `headers` für Downloads (OPML-Export).
  * - `actions`: Pfad → `async (form, session) => ({ message, undo?, redirect? })`
- *   wie die übrigen `/aktion/…`; Fehler als `ActionError`. Mit Datei
- *   (`multipart/form-data`) liegen die Dateien unter `form.files`.
+ *   wie die übrigen `/aktion/…`; Fehler als `ActionError`.
+ * - `uploads`: Aktion → Größenlimit für Aktionen mit Datei (`multipart/form-data`),
+ *   die Dateien liegen dann in `form.files`.
  *
  * Eine neue Seite oder Aktion ist ein Eintrag hier (gern aus einer eigenen Datei).
  */
@@ -28,15 +30,19 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
       return await run();
     } catch (err) {
       if (err instanceof FetchError) throw new ActionError(err.message, err.status);
-      if (err instanceof ReadingError) throw new ActionError(err.message, 400);
+      if (err instanceof ReadingError) throw new ActionError(err.message, err.status ?? 400);
       throw err;
     }
   };
 
   const inbox = inboxRoutes({ store });
 
+  const add = addRoutes({ store, asAction, logger });
+
   return {
+    uploads: { ...add.uploads, ...feeds.uploads },
     pages: {
+      ...add.pages,
       '/lesen': async () => ({ redirect: '/lesen/eingang' }),
       ...inbox.pages,
       ...stackRoutes({ store }).pages,
@@ -45,6 +51,7 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
     },
     actions: {
       ...inbox.actions,
+      ...add.actions,
       async '/aktion/lesen/speichern'(form, session) {
         const url = (form.get('url') ?? '').trim();
         if (!url) throw new ActionError('Bitte eine Adresse eingeben');

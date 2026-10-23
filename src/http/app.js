@@ -37,7 +37,7 @@ function send(res, status, body, headers = {}) {
  * nur die Protected Resource Metadata (RFC 9728), damit Claude den zuständigen
  * Authorization Server findet, und prüfen eingehende Bearer-Tokens.
  */
-export function createApp({ config, verifyToken, mcpHandler, captureHttp = null, searchHttp = null, webHttp = null, degraded = () => false, logger = console }) {
+export function createApp({ config, verifyToken, mcpHandler, captureHttp = null, readingApi = null, searchHttp = null, webHttp = null, degraded = () => false, logger = console }) {
   const prmUrl = `${config.publicUrl}/.well-known/oauth-protected-resource/mcp`;
 
   const protectedResourceMetadata = () => ({
@@ -86,6 +86,9 @@ export function createApp({ config, verifyToken, mcpHandler, captureHttp = null,
       const body = req.method === 'POST' ? await readBody(req) : null;
       return captureHttp.handle(req, res, url, body);
     }
+
+    // Lesestapel mit eigenem Token; liest den Body selbst (eigene Limits, PDFs), siehe lesen/api.js.
+    if (readingApi?.matches(path)) return readingApi.handle(req, res, url);
 
     // Lesende Suche mit eigenem Token, siehe search/http.js.
     if (searchHttp?.matches(path)) return searchHttp.handle(req, res, url);

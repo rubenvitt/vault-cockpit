@@ -7,6 +7,8 @@ import { createCockpitActions, ActionError, resolveDue } from '../src/cockpit/ac
 import { createSettingsStore } from '../src/cockpit/settings.js';
 import { createStateStore } from '../src/capture/state.js';
 import { compilePolicy } from '../src/vault/policy.js';
+import { createReadingStore } from '../src/lesen/store.js';
+import { saveUrl } from '../src/lesen/save.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
 let root, settings, calls, changed, zunder;
@@ -194,6 +196,41 @@ test('capture: Syntax für Fälligkeit und Bereich, Vorschau ohne Anlegen', asyn
   assert.equal(calls[0][1].due, '2026-10-20');
   assert.deepEqual(calls[0][1].location, { kind: 'area', id: 'a-ges' });
   assert.equal(r.location.name, 'Gesundheit');
+});
+
+test('capture: > mit einer Adresse wird ein Artikel im Lesestapel, auch beim Nachsenden aus dem Puffer', async () => {
+  const store = createReadingStore({ path: ':memory:' });
+  let fetched = 0;
+  const fetchPage = async (url) => {
+    fetched += 1;
+    return { url, body: '<html><head><title>Vom Lesen</title></head><body><article><p>Ein Absatz.</p></article></body></html>' };
+  };
+  const a = actions({ saveArticle: ({ url, clientId }) => saveUrl({ store, url, origin: 'schnelleingabe', clientId, fetchPage }) });
+  assert.deepEqual(await a.previewCapture('> https://blatt.test/lesen'), { kind: 'article', summary: 'Artikel · Lesestapel' });
+  assert.equal(fetched, 0, 'Vorschau holt nichts');
+
+  const r = await a.capture({ text: '> https://blatt.test/lesen', captureId: 'puffer-1' });
+  assert.equal(r.kind, 'article');
+  assert.equal(r.title, 'Vom Lesen');
+  const doc = store.get(r.id);
+  assert.equal(doc.origin, 'schnelleingabe');
+  assert.equal(doc.client_id, 'puffer-1');
+  // Der Offline-Puffer sendet denselben Text mit derselben ID noch einmal.
+  assert.equal((await a.capture({ text: '> https://blatt.test/lesen', captureId: 'puffer-1' })).duplicate, true);
+  assert.equal(store.list().length, 1);
+  assert.equal(fetched, 1);
+  assert.equal(readdirSync(root).length, 0, 'keine Notiz im Vault');
+
+  // Ein Markdown-Zitat bleibt eine Notiz; lokale Adressen lehnt der SSRF-Schutz ab.
+  assert.equal((await a.capture({ text: '> Ein kluger Satz', captureId: 'c-zitat' })).kind, 'note');
+  assert.deepEqual(await a.previewCapture('> Ein kluger Satz'), { kind: 'note', summary: 'Notiz' });
+  const local = actions({ saveArticle: ({ url, clientId }) => saveUrl({ store, url, origin: 'schnelleingabe', clientId }) });
+  await assert.rejects(local.capture({ text: '> http://127.0.0.1/admin' }), (e) => e instanceof ActionError && e.status === 400);
+});
+
+test('capture: ohne Lesestapel bleibt > https://… eine Notiz', async () => {
+  const r = await actions().capture({ text: '> https://blatt.test/lesen', captureId: 'c-ohne' });
+  assert.equal(r.kind, 'note');
 });
 
 test('capture: ! ohne Zunder und leerer Text werden verständlich abgewiesen', async () => {

@@ -339,8 +339,9 @@
   // --- Vorschau der Schnelleingabe ------------------------------------------
 
   // Zeigt unter dem Feld, wo eine Aufgabe landet („Aufgabe · morgen ·
-  // Gesundheit“), bevor Enter sie anlegt. Gerechnet wird auf dem Server, mit
-  // derselben Logik wie beim Anlegen; Notizen bekommen keine Vorschau.
+  // Gesundheit“), bevor Enter sie anlegt, und dass `> https://…` ein Artikel
+  // für den Lesestapel wird. Gerechnet wird auf dem Server, mit derselben Logik
+  // wie beim Anlegen; Notizen bekommen keine Vorschau.
   const preview = document.querySelector('[data-capture-preview]');
   const previewForm = preview && document.querySelector('form.capture');
   if (preview && previewForm) {
@@ -354,7 +355,7 @@
     };
     const update = async () => {
       const text = field.value.trimStart();
-      if (!text.startsWith('!') || !text.slice(1).trim()) return hide();
+      if (!/^[!>]/.test(text) || !text.slice(1).trim()) return hide();
       // Ohne Netz rechnet niemand die Vorschau; der Puffer wertet den Text später aus.
       if (!navigator.onLine) return hide();
       const mine = ++seq;
@@ -367,7 +368,8 @@
         if (mine === seq) hide();
         return;
       }
-      if (mine !== seq || data.kind !== 'task') return;
+      if (mine !== seq) return;
+      if (data.kind !== 'task' && data.kind !== 'article') return hide();
       const line = document.createElement('span');
       line.textContent = data.summary;
       preview.replaceChildren(line);
@@ -394,8 +396,8 @@
   window.cockpit = { toast, send, csrf };
 
   function prepend(result, sent) {
-    // Eine Aufgabe mit Ziel (`#gesundheit`) liegt nicht in der Inbox.
-    if (!result || result.duplicate || (result.kind === 'task' && result.location && result.location.kind !== 'inbox')) return;
+    // Eine Aufgabe mit Ziel (`#gesundheit`) liegt nicht in der Inbox, ein Artikel im Lesestapel.
+    if (!result || result.duplicate || result.kind === 'article' || (result.kind === 'task' && result.location && result.location.kind !== 'inbox')) return;
     const list = document.querySelector(`ul[data-list="${result.kind === 'task' ? 'zunder-inbox' : 'vault-inbox'}"]`);
     if (!list) return;
     list.parentElement.querySelector(`[data-empty="${list.dataset.list}"]`)?.remove();

@@ -1,0 +1,116 @@
+import { CAPTURE_ID } from '../capture/router.js';
+import { SCOPES } from '../cockpit/tokens.js';
+import { readLimited, FormError } from '../web/multipart.js';
+import { FetchError } from './fetch.js';
+import { ReadingError } from './store.js';
+import { saveUrl } from './save.js';
+import { savePdf, MAX_PDF } from './pdf.js';
+
+/**
+ * `POST /lesestapel/speichern`: Artikel von außen in den Eingang des
+ * Lesestapels, für den Kurzbefehl „Zum Lesestapel“ aus dem Teilen-Menü.
+ *
+ * Vertrauensgrenze wie `/capture` (src/capture/http.js): nur mit einem
+ * API-Token mit dem Recht „Lesestapel“. Ein Token mit einem anderen Recht
+ * bekommt 403, ein unbekannter 401; der alte `CAPTURE_TOKEN` gilt hier nicht.
+ * Die Adresse geht nur über `saveUrl` (SSRF-Schutz in fetch.js), der Body ist
+ * begrenzt.
+ *
+ * - Text (`text/plain`): die erste http(s)-Adresse darin.
+ * - JSON `{url, title?, source?, id?}`: `source` ist `kurzbefehl` (Standard)
+ *   oder `import`, `id` macht das Speichern idempotent wie bei `/capture`.
+ * - `application/pdf`: die Datei (höchstens `MAX_PDF`), `title`, `source` und
+ *   `id` dann als Query-Parameter. Siehe src/lesen/pdf.js.
+ *
+ * Antwort mit `message` als fertigem Satz für die Mitteilung auf dem iPhone,
+ * Fehler zusätzlich mit `status` im Body (der Kurzbefehl sieht den HTTP-Status nicht).
+ */
+
+export const PATH = '/lesestapel/speichern';
+const MAX_BODY = 16 * 1024;
+const ORIGINS = ['kurzbefehl', 'import'];
+const PDF = /^application\/pdf\b/i;
+
+class ApiError extends Error {
+  constructor(message, status = 400) {
+    super(message);
+    this.status = status;
+  }
+}
+
+function errorMessage(status, error) {
+  if (status === 401) return 'Token abgelehnt. Den Lesestapel-Token im Kurzbefehl prüfen.';
+  if (status === 403) return 'Dieser Token darf nichts in den Lesestapel legen. Unter Einstellungen → API-Tokens einen mit dem Recht „Lesestapel“ anlegen.';
+  return `Nicht gespeichert: ${error}`;
+}
+
+/** `fetchPage` nur für Tests (Standard: `safeFetch`). */
+export function createReadingApi({ tokens, store, fetchPage = undefined, logger = console }) {
+  const json = (res, status, body) => {
+    res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+    res.end(JSON.stringify(body));
+  };
+  const fail = (res, status, error) => json(res, status, { error, status, message: errorMessage(status, error) });
+
+  /** 0 = darf, sonst der HTTP-Status. */
+  const access = (req) => {
+    const m = /^Bearer (\S+)$/.exec(String(req.headers.authorization ?? ''));
+    if (!m || !tokens) return 401;
+    if (tokens.verify(m[1], 'lesestapel')) return 0;
+    return SCOPES.some((s) => tokens.verify(m[1], s)) ? 403 : 401;
+  };
+
+  /** Bei einem PDF kommen die Felder nur aus der Query. */
+  function parse(type, url, body) {
+    let input = {};
+    if (type.includes('application/json')) {
+      try {
+        input = JSON.parse(body.toString('utf8') || '{}');
+      } catch {
+        throw new ApiError('Kein gültiges JSON');
+      }
+      if (typeof input !== 'object' || input === null || Array.isArray(input)) throw new ApiError('JSON-Objekt erwartet');
+    } else if (!PDF.test(type)) {
+      input = { url: body.toString('utf8') };
+    }
+    for (const field of ['url', 'title', 'source', 'id']) {
+      if (input[field] !== undefined && input[field] !== null && typeof input[field] !== 'string') throw new ApiError(`Feld "${field}" muss Text sein`);
+    }
+    const origin = input.source ?? url.searchParams.get('source') ?? 'kurzbefehl';
+    if (!ORIGINS.includes(origin)) throw new ApiError(`Unbekannte Quelle "${origin}" (möglich: ${ORIGINS.join(', ')})`);
+    const clientId = input.id ?? url.searchParams.get('id') ?? null;
+    if (clientId !== null && !CAPTURE_ID.test(clientId)) throw new ApiError('Ungültige ID (Buchstaben, Ziffern und _ . : -, höchstens 128 Zeichen)');
+    const title = (input.title ?? url.searchParams.get('title'))?.trim().slice(0, 300) || null;
+    if (PDF.test(type)) return { pdf: body, title, origin, clientId };
+    const raw = input.url?.trim();
+    if (!raw) throw new ApiError('Adresse fehlt');
+    // Geteilt wird oft „Titel — https://…“: die erste http(s)-Adresse zählt.
+    return { url: raw.match(/https?:\/\/\S+/i)?.[0] ?? raw, title, origin, clientId };
+  }
+
+  return {
+    matches: (path) => path === PATH,
+
+    async handle(req, res, url) {
+      const denied = access(req);
+      if (denied) return fail(res, denied, denied === 401 ? 'unauthorized' : 'forbidden');
+      if (req.method !== 'POST') return fail(res, 405, 'method not allowed');
+      try {
+        const type = String(req.headers['content-type'] ?? '');
+        const body = await readLimited(req, PDF.test(type) ? MAX_PDF : MAX_BODY);
+        const input = parse(type, url, body);
+        let { doc, duplicate } = input.pdf
+          ? await savePdf({ store, data: input.pdf, origin: input.origin, clientId: input.clientId })
+          : await saveUrl({ store, url: input.url, origin: input.origin, clientId: input.clientId, ...(fetchPage ? { fetchPage } : {}) });
+        if (!duplicate && input.title) doc = store.updateDocument(doc.id, { title: input.title });
+        if (!duplicate) logger.info?.(`Lesestapel (${input.origin}) → ${doc.url}`);
+        const name = doc.title ?? doc.url;
+        return json(res, duplicate ? 200 : 201, { ok: true, duplicate, id: doc.id, title: doc.title, url: doc.url, kind: doc.kind, message: duplicate ? `Schon im Lesestapel: ${name}` : `Im Lesestapel: ${name}` });
+      } catch (err) {
+        if (err instanceof ApiError || err instanceof FetchError || err instanceof FormError) return fail(res, err.status, err.message);
+        if (err instanceof ReadingError) return fail(res, err.status ?? 400, err.message);
+        throw err;
+      }
+    },
+  };
+}
