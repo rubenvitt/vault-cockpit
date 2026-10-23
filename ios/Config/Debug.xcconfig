@@ -1,0 +1,3 @@
+// Debug-Einstellungen der App. Eigene Werte (z. B. COCKPIT_SERVER_URL) in Local.xcconfig,
+// die nicht eingecheckt wird; Vorlage: Local.xcconfig.example.
+#include? "Local.xcconfig"

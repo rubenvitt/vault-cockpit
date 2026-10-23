@@ -1,0 +1,3 @@
+// Kopieren nach Local.xcconfig (gitignored), gilt nur für Debug-Builds.
+// In xcconfig beginnt `//` einen Kommentar, daher `:/$()/` statt `://`.
+COCKPIT_SERVER_URL = http:/$()/localhost:3000
