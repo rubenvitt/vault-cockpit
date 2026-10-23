@@ -36,7 +36,8 @@ final class Player {
     private var pending: PendingListening {
         didSet { pending.save(to: defaults) }
     }
-    private var isFlushing = false
+    /// Laufendes Nachsenden; weitere `flush()` warten darauf, statt sofort zurückzukehren.
+    @ObservationIgnored private var flushing: Task<Void, Never>?
     private var isStarted = false
     @ObservationIgnored private var commandTargets: [(MPRemoteCommand, Any)] = []
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
@@ -80,7 +81,9 @@ final class Player {
         }
         isStarted = true
         setUpSystem()
-        Task { await flush() }
+        // Erst den Puffer nachsenden: Sonst liefern Liste und Text den alten Stand, und der nächste
+        // Satz überschreibt den höheren Fortschritt aus dem Puffer.
+        await flush()
         await loadQueue()
         send(.play)
     }
@@ -161,11 +164,21 @@ final class Player {
         }
     }
 
-    /// Schickt den Puffer ab, bis er leer ist oder das Netz fehlt.
+    /// Schickt den Puffer ab, bis er leer ist oder das Netz fehlt. Läuft das schon, wartet es darauf;
+    /// die Schleife nimmt auch Aufträge mit, die währenddessen dazukommen.
     func flush() async {
-        guard let service, !isFlushing else { return }
-        isFlushing = true
-        defer { isFlushing = false }
+        guard let service else { return }
+        if flushing == nil {
+            flushing = Task {
+                // Ohne `await` dazwischen: Wer nach dem letzten Auftrag kommt, startet ein neues Senden.
+                defer { flushing = nil }
+                await sendPending(using: service)
+            }
+        }
+        await flushing?.value
+    }
+
+    private func sendPending(using service: any ListenService) async {
         while let job = pending.next {
             do {
                 switch job {

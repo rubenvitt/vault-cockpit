@@ -253,6 +253,12 @@ private actor FakeService: ListenService {
     var offline = false
     var saved: [ProgressUpdate] = []
     var highlights: [NewHighlight] = []
+    /// Langsames Netz beim Speichern des Fortschritts.
+    let saveDelay: Duration
+
+    init(saveDelay: Duration = .zero) {
+        self.saveDelay = saveDelay
+    }
 
     func setOffline(_ value: Bool) { offline = value }
 
@@ -261,10 +267,14 @@ private actor FakeService: ListenService {
         return try JSONDecoder().decode(Queue.self, from: JSONSerialization.data(withJSONObject: list))
     }
 
-    func text(id: String) async throws -> ListenText { listenText(id: id, anchor: 21) }
+    /// Wie der Server: die zuletzt gespeicherte Lesestelle, sonst Satz 2.
+    func text(id: String) async throws -> ListenText {
+        listenText(id: id, anchor: saved.last { $0.id == id }?.anchor ?? 21)
+    }
 
     func saveProgress(id: String, progress: Double, anchor: Int?) async throws -> Double {
         if offline { throw URLError(.notConnectedToInternet) }
+        try? await Task.sleep(for: saveDelay)
         saved.append(ProgressUpdate(id: id, progress: progress, anchor: anchor ?? 0))
         return progress
     }
@@ -309,5 +319,23 @@ final class PlayerTests: XCTestCase {
         XCTAssertEqual(saved, [.init(id: "a", progress: 34.0 / 51, anchor: 35)])
         XCTAssertEqual(highlights.map(\.start), [35])
         XCTAssertNil(PendingListening(defaults: defaults).next, "nachgesendet und leer")
+    }
+
+    func testSendsBufferedProgressBeforeLoading() async {
+        // Stand aus einer Sitzung ohne Netz: Satz 3 ist dran, der Server kennt noch Satz 2.
+        let defaults = UserDefaults(suiteName: "test-\(UUID())")!
+        var buffered = PendingListening()
+        buffered.add(ProgressUpdate(id: "a", progress: 34.0 / 51, anchor: 35))
+        buffered.save(to: defaults)
+        let speech = FakeSpeech()
+        let service = FakeService(saveDelay: .milliseconds(100))
+        let player = Player(minutes: 15, service: service, speech: speech, defaults: defaults)
+        defer { player.close() }
+
+        await player.start()
+        await waitUntil { !speech.spoken.isEmpty }
+        XCTAssertEqual(speech.spoken, ["Dritter 🎉 Satz."], "Text erst nach dem Nachsenden geladen")
+        let saved = await service.saved
+        XCTAssertEqual(saved, [.init(id: "a", progress: 34.0 / 51, anchor: 35)])
     }
 }

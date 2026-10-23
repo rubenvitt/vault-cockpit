@@ -78,7 +78,8 @@ make test      # Unit-Tests auf dem ersten verfügbaren iPhone-Simulator
   (`quote`, je 32 Zeichen `prefix`/`suffix`, `start`), `cid` = UUID.
 - **Ohne Netz:** Fortschritt (nur der letzte Stand je Text) und Markierungen (höchstens 100) kommen
   in einen Puffer in den `UserDefaults` der App Group (`player.pending`) und gehen raus, sobald
-  `NWPathMonitor` wieder Netz meldet, beim nächsten Öffnen des Players oder nach dem nächsten Satz.
+  `NWPathMonitor` wieder Netz meldet, beim nächsten Öffnen des Players (vor dem Laden von Liste und Text, damit
+  sie den nachgesendeten Stand zeigen) oder nach dem nächsten Satz.
   Andere 4xx-Antworten als 401/429 verwirft der Puffer. Texte lädt der Player erst, wenn er sie
   braucht: Ohne Netz geht es nach dem laufenden Text nicht weiter.
 - **Zeichen:** Server und Leseansicht zählen in UTF-16 (JS-Strings). `SpeechText` rechnet deshalb
