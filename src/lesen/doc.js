@@ -27,12 +27,12 @@ const restLabel = (d) => (d.progress >= 1 ? 'gelesen' : d.reading_minutes ? `noc
 const short = (s, n = 160) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
 
 const KEYS = [
-  ['H', 'markieren'],
+  ['H', 'Absatz markieren'],
   ['N', 'Notiz'],
   ['L', 'verbinden'],
   ['E', 'fertig, weg'],
   ['V', 'in den Vault'],
-  ['J / K', 'nächster / vorheriger Absatz'],
+  ['J / K', 'Absatz weiter / zurück'],
 ];
 
 /** Bereiche des Lesestapels mit Zählern. */

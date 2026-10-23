@@ -1,11 +1,12 @@
-// Leseansicht (VCP-71, src/lesen/doc.js): Markieren per Textauswahl, Notizen,
-// Fortschritt speichern, Schriftgröße und Tastenkürzel. Braucht /static/cockpit.js
+// Leseansicht (VCP-71, src/lesen/doc.js): Markieren per Textauswahl oder ganzer
+// Absatz, Notizen, Fortschritt speichern, Schriftgröße und Tastenkürzel. Braucht /static/cockpit.js
 // (window.cockpit) davor. Ohne Script bleibt der Text lesbar, jede Entscheidung
 // (Fertig, weg · In den Vault) ist ein Formular.
 //
 // Anker zählen Zeichen in `textContent` von `.lesen-text`, genau wie
 // src/lesen/anchor.js auf dem Server. Deshalb steht dort nur der Artikel, und
-// Hinweise an Markierungen kommen per CSS, nie als Text.
+// Hinweise an Markierungen kommen per CSS, nie als Text. Auch der Strich am
+// aktiven Absatz (`.lesen-fokus`) hängt am Leser, nicht im Lesetext.
 //
 // Hooks für spätere Aufgaben, als Ereignisse auf `document`:
 // - `lesen:verbinden` (abbrechbar, `detail`: { docId, anchor?, highlightId? }) –
@@ -124,8 +125,7 @@
 
   const noteOf = (id) => document.querySelector(`mark[data-hl="${CSS.escape(id)}"]`)?.title ?? '';
 
-  async function run(cmd) {
-    const s = current;
+  async function run(cmd, s = current) {
     if (!s) return;
     if (cmd === 'mark' && s.anchor) return post(NEW, { id: docId(), ...s.anchor, cid: newId() });
     if (cmd === 'note') {
@@ -349,15 +349,111 @@
 
   // --- Tastenkürzel -------------------------------------------------------------
 
-  /** Zum nächsten (`1`) oder vorigen (`-1`) Absatz. */
+  // --- Aktiver Absatz ------------------------------------------------------------
+
+  // Wie bei Readwise: Ein Strich am linken Rand zeigt den aktiven Absatz. J/K schieben ihn
+  // weiter, ein Klick setzt ihn, beim Scrollen wandert er mit, sobald er aus dem Bild ist.
+  // Ohne Auswahl wirken H, N und L auf ihn. Gemerkt wird die Nummer des Absatzes, weil
+  // `refresh()` den Lesetext austauscht.
+  // Bezugslinie ist `scroll-margin-top` der Absätze (cockpit.css), damit der Fortschrittsbalken nichts verdeckt.
+  const LINE = 64;
+  let active = -1;
+  // Bis dahin scrollt J/K selbst: Der Strich bleibt, wo die Taste ihn hingesetzt hat.
+  let steerUntil = 0;
+  const fokus = document.createElement('div');
+  fokus.className = 'lesen-fokus';
+  fokus.setAttribute('aria-hidden', 'true');
+  fokus.hidden = true;
+
+  /** Absätze des Lesetexts, ohne die in einem anderen Absatz (Absätze im Zitat zählen nicht einzeln). */
+  const blocks = () => [...(textEl()?.querySelectorAll(BLOCKS) ?? [])].filter((b) => !b.parentElement.closest(BLOCKS));
+  const activeBlock = () => blocks()[active] ?? null;
+  const inView = (r) => r.bottom > LINE && r.top < innerHeight;
+
+  /** Strich neben den aktiven Absatz setzen; nach `refresh()` oder neuem `main` neu einhängen. */
+  function place() {
+    const b = activeBlock();
+    const r = reader();
+    if (!b || !r) return void (fokus.hidden = true);
+    if (fokus.parentElement !== r) r.append(fokus);
+    const top = b.getBoundingClientRect().top - r.getBoundingClientRect().top;
+    fokus.style.top = `${top}px`;
+    fokus.style.height = `${b.getBoundingClientRect().height}px`;
+    fokus.hidden = false;
+  }
+
+  function activate(i) {
+    active = i;
+    place();
+  }
+
+  /** Erster Absatz, der unter dem Fortschrittsbalken zu sehen ist. */
+  const firstVisible = () => blocks().findIndex((b) => b.getBoundingClientRect().bottom > LINE + 4);
+
+  /** Aktiven Absatz einen weiter (`1`) oder zurück (`-1`); scrollt nur, wenn er nicht ganz zu sehen ist. */
   function step(dir) {
-    const blocks = [...(textEl()?.querySelectorAll(BLOCKS) ?? [])].filter((b) => !b.parentElement.closest(BLOCKS));
-    const tops = blocks.map((b) => b.getBoundingClientRect().top);
-    // Bezugslinie ist `scroll-margin-top` der Absätze (cockpit.css), damit der Fortschrittsbalken nichts verdeckt.
-    const line = 64;
-    const i = dir > 0 ? tops.findIndex((t) => t > line + 4) : tops.findLastIndex((t) => t < line - 4);
+    const all = blocks();
+    if (!all.length) return;
+    const now = all[active];
+    const i = now && inView(now.getBoundingClientRect()) ? Math.min(all.length - 1, Math.max(0, active + dir)) : Math.max(0, firstVisible());
+    activate(i);
+    const r = all[i].getBoundingClientRect();
+    if (r.top >= LINE - 4 && r.bottom <= innerHeight) return;
     const smooth = !matchMedia('(prefers-reduced-motion: reduce)').matches;
-    blocks[i]?.scrollIntoView({ block: 'start', behavior: smooth ? 'smooth' : 'auto' });
+    steerUntil = Date.now() + (smooth ? 800 : 100);
+    all[i].scrollIntoView({ block: 'start', behavior: smooth ? 'smooth' : 'auto' });
+  }
+
+  addEventListener(
+    'scroll',
+    () => {
+      if (Date.now() < steerUntil) return;
+      const b = activeBlock();
+      if (!b || !inView(b.getBoundingClientRect())) activate(firstVisible());
+    },
+    { passive: true },
+  );
+  // Bilder laden nach, Schriftgröße und Fensterbreite ändern sich: Der Strich zieht mit.
+  if (window.ResizeObserver) new ResizeObserver(() => place()).observe(document.body);
+  document.addEventListener('DOMContentLoaded', () => requestAnimationFrame(() => activate(firstVisible())));
+  document.addEventListener('lesen:markierung', () => place());
+  document.addEventListener('click', (e) => {
+    if (!(e.target instanceof Element) || !getSelection().isCollapsed) return;
+    const b = e.target.closest(BLOCKS);
+    const i = b ? blocks().findIndex((x) => x === b || x.contains(b)) : -1;
+    if (i !== -1) activate(i);
+  });
+
+  /** Markierung, die den ganzen Absatz deckt (sonst `null`): H nimmt sie wieder weg, N bearbeitet ihre Notiz. */
+  function wholeHighlight(b) {
+    const marks = [...b.querySelectorAll('mark[data-hl]')];
+    const id = marks[0]?.dataset.hl;
+    if (!id || marks.some((m) => m.dataset.hl !== id)) return null;
+    const squash = (s) => s.replace(/\s+/g, '');
+    return squash(marks.map((m) => m.textContent).join('')) === squash(b.textContent) ? id : null;
+  }
+
+  /** Anker für den ganzen Absatz `b`, ohne Leerraum am Rand; `null` ohne Text (etwa ein Bild). */
+  function blockAnchor(b) {
+    const root = textEl();
+    const text = root.textContent;
+    let start = offsetOf(root, b, 0);
+    let end = offsetOf(root, b, b.childNodes.length);
+    while (start < end && /\s/.test(text[start])) start++;
+    while (end > start && /\s/.test(text[end - 1])) end--;
+    if (start === end) return null;
+    return { quote: text.slice(start, end), prefix: text.slice(Math.max(0, start - CONTEXT), start), suffix: text.slice(end, end + CONTEXT), start: String(start) };
+  }
+
+  /** H, N und L ohne Auswahl: auf den aktiven Absatz. H auf einem ganz markierten Absatz entfernt die Markierung. */
+  function runOnBlock(cmd) {
+    const b = activeBlock();
+    if (!b) return;
+    const id = wholeHighlight(b);
+    if (id) return run(cmd === 'mark' ? 'delete' : cmd, { id });
+    const anchor = blockAnchor(b);
+    if (!anchor) return toast('In diesem Absatz gibt es keinen Text zum Markieren.');
+    return run(cmd, { anchor });
   }
 
   document.addEventListener('keydown', (e) => {
@@ -367,9 +463,9 @@
     const key = e.key.toLowerCase();
     const cmd = { h: 'mark', n: 'note', l: 'link' }[key];
     if (cmd) {
-      if (!current) return;
       e.preventDefault();
-      run(cmd);
+      if (current) run(cmd);
+      else runOnBlock(cmd);
     } else if (key === 'e' || key === 'v') {
       // E: Fertig, weg · V: In den Vault (mit der Wahl im Formular).
       e.preventDefault();

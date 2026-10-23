@@ -675,7 +675,10 @@ main.lesen-doc { grid-template-columns: 160px 220px minmax(0, 1fr) 280px; align-
 .lesen-stack a { font-family: var(--font-read); color: var(--text); }
 .lesen-stack a .meta { display: block; font-family: var(--font); }
 
-.lesen-reader { width: 100%; max-width: 72ch; justify-self: center; min-width: 0; }
+.lesen-reader { position: relative; width: 100%; max-width: 72ch; justify-self: center; min-width: 0; }
+/* Aktiver Absatz (lesen-doc.js): Strich am linken Rand, außerhalb des Lesetexts, damit die Anker stimmen. */
+.lesen-fokus { position: absolute; left: -14px; width: 3px; border-radius: var(--r-full); background: var(--accent); pointer-events: none; transition: top var(--fast) ease, height var(--fast) ease; }
+.lesen-fokus[hidden] { display: none; }
 .lesen-doc-head { display: grid; gap: var(--s-2); margin-bottom: var(--s-2); }
 .lesen-doc-head h1 { font: 700 var(--t-2xl)/1.2 var(--font-read); letter-spacing: -.01em; overflow-wrap: anywhere; }
 .lesen-progress { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; display: flex; align-items: center; gap: var(--s-3); padding: var(--s-2) 0; background: var(--bg); }
@@ -754,10 +757,11 @@ html[data-read-sans] .lesen-text :is(h1, h2, h3, h4, h5, h6) { font-family: var(
   .lesen-text { --read-size: 18px; }
   .lesen-selbar { left: 8px; right: 8px; transform: none; justify-content: center; }
   .lesen-selbar .btn { flex: 1; padding: 8px 10px; }
+  .lesen-fokus { left: -10px; }
 }
 /* Ohne Tastatur keine Kürzel-Hinweise. */
 @media (hover: none) {
-  .lesen-doc kbd, .lesen-selbar kbd, .lesen-keys { display: none; }
+  .lesen-doc kbd, .lesen-selbar kbd, .lesen-keys, .lesen-fokus { display: none; }
 }
 
 /* --- Lesen: Wiedersehen --- */
