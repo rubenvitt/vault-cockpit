@@ -72,6 +72,7 @@ after(() => {
 test('openPoints: [TODO …] im Text und offene Einträge unter „Offene Punkte“, ohne Code, Erledigtes und Doppelte', () => {
   assert.deepEqual(openPoints(SYNTHESE), ['Quelle zu Ego-Depletion prüfen', 'Beispiel aus dem Alltag ergänzen', 'Gegenposition suchen']);
   assert.deepEqual(openPoints('### Offene Punkte:\n- A\n#### Unterpunkt\n- B\n### Weiter\n- C [TODO: D]\n- [TODO: D]'), ['A', 'B', 'D']);
+  assert.deepEqual(openPoints('Erst [TODO:Quelle] und [TODO] ohne Text.'), ['Quelle']);
   assert.deepEqual(openPoints(''), []);
 });
 

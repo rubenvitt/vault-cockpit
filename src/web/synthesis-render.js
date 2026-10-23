@@ -8,7 +8,7 @@ const FENCE = /^\s*(```|~~~)/;
 const HEADING = /^(#{1,6})\s+(.+?)\s*#*\s*$/;
 const ITEM = /^\s*(?:[-*+]|\d+[.)])\s+(?:\[([ xX-])\]\s*)?(.+)$/;
 // `[TODO …]` oder `[TODO: …]`, aber nicht in einem Wikilink `[[TODO …]]`.
-const TODO = /(?<!\[)\[TODO:?\s+([^\]]+)\]/g;
+const TODO = /(?<!\[)\[TODO(?::\s*|\s+)([^\]]+)\]/g;
 const plain = (s) => s.replace(/!?\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, t, l) => l ?? t).replace(/\s+/g, ' ').trim();
 
 /**
