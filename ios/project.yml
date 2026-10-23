@@ -1,0 +1,142 @@
+# Erzeugt Cockpit.xcodeproj mit `make project` (xcodegen). Das .xcodeproj nicht einchecken.
+name: Cockpit
+
+options:
+  bundleIdPrefix: dev.rubeen
+  deploymentTarget:
+    # 17.4 für ASWebAuthenticationSession mit https-Callback (Universal Link).
+    iOS: "17.4"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    DEVELOPMENT_TEAM: H95J852PKP
+    CODE_SIGN_STYLE: Automatic
+    MARKETING_VERSION: "1.0"
+    # Build-Nummer: CI bzw. scripts/testflight.sh überschreiben sie per CURRENT_PROJECT_VERSION=…
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.0"
+    # Hier statt im xcconfig, weil dort `//` einen Kommentar beginnt.
+    # Debug-Überschreibung: Config/Local.xcconfig (siehe Local.xcconfig.example).
+    COCKPIT_SERVER_URL: https://vault.rubeen.dev
+    # Host von COCKPIT_SERVER_URL für Associated Domains und App-Bound Domains (xcconfig kann ihn nicht ableiten).
+    COCKPIT_SERVER_HOST: vault.rubeen.dev
+
+packages:
+  Shared:
+    path: Shared
+
+targets:
+  Cockpit:
+    type: application
+    platform: iOS
+    sources:
+      - Cockpit
+    configFiles:
+      Debug: Config/Debug.xcconfig
+    dependencies:
+      - package: Shared
+        product: CockpitShared
+      - target: ShareExtension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.rubeen.cockpit
+        PRODUCT_NAME: Cockpit
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_PREVIEWS: YES
+    info:
+      path: Cockpit/Info.plist
+      properties:
+        CFBundleDisplayName: Cockpit
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CockpitServerURL: $(COCKPIT_SERVER_URL)
+        CockpitKeychainGroup: $(AppIdentifierPrefix)dev.rubeen.cockpit.shared
+        CockpitAppGroup: group.dev.rubeen.cockpit
+        UIBackgroundModes: [audio]
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        # Service Worker im WKWebView nur für App-Bound Domains (WebShell.swift).
+        WKAppBoundDomains: [$(COCKPIT_SERVER_HOST)]
+        # Nur für einen lokalen Entwicklungsserver per http (Debug-Überschreibung).
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    entitlements:
+      path: Cockpit/Cockpit.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.dev.rubeen.cockpit
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)dev.rubeen.cockpit.shared
+        # Login-Callback als Universal Link (applinks) im Login-Blatt (webcredentials).
+        com.apple.developer.associated-domains:
+          - applinks:$(COCKPIT_SERVER_HOST)
+          - webcredentials:$(COCKPIT_SERVER_HOST)
+    scheme:
+      testTargets:
+        - CockpitTests
+
+  # Teilen-Menü „Zum Lesestapel“ (VCP-93), in die App eingebettet.
+  ShareExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - ShareExtension
+    # Wie die App: Local.xcconfig gilt auch hier, sonst Produktions-URL mit dem Token des Entwicklungsservers.
+    configFiles:
+      Debug: Config/Debug.xcconfig
+    dependencies:
+      - package: Shared
+        product: CockpitShared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.rubeen.cockpit.share
+        TARGETED_DEVICE_FAMILY: "1"
+    info:
+      path: ShareExtension/Info.plist
+      properties:
+        CFBundleDisplayName: Zum Lesestapel
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # AppConfiguration liest die eigene Info.plist der Extension.
+        CockpitServerURL: $(COCKPIT_SERVER_URL)
+        CockpitKeychainGroup: $(AppIdentifierPrefix)dev.rubeen.cockpit.shared
+        CockpitAppGroup: group.dev.rubeen.cockpit
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          # Höchstens eine Web-Adresse, Text oder eine PDF-Datei; andere Dateien (file-url) nicht.
+          NSExtensionAttributes:
+            NSExtensionActivationRule: >-
+              SUBQUERY(extensionItems, $item, SUBQUERY($item.attachments, $a,
+              ANY $a.registeredTypeIdentifiers UTI-CONFORMS-TO "com.adobe.pdf"
+              OR ANY $a.registeredTypeIdentifiers UTI-CONFORMS-TO "public.plain-text"
+              OR (ANY $a.registeredTypeIdentifiers UTI-CONFORMS-TO "public.url"
+              AND NOT (ANY $a.registeredTypeIdentifiers UTI-CONFORMS-TO "public.file-url"))
+              ).@count >= 1).@count >= 1
+    entitlements:
+      path: ShareExtension/ShareExtension.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.dev.rubeen.cockpit
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)dev.rubeen.cockpit.shared
+
+  CockpitTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - CockpitTests
+    dependencies:
+      - target: Cockpit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.rubeen.cockpit.tests
+        GENERATE_INFOPLIST_FILE: YES

@@ -1,0 +1,23 @@
+name: iOS
+
+# Baut und testet die iOS-App auf dem Simulator, ohne Signieren.
+# Läuft nur, wenn sich ios/ oder dieser Workflow ändert.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios.yml'
+  pull_request:
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios.yml'
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen
+      # Der Makefile wählt das erste verfügbare iPhone als Simulator.
+      - run: make -C ios test

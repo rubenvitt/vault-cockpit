@@ -38,17 +38,33 @@ export function createSessions({ signer, settings, allowedSubjects = [], secure 
     return { idle: Math.min(s.idleDays, s.maxDays) * DAY, max: s.maxDays * DAY, generation: s.generation };
   };
 
-  function sessionCookie(s, t) {
+  function sealed(s, t) {
     const { idle, max } = limits();
     const exp = Math.min(t + idle, s.iat + max);
-    return cookie(SESSION_COOKIE, signer.seal({ ...s, seen: t, exp }), { secure, maxAge: Math.max(0, exp - t) });
+    return { value: signer.seal({ ...s, seen: t, exp }), exp, maxAge: Math.max(0, exp - t) };
   }
+  function sessionCookie(s, t) {
+    const { value, maxAge } = sealed(s, t);
+    return cookie(SESSION_COOKIE, value, { secure, maxAge });
+  }
+  const fresh = ({ subject, name }, t) => ({ sub: subject, name, sid: randomUUID(), gen: limits().generation, iat: t });
 
   return {
     /** Set-Cookie für einen frischen Login. */
-    issue({ subject, name }) {
+    issue(user) {
       const t = seconds();
-      return sessionCookie({ sub: subject, name, sid: randomUUID(), gen: limits().generation, iat: t }, t);
+      return sessionCookie(fresh(user, t), t);
+    },
+
+    /**
+     * Dieselbe frische Sitzung als Werte statt Set-Cookie, für die iOS-App
+     * (`WKHTTPCookieStore`, src/web/app-access.js). `domain` ohne Punkt davor:
+     * nur dieser Host, wie das Cookie aus `issue`.
+     */
+    issueValues(user, domain) {
+      const t = seconds();
+      const { value, exp } = sealed(fresh(user, t), t);
+      return { name: SESSION_COOKIE, value, domain, path: '/', expires: new Date(exp * 1000).toISOString(), secure, httpOnly: true, sameSite: 'Lax' };
     },
 
     /**

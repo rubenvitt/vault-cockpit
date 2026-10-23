@@ -1,0 +1,40 @@
+name: iOS TestFlight
+
+# Archiviert, signiert automatisch und lädt zu TestFlight hoch, ohne lokales Xcode (lokale
+# Betas nimmt App Store Connect nicht an). Startet von selbst bei jedem Push auf main, der ios/
+# ändert, dazu manuell oder per Tag `ios/v…` (geht auch für Branches, die noch nicht auf main sind).
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['ios/**']
+    tags: ['ios/v*']
+
+# Ein Upload nach dem anderen; ein neuer Push wartet, statt einen laufenden abzubrechen.
+concurrency:
+  group: ios-testflight
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen
+      - name: API-Key ablegen
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+        run: |
+          key="$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
+          (umask 077; printf '%s' "$ASC_KEY_P8_BASE64" | base64 --decode > "$key")
+          echo "ASC_KEY_PATH=$key" >> "$GITHUB_ENV"
+      - name: Archivieren und hochladen
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: ios/scripts/testflight.sh
+      - name: API-Key löschen
+        if: always()
+        run: rm -f "$ASC_KEY_PATH"

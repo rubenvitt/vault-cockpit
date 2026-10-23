@@ -126,3 +126,26 @@ test('Abruf: zu groß (mit und ohne Content-Length) und zu langsam bricht ab', a
     },
   );
 });
+
+test('Abruf: der Body einer Weiterleitung wird nicht gelesen, die Verbindung schließt', async () => {
+  let closed = false;
+  await withServer(
+    (req, res) => {
+      if (req.url === '/endlos') {
+        res.writeHead(302, { location: '/artikel' });
+        const t = setInterval(() => res.write('x'.repeat(512)), 5);
+        res.on('close', () => {
+          clearInterval(t);
+          closed = true;
+        });
+        return;
+      }
+      res.writeHead(200, { 'content-type': 'text/html' }).end('<p>ok</p>');
+    },
+    async (base, opts) => {
+      assert.equal((await safeFetch(`${base}/endlos`, opts)).body, '<p>ok</p>');
+      for (let i = 0; i < 50 && !closed; i++) await new Promise((r) => setTimeout(r, 10));
+      assert.ok(closed, 'Redirect-Verbindung bleibt nicht offen');
+    },
+  );
+});

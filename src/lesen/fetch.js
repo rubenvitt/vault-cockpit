@@ -174,7 +174,8 @@ function request(url, { resolve, isAllowed, maxBytes, deadline, headers }) {
       req.on('response', (res) => {
         const base = { status: res.statusCode, location: res.headers.location ?? null, contentType: res.headers['content-type'] ?? null, headers: res.headers };
         if (res.statusCode >= 300 && res.statusCode < 400) {
-          res.resume();
+          // Body eines Redirects nie lesen: ein endloser Body liefe sonst ohne Zeit- und Größenlimit weiter.
+          req.destroy();
           return finish(done, { ...base, body: Buffer.alloc(0) });
         }
         if (Number(res.headers['content-length']) > maxBytes) {

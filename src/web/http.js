@@ -2,6 +2,7 @@ import { readFileSync, createReadStream, closeSync } from 'node:fs';
 import { timingSafeEqual, randomUUID, createHash } from 'node:crypto';
 import { createCookieSigner, parseCookies, cookie } from './session.js';
 import { createSessions } from './sessions.js';
+import { createAppAccess, APP_CALLBACK_PATH, SITE_ASSOCIATION_PATH } from './app-access.js';
 import { renderDraftRescue } from './session-render.js';
 import { renderWeek, renderMessage, renderSettings, dueLabel } from './render.js';
 import { versionAssets, THEME } from './layout.js';
@@ -173,15 +174,21 @@ for (const [path, file] of offlineFiles(PUBLIC, { html: HTML_HEADERS }).entries)
  *   dem der Offline-Puffer die Schnelleingabe nachsendet (401 ohne Sitzung).
  *   `GET /api/lesen/offline` nennt die Seiten, die der Service Worker als
  *   Lesestoff für unterwegs speichern darf (src/web/offline.js).
+ * - `GET /login?app=1&state=…&challenge=…` und `/api/app/…` — Login und
+ *   JSON-API der iOS-App mit Geräte-Token (src/web/app-access.js);
+ *   `GET /.well-known/apple-app-site-association` und `GET /app/angemeldet`
+ *   (Universal Link des Logins) ohne Anmeldung.
  *
  * Die Sitzung ist ein signiertes Cookie und nur für diese Routen gültig; die
  * MCP-Schnittstelle prüft weiter ausschließlich Bearer-Tokens.
  */
-export function createWebHttp({ cockpit, settings, actions = null, notes = null, plan = null, reading = null, tokens = null, shortcuts = [], captureEnabled = false, calendars = null, graph = null, search = null, evidence = null, health = null, backup = null, restart = () => {}, oidc, sessionSecret, publicUrl, allowedSubjects = [], logger = console, now = () => Date.now() }) {
+export function createWebHttp({ cockpit, settings, actions = null, notes = null, plan = null, reading = null, tokens = null, shortcuts = [], captureEnabled = false, calendars = null, graph = null, search = null, evidence = null, health = null, backup = null, restart = () => {}, oidc, sessionSecret, publicUrl, appId = undefined, allowDevScheme = false, allowedSubjects = [], logger = console, now = () => Date.now() }) {
   const signer = createCookieSigner(sessionSecret);
   const secure = publicUrl.startsWith('https://');
   const sessions = createSessions({ signer, settings, allowedSubjects, secure, now });
   const READING_PAGES = reading?.pages ?? {};
+  // iOS-App: Login über das System-Blatt, Geräte-Token, JSON-API (VCP-91).
+  const appAccess = tokens && reading ? createAppAccess({ sessions, tokens, reading, publicUrl, appId, allowDevScheme, logger, now }) : null;
 
   const send = (res, status, body, headers = {}) => {
     res.writeHead(status, { ...HTML_HEADERS, ...headers });
@@ -226,8 +233,11 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   const safeNext = (n) => (typeof n === 'string' && /^\/(?!\/)[^\\\s]*$/.test(n) ? n : '/');
 
   async function login(req, res, url) {
+    // `app=1`: Login der iOS-App, endet auf `/app/angemeldet` (Universal Link) statt mit einer Sitzung.
+    const app = url.searchParams.get('app') === '1' ? appAccess?.start(url) : null;
+    if (url.searchParams.get('app') === '1' && !app) return send(res, 400, renderMessage('Login nicht möglich', 'Der App-Login braucht gültige Werte für state und challenge.'));
     const { url: target, pending } = await oidc.start();
-    const value = signer.seal({ ...pending, next: safeNext(url.searchParams.get('next')), exp: Math.floor(now() / 1000) + 600 });
+    const value = signer.seal({ ...pending, ...(app ? { app } : { next: safeNext(url.searchParams.get('next')) }), exp: Math.floor(now() / 1000) + 600 });
     redirect(res, target, [cookie(LOGIN, value, { secure, maxAge: 600 })]);
   }
 
@@ -235,6 +245,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     const pending = signer.open(parseCookies(req.headers.cookie)[LOGIN], now());
     const clear = cookie(LOGIN, '', { secure, maxAge: 0 });
     if (url.searchParams.get('error')) {
+      if (pending?.app && appAccess) return redirect(res, appAccess.deny(pending.app, 'access_denied'), [clear]);
       res.setHeader('set-cookie', [clear]);
       return send(res, 401, renderMessage('Login abgebrochen', url.searchParams.get('error_description') ?? url.searchParams.get('error'), { link: { href: '/login', label: 'Noch einmal anmelden' } }));
     }
@@ -243,9 +254,12 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       user = await oidc.finish({ code: url.searchParams.get('code'), state: url.searchParams.get('state'), pending });
     } catch (err) {
       logger.warn?.(`Web-Login abgelehnt: ${err.message}`);
+      if (pending?.app && appAccess) return redirect(res, appAccess.deny(pending.app, 'access_denied'), [clear]);
       res.setHeader('set-cookie', [clear]);
       return send(res, 403, renderMessage('Kein Zugang', 'Die Anmeldung wurde nicht angenommen.', { link: { href: '/login', label: 'Noch einmal anmelden' } }));
     }
+    // Die App bekommt nur den Code; Sitzung und Token gibt es erst beim Einlösen.
+    if (pending.app && appAccess) return redirect(res, appAccess.finish(pending.app, user), [clear]);
     // Jede Anmeldung bekommt eine eigene `sid`, damit auch das CSRF-Token wechselt.
     redirect(res, safeNext(pending.next), [clear, sessions.issue(user)]);
   }
@@ -830,6 +844,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...PUBLIC.keys(), '/', '/api/woche', '/api/sitzung', '/api/suche', ...(actions ? ['/api/erfassen/vorschau'] : []), '/rueckblick', ...(notes ? ['/notiz', '/notiz/bild'] : []), ...(plan ? ['/planen'] : []), '/graph', '/api/graph', ...Object.keys(READING_PAGES), '/einstellungen', ...(health ? ['/zustand'] : []), ...(tokens ? Object.keys(TOKEN_ROUTES) : []), ...Object.keys(BACKUP_ROUTES), '/einstellungen/abmelden', '/login', '/auth/callback', '/logout']);
   if (notes) ROUTES.add('/wissen');
   if (notes || reading) ROUTES.add('/api/lesen/offline');
+  for (const p of appAccess ? [...appAccess.paths, SITE_ASSOCIATION_PATH, APP_CALLBACK_PATH] : []) ROUTES.add(p);
 
   return {
     matches: (path) => ROUTES.has(path),
@@ -850,8 +865,13 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
         });
         return res.end(file.body);
       }
+      // Ohne Anmeldung: Apple holt die Datei für Universal Links; `/app/angemeldet` sieht nur, wer den Link im Browser öffnet, der Code darin bleibt unbenutzt.
+      if (appAccess && method === 'GET' && path === SITE_ASSOCIATION_PATH) return json(res, 200, appAccess.siteAssociation);
+      if (appAccess && method === 'GET' && path === APP_CALLBACK_PATH) return send(res, 200, renderMessage('Zurück zur App …', 'Die Anmeldung ist fertig. Die Cockpit-App übernimmt sie, dieses Fenster kann zu.'));
       if (path === '/login' && method === 'GET') return login(req, res, url);
       if (path === '/auth/callback' && method === 'GET') return callback(req, res, url);
+      // Mit Geräte-Token statt Sitzung (src/web/app-access.js).
+      if (appAccess?.paths.includes(path)) return appAccess.handle(req, res, url);
       if (path === '/logout' && method === 'POST') {
         return redirect(res, '/login', [sessions.clear()]);
       }
