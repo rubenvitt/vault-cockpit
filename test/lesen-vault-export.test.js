@@ -293,3 +293,14 @@ test('Verdrahtung: Archivieren, Fortschritt 1 und Markierungs-Aktionen melden da
   await act('/aktion/lesen/markierung/loeschen', { id: highlight.id });
   assert.deepEqual(seen, Array(5).fill(doc.id));
 });
+
+test('Lesedatum: vorzeitig angelegte Notiz hat kein „gelesen“, beim Abschluss wird es nachgetragen', () => {
+  const h = store.addHighlight({ doc_id: doc.id, quote: 'Stelle', start_hint: 1 });
+  const r = exporter.addLink({ highlightId: h.id, target: 'Start' });
+  assert.doesNotMatch(read(r.path), /^gelesen:/m);
+  store.setStatus(doc.id, 'archiv');
+  exporter.changed(doc.id);
+  exporter.flush();
+  assert.match(read(r.path), /^gelesen: 2026-10-2\d$/m);
+  assert.match(read(r.path), /Verknüpft: \[\[Start\]\]/);
+});

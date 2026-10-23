@@ -147,7 +147,7 @@ export function createReadingExport({ vaultPath, index, editor, policy, store, s
     return null;
   }
 
-  function create(doc, inner) {
+  function create(doc, inner, finished) {
     const folder = settings.get().readingNotes?.folder ?? DEFAULT_FOLDER;
     const probe = `${folder}/_.md`;
     if (policy.isExcluded(probe) || policy.sensitivityOf(probe) || policy.classify(probe) !== 'core') {
@@ -156,7 +156,7 @@ export function createReadingExport({ vaultPath, index, editor, policy, store, s
     const slug = slugOf(doc.title || doc.url);
     const name = [`${slug}.md`, `${slug}-${blockId(doc.id).slice(3)}.md`].find((n) => !existsSync(join(vaultPath, folder, n)));
     if (!name) throw new Error(`In „${folder}“ gibt es schon „${slug}.md“`);
-    const r = editor.create({ folder, name, content: noteContent(doc, inner, { tz: settings.get().tz, finishedAt: now().toISOString() }) });
+    const r = editor.create({ folder, name, content: noteContent(doc, inner, { tz: settings.get().tz, finishedAt: finished ? now().toISOString() : null }) });
     return { state: 'angelegt', path: r.path };
   }
 
@@ -177,7 +177,11 @@ export function createReadingExport({ vaultPath, index, editor, policy, store, s
     }
     if (link) links.set(link.id, [...(links.get(link.id) ?? []), link.target]);
     const inner = renderHighlights(highlights, links);
-    if (!found) return { ...create(doc, inner), doc: doc.id };
+    if (!found) return { ...create(doc, inner, finished), doc: doc.id };
+    // Vorzeitig (beim Verknüpfen) angelegt: „gelesen“ beim Abschluss nachtragen.
+    if (finished && index.getNote(found.path)?.frontmatter.gelesen == null) {
+      editor.setFrontmatter({ path: found.path, set: { gelesen: localDate(new Date(doc.read_at ?? now().toISOString()), settings.get().tz) } });
+    }
     const r = writeSection({ vaultPath, editor, path: found.path, name: SECTION, inner, label: LABEL, spaced: true, heading: HEADING, createHeading: true });
     return { ...r, path: found.path, doc: doc.id };
   }
