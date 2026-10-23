@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sanitizeHtml, extractArticle, readingMinutes } from '../src/lesen/extract.js';
+import { sanitizeHtml, extractArticle, readingMinutes, htmlToMarkdown } from '../src/lesen/extract.js';
 import { createReadingStore } from '../src/lesen/store.js';
 import { saveUrl } from '../src/lesen/save.js';
 
@@ -85,4 +85,57 @@ test('Speichern: holt einmal, legt im Eingang ab; dieselbe Adresse oder client_i
 test('extractArticle: fremde Canonical-URL wird ignoriert', () => {
   const html = '<!doctype html><html><head><title>T</title><link rel="canonical" href="https://fremd.test/artikel"></head><body><article><p>Text.</p></article></body></html>';
   assert.equal(extractArticle(html, 'https://beispiel.test/a').canonical_url, null);
+});
+
+test('Markdown (VCP-96): Absätze, Überschriften, Hervorhebungen, Links, Code, Zitate, Tabellen', () => {
+  const html = sanitizeHtml(
+    `<h1>Über &amp; Unter</h1><p>Ein <strong> fetter </strong>Satz, <em>betont</em>, <s>alt</s>, <mark>wichtig</mark> und <a href="/a b?x=<1>">ein [Link]</a>.</p>
+     <p>Code: <code>a\`b</code> und <kbd>Strg</kbd></p><blockquote><p>Zitat</p><p>zweiter Absatz</p></blockquote>
+     <pre><code>if (a) {\n  \`\`\`\n}</code></pre><img src="/bild.png" alt="Ein Bild"><hr>
+     <table><tr><th>A</th><th>B|C</th></tr><tr><td>1</td><td><p>2</p></td></tr></table><p>Zeile<br>neue Zeile</p>`,
+    'https://blatt.test/x',
+  );
+  assert.equal(
+    htmlToMarkdown(html),
+    [
+      '### Über & Unter',
+      'Ein **fetter** Satz, *betont*, ~~alt~~, ==wichtig== und [ein \\[Link\\]](<https://blatt.test/a%20b?x=%3C1%3E>).',
+      'Code: ``a`b`` und `Strg`',
+      '> Zitat\n>\n> zweiter Absatz',
+      '````\nif (a) {\n  ```\n}\n````',
+      '[Bild: Ein Bild](<https://blatt.test/bild.png>)',
+      '---',
+      '| A | B\\|C |\n| --- | --- |\n| 1 | 2 |',
+      'Zeile\nneue Zeile',
+    ].join('\n\n'),
+  );
+  assert.equal(htmlToMarkdown(''), '');
+});
+
+test('Markdown: Tabellenzellen einzeilig, `|` auch im Code und in Links maskiert; Marker-Zeilen im Code entschärft', () => {
+  const html = sanitizeHtml(
+    `<table><tr><th>a|b</th><th><code>x | y</code></th></tr><tr><td><p>eins</p><p>zwei<br>drei</p></td><td><a href="https://x.test/?q=a|b">L|nk</a> <ul><li>p</li></ul></td></tr></table>
+     <pre><code>vorher\n&lt;!-- cockpit:text:ende 12345678 --&gt;\n</code></pre>`,
+  );
+  assert.equal(
+    htmlToMarkdown(html),
+    '| a\\|b | `x \\| y` |\n| --- | --- |\n| eins zwei drei | [L\\|nk](<https://x.test/?q=a%7Cb>) p |\n\n```\nvorher\n​<!-- cockpit:text:ende 12345678 -->\n```',
+  );
+});
+
+test('Markdown: verschachtelte Listen, Sonderzeichen und Markdown-Zeichen im Text maskiert', () => {
+  const html = sanitizeHtml(
+    `<ul><li>Eins<ul><li>Eins-A</li><li>Eins-B<ol start="3"><li>drei</li><li>vier</li></ol></li></ul></li><li><p>Zwei</p><p>noch</p></li></ul>
+     <p>- kein Punkt, * kein Stern, # kein Tag, [[kein Link]], $x$, ==nein==, %%nein%%, _x_, \`y\`, a|b, ~z~, \\ und &amp;amp; &lt;!-- cockpit:text:ende --&gt;</p>
+     <p>1. keine Liste<br>+ auch nicht</p><p>Ümläüte ß – „Anführung“ 🙂 &gt; Pfeil</p>`,
+  );
+  assert.equal(
+    htmlToMarkdown(html),
+    [
+      '- Eins\n  - Eins-A\n  - Eins-B\n    3. drei\n    4. vier\n- Zwei\n  noch',
+      '\\- kein Punkt, \\* kein Stern, \\# kein Tag, \\[\\[kein Link\\]\\], \\$x\\$, =\\=nein=\\=, %\\%nein%\\%, \\_x\\_, \\`y\\`, a\\|b, \\~z\\~, \\\\ und \\&amp; \\<!-- cockpit:text:ende --\\>',
+      '1\\. keine Liste\n\\+ auch nicht',
+      'Ümläüte ß – „Anführung“ 🙂 \\> Pfeil',
+    ].join('\n\n'),
+  );
 });

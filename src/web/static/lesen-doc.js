@@ -1,7 +1,7 @@
 // Leseansicht (VCP-71, src/lesen/doc.js): Markieren per Textauswahl, Notizen,
 // Fortschritt speichern, Schriftgröße und Tastenkürzel. Braucht /static/cockpit.js
-// (window.cockpit) davor. Ohne Script bleibt der Text lesbar, Archivieren ist
-// ein Formular.
+// (window.cockpit) davor. Ohne Script bleibt der Text lesbar, jede Entscheidung
+// (Fertig, weg · In den Vault) ist ein Formular.
 //
 // Anker zählen Zeichen in `textContent` von `.lesen-text`, genau wie
 // src/lesen/anchor.js auf dem Server. Deshalb steht dort nur der Artikel, und
@@ -15,7 +15,7 @@
 //   die Aktionen in src/lesen/highlights.js.
 //
 // Ohne Netz oder auf der gespeicherten Seite (VCP-80) gehen Markieren, Notiz,
-// Fortschritt und Archivieren in den Puffer von /static/offline.js
+// Fortschritt und die Entscheidungen in den Puffer von /static/offline.js
 // (`window.cockpitPuffer`) und von dort später raus. Neue Markierungen tragen
 // dafür immer eine eigene ID (`cid`); wartende zeigt die Seite per CSS-Highlight.
 (() => {
@@ -41,6 +41,8 @@
     '/aktion/lesen/markierung/notiz': 'Notiz',
     '/aktion/lesen/doc/fortschritt': 'Lesefortschritt',
     '/aktion/lesen/doc/status': 'Status',
+    '/aktion/lesen/doc/fertig': 'Fertig, weg',
+    '/aktion/lesen/doc/vault': 'In den Vault',
   };
 
   /** Zeichen im Lesetext vor (`node`, `offset`). */
@@ -218,21 +220,22 @@
     for (const e of (await puffer()?.pending().catch(() => [])) ?? []) if (e.action === NEW && !e.error && e.fields.id === docId()) paint(e.fields);
   });
 
-  // Archivieren ohne Netz: in den Puffer, Knopf schaltet um (noch einmal drücken nimmt es zurück).
-  // shortcut: Im Funkloch mit `navigator.onLine` true geht Archivieren über cockpit.js und meldet nur den Fehler;
+  // Entscheidungen ohne Netz (Fertig, weg · In den Vault · Zurück auf den Stapel): in den Puffer, der Server
+  // schreibt die Notiz beim Nachsenden. Die Knöpfe bleiben, wie sie sind; die Meldung sagt, dass es wartet.
+  // shortcut: Im Funkloch mit `navigator.onLine` true gehen sie über cockpit.js und melden nur den Fehler;
   // „Entfernen“ und „In Inbox“ puffern gar nicht. Bei Bedarf dort auf `err.offline` hin puffern.
   document.addEventListener(
     'submit',
     async (e) => {
       const form = e.target;
-      if (!(form instanceof HTMLFormElement) || !form.hasAttribute('data-archive') || !puffer()?.offline()) return;
+      if (!(form instanceof HTMLFormElement) || !form.hasAttribute('data-decide') || !puffer()?.offline()) return;
       e.preventDefault();
       e.stopImmediatePropagation();
-      const status = form.elements.status.value;
-      if (!(await buffer('/aktion/lesen/doc/status', { id: docId(), status }))) return;
-      form.elements.status.value = status === 'archiv' ? 'stapel' : 'archiv';
-      const label = form.querySelector('button')?.firstChild;
-      if (label) label.textContent = status === 'archiv' ? 'Zurück auf den Stapel ' : 'Archivieren ';
+      // Das CSRF-Token holt der Puffer beim Nachsenden frisch.
+      const fields = Object.fromEntries(new FormData(form));
+      delete fields.csrf;
+      delete fields.back;
+      await buffer(form.getAttribute('action'), fields);
     },
     true,
   );
@@ -367,9 +370,10 @@
       if (!current) return;
       e.preventDefault();
       run(cmd);
-    } else if (key === 'e') {
+    } else if (key === 'e' || key === 'v') {
+      // E: Fertig, weg · V: In den Vault (mit der Wahl im Formular).
       e.preventDefault();
-      document.querySelector('form[data-archive]')?.requestSubmit();
+      document.querySelector(`form[data-decide=${key === 'e' ? 'fertig' : 'vault'}]`)?.requestSubmit();
     } else if (key === 'j' || key === 'k') {
       e.preventDefault();
       step(key === 'j' ? 1 : -1);

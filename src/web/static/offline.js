@@ -398,10 +398,10 @@
 
   // --- Offline sperren -------------------------------------------------------
 
-  /** Ohne Netz (oder auf einer gespeicherten Seite) gehen nur Schnelleingabe, Archivieren in der Leseansicht (puffert lesen-doc.js) und Abmelden. */
+  /** Ohne Netz (oder auf einer gespeicherten Seite) gehen nur Schnelleingabe, die Entscheidungen in der Leseansicht (puffert lesen-doc.js) und Abmelden. */
   function lock(blocked) {
     for (const form of document.forms) {
-      if (form.method !== 'post' || form.matches('.capture, .logout, [data-archive]')) continue;
+      if (form.method !== 'post' || form.matches('.capture, .logout, [data-decide]')) continue;
       form.classList.toggle('offline-off', blocked);
       for (const field of form.elements) {
         if (blocked && !field.disabled) {

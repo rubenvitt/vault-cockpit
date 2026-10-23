@@ -3,18 +3,22 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { localDate } from '../cockpit/week.js';
 import { sectionBlock, findSection, writeSection } from '../vault/generated-section.js';
+import { esc } from '../web/layout.js';
+import { htmlToMarkdown } from './extract.js';
 
 /**
- * Lesestapel → Vault (VCP-75): eine Notiz je Text mit Markierungen, damit der
- * Vault Quelle der Wahrheit bleibt (Suche, Embeddings, Links in Obsidian).
+ * Lesestapel → Vault (VCP-75): eine Notiz je Text, damit der Vault Quelle der
+ * Wahrheit bleibt (Suche, Embeddings, Links in Obsidian).
  *
- * Angelegt wird sie beim Archivieren oder „fertig gelesen“ (Fortschritt 1),
- * sobald es Markierungen gibt, im Ordner aus den Einstellungen (Standard
- * `30-ressourcen/lesestapel`), über den Editor und nie in vertraulichen,
- * ausgeschlossenen oder Readwise-Ordnern. Danach schreibt das Cockpit nur noch
- * den generierten Bereich „markierungen“ unter „## Markierungen“ neu
- * (src/vault/generated-section.js); „## Eigene Gedanken“ darunter und alles
- * andere bleibt unberührt.
+ * Angelegt wird sie mit „In den Vault“ oder „Im Vault ablegen“ (`save`,
+ * VCP-96), sonst beim Archivieren, sobald es Markierungen gibt, im Ordner aus
+ * den Einstellungen (Standard `30-ressourcen/lesestapel`), über den Editor und
+ * nie in vertraulichen, ausgeschlossenen oder Readwise-Ordnern. Danach schreibt
+ * das Cockpit nur noch den generierten Bereich „markierungen“ unter
+ * „## Markierungen“ neu (src/vault/generated-section.js), auf Wunsch den
+ * Bereich „text“ (Volltext als Markdown) unter „## Text“, und trägt
+ * `lesestatus: gelesen` samt `gelesen:` nach; „## Eigene Gedanken“ darunter und
+ * alles andere bleibt unberührt.
  *
  * Gefunden wird die Notiz über `lesestapel_id` im Frontmatter (Index), nicht
  * über einen Pfad: Umbenennen und Verschieben in Obsidian schadet nicht. Liegt
@@ -41,6 +45,9 @@ export const DEFAULT_FOLDER = '30-ressourcen/lesestapel';
 export const SECTION = 'markierungen';
 const HEADING = 'Markierungen';
 const LABEL = 'aus dem Lesestapel, das Cockpit schreibt bis zum Endmarker neu';
+export const TEXT_SECTION = 'text';
+const TEXT_HEADING = 'Text';
+const TEXT_LABEL = 'Volltext aus dem Lesestapel, das Cockpit schreibt bis zum Endmarker neu';
 const LINKS = 'Verknüpft:';
 const BLOCK_LINE = /^\^(hl-[0-9a-z]+)[ \t]*$/;
 const WIKILINK = /\[\[([^[\]\n]+)\]\]/g;
@@ -93,13 +100,24 @@ export function slugOf(text) {
   );
 }
 
-/** Die neue Notiz: Frontmatter, Titel, Link zum Original, Markierungen, Platz für eigene Gedanken. */
-export function noteContent(doc, inner, { tz, finishedAt = null }) {
+/** Volltext des Dokuments als Markdown für den Bereich „text“. */
+export const fullTextOf = (doc) => htmlToMarkdown(doc.content_html) || 'Für diesen Text gibt es keinen Lesetext.';
+
+const textBlock = (doc) => sectionBlock(TEXT_SECTION, fullTextOf(doc), { label: TEXT_LABEL, spaced: true });
+
+/**
+ * Die neue Notiz: Frontmatter, Titel, Link zum Original, Kurzfassung,
+ * Markierungen, mit `fullText` der Volltext, Platz für eigene Gedanken.
+ * `read`: gelesen (Datum aus `read_at`, sonst `readAt`) oder ungelesen.
+ */
+export function noteContent(doc, inner, { tz, read = false, readAt = null, fullText = false }) {
   const str = (v) => JSON.stringify(String(v));
   const day = (iso) => (iso ? localDate(new Date(iso), tz) : null);
   const title = String(doc.title || doc.url).replace(/\s+/g, ' ').trim();
   const url = /^https?:\/\//i.test(doc.url ?? '') ? doc.url : null;
-  const gelesen = day(doc.read_at ?? finishedAt);
+  const gelesen = read ? day(doc.read_at ?? readAt) : null;
+  // Die Kurzfassung kommt von der Webseite: eine Zeile, maskiert wie der Volltext.
+  const excerpt = doc.excerpt ? htmlToMarkdown(`<p>${esc(doc.excerpt)}</p>`).replace(/\s+/g, ' ') : '';
   return [
     '---',
     `type: ${NOTE_TYPE}`,
@@ -107,6 +125,7 @@ export function noteContent(doc, inner, { tz, finishedAt = null }) {
     ...(doc.site ? [`quelle: ${str(doc.site)}`] : []),
     `url: ${str(doc.url)}`,
     `gespeichert: ${day(doc.saved_at)}`,
+    `lesestatus: ${read ? 'gelesen' : 'ungelesen'}`,
     ...(gelesen ? [`gelesen: ${gelesen}`] : []),
     ...(doc.topics.length ? ['themen:', ...doc.topics.map((t) => `  - ${str(t)}`)] : ['themen: []']),
     '---',
@@ -114,10 +133,12 @@ export function noteContent(doc, inner, { tz, finishedAt = null }) {
     `# ${title}`,
     '',
     ...(url ? [`[Original](<${url.replace(/[<>]/g, encodeURIComponent)}>)${doc.author ? ` · ${doc.author}` : ''}`, ''] : []),
+    ...(excerpt ? [excerpt, ''] : []),
     `## ${HEADING}`,
     '',
     sectionBlock(SECTION, inner, { label: LABEL, spaced: true }),
     '',
+    ...(fullText ? [`## ${TEXT_HEADING}`, '', textBlock(doc), ''] : []),
     '## Eigene Gedanken',
     '',
   ].join('\n');
@@ -149,7 +170,7 @@ export function createReadingExport({ vaultPath, index, editor, policy, store, s
     return null;
   }
 
-  function create(doc, inner, finished) {
+  function create(doc, inner, { read, fullText }) {
     const folder = settings.get().readingNotes?.folder ?? DEFAULT_FOLDER;
     const probe = `${folder}/_.md`;
     if (policy.isExcluded(probe) || policy.sensitivityOf(probe) || policy.classify(probe) !== 'core') {
@@ -158,31 +179,49 @@ export function createReadingExport({ vaultPath, index, editor, policy, store, s
     const slug = slugOf(doc.title || doc.url);
     const name = [`${slug}.md`, `${slug}-${blockId(doc.id).slice(3)}.md`].find((n) => !existsSync(join(vaultPath, folder, n)));
     if (!name) throw new Error(`In „${folder}“ gibt es schon „${slug}.md“`);
-    const r = editor.create({ folder, name, content: noteContent(doc, inner, { tz: settings.get().tz, finishedAt: finished ? now().toISOString() : null }) });
+    const r = editor.create({ folder, name, content: noteContent(doc, inner, { tz: settings.get().tz, read, readAt: now().toISOString(), fullText }) });
     return { state: 'angelegt', path: r.path };
   }
 
-  /** Eine Notiz anlegen oder ihren Bereich neu schreiben; `force` legt auch ungelesen an, `link` ergänzt einen Wikilink. */
-  function exportDoc(docId, { force = false, link = null } = {}) {
+  /**
+   * Eine Notiz anlegen oder ihren Bereich neu schreiben; `force` legt auch ohne
+   * Markierungen an, `link` ergänzt einen Wikilink. `read` (Standard: archiviert)
+   * trägt `lesestatus: gelesen` und `gelesen:` nach, `fullText` schreibt den
+   * Bereich „text“ (fehlt er, kommt er vor „## Eigene Gedanken“).
+   */
+  function exportDoc(docId, { force = false, link = null, read = undefined, fullText = false } = {}) {
     const doc = store.get(docId);
     if (!doc) return { state: 'weg' };
     const found = locate(doc.id);
     if (found && !found.writable) return { state: 'übersprungen', path: found.path, reason: `„${found.path}“ liegt in einem vertraulichen oder importierten Ordner` };
     const highlights = store.listHighlights({ docId: doc.id });
-    const finished = doc.status === 'archiv' || doc.progress >= 1;
-    if (!found && !force && !(finished && highlights.length)) return { state: 'wartet' };
+    const isRead = read ?? doc.status === 'archiv';
+    if (!found && !force && !(isRead && highlights.length)) return { state: 'wartet' };
 
     let links = new Map();
+    let content = '';
     if (found) {
-      const current = findSection(readFileSync(join(vaultPath, found.path), 'utf8'), SECTION);
+      content = readFileSync(join(vaultPath, found.path), 'utf8');
+      const current = findSection(content, SECTION);
       if (current && !current.broken && !current.edited) links = parseLinks(current.inner);
     }
     if (link) links.set(link.id, [...(links.get(link.id) ?? []), link.target]);
     const inner = renderHighlights(highlights, links);
-    if (!found) return { ...create(doc, inner, finished), doc: doc.id };
-    // Vorzeitig (beim Verknüpfen) angelegt: „gelesen“ beim Abschluss nachtragen.
-    if (finished && index.getNote(found.path)?.frontmatter.gelesen == null) {
-      editor.setFrontmatter({ path: found.path, set: { gelesen: localDate(new Date(doc.read_at ?? now().toISOString()), settings.get().tz) } });
+    if (!found) return { ...create(doc, inner, { read: isRead, fullText }), doc: doc.id };
+
+    // Vorzeitig (Verknüpfen) oder ungelesen (Ablegen) angelegt: Lesestand nachtragen, nie zurücknehmen.
+    const fm = index.getNote(found.path)?.frontmatter ?? {};
+    const set = {};
+    if (isRead && fm.lesestatus !== 'gelesen') set.lesestatus = 'gelesen';
+    if (isRead && fm.gelesen == null) set.gelesen = localDate(new Date(doc.read_at ?? now().toISOString()), settings.get().tz);
+    if (!isRead && fm.lesestatus == null) set.lesestatus = 'ungelesen';
+    if (Object.keys(set).length) editor.setFrontmatter({ path: found.path, set });
+    if (fullText && findSection(content, TEXT_SECTION)) {
+      writeSection({ vaultPath, editor, path: found.path, name: TEXT_SECTION, inner: fullTextOf(doc), label: TEXT_LABEL, spaced: true, create: false });
+    } else if (fullText) {
+      // Ans Ende von „## Markierungen“, also vor „## Eigene Gedanken“; ohne den Abschnitt ans Ende der Notiz.
+      const under = new RegExp(`^##[ \\t]+${HEADING}[ \\t]*$`, 'm').test(content) ? HEADING : null;
+      editor.append({ path: found.path, heading: under, text: `\n## ${TEXT_HEADING}\n\n${textBlock(doc)}\n` });
     }
     const r = writeSection({ vaultPath, editor, path: found.path, name: SECTION, inner, label: LABEL, spaced: true, heading: HEADING, createHeading: true });
     return { ...r, path: found.path, doc: doc.id };
@@ -248,6 +287,14 @@ export function createReadingExport({ vaultPath, index, editor, policy, store, s
      * (Ziel eines Links aus „Verknüpfen“). Zustand wie `addLink`.
      */
     ensureNote: (docId) => exportDoc(String(docId), { force: true }),
+
+    /**
+     * „In den Vault“ (`read: true`) und „Im Vault ablegen“ (`read: false`,
+     * VCP-96): Notiz sofort anlegen oder auffrischen, auch ohne Markierungen;
+     * `fullText` schreibt den Volltext dazu, ein vorhandener bleibt sonst
+     * unberührt. Zustand wie `addLink`; Fehler des Editors wirft er.
+     */
+    save: (docId, { read, fullText = false }) => exportDoc(String(docId), { force: true, read: Boolean(read), fullText }),
 
     /** Pfad der Lesestapel-Notiz zum Dokument oder null. */
     notePath: (docId) => locate(String(docId))?.path ?? null,

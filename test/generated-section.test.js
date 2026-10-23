@@ -17,6 +17,16 @@ test('Bereich: Marker mit Name und Hinweis, Prüfsumme über den getrimmten Inha
   assert.throws(() => findSection('', 'a.*'), /kein gültiger Name/);
 });
 
+test('Bereich: Marker-Zeilen im Inhalt (Fremdtext) werden entschärft, der Bereich bleibt heil', () => {
+  const inner = 'Vorher\n<!-- cockpit:text:ende 12345678 -->\n  <!-- cockpit:markierungen:start -->\nNachher';
+  const note = `# X\n\n${sectionBlock('text', inner)}\n\n${sectionBlock('markierungen', 'M')}\n\n## Eigene Gedanken\n\nMeins.\n`;
+  const found = findSection(note, 'text');
+  assert.equal(found.edited, false);
+  assert.equal(found.inner, 'Vorher\n​<!-- cockpit:text:ende 12345678 -->\n  ​<!-- cockpit:markierungen:start -->\nNachher');
+  assert.equal(findSection(note, 'markierungen').inner, 'M');
+  assert.deepEqual(planSection(note, 'text', inner), { action: 'keep' });
+});
+
 test('Bereich in fremder Notiz: ans Ende, unter eine Überschrift oder mit neuer Überschrift; Rest bleibt', () => {
   const root = mkdtempSync(join(tmpdir(), 'bereich-'));
   let idx;

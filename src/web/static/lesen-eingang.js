@@ -94,7 +94,7 @@
     if (swallowClick && e.target instanceof Element && e.target.closest('.inbox-card')) e.preventDefault();
   }, true);
 
-  // --- Tasten: ← / X weg, ↓ / S Stapel, → / Enter lesen, Z rückgängig ------
+  // --- Tasten: ← / X weg, ↓ / S Stapel, → / Enter lesen, Z rückgängig, A im Vault ablegen ---
 
   const KEYS = { ArrowLeft: 'weg', x: 'weg', ArrowDown: 'stapel', s: 'stapel', ArrowRight: 'lesen', Enter: 'lesen' };
 
@@ -105,11 +105,11 @@
     // Enter auf einem Knopf oder Link bleibt dessen Sache.
     if (e.key === 'Enter' && t?.closest('a, button, summary')) return;
     const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-    if (key === 'z') {
-      const undo = document.querySelector('form.inbox-undo');
-      if (!undo || undo.classList.contains('busy')) return;
+    if (key === 'z' || key === 'a') {
+      const form = document.querySelector(key === 'z' ? 'form.inbox-undo' : 'form.inbox-ablegen');
+      if (!form || form.classList.contains('busy')) return;
       e.preventDefault();
-      undo.requestSubmit();
+      form.requestSubmit();
       return;
     }
     if (!KEYS[key] || !decideForm()) return;

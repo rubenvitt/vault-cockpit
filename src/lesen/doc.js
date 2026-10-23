@@ -6,17 +6,20 @@ import { markHighlights } from './anchor.js';
 
 /**
  * Leseansicht `/lesen/doc?id=…` (VCP-71): Lesetext in Leseschrift mit den
- * Markierungen, Fortschritt und Restzeit, Archivieren. Auf breiten
- * Bildschirmen daneben Bereiche, Stapel und eine Seitenleiste (Querverbindungen,
- * Markierungen, Tastenkürzel). Markieren und Speichern des Fortschritts macht
- * `/static/lesen-doc.js`; ohne JavaScript bleibt der Text lesbar und
- * Archivieren ein Formular.
+ * Markierungen, Fortschritt und Restzeit, dazu die Entscheidung nach dem Lesen
+ * (VCP-96): „Fertig, weg“ oder „In den Vault“ (Notiz, wahlweise mit Volltext).
+ * Auf breiten Bildschirmen daneben Bereiche, Stapel und eine Seitenleiste
+ * (Querverbindungen, Markierungen, Tastenkürzel). Markieren und Speichern des
+ * Fortschritts macht `/static/lesen-doc.js`; ohne JavaScript bleibt der Text
+ * lesbar und jede Entscheidung ein Formular.
  *
  * Link-Vertrag für die anderen Seiten: `/lesen/doc?id=<id>`, mit `#weiter`
  * an die zuletzt gelesene Stelle (`scroll_anchor`, Zeichen im Lesetext).
  */
 
-const STATUS_MESSAGE = { eingang: 'In den Eingang gelegt', stapel: 'Auf den Stapel gelegt', archiv: 'Archiviert', weg: 'Verworfen' };
+const STATUS_MESSAGE = { eingang: 'In den Eingang gelegt', stapel: 'Auf den Stapel gelegt', archiv: 'Archiviert', abgelegt: 'Im Vault abgelegt', weg: 'Verworfen' };
+const STATUS = '/aktion/lesen/doc/status';
+const name = (d) => d.title ?? d.url;
 const href = (u) => (/^https?:\/\//i.test(u ?? '') ? u : '#');
 export const docLink = (id) => `/lesen/doc?id=${encodeURIComponent(id)}`;
 const remaining = (d) => Math.max(1, Math.ceil(d.reading_minutes * (1 - d.progress)));
@@ -27,7 +30,8 @@ const KEYS = [
   ['H', 'markieren'],
   ['N', 'Notiz'],
   ['L', 'verbinden'],
-  ['E', 'archivieren'],
+  ['E', 'fertig, weg'],
+  ['V', 'in den Vault'],
   ['J / K', 'nächster / vorheriger Absatz'],
 ];
 
@@ -69,10 +73,22 @@ function highlightList(highlights, orphans, ctx) {
     .join('')}</ul>`;
 }
 
-function renderDoc(doc, { highlights, stackDocs, counts }, ctx) {
+/**
+ * Nach dem Lesen: „Fertig, weg“ (E), „In den Vault“ (V, nur mit Lesestapel-Notizen)
+ * mit Wahl „mit Volltext“, und nach einer Entscheidung „Zurück auf den Stapel“.
+ */
+function decide(doc, ctx, vault) {
+  const form = (action, key, fields, body) => `<form method="post" action="${action}" class="act" data-decide="${key}">${hidden({ csrf: ctx.write.csrf, back: ctx.write.back, id: doc.id, ...fields })}${body}</form>`;
+  return `<div class="lesen-decide">
+      ${doc.status !== 'weg' ? form('/aktion/lesen/doc/fertig', 'fertig', {}, '<button type="submit" class="btn">Fertig, weg <kbd>E</kbd></button>') : ''}
+      ${vault ? form('/aktion/lesen/doc/vault', 'vault', {}, '<label class="lesen-volltext"><input type="checkbox" name="volltext" value="1"> mit Volltext</label><button type="submit" class="btn primary">In den Vault <kbd>V</kbd></button>') : ''}
+      ${['archiv', 'abgelegt', 'weg'].includes(doc.status) ? form(STATUS, 'zurueck', { status: 'stapel' }, '<button type="submit" class="btn quiet">Zurück auf den Stapel</button>') : ''}
+    </div>`;
+}
+
+function renderDoc(doc, { highlights, stackDocs, counts, vault }, ctx) {
   const { html, orphans } = markHighlights(doc.content_html ?? '', highlights, { weiter: Number(doc.scroll_anchor) || 0 });
   const meta = [doc.site, doc.author, doc.reading_minutes ? `${doc.reading_minutes} min` : null].filter(Boolean).map(esc).join(' · ');
-  const archived = doc.status === 'archiv';
   const text = doc.content_html
     ? html
     : `<span id="weiter"></span><p>${esc(doc.excerpt || 'Für diesen Artikel gibt es keinen Lesetext.')}</p>`;
@@ -102,7 +118,7 @@ ${stack(stackDocs, doc.id)}
       <button type="button" class="btn quiet" data-size="1" aria-label="Schrift größer">A+</button>
       <button type="button" class="btn quiet" data-font aria-pressed="false">Ohne Serifen</button>
     </div>
-    <form method="post" action="/aktion/lesen/doc/status" class="act" data-archive>${hidden({ csrf: ctx.write.csrf, back: ctx.write.back, id: doc.id, status: archived ? 'stapel' : 'archiv' })}<button type="submit" class="btn">${archived ? 'Zurück auf den Stapel' : 'Archivieren'} <kbd>E</kbd></button></form>
+    ${decide(doc, ctx, vault)}
   </div>
   <div class="lesen-text">${text}</div>
 </article>
@@ -124,31 +140,76 @@ ${stack(stackDocs, doc.id)}
 </html>`;
 }
 
+/** Antwort einer Entscheidung: Meldung, neuer Status, Rückgängig (alter Status), wenn sich etwas geändert hat. */
+const decided = (message, { doc, previous, changed }) => ({
+  message: `${message}: ${name(doc)}`,
+  doc: { id: doc.id, status: doc.status },
+  ...(changed ? { undo: { action: STATUS, fields: { id: doc.id, status: previous } } } : {}),
+});
+
 /**
  * Seite und Aktionen der Leseansicht; `asAction` macht Fehler des Speichers zur
- * Meldung, `onChange(docId)` hört Statuswechsel und „fertig gelesen“.
+ * Meldung, `onChange(docId)` hört Statuswechsel, `exporter` schreibt die
+ * Lesestapel-Notiz (src/lesen/vault-export.js; ohne gibt es „In den Vault“ und
+ * „Im Vault ablegen“ nicht).
  */
-export function docRoutes({ store, asAction, onChange = () => {} }) {
+export function docRoutes({ store, asAction, onChange = () => {}, exporter = null }) {
+  const must = (id) => {
+    const doc = store.get(id);
+    if (!doc) throw new ActionError('Dieses Dokument gibt es nicht', 404);
+    return doc;
+  };
+  /** Notiz sofort schreiben; erst danach wechselt der Status, sonst stünde ein Text ohne Notiz im Archiv. */
+  const toVault = (doc, opts) => {
+    if (!exporter) throw new ActionError('Die Lesestapel-Notizen sind hier nicht angebunden', 503);
+    let r;
+    try {
+      r = exporter.save(doc.id, opts);
+    } catch (err) {
+      throw new ActionError(`Nicht in den Vault geschrieben: ${err.message}`, 409);
+    }
+    if (r.state === 'übersprungen' && !r.path) throw new ActionError(r.reason, 409);
+    return r;
+  };
+
   return {
     pages: {
       async '/lesen/doc'(ctx) {
         const doc = store.get(ctx.url.searchParams.get('id'));
         if (!doc) return { status: 404, html: readingPage(ctx, { key: null, title: 'Nicht gefunden', body: '<section><p class="empty">Diesen Artikel gibt es nicht (mehr).</p></section>' }) };
-        const model = { highlights: store.listHighlights({ docId: doc.id }), stackDocs: store.list({ status: 'stapel', limit: 30 }), counts: store.counts() };
+        const model = { highlights: store.listHighlights({ docId: doc.id }), stackDocs: store.list({ status: 'stapel', limit: 30 }), counts: store.counts(), vault: Boolean(exporter) };
         return { html: renderDoc(doc, model, ctx) };
       },
     },
     actions: {
-      /** Status wechseln (`id`, `status`), z. B. Archivieren; Rückgängig stellt den alten her. */
-      async '/aktion/lesen/doc/status'(form) {
+      /** Status wechseln (`id`, `status`), z. B. zurück auf den Stapel; auch das Rückgängig der Entscheidungen. */
+      async [STATUS](form) {
         const status = form.get('status');
-        const { doc, previous, changed } = await asAction(() => store.setStatus(form.get('id'), status));
-        if (changed) onChange(doc.id);
-        return {
-          message: `${STATUS_MESSAGE[status]}: ${doc.title ?? doc.url}`,
-          doc: { id: doc.id, status: doc.status },
-          ...(changed ? { undo: { action: '/aktion/lesen/doc/status', fields: { id: doc.id, status: previous } } } : {}),
-        };
+        const r = await asAction(() => store.setStatus(form.get('id'), status));
+        if (r.changed) onChange(r.doc.id);
+        const kept = r.changed && ['archiv', 'abgelegt'].includes(r.previous) ? ' (die Notiz im Vault bleibt)' : '';
+        const out = decided(STATUS_MESSAGE[status], r);
+        return { ...out, message: out.message + kept };
+      },
+      /** „Fertig, weg“: gelesen, keine Notiz; eine vorhandene bleibt unberührt. */
+      async '/aktion/lesen/doc/fertig'(form) {
+        return decided('Fertig, weg', await asAction(() => store.setStatus(form.get('id'), 'weg', { read: true })));
+      },
+      /** „In den Vault“: Notiz mit `lesestatus: gelesen`, mit `volltext=1` samt Volltext; dann archiviert. */
+      async '/aktion/lesen/doc/vault'(form) {
+        const fullText = form.get('volltext') === '1';
+        const doc = must(form.get('id'));
+        // Erst gelesen (`read_at`, Datum für `gelesen:`), dann die Notiz, dann der Status.
+        store.setStatus(doc.id, doc.status, { read: true });
+        toVault(doc, { read: true, fullText });
+        return decided(fullText ? 'Mit Volltext im Vault' : 'Im Vault', store.setStatus(doc.id, 'archiv'));
+      },
+      /** „Im Vault ablegen“ aus Eingang oder Stapel: ungelesen, immer mit Volltext; verlässt Eingang und Stapel. */
+      async '/aktion/lesen/ablegen'(form) {
+        const doc = must(form.get('id'));
+        if (!['eingang', 'stapel', 'abgelegt'].includes(doc.status)) throw new ActionError(`Liegt nicht mehr in Eingang oder Stapel: ${name(doc)}`, 409);
+        toVault(doc, { read: false, fullText: true });
+        return decided('Im Vault abgelegt', store.setStatus(doc.id, 'abgelegt'));
       },
       /** Lesefortschritt (`fortschritt` 0..1, `anker` Zeichen im Lesetext); still, ohne Meldung. */
       async '/aktion/lesen/doc/fortschritt'(form) {
@@ -156,7 +217,6 @@ export function docRoutes({ store, asAction, onChange = () => {} }) {
         if (!progress) throw new ActionError('Fortschritt fehlt');
         const anchor = form.get('anker');
         const doc = await asAction(() => store.setProgress(form.get('id'), progress, /^\d{1,8}$/.test(anchor ?? '') ? anchor : undefined));
-        if (doc.progress >= 1) onChange(doc.id);
         return { message: '', progress: doc.progress };
       },
     },

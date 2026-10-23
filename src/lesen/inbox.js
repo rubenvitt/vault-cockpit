@@ -6,7 +6,8 @@ import { readingPage, saveForm } from './pages.js';
 
 /**
  * Eingang sortieren (VCP-70): eine Karte nach der anderen, je Karte Weg,
- * Stapel oder Jetzt lesen. Ohne JavaScript ein Formular mit drei Knöpfen und
+ * Stapel oder Jetzt lesen, dazu „Im Vault ablegen“ (VCP-96) als eigenes
+ * Formular. Ohne JavaScript ein Formular mit drei Knöpfen und
  * Weiterleitung; mit JavaScript schickt `/static/cockpit.js` es als JSON
  * (Formular `.act`, mit Rückgängig in der Meldung) und lädt `main` neu,
  * `/static/lesen-eingang.js` macht Wischen und Tasten daraus.
@@ -64,7 +65,7 @@ const arrow = (a) => `<span aria-hidden="true">${a}</span>`;
 const choice = (ziel, label, key, keys, cls = '') =>
   `<button type="submit" name="ziel" value="${ziel}" class="btn${cls}" aria-keyshortcuts="${keys}">${label} <kbd aria-hidden="true">${key}</kbd></button>`;
 
-export function renderInboxPage({ doc, left, today }, ctx, { getFeed }) {
+export function renderInboxPage({ doc, left, today }, ctx, { getFeed, vault = false }) {
   const write = { csrf: ctx.write.csrf, back: ctx.write.back };
   const total = today.count + left;
   const progress = total
@@ -83,20 +84,25 @@ export function renderInboxPage({ doc, left, today }, ctx, { getFeed }) {
       ${choice('lesen', `Jetzt lesen ${arrow('→')}`, '↵', 'ArrowRight Enter', ' primary')}
     </form>`
     : '';
-  const actions = undo || decide ? `<div class="inbox-actions">${undo}${decide}</div>` : '';
+  // Im Vault ablegen (VCP-96): ein Knopf, kein Wischen; die Aktion steht in src/lesen/doc.js.
+  const file = doc && vault
+    ? `<form method="post" action="/aktion/lesen/ablegen" class="act inbox-ablegen">${hidden({ ...write, id: doc.id })}<button type="submit" class="btn quiet" aria-keyshortcuts="a">Im Vault ablegen <kbd aria-hidden="true">A</kbd></button></form>`
+    : '';
+  const row = undo || file ? `<div class="inbox-row">${undo}${file}</div>` : '';
+  const actions = row || decide ? `<div class="inbox-actions">${row}${decide}</div>` : '';
   const body = `<div class="inbox">${progress}${stack}${actions}</div>
 <details class="more inbox-save"${doc ? '' : ' open'}><summary>Adresse speichern</summary>${saveForm(ctx)}</details>`;
   return readingPage(ctx, { key: 'eingang', title: 'Eingang', body, scripts: [assets.inbox] });
 }
 
-/** Seite und Aktion für src/lesen/http.js. `now` nur für Tests. */
-export function inboxRoutes({ store, now = () => Date.now() }) {
+/** Seite und Aktion für src/lesen/http.js; `vault` zeigt „Im Vault ablegen“. `now` nur für Tests. */
+export function inboxRoutes({ store, vault = false, now = () => Date.now() }) {
   return {
     pages: {
       '/lesen/eingang': async (ctx) => {
         const [doc = null] = store.list({ status: 'eingang', limit: 1 });
         const model = { doc, left: store.counts().eingang, today: store.leftInboxSince(dayStart(now(), ctx.tz)) };
-        return { html: renderInboxPage(model, ctx, { getFeed: store.getFeed }) };
+        return { html: renderInboxPage(model, ctx, { getFeed: store.getFeed, vault }) };
       },
     },
     actions: {
@@ -107,14 +113,14 @@ export function inboxRoutes({ store, now = () => Date.now() }) {
         const doc = store.get(form.get('id'));
         if (!doc) throw new ActionError('Dieses Dokument gibt es nicht', 404);
         // Nur aus dem Eingang heraus und (Rückgängig) wieder hinein; doppelt abgeschickt ändert nichts.
-        const from = status === 'eingang' ? ['stapel', 'weg'] : ['eingang'];
+        const from = status === 'eingang' ? ['stapel', 'weg', 'abgelegt'] : ['eingang'];
         if (doc.status !== status && !from.includes(doc.status)) {
           throw new ActionError(`${status === 'eingang' ? 'Lässt sich nicht mehr zurücklegen' : 'Liegt nicht mehr im Eingang'}: ${name(doc)}`, 409);
         }
         const r = store.setStatus(doc.id, status);
         const message = { weg: 'Weg', stapel: 'Auf dem Stapel', eingang: 'Zurück im Eingang' }[status];
         return {
-          message: `${message}: ${name(doc)}`,
+          message: `${message}: ${name(doc)}${r.changed && r.previous === 'abgelegt' ? ' (die Notiz im Vault bleibt)' : ''}`,
           doc: { id: doc.id, status: r.doc.status },
           undo: r.changed ? { action: SORT, fields: { id: doc.id, ziel: r.previous } } : null,
           redirect: ziel === 'lesen' ? `/lesen/doc?id=${encodeURIComponent(doc.id)}` : null,

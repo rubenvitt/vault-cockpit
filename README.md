@@ -519,7 +519,7 @@ er holt nur, was fehlt oder älter als einen Tag ist, und löscht, was nicht meh
 auf der Liste steht. Wer einen gespeicherten Artikel mit Netz öffnet, frischt ihn
 auf. Eine Synthese zeigt auch Titel und Pfade verlinkter oder ähnlicher Notizen
 (wie online), deren Inhalt nicht. Ohne Netz gehen in der Leseansicht
-**Markieren, Notizen, Fortschritt und Archivieren** in denselben Puffer wie die
+**Markieren, Notizen, Fortschritt und die Entscheidungen** (Fertig, weg · In den Vault) in denselben Puffer wie die
 Schnelleingabe; wartende Markierungen sind gestrichelt unterlegt. Jede neue
 Markierung bekommt auf dem Gerät eine ID, die der Server als ihre ID übernimmt
 (`cid` bei `/aktion/lesen/markierung/neu`): Dieselbe ID legt nie eine zweite an.
@@ -601,7 +601,7 @@ Bilder und Videos werden zu Links, die Content-Security-Policy lädt weiter nich
 von fremden Servern.
 
 Die **Leseansicht** (`/lesen/doc?id=…`, VCP-71) zeigt den Text in Leseschrift mit
-Fortschritt, Restzeit und Archivieren (ohne JavaScript als Formular). Mit
+Fortschritt, Restzeit und der Entscheidung nach dem Lesen (ohne JavaScript als Formular). Mit
 JavaScript (`/static/lesen-doc.js`) speichert sie die Lesestelle beim Scrollen;
 `#weiter` springt dorthin. Markiert wird per Textauswahl über eine Leiste unten
 (Markieren · Notiz · Verbinden · In Inbox), am iPhone also nicht im Weg des
@@ -688,12 +688,36 @@ anlegen“. Ohne Embedder oder wenn Ollama nicht antwortet, fehlt der Kasten.
 Abhängigkeiten dafür: `@mozilla/readability` und `linkedom` (reines JavaScript,
 feste Versionen).
 
+**Nach dem Lesen entscheiden** (VCP-96): In der Leseansicht steht
+**Fertig, weg** (Taste E) neben **In den Vault** (Taste V) mit dem Häkchen
+**mit Volltext** (Standard aus). „Fertig, weg“ setzt den Status `weg` mit
+Lesedatum (`read_at`) und schreibt nichts in den Vault; eine schon vorhandene
+Notiz bleibt unangetastet. „Weg“ im Eingang hat kein Lesedatum, das Aufräumen
+kann beides unterscheiden. „In den Vault“ legt die Lesestapel-Notiz an oder
+frischt sie auf, auch ohne Markierungen, mit `lesestatus: gelesen`, `gelesen:`
+und der Kurzfassung; mit Häkchen kommt der Artikel als Markdown in einen
+eigenen generierten Bereich unter „## Text“ (vor „## Eigene Gedanken“). Der Text
+ist dann archiviert (`archiv`). Im Eingang (Knopf, Taste A) und auf dem Stapel
+(je Eintrag ein Knopf) gibt es **Im Vault ablegen**: Notiz immer mit Volltext,
+`lesestatus: ungelesen` und ohne `gelesen:`; der Text bekommt den Status
+`abgelegt` und verlässt Eingang und Stapel. Wer ihn später doch liest und „In den
+Vault“ wählt, bekommt `lesestatus: gelesen` und `gelesen:` nachgetragen, der
+Volltext bleibt, wie er ist. Alle drei lassen sich rückgängig machen (Status
+zurück, im Eingang auch mit Z); eine schon geschriebene Notiz bleibt dabei
+stehen. Ohne Netz gehen die Entscheidungen der Leseansicht in den Puffer und
+später raus. Das HTML → Markdown macht `htmlToMarkdown` in
+`src/lesen/extract.js` über dieselbe Allowlist wie `sanitizeHtml`: Absätze,
+Überschriften (zwei Ebenen tiefer, unter „## Text“), Listen, Zitate, Code,
+Links, Hervorhebungen und einfache Tabellen; Zeichen, die in Markdown oder
+Obsidian etwas auslösen würden (`#`, `[[`, `$`, `==`, `%%` …), sind maskiert.
+
 **Markierungen im Vault** (VCP-75): Der Vault bleibt Quelle der Wahrheit. Wird
-ein Text mit Markierungen archiviert oder fertig gelesen (Fortschritt 1), legt
-das Cockpit über den Editor eine Notiz an, Standard
-`30-ressourcen/lesestapel/<slug>.md` (änderbar unter **Einstellungen →
-Lesestapel**). Ihr Frontmatter hat `type: lesestapel`, `lesestapel_id`,
-`quelle`, `url`, `gespeichert`, `gelesen` und `themen`. Jede Markierung steht
+ein Text mit Markierungen archiviert, legt das Cockpit über den Editor eine
+Notiz an, Standard `30-ressourcen/lesestapel/<slug>.md` (änderbar unter
+**Einstellungen → Lesestapel**); Fortschritt 1 allein reicht seit VCP-96 nicht
+mehr, das entscheidet „In den Vault“. Ihr Frontmatter hat `type: lesestapel`,
+`lesestapel_id`, `quelle`, `url`, `gespeichert`, `lesestatus`
+(`gelesen`/`ungelesen`), `gelesen` und `themen`. Jede Markierung steht
 als Zitat mit eigener Block-ID (`[[vom-lesen#^hl-1a2b3c4d]]`), darunter Notiz und
 Verknüpfungen als Wikilinks:
 
