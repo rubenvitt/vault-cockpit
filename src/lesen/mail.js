@@ -48,7 +48,8 @@ const paragraphs = (text) =>
 
 /** `store`: Lesestapel; `fetchPage` nur für Tests. Liefert `{ matches, save }` für den Mail-Abruf. */
 export function createMailReader({ store, fetchPage = undefined, logger = console }) {
-  async function save(email) {
+  /** `fetch: false` (fremde Absender): nie eine Adresse holen, nur die Mail selbst speichern. */
+  async function save(email, { fetch = true } = {}) {
     const subject = String(email.subject ?? '').replace(MARK, ' ').replace(/^\s*>/, '').replace(/\s+/g, ' ').trim();
     const messageId = String(email.messageId?.[0] ?? email.id);
     const clientId = `mail-${createHash('sha256').update(messageId).digest('hex').slice(0, 32)}`;
@@ -59,7 +60,8 @@ export function createMailReader({ store, fetchPage = undefined, logger = consol
     // Signatur (`-- `) und „Von meinem iPhone gesendet“ zählen nicht mit.
     const bare = (text || content.content_text || subject).replace(/\n-- ?\n[\s\S]*$/, '').replace(/^(?:Von meinem|Sent from my) .*$/gim, '').trim();
     const only = /^https?:\/\/\S+$/i.exec(bare)?.[0];
-    if (only) {
+    if (only && !fetch) content = textFields(sanitizeHtml(`<p><a href="${esc(only)}">${esc(only)}</a></p>`));
+    else if (only) {
       try {
         return await saveUrl({ store, url: only, origin: 'mail', clientId, ...(fetchPage ? { fetchPage } : {}) });
       } catch (err) {

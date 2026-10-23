@@ -89,7 +89,7 @@ test('Mail-Abruf: [lesen] geht in den Lesestapel, der Rest an den Router, fremde
     mail({ id: 'm1', subject: '[lesen] Wochenpost', html: NEWSLETTER }),
     mail({ id: 'm2', subject: 'Notiz', text: 'Text' }),
     mail({ id: 'm3', from: 'news@blatt.test', subject: 'Wochenblatt', html: NEWSLETTER }),
-    mail({ id: 'm4', from: 'fremd@spam.test', subject: '!Hack', text: 'x' }),
+    mail({ id: 'm4', from: 'fremd@spam.test', subject: '!Hack', text: 'https://intern.test/x' }),
   ];
   const moved = [];
   let getArgs = null;
@@ -116,7 +116,7 @@ test('Mail-Abruf: [lesen] geht in den Lesestapel, der Rest an den Router, fremde
     sessionUrl: 'https://jmap.test/session',
     allowedSenders: ['r@x.test'],
     router: { route: async (input) => routed.push(input.title) },
-    readingMail: createMailReader({ store, logger: quiet }),
+    readingMail: createMailReader({ store, fetchPage: () => assert.fail('fremder Absender löst keinen Abruf aus'), logger: quiet }),
     fetch,
     logger: quiet,
   });

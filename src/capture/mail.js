@@ -111,9 +111,10 @@ export function createMailCapture({
       const sender = String(email.from?.[0]?.email ?? '').toLowerCase();
       try {
         if (!isAllowed(sender)) {
-          // Direkt abonnierte Newsletter: fremde Absender landen im Lese-Eingang, nie als Notiz oder Aufgabe.
+          // Direkt abonnierte Newsletter: fremde Absender landen im Lese-Eingang, nie als Notiz oder Aufgabe,
+          // und lösen keinen Abruf einer Adresse aus.
           if (readingMail) {
-            await readingMail.save(email);
+            await readingMail.save(email, { fetch: false });
             processed += 1;
           } else logger.warn?.(`Mail-Capture: Absender nicht freigegeben, Mail wird nur verschoben (${email.id})`);
         } else if (readingMail?.matches(email)) {
