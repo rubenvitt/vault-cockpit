@@ -656,6 +656,8 @@ main.refreshing { transition: opacity var(--mid); }
 .feed-check { display: flex; align-items: center; gap: var(--s-2); }
 .feed-field { display: grid; gap: 4px; }
 .feed-actions { margin: 0; }
+.feed-group + .feed-group { margin-top: var(--s-5); }
+.feed-group > summary { cursor: pointer; font-weight: 600; margin-bottom: var(--s-2); }
 .feed-opml h2 { margin-top: 0; }
 .feed-opml input[type=file] { flex: 1; min-width: 0; }
 

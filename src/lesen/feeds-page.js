@@ -14,6 +14,8 @@ import { parseOpml, toOpml } from './opml.js';
  * je Feed pausieren, direkt auf den Stapel, Stichwort-Filter, Abstand,
  * entfernen; OPML importieren und exportieren. Abgerufen wird im Hintergrund
  * (src/lesen/feeds.js), ein neuer Feed ist beim nächsten Durchgang dran.
+ * Gruppen (VCP-97): anlegen, umbenennen, ordnen, löschen; Pausieren und
+ * „direkt auf den Stapel“ einer Gruppe gelten zusätzlich für alle ihre Feeds.
  */
 
 const back = '/lesen/feeds';
@@ -47,15 +49,22 @@ const iconOf = (f) =>
 
 function status(f, tz) {
   if (f.paused) return 'pausiert';
+  if (f.group_paused) return 'pausiert (Gruppe)';
   if (f.error_count) return `Fehler (${f.error_count}×): ${maskSecrets(f.last_error, { max: 160 })}`;
   return f.last_fetch_at ? `abgerufen ${when(f.last_fetch_at, tz)}` : 'noch nicht abgerufen';
 }
 
-function feedItem(f, ctx) {
+/** Auswahl der Gruppe; ohne Gruppen gibt es nichts zu wählen. */
+const groupSelect = (groups, selected, label) =>
+  groups.length
+    ? `<label class="feed-field">${label}<select name="gruppe"><option value="">ohne Gruppe</option>${groups.map((g) => `<option value="${esc(g.id)}"${g.id === selected ? ' selected' : ''}>${esc(g.name)}</option>`).join('')}</select></label>`
+    : '';
+
+function feedItem(f, ctx, groups) {
   const token = hidden({ csrf: ctx.write.csrf, back, id: f.id });
   const title = f.title || host(f.url);
   const link = /^https?:\/\//i.test(f.site_url ?? '') ? `<a href="${esc(f.site_url)}" class="lesen-title" rel="noopener noreferrer">${esc(title)}</a>` : `<span class="lesen-title">${esc(title)}</span>`;
-  const meta = [host(f.url), `alle ${f.interval_minutes} min`, f.to_stack ? 'direkt auf den Stapel' : null, f.keyword_filter ? `nur „${f.keyword_filter}“` : null].filter(Boolean).map(esc).join(' · ');
+  const meta = [host(f.url), `alle ${f.interval_minutes} min`, f.to_stack ? 'direkt auf den Stapel' : f.group_to_stack ? 'direkt auf den Stapel (Gruppe)' : null, f.keyword_filter ? `nur „${f.keyword_filter}“` : null].filter(Boolean).map(esc).join(' · ');
   return `<li class="lesen-item feed${f.error_count ? ' feed-failing' : ''}">
     <div class="feed-head">${iconOf(f)}${link}</div>
     <span class="meta">${meta}</span>
@@ -66,6 +75,7 @@ function feedItem(f, ctx) {
         <label class="feed-check"><input type="checkbox" name="stapel" value="1"${f.to_stack ? ' checked' : ''}> Direkt auf den Stapel</label>
         <label class="feed-field"><span>Stichwort-Filter <span class="hint">durch Komma getrennt, leer = alles</span></span><input name="filter" value="${esc(f.keyword_filter ?? '')}" autocomplete="off"></label>
         <label class="feed-field"><span>Abstand in Minuten</span><input name="intervall" type="number" min="${MIN_INTERVAL}" max="${MAX_INTERVAL}" value="${esc(f.interval_minutes)}" inputmode="numeric"></label>
+        ${groupSelect(groups, f.group_id, '<span>Gruppe</span>')}
         <p class="feed-actions"><button type="submit" class="btn">Speichern</button></p>
       </form>
       <form method="post" action="/aktion/lesen/feed/entfernen">${token}<button type="submit" class="btn quiet danger">Feed entfernen</button></form>
@@ -73,17 +83,59 @@ function feedItem(f, ctx) {
   </li>`;
 }
 
-export function renderFeeds(feeds, ctx) {
+const feedList = (feeds, ctx, groups, empty) => (feeds.length ? `<ul class="lesen-list">${feeds.map((f) => feedItem(f, ctx, groups)).join('')}</ul>` : `<p class="empty">${empty}</p>`);
+
+function groupSection(g, i, { feeds, groups, inbox, ctx }) {
+  const token = hidden({ csrf: ctx.write.csrf, back, id: g.id });
+  const n = inbox[g.id] ?? 0;
+  const flags = [g.paused ? 'pausiert' : null, g.to_stack ? 'direkt auf den Stapel' : null].filter(Boolean).join(' · ');
+  return `<details open class="feed-group">
+  <summary><span class="feed-group-name">${esc(g.name)}</span> <span class="count-badge">${n} neu</span></summary>
+  <p class="meta"><a href="/lesen/eingang?gruppe=${encodeURIComponent(g.id)}">${n} ${n === 1 ? 'neuer Eintrag' : 'neue Einträge'} im Eingang</a>${flags ? ` · ${esc(flags)}` : ''}</p>
+  ${feedList(feeds.filter((f) => f.group_id === g.id), ctx, groups, 'Noch keine Feeds in dieser Gruppe.')}
+  <details class="feed-edit"><summary>Gruppe bearbeiten</summary>
+    <form method="post" action="/aktion/lesen/gruppe/aendern" class="feed-form">${token}
+      <label class="feed-field"><span>Name</span><input name="name" value="${esc(g.name)}" required autocomplete="off"></label>
+      <label class="feed-check"><input type="checkbox" name="pausiert" value="1"${g.paused ? ' checked' : ''}> Pausiert</label>
+      <label class="feed-check"><input type="checkbox" name="stapel" value="1"${g.to_stack ? ' checked' : ''}> Direkt auf den Stapel</label>
+      <p class="hint">Gilt für alle Feeds der Gruppe, zusätzlich zu deren eigener Einstellung.</p>
+      <p class="feed-actions"><button type="submit" class="btn">Speichern</button></p>
+    </form>
+    <form method="post" action="/aktion/lesen/gruppe/verschieben" class="feed-actions">${token}
+      <button type="submit" name="richtung" value="hoch" class="btn quiet"${i === 0 ? ' disabled' : ''}>Nach oben<span class="sr-only">: ${esc(g.name)}</span></button>
+      <button type="submit" name="richtung" value="runter" class="btn quiet"${i === groups.length - 1 ? ' disabled' : ''}>Nach unten<span class="sr-only">: ${esc(g.name)}</span></button>
+    </form>
+    <form method="post" action="/aktion/lesen/gruppe/entfernen">${token}<button type="submit" class="btn quiet danger">Gruppe löschen</button> <span class="hint">Die Feeds bleiben, dann ohne Gruppe.</span></form>
+  </details>
+</details>`;
+}
+
+/** `inbox`: neue Einträge im Eingang je Gruppe (`store.inboxByGroup()`). */
+export function renderFeeds({ feeds, groups = [], inbox = {} }, ctx) {
   const token = hidden({ csrf: ctx.write.csrf, back });
-  const list = feeds.length ? `<ul class="lesen-list">${feeds.map((f) => feedItem(f, ctx)).join('')}</ul>` : '<p class="empty">Noch keine Feeds abonniert.</p>';
+  let list;
+  if (!feeds.length && !groups.length) list = '<p class="empty">Noch keine Feeds abonniert.</p>';
+  else if (!groups.length) list = feedList(feeds, ctx, groups);
+  else {
+    const loose = feeds.filter((f) => !f.group_id);
+    list = groups.map((g, i) => groupSection(g, i, { feeds, groups, inbox, ctx })).join('\n');
+    if (loose.length) list += `\n<details open class="feed-group"><summary><span class="feed-group-name">Ohne Gruppe</span></summary>${feedList(loose, ctx, groups)}</details>`;
+  }
   const body = `<section>
   <form method="post" action="/aktion/lesen/feed/abonnieren" class="lesen-save">${token}
     <label class="lesen-url"><span class="sr-only">Adresse eines Feeds oder einer Website</span><input type="url" name="url" required placeholder="https://… Feed oder Website" inputmode="url" autocomplete="off" spellcheck="false" enterkeyhint="go"></label>
+    ${groupSelect(groups, null, '<span class="sr-only">Gruppe</span>')}
     <button type="submit" class="btn primary">Abonnieren</button>
   </form>
   <p class="meta">Neue Einträge landen von selbst im Eingang, beim ersten Abruf die letzten fünf.</p>
 </section>
 <section>${list}</section>
+<section>
+  <form method="post" action="/aktion/lesen/gruppe/anlegen" class="lesen-save">${token}
+    <label class="lesen-url"><span class="sr-only">Name der neuen Gruppe</span><input name="name" required placeholder="Neue Gruppe" autocomplete="off"></label>
+    <button type="submit" class="btn">Gruppe anlegen</button>
+  </form>
+</section>
 <section class="feed-opml">
   <h2>OPML</h2>
   <form method="post" action="/aktion/lesen/feeds/import" enctype="multipart/form-data" class="lesen-save">${token}
@@ -102,12 +154,17 @@ export function feedRoutes({ store, fetchFeed = fetchFeedDefault, logger = conso
     if (!feed) throw new ActionError('Diesen Feed gibt es nicht mehr', 404);
     return feed;
   };
+  const groupOf = (form) => {
+    const group = store.getGroup(form.get('id'));
+    if (!group) throw new ActionError('Diese Gruppe gibt es nicht mehr', 404);
+    return group;
+  };
   return {
     uploads: { '/aktion/lesen/feeds/import': MAX_OPML },
     pages: {
-      '/lesen/feeds': async (ctx) => ({ html: renderFeeds(store.listFeeds(), ctx) }),
+      '/lesen/feeds': async (ctx) => ({ html: renderFeeds({ feeds: store.listFeeds(), groups: store.listGroups(), inbox: store.inboxByGroup() }, ctx) }),
       '/lesen/feeds.opml': async () => ({
-        body: toOpml(store.listFeeds()),
+        body: toOpml(store.listFeeds(), { groups: store.listGroups() }),
         headers: { 'content-type': 'text/x-opml; charset=utf-8', 'content-disposition': 'attachment; filename="feeds.opml"', 'cache-control': 'no-store' },
       }),
     },
@@ -116,19 +173,20 @@ export function feedRoutes({ store, fetchFeed = fetchFeedDefault, logger = conso
         const input = (form.get('url') ?? '').trim();
         if (!input) throw new ActionError('Bitte eine Adresse eingeben');
         const { url, feed } = await asAction(() => discoverFeed(input, { fetchFeed }));
-        const r = store.addFeed({ url, title: feed.title, site_url: feed.siteUrl, interval_minutes: DEFAULT_INTERVAL });
+        const r = await asAction(() => store.addFeed({ url, title: feed.title, site_url: feed.siteUrl, interval_minutes: DEFAULT_INTERVAL, group_id: form.get('gruppe') || null }));
         if (!r.duplicate) logger.info?.(`Feeds: ${r.feed.title ?? host(url)} abonniert (${session.sub})`); // nie die URL: private Feeds tragen Tokens darin
         return { message: `${r.duplicate ? 'Schon abonniert' : 'Abonniert'}: ${r.feed.title ?? host(url)}` };
       },
       async '/aktion/lesen/feed/aendern'(form) {
         const feed = feedOf(form);
         const minutes = Number(form.get('intervall'));
-        const f = store.updateFeed(feed.id, {
+        const f = await asAction(() => store.updateFeed(feed.id, {
+          ...(form.has('gruppe') ? { group_id: form.get('gruppe') } : {}),
           paused: form.get('pausiert') === '1',
           to_stack: form.get('stapel') === '1',
           keyword_filter: (form.get('filter') ?? '').trim() || null,
           interval_minutes: Number.isFinite(minutes) && minutes > 0 ? Math.round(Math.min(MAX_INTERVAL, Math.max(MIN_INTERVAL, minutes))) : feed.interval_minutes,
-        });
+        }));
         return { message: `Gespeichert: ${f.title ?? host(f.url)}` };
       },
       async '/aktion/lesen/feed/entfernen'(form) {
@@ -142,10 +200,37 @@ export function feedRoutes({ store, fetchFeed = fetchFeedDefault, logger = conso
         const list = await asAction(() => parseOpml(file.data.toString('utf8')));
         if (!list.length) throw new ActionError('In der Datei steht kein Feed');
         let added = 0;
-        for (const f of list) if (!store.addFeed({ ...f, interval_minutes: DEFAULT_INTERVAL }).duplicate) added += 1;
+        for (const { group, ...f } of list) {
+          // Ordner werden Gruppen; ein schon abonnierter Feed behält eine vorhandene Zuordnung.
+          const groupId = group?.trim() ? store.addGroup({ name: group }).group.id : null;
+          const r = store.addFeed({ ...f, group_id: groupId, interval_minutes: DEFAULT_INTERVAL });
+          if (!r.duplicate) added += 1;
+          else if (groupId && !r.feed.group_id) store.updateFeed(r.feed.id, { group_id: groupId });
+        }
         logger.info?.(`Feeds: ${added} aus OPML importiert (${session.sub})`);
         const known = list.length - added;
         return { message: `${added} ${added === 1 ? 'Feed' : 'Feeds'} importiert${known ? `, ${known} schon abonniert` : ''}` };
+      },
+      async '/aktion/lesen/gruppe/anlegen'(form) {
+        const { group, duplicate } = await asAction(() => store.addGroup({ name: form.get('name') }));
+        return { message: `${duplicate ? 'Gibt es schon' : 'Gruppe angelegt'}: ${group.name}` };
+      },
+      async '/aktion/lesen/gruppe/aendern'(form) {
+        const group = groupOf(form);
+        const g = await asAction(() => store.updateGroup(group.id, { name: form.get('name'), paused: form.get('pausiert') === '1', to_stack: form.get('stapel') === '1' }));
+        return { message: `Gespeichert: ${g.name}` };
+      },
+      async '/aktion/lesen/gruppe/verschieben'(form) {
+        const group = groupOf(form);
+        const delta = { hoch: -1, runter: 1 }[form.get('richtung')];
+        if (!delta) throw new ActionError('Unbekannte Richtung');
+        store.moveGroup(group.id, delta);
+        return { message: `Verschoben: ${group.name}` };
+      },
+      async '/aktion/lesen/gruppe/entfernen'(form) {
+        const group = groupOf(form);
+        store.deleteGroup(group.id);
+        return { message: `Gruppe gelöscht: ${group.name}. Ihre Feeds bleiben, jetzt ohne Gruppe.` };
       },
     },
   };
