@@ -31,14 +31,15 @@ extension Data {
 enum LoginError: LocalizedError, Equatable {
     case stateMismatch, denied, invalidCallback, invalidCookie
     /// Das Login-Blatt ging gar nicht erst auf, meist weil Apple die Associated Domain nicht bestätigt hat.
-    case notStarted(host: String)
+    /// `detail`: Fehler-Domain, Code und Dauer, damit sich die Ursache auf dem Gerät ablesen lässt.
+    case notStarted(host: String, detail: String)
 
     var errorDescription: String? {
         switch self {
         case .stateMismatch, .invalidCallback: "Die Antwort der Anmeldung passt nicht. Bitte noch einmal anmelden."
         case .denied: "Die Anmeldung wurde abgebrochen oder nicht angenommen."
         case .invalidCookie: "Der Server hat kein brauchbares Sitzungs-Cookie geschickt."
-        case .notStarted(let host): "Anmeldung konnte nicht starten. Ist der Server mit dem App-Login schon deployt? (Associated Domains für \(host) nicht bestätigt)"
+        case .notStarted(let host, let detail): "Anmeldung konnte nicht starten. Ist der Server mit dem App-Login schon deployt? (Associated Domains für \(host) nicht bestätigt)\n\(detail)"
         }
     }
 
@@ -47,9 +48,11 @@ enum LoginError: LocalizedError, Equatable {
     /// mit `canceledLogin` ab, als hätte man „Abbrechen“ getippt.
     // shortcut: unter einer Sekunde gilt `canceledLogin` als „nicht gestartet“; ersetzen, falls iOS dafür einen eigenen Fehler liefert.
     static func shown(_ error: Error, elapsed: TimeInterval, host: String) -> Error? {
-        guard let error = error as? ASWebAuthenticationSessionError else { return error }
-        if error.code == .canceledLogin && elapsed >= 1 { return nil }
-        return LoginError.notStarted(host: host)
+        if error is LoginError { return error }
+        guard let sessionError = error as? ASWebAuthenticationSessionError else { return error }
+        if sessionError.code == .canceledLogin && elapsed >= 1 { return nil }
+        let ns = error as NSError
+        return LoginError.notStarted(host: host, detail: "\(ns.domain) \(ns.code) nach \(elapsed.formatted(.number.precision(.fractionLength(1)))) s")
     }
 }
 
@@ -130,7 +133,7 @@ final class WebAuthenticator: NSObject, ASWebAuthenticationPresentationContextPr
             // `start()` false kommt ohne Completion: sonst dreht der Spinner für immer.
             if !session.start(), !resumed {
                 resumed = true
-                continuation.resume(throwing: LoginError.notStarted(host: url.host() ?? ""))
+                continuation.resume(throwing: LoginError.notStarted(host: url.host() ?? "", detail: "start() = false"))
             }
         }
     }
