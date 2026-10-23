@@ -117,7 +117,7 @@ targets:
               OR ANY $a.registeredTypeIdentifiers UTI-CONFORMS-TO "public.plain-text"
               OR (ANY $a.registeredTypeIdentifiers UTI-CONFORMS-TO "public.url"
               AND NOT (ANY $a.registeredTypeIdentifiers UTI-CONFORMS-TO "public.file-url"))
-              ).@count >= 1).@count == 1
+              ).@count >= 1).@count >= 1
     entitlements:
       path: ShareExtension/ShareExtension.entitlements
       properties:

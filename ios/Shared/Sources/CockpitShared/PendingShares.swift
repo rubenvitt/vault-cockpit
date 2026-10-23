@@ -72,7 +72,8 @@ public struct PendingShares: Sendable {
     }
 
     /// Sendet alles nach. Gesendetes und vom Server Abgelehntes verschwindet; bei einem
-    /// vorübergehenden Fehler bleibt der Rest für den nächsten Versuch liegen.
+    /// vorübergehenden Fehler bleibt der Eintrag für den nächsten Versuch liegen, ohne Netz oder
+    /// bei 401 auch der ganze Rest.
     /// Liefert die abgelehnten Anfragen mit Fehler (zum Protokollieren).
     @discardableResult
     public func flush(using api: APIClient) async -> [(share: PendingShare, error: Error)] {
@@ -81,8 +82,12 @@ public struct PendingShares: Sendable {
             do {
                 _ = try await send(share, using: api)
                 remove(share)
+            } catch let error as APIError where error.isUnauthorized {
+                break  // gilt für alle Einträge: liegen lassen bis zur neuen Anmeldung
+            } catch is URLError {
+                break  // kein Netz
             } catch where Self.isTemporary(error) {
-                break
+                continue  // Server-Fehler bei diesem Eintrag: liegen lassen, die anderen trotzdem senden
             } catch {
                 // Nochmal senden hilft nicht (z. B. ungültige Adresse, Datei zu groß).
                 rejected.append((share, error))

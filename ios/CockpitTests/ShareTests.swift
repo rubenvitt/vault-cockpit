@@ -138,6 +138,20 @@ final class ShareTests: XCTestCase {
         XCTAssertEqual(pending.all().count, 2)
     }
 
+    func testFlushSkipsServerErrorButSendsTheRest() async throws {
+        let pending = PendingShares(directory: directory.appending(path: "puffer"))
+        try pending.add(PendingShare(id: "a", url: URL(string: "https://blatt.test/a")!, title: nil))
+        try pending.add(PendingShare(id: "b", url: URL(string: "https://blatt.test/b")!, title: nil))
+        MockURLProtocol.handler = { _, body in
+            let id = (try? JSONSerialization.jsonObject(with: body) as? [String: String])?["id"]
+            if id == "a" { return (500, #"{"error":"kaputt","status":500,"message":"Nicht gespeichert: kaputt"}"#) }
+            return (201, #"{"ok":true,"id":"d2","title":null,"url":"https://blatt.test/b","kind":"artikel","duplicate":false,"message":"Im Lesestapel: blatt.test"}"#)
+        }
+        let rejected = await pending.flush(using: client)
+        XCTAssertTrue(rejected.isEmpty)
+        XCTAssertEqual(pending.all().map(\.id), ["a"])
+    }
+
     func testFlushDropsRejected() async throws {
         let pending = PendingShares(directory: directory.appending(path: "puffer"))
         try pending.add(PendingShare(id: "a", url: URL(string: "https://blatt.test/a")!, title: nil))
