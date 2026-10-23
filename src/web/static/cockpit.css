@@ -804,6 +804,25 @@ html[data-read-sans] .lesen-text :is(h1, h2, h3, h4, h5, h6) { font-family: var(
 /* Markierungen, die noch im Puffer auf Netz warten (lesen-doc.js, CSS Custom Highlight API) */
 ::highlight(lesen-wartet) { background-color: color-mix(in srgb, #facc15 22%, transparent); text-decoration: underline dashed var(--warn); }
 
+/* --- Lesen: Querverbindungen --- */
+/* Seitenleiste der Leseansicht (src/web/static/lesen-verbinden.js); Treffer nutzen .lesen-notes, auf dem iPhone ein Blatt von unten */
+.lesen-links { display: grid; gap: var(--s-2); }
+.lesen-links:focus { outline: none; }
+.lesen-links h2 { margin: 0; }
+.lesen-links h3 { margin: var(--s-2) 0 0; }
+.lesen-links-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); }
+.lesen-links-close { display: none; }
+.lesen-links-problem { margin: 0; padding: var(--s-2) var(--s-3); border-radius: var(--r-sm); background: var(--bg-sunk); }
+.lesen-links-done { display: grid; gap: 4px; font-size: var(--t-sm); overflow-wrap: anywhere; }
+.lesen-links-hits .lesen-quote { margin: 0; font-size: var(--t-sm); }
+.lesen-links-hits .meta { overflow-wrap: anywhere; }
+@media (max-width: 900px) {
+  .lesen-links.is-open { position: fixed; z-index: 26; left: 8px; right: 8px; bottom: calc(var(--tabbar) + max(8px, env(safe-area-inset-bottom)));
+    max-height: 70vh; overflow-y: auto; overscroll-behavior: contain; background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--r-xl); box-shadow: var(--shadow-pop); animation: sheet-in .2s var(--ease); }
+  .lesen-links.is-open .lesen-links-close { display: inline-flex; }
+}
+
 /* --- Schmale Bildschirme ------------------------------------------------- */
 @media (max-width: 900px) {
   .feuer, .columns, .settings { grid-template-columns: minmax(0, 1fr); }

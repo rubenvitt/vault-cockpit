@@ -685,6 +685,28 @@ nicht mehr an. Wikilinks zu einer Markierung schreibt `addLink` aus
 `src/lesen/vault-export.js` (für „Verknüpfen“). Sie stehen in der Zeile
 „Verknüpft:“ und bleiben beim Neuschreiben erhalten.
 
+**Querverbindungen** (VCP-73): „Verbinden“ (Taste L) zu einer Markierung oder
+einer noch nicht gespeicherten Auswahl zeigt in der Seitenleiste der
+Leseansicht, auf dem iPhone als Blatt von unten, passende Stellen aus anderen
+Quellen: Markierungen anderer Texte aus dem Lesestapel und Synthesen und
+Konzepte (`type: synthesis` oder `concept`) mit ihrem ähnlichsten Abschnitt.
+Die Auswahl wird dafür sofort eingebettet, nicht erst beim nächsten Indexlauf;
+die Embeddings der Markierungen liegen nur im Speicher und teilen sich
+Wiedersehen und Querverbindungen (`src/lesen/embed-cache.js`). Die eigene
+Lesestapel-Notiz des Textes fehlt, vertrauliche und ausgeschlossene Notizen auch
+(wie „Ähnlich“ in `/notiz`). **Verknüpfen** schreibt `[[Ziel]]` bzw.
+`[[Ziel#Abschnitt]]` in die Zeile „Verknüpft:“ unter der Markierung in ihrer
+Lesestapel-Notiz, nie in die Zielnotiz; eine Auswahl wird vorher markiert. Ist
+das Ziel eine Markierung, verweist der Link auf deren Block
+(`[[anderer-text#^hl-…]]`) und das Cockpit legt die Notiz zum anderen Text an,
+falls es sie noch nicht gibt. Schon Verknüpftes steht als „Schon verknüpft“ da.
+Ohne Embedder oder wenn Ollama nicht antwortet, sucht es mit Hinweis nur im
+Volltext (dann auch in den Lesestapel-Notizen). Als JSON:
+`GET /api/lesen/verbindungen?markierung=<id>` oder `?doc=<id>&text=<Auswahl>`
+(angemeldet, sonst 401); verknüpft wird mit `POST /aktion/lesen/verbinden`
+(`markierung` und `pfad` mit optionalem `abschnitt` oder `zu` für eine andere
+Markierung). Ohne JavaScript bleibt ein Hinweis.
+
 **Feeds** (`/lesen/feeds`, VCP-78): Eine Feed-Adresse abonnieren oder einfach die
 Website, das Cockpit findet den Feed dann über `<link rel="alternate">`. Gelesen
 werden RSS 2.0 (auch 1.0), Atom und JSON Feed. Je Feed lässt sich einstellen:
@@ -794,7 +816,7 @@ npm ci && npm test
 - `src/search/` — lesender Such-Endpunkt `/api/search` mit eigenem Token
 - `src/graph/` — Graph um eine Notiz mit Aufgaben- und Termin-Knoten
 - `src/health/` — Zustand der Hintergrunddienste für `/zustand` und `/health`, Maskieren von Fehlertexten
-- `src/lesen/` — Lesestapel: SQLite-Speicher (`store.js`), SSRF-sicheres Holen (`fetch.js`), Readability und Säubern (`extract.js`), Seiten und Routen (`pages.js`, `http.js`), Leseansicht und Markierungen (`doc.js`, `highlights.js`, Textanker in `anchor.js`), Wiedersehen (Planung und Clustering in `review.js`, Seite in `review-page.js`)
+- `src/lesen/` — Lesestapel: SQLite-Speicher (`store.js`), SSRF-sicheres Holen (`fetch.js`), Readability und Säubern (`extract.js`), Seiten und Routen (`pages.js`, `http.js`), Leseansicht und Markierungen (`doc.js`, `highlights.js`, Textanker in `anchor.js`), Wiedersehen (Planung und Clustering in `review.js`, Seite in `review-page.js`), Querverbindungen (`connections.js`, Embeddings der Markierungen in `embed-cache.js`)
 - `src/web/` — Web-Cockpit: OIDC-Login mit PKCE, signiertes Sitzungs-Cookie, HTML der Wochenansicht, Einstellungen, Suche und Graph
 - `sync/` — Image des Sidecars `vault-sync` (Obsidian Headless mit Status-Wrapper)
 

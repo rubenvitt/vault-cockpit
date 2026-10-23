@@ -10,6 +10,7 @@ import { docRoutes, docLink } from './doc.js';
 import { highlightRoutes } from './highlights.js';
 import { reviewRoutes } from './review-page.js';
 import { listenRoutes } from './listen.js';
+import { connectionRoutes } from './connections.js';
 
 /**
  * Routen des Bereichs „Lesen“, eingebunden in src/web/http.js (Sitzung, CSRF,
@@ -27,11 +28,15 @@ import { listenRoutes } from './listen.js';
  *
  * Eine neue Seite oder Aktion ist ein Eintrag hier (gern aus einer eigenen Datei).
  * `capture` legt Notizen in der Vault-Inbox an („In Inbox“, src/lesen/highlights.js).
- * `review` geht an das Wiedersehen (`embedder`, `onOwnWords`, src/lesen/review-page.js).
+ * `review` geht an das Wiedersehen (`onOwnWords`, src/lesen/review-page.js).
+ * `embedCache` ist der gemeinsame Speicher für Embeddings von Markierungen
+ * (src/lesen/embed-cache.js); ohne gibt es keine Querverbindung im Wiedersehen.
+ * `connections` (`index`, `semantic`, `policy`, `exporter`) schaltet die
+ * Querverbindungen der Leseansicht ein (src/lesen/connections.js).
  * `onChange(docId)` meldet Archivieren, „fertig gelesen“ und geänderte
  * Markierungen (für die Lesestapel-Notiz im Vault, src/lesen/vault-export.js).
  */
-export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefined, capture = null, review = {}, onChange = () => {}, logger = console }) {
+export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefined, capture = null, review = {}, embedCache = null, connections = null, onChange = () => {}, logger = console }) {
   const feeds = feedRoutes({ store, fetchFeed, logger });
   /** Fehler aus Abruf und Speicher als Meldung für die Seite. */
   const asAction = async (run) => {
@@ -50,7 +55,8 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
 
   const doc = docRoutes({ store, asAction, onChange });
   const marked = highlightRoutes({ store, asAction, capture, onChange, logger });
-  const wiedersehen = reviewRoutes({ store, capture, logger, ...review });
+  const wiedersehen = reviewRoutes({ store, capture, logger, embedCache, ...review });
+  const links = connections ? connectionRoutes({ store, embedCache, logger, ...connections }) : { pages: {}, actions: {} };
 
   return {
     offlineDocs: (n) => upNext(store.list({ status: 'stapel', limit: -1 }), n).map((d) => docLink(d.id)),
@@ -65,6 +71,7 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
       ...doc.pages,
       ...marked.pages,
       ...wiedersehen.pages,
+      ...links.pages,
     },
     actions: {
       ...inbox.actions,
@@ -72,6 +79,7 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
       ...doc.actions,
       ...marked.actions,
       ...wiedersehen.actions,
+      ...links.actions,
       async '/aktion/lesen/speichern'(form, session) {
         const url = (form.get('url') ?? '').trim();
         if (!url) throw new ActionError('Bitte eine Adresse eingeben');

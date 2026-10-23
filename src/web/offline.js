@@ -98,7 +98,7 @@ ${appHeader({ current: 'woche' })}
  */
 export function offlineFiles(files, { html }) {
   const page = renderOfflinePage();
-  const shell = [assets.css, assets.js, assets.offline, assets.lesenDoc, ...SHELL_FILES].map((path) => {
+  const shell = [assets.css, assets.js, assets.offline, assets.lesenDoc, assets.lesenLinks, ...SHELL_FILES].map((path) => {
     const file = files.get(path.split('?')[0]);
     if (!file) throw new Error(`App-Hülle: ${path} fehlt`);
     return [path, file.body];

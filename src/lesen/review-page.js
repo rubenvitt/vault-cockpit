@@ -1,5 +1,4 @@
 import { randomUUID, createHash } from 'node:crypto';
-import { setTimeout as delay } from 'node:timers/promises';
 import { ActionError } from '../cockpit/actions.js';
 import { describeWeek, parseWeekId, weekOf } from '../cockpit/week.js';
 import { esc } from '../web/layout.js';
@@ -9,6 +8,7 @@ import { dayStart } from './inbox.js';
 import { docLink } from './doc.js';
 import { inboxText } from './highlights.js';
 import { REVIEW_STATES } from './store.js';
+import { createEmbedCache } from './embed-cache.js';
 import { MAX_BOX, SESSION_LIMIT, dueCards, findClusters, isDue, keep, letGo, seenToday } from './review.js';
 
 /**
@@ -28,10 +28,6 @@ const REVIEW = '/aktion/lesen/wiedersehen';
 const UNDO = '/aktion/lesen/wiedersehen/zurueck';
 const LINK = '/aktion/lesen/wiedersehen/verbindung';
 const MAX_WORDS = 4000;
-/** So lange wartet die Seite auf Embeddings, danach ohne Kasten (der Speicher füllt sich weiter). */
-const EMBED_WAIT_MS = 1500;
-/** Nach einem Fehler des Embedders so lange keine neuen Versuche. */
-const EMBED_PAUSE_MS = 5 * 60_000;
 /** shortcut: Schwelle für bge-m3 geschätzt, nicht an echten Markierungen gemessen; bei zu vielen oder zu wenigen Treffern nachjustieren. */
 const CLUSTER_THRESHOLD = 0.75;
 /** shortcut: höchstens so viele Markierungen einer Woche fürs Clustering (O(n²)); reicht für eine normale Woche. */
@@ -145,40 +141,18 @@ ${renderWeek(model, ctx, opts)}`;
 /**
  * Seiten und Aktionen für src/lesen/http.js.
  * - `capture`: Notiz in der Vault-Inbox (wie „In Inbox“); ohne gibt es „In eigenen Worten“ und „Als eigene Notiz anlegen“ nicht.
- * - `embedder`: liefert den konfigurierten Embedder (`{ model, embed }`) oder `null`; ohne bleibt der Kasten „Querverbindung“ weg.
+ * - `embedCache`: gemeinsamer Speicher für Embeddings (src/lesen/embed-cache.js); ohne legt die Seite einen
+ *   eigenen über `embedder` an (liefert `{ model, embed }` oder `null`). Ohne Embedder bleibt der Kasten „Querverbindung“ weg.
  * - `onOwnWords({ highlight, words, result })`: Haken nach „In eigenen Worten“, z. B. für die Lesestapel-Notiz (VCP-75).
  * - `now` nur für Tests.
  */
-export function reviewRoutes({ store, capture = null, embedder = () => null, onOwnWords = null, logger = console, now = () => Date.now() }) {
-  /** Embeddings nur im Speicher: Modell + Zitat → Vektor. */
-  const cache = new Map();
-  let pending = null;
-  let pausedUntil = 0;
-
+export function reviewRoutes({ store, capture = null, embedder = () => null, embedCache = null, onOwnWords = null, logger = console, now = () => Date.now() }) {
+  embedCache ??= createEmbedCache({ embedder, logger, label: 'Wiedersehen' });
   /** Vektoren zu `items` oder `null`, wenn es keinen Embedder gibt, er nicht antwortet oder (noch) nicht fertig ist. */
   async function vectorsFor(items) {
-    const e = embedder?.();
-    if (!e || items.length < 2 || Date.now() < pausedUntil) return null;
-    const key = (h) => `${e.model}\n${h.quote}`;
-    const missing = items.filter((h) => !cache.has(key(h)));
-    // Auf einen Auftrag, den eine frühere Anfrage gestartet hat, wartet die Seite nicht (Ollama kann hängen oder ein Modell laden).
-    let job = null;
-    if (missing.length && !pending) {
-      // shortcut: alles leeren statt verdrängen, wenn der Speicher voll ist; reicht bei Wochen mit wenigen hundert Markierungen.
-      if (cache.size > 2000) cache.clear();
-      job = pending = e
-        .embed(missing.map((h) => h.quote))
-        .then(
-          (vecs) => missing.forEach((h, i) => cache.set(key(h), vecs[i])),
-          (err) => {
-            pausedUntil = Date.now() + EMBED_PAUSE_MS;
-            logger.warn?.(`Wiedersehen: keine Embeddings (${err.message})`);
-          },
-        )
-        .finally(() => (pending = null));
-    }
-    if (job) await Promise.race([job, delay(EMBED_WAIT_MS, null, { ref: false })]);
-    return items.every((h) => cache.has(key(h))) ? items.map((h) => cache.get(key(h))) : null;
+    if (items.length < 2) return null;
+    const vecs = await embedCache.vectors(items.map((h) => h.quote));
+    return vecs?.every(Boolean) ? vecs : null;
   }
 
   const highlightOf = (id) => {
