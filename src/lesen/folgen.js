@@ -94,6 +94,54 @@ export function stripId3(buf) {
   return buf.subarray(10 + size);
 }
 
+const BITRATES = { 1: [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320], 2: [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160] };
+const RATES = { 3: [44100, 48000, 32000], 2: [22050, 24000, 16000], 0: [11025, 12000, 8000] };
+
+/** Kopf eines MPEG-Layer-III-Frames bei `at`: `{ length, tag }` (`tag`: Info/Xing/VBRI-Frame), sonst null. */
+function frameAt(buf, at) {
+  if (at + 4 > buf.length || buf[at] !== 0xff || (buf[at + 1] & 0xe0) !== 0xe0) return null;
+  const version = (buf[at + 1] >> 3) & 3;
+  if (version === 1 || ((buf[at + 1] >> 1) & 3) !== 1) return null;
+  const kbps = BITRATES[version === 3 ? 1 : 2][(buf[at + 2] >> 4) & 15];
+  const rate = RATES[version][(buf[at + 2] >> 2) & 3];
+  if (!kbps || !rate) return null;
+  const length = Math.floor(((version === 3 ? 144 : 72) * kbps * 1000) / rate) + ((buf[at + 2] >> 1) & 1);
+  const mono = (buf[at + 3] >> 6) === 3;
+  const side = version === 3 ? (mono ? 17 : 32) : mono ? 9 : 17;
+  const id = buf.toString('latin1', at + 4 + side, at + 8 + side);
+  return { length, tag: id === 'Info' || id === 'Xing' || buf.toString('latin1', at + 36, at + 40) === 'VBRI' };
+}
+
+/**
+ * Nur die Audio-Frames: ohne ID3-Tags und ohne Info/Xing-Frame. Den Info-Frame
+ * schreibt der Encoder an den Anfang jedes Stücks, mit der Länge nur dieses
+ * Stücks. Hängen mehrere Stücke hintereinander, liest AVFoundation (iOS,
+ * Safari) die Länge daraus und hält die Folge für so lang wie das erste Stück.
+ * Ohne ihn rechnen Player mit der festen Bitrate. Was kein MP3 ist, bleibt, wie es ist.
+ */
+export function audioFrames(buf) {
+  let at = 0;
+  const out = [];
+  let any = false;
+  while (at < buf.length) {
+    if (buf.toString('latin1', at, at + 3) === 'ID3' && at + 10 <= buf.length) {
+      at += 10 + ((buf[at + 6] << 21) | (buf[at + 7] << 14) | (buf[at + 8] << 7) | buf[at + 9]);
+      continue;
+    }
+    const frame = frameAt(buf, at);
+    if (!frame) {
+      // Kein Frame: Rest unverändert, damit nichts verloren geht (auch Nicht-MP3 in Tests).
+      if (!any) return stripId3(buf);
+      out.push(buf.subarray(at));
+      break;
+    }
+    any = true;
+    if (!frame.tag) out.push(buf.subarray(at, at + frame.length));
+    at += frame.length;
+  }
+  return out.length === 1 ? out[0] : Buffer.concat(out);
+}
+
 const plain = (doc) => htmlText(doc.content_html ?? '').trim();
 
 /**
@@ -337,13 +385,13 @@ export function createEpisodes({ dir, store, tts, speech = null, voices, writer,
     // Satzweise mehrere zugleich (Vorlesen); Gespräch und Report nacheinander, die Stücke sind groß.
     await inOrder(jobs.slice(from), ep.kind === 'vorlesen' ? PARALLEL : 1, ({ audio, paid }, i) => {
       const k = from + i;
-      const chunk = k === 0 ? audio : stripId3(audio);
+      const chunk = audioFrames(audio);
       appendFileSync(part, chunk);
       update(ep, { done: k + 1, part_bytes: ep.part_bytes + chunk.length, paid: ep.paid + paid });
     });
     renameSync(part, audioPath(ep.id));
     rmSync(scriptPath(ep.id), { force: true });
-    update(ep, { ...(ep.kind === 'vorlesen' ? { chars: ep.paid } : {}), status: 'fertig', bytes: statSync(audioPath(ep.id)).size, finished_at: now().toISOString() });
+    update(ep, { ...(ep.kind === 'vorlesen' ? { chars: ep.paid } : {}), status: 'fertig', frames: true, bytes: statSync(audioPath(ep.id)).size, finished_at: now().toISOString() });
     logger.info?.(`Folge „${ep.title}“ (${KINDS[ep.kind]}) fertig, ${ep.chars} Zeichen`);
   }
 
@@ -375,6 +423,27 @@ export function createEpisodes({ dir, store, tts, speech = null, voices, writer,
   if (episodes.length) save();
   // Nach dem Start, nicht mittendrin im Aufbau des Servers.
   if (queue.length) setTimeout(next, 1000).unref?.();
+  // Ältere Folgen hatten Info-Frames mitten im Strom (falsche Länge auf iOS): einmal bereinigen.
+  if (episodes.some((ep) => ep.status === 'fertig' && !ep.frames)) setTimeout(repair, 1500).unref?.();
+
+  function repair() {
+    for (const ep of episodes) {
+      if (ep.status !== 'fertig' || ep.frames || running === ep.id) continue;
+      try {
+        const path = audioPath(ep.id);
+        if (existsSync(path)) {
+          const clean = audioFrames(readFileSync(path));
+          writeFileSync(`${path}.tmp`, clean, { mode: 0o600 });
+          renameSync(`${path}.tmp`, path);
+          ep.bytes = clean.length;
+        }
+        ep.frames = true;
+      } catch (err) {
+        logger.warn?.(`Folge „${ep.title}“ nicht bereinigt: ${err.message}`);
+      }
+    }
+    save();
+  }
 
   return {
     KINDS,
