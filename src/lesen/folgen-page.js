@@ -82,38 +82,90 @@ const PLAY = '<svg viewBox="0 0 24 24" class="folge-icon-play" aria-hidden="true
 const PAUSE = '<svg viewBox="0 0 24 24" class="folge-icon-pause" aria-hidden="true"><rect x="6.5" y="5" width="4" height="14" rx="1.2"/><rect x="13.5" y="5" width="4" height="14" rx="1.2"/></svg>';
 const RATES = [0.8, 1, 1.2, 1.5, 1.8];
 
+const KIND_ICONS = {
+  vorlesen: '<path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="14" width="4.5" height="6.5" rx="1.6"/><rect x="16.5" y="14" width="4.5" height="6.5" rx="1.6"/>',
+  podcast: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M9 21h6"/>',
+  report: '<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/>',
+};
+// Gesprochenes Deutsch bei ElevenLabs: rund 900 Zeichen je Minute.
+const SPOKEN_CHARS_PER_MINUTE = 900;
+
+/**
+ * Zusammenfassung am Knopf: `main` (Art, Texte, Dauer) und `cost`. Dieselbe
+ * Rechnung macht /static/lesen-folgen.js beim Umschalten.
+ */
+export function newSummary({ kind, texts, chars, minutes }) {
+  if (!texts) return { main: 'Bitte mindestens einen Text wählen', cost: '' };
+  const n = `${texts} ${texts === 1 ? 'Text' : 'Texte'}`;
+  if (kind === 'vorlesen') {
+    return { main: `${KINDS.vorlesen} · ${n} · etwa ${Math.max(1, Math.round(chars / SPOKEN_CHARS_PER_MINUTE))} Min.`, cost: chars ? `rund ${fmt.format(chars)} Zeichen bei ElevenLabs` : 'Schon alles gehört, kostet nichts' };
+  }
+  return { main: `${KINDS[kind]} · ${n} · ${minutes} Min.`, cost: `rund ${fmt.format(minutes * SPOKEN_CHARS_PER_MINUTE)} Zeichen bei ElevenLabs, dazu dein Claude-Abo` };
+}
+
 function newPage(episodes, store, ctx) {
   const n = Number(ctx.url.searchParams.get('zeit'));
   const zeit = WINDOWS.includes(n) ? n : 30;
   const { items } = fitToWindow(store.list({ status: 'stapel', limit: -1 }), zeit);
   const missing = episodes.availability();
-  const picker = `<nav class="chips stapel-zeit" aria-label="Zeitfenster">${WINDOWS.map((m) => `<a href="/lesen/folgen/neu?zeit=${m}" class="chip"${m === zeit ? ' aria-current="true"' : ''}>${m} Min.</a>`).join('')}</nav>`;
-  if (!items.length) return `${picker}<p class="empty">Für dieses Zeitfenster passt nichts vom Stapel.</p>`;
-  let full = 0;
-  try {
-    full = episodes.preview({ kind: 'vorlesen', docIds: items.map((d) => d.id) }).chars;
-  } catch {
-    /* keine Texte mit Text: Vorlesen geht dann ohnehin nicht */
-  }
-  const docs = items
-    .map((d) => `<li class="lesen-item"><label class="checkline"><input type="checkbox" name="doc" value="${esc(d.id)}" checked> <span class="lesen-title">${esc(d.title || d.url)}</span></label><span class="meta">${esc([`${d.reading_minutes} Min.`, d.site].filter(Boolean).join(' · '))}</span></li>`)
+  const picker = `<nav class="chips folge-zeit" aria-label="Zeitfenster">${WINDOWS.map((m) => `<a href="/lesen/folgen/neu?zeit=${m}" class="chip"${m === zeit ? ' aria-current="true"' : ''}>${m} Min.</a>`).join('')}</nav>`;
+  const step = (nr, title, hint = '') => `<div class="folge-schritt-kopf"><span class="folge-nr" aria-hidden="true">${nr}</span><div><h2>${title}</h2>${hint ? `<p class="meta">${hint}</p>` : ''}</div></div>`;
+  if (!items.length) return `<section class="folge-schritt">${step(1, 'Welche Texte?', 'Aus dem Stapel, passend zur Zeit, die du hast.')}${picker}<p class="empty">Für dieses Zeitfenster passt nichts vom Stapel.</p></section>`;
+
+  // Zeichen je Text fürs Vorlesen; Gehörtes und offline Geladenes kostet nichts mehr.
+  const charsOf = (id) => {
+    try {
+      return episodes.preview({ kind: 'vorlesen', docIds: [id] }).chars;
+    } catch {
+      return 0;
+    }
+  };
+  const docs = items.map((d) => ({ d, chars: charsOf(d.id) }));
+  const full = docs.reduce((sum, x) => sum + x.chars, 0);
+  const texts = docs
+    .map(
+      ({ d, chars }) => `<li><label class="folge-textwahl">
+        <input type="checkbox" name="doc" value="${esc(d.id)}" checked data-chars="${chars}">
+        <span class="folge-textwahl-text"><span class="lesen-title">${esc(d.title || d.url)}</span><span class="meta">${esc([`${d.reading_minutes} Min. Lesezeit`, d.site].filter(Boolean).join(' · '))}</span></span>
+      </label></li>`,
+    )
     .join('');
+
   const first = Object.keys(KINDS).find((k) => !missing[k]);
   const kinds = Object.entries(KINDS)
     .map(([kind, label]) => {
-      const cost = kind === 'vorlesen' ? (full ? `rund ${fmt.format(full)} Zeichen bei ElevenLabs` : 'schon alles gehört, kostet nichts') : `rund 900 Zeichen je Minute bei ElevenLabs, dazu dein Claude-Abo`;
       const off = missing[kind];
-      return `<label class="checkline"><input type="radio" name="art" value="${kind}"${off ? ' disabled' : kind === first ? ' checked' : ''}> <b>${label}</b>: ${esc(DESCRIPTIONS[kind])} <span class="meta">${esc(off ?? cost)}</span></label>`;
+      const cost = kind === 'vorlesen' ? 'Kosten nach Textlänge, Gehörtes ist gratis' : '900 Zeichen je Minute, dazu Claude';
+      return `<label class="folge-wahl${off ? ' is-off' : ''}">
+        <input type="radio" name="art" value="${kind}"${off ? ' disabled' : kind === first ? ' checked' : ''}>
+        <span class="folge-wahl-icon"><svg viewBox="0 0 24 24" aria-hidden="true">${KIND_ICONS[kind]}</svg></span>
+        <span class="folge-wahl-text"><b>${label}</b><span>${esc(DESCRIPTIONS[kind])}</span><span class="meta">${esc(off ?? cost)}</span></span>
+      </label>`;
     })
     .join('');
-  return `${picker}
-  <form method="post" action="/aktion/lesen/folge/neu" class="folge-neu">
+  const lengths = LENGTHS.map((m) => `<label><input type="radio" name="laenge" value="${m}"${m === 10 ? ' checked' : ''}><span>${m} Min.</span></label>`).join('');
+  const summary = first ? newSummary({ kind: first, texts: docs.length, chars: full, minutes: 10 }) : { main: 'Folgen brauchen ElevenLabs', cost: 'Einstellungen → Vorlesen' };
+
+  return `<form method="post" action="/aktion/lesen/folge/neu" class="folge-neu" data-folge-neu>
     ${hidden({ csrf: ctx.write.csrf, back: ctx.write.back })}
-    <fieldset><legend>Texte</legend><ul class="lesen-list">${docs}</ul></fieldset>
-    <fieldset><legend>Art</legend>${kinds}</fieldset>
-    <label class="field"><span>Länge bei Podcast und Report</span><select name="laenge">${LENGTHS.map((m) => `<option value="${m}"${m === 10 ? ' selected' : ''}>${m} Minuten</option>`).join('')}</select></label>
-    <p class="meta">Die Folge entsteht im Hintergrund und steht dann unter <a href="/lesen/folgen">Folgen</a>. Vorlesen kostet so viele Zeichen, wie die Texte lang sind; Sätze, die du schon gehört oder offline geladen hast, kosten nichts mehr.</p>
-    <p><button type="submit" class="btn primary">Folge erzeugen</button></p>
+    <section class="folge-schritt">
+      ${step(1, 'Welche Texte?', 'Aus dem Stapel, passend zur Zeit, die du hast. Abwählen, was nicht hinein soll.')}
+      ${picker}
+      <ul class="folge-texte">${texts}</ul>
+    </section>
+    <section class="folge-schritt">
+      ${step(2, 'Was soll daraus werden?')}
+      <div class="folge-arten">${kinds}</div>
+    </section>
+    <section class="folge-schritt folge-laenge">
+      ${step(3, 'Wie lang?', 'Gilt für Podcast und Report; Vorlesen dauert so lange wie die Texte.')}
+      <div class="folge-segmente" role="radiogroup" aria-label="Länge">${lengths}</div>
+    </section>
+    <div class="folge-los">
+      <p class="folge-summe" aria-live="polite"><b data-summary>${esc(summary.main)}</b><span class="meta" data-cost>${esc(summary.cost)}</span></p>
+      <button type="submit" class="btn primary"${first ? '' : ' disabled'}>Folge erzeugen</button>
+      <p class="meta">Die Folge entsteht im Hintergrund, du kannst die Seite verlassen. Fertige stehen unter <a href="/lesen/folgen">Folgen</a>.</p>
+    </div>
   </form>`;
 }
 
@@ -245,7 +297,7 @@ export function folgenRoutes({ store, episodes }) {
         return { status: 200, body: JSON.stringify({ ok: true, items }), headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } };
       },
       async '/lesen/folgen/neu'(ctx) {
-        return { html: readingPage(ctx, { key: 'folgen', title: 'Neue Folge', body: `<section>${newPage(episodes, store, ctx)}</section>` }) };
+        return { html: readingPage(ctx, { key: 'folgen', title: 'Neue Folge', body: newPage(episodes, store, ctx), scripts: [assets.lesenFolgen] }) };
       },
       async '/lesen/folgen/audio'(ctx) {
         const path = episodes.audioPath(ctx.url.searchParams.get('id') ?? '');
