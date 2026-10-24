@@ -112,6 +112,29 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(queue.voice, "ElevenLabs")
     }
 
+    func testDownloadEpisodeReplacesFileOrThrowsServerMessage() async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let target = folder.appending(path: "Folgen/f1.mp3")
+        respond("ID3-alt")
+        try await client.downloadEpisode(id: "f 1", to: target)
+        respond("ID3-folge")
+        try await client.downloadEpisode(id: "f 1", to: target)
+        XCTAssertEqual(try String(contentsOf: target, encoding: .utf8), "ID3-folge", "ersetzt die alte Datei")
+        XCTAssertEqual(seen[0].request.url?.absoluteString, "https://vault.test/api/app/folge?id=f%201")
+        XCTAssertEqual(seen[0].request.value(forHTTPHeaderField: "Authorization"), "Bearer vct_geheim")
+
+        respond(#"{"error":"not_found","status":404,"message":"Diese Folge gibt es nicht oder sie ist noch nicht fertig"}"#, status: 404)
+        do {
+            try await client.downloadEpisode(id: "weg", to: folder.appending(path: "weg.mp3"))
+            XCTFail("sollte werfen")
+        } catch let error as APIError {
+            XCTAssertEqual(error.status, 404)
+            XCTAssertEqual(error.message, "Diese Folge gibt es nicht oder sie ist noch nicht fertig")
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.appending(path: "weg.mp3").path))
+    }
+
     func testWritesSendJSON() async throws {
         respond(#"{"ok":true,"progress":0.42}"#)
         let progress = try await client.saveProgress(id: "d1", progress: 0.42, anchor: 1234)

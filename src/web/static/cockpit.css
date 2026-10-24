@@ -806,6 +806,67 @@ html[data-read-sans] .lesen-text :is(h1, h2, h3, h4, h5, h6) { font-family: var(
 .hoeren-rate { display: inline-flex; align-items: center; gap: var(--s-2); color: var(--text-2); }
 .hoeren-list .is-playing .lesen-title { color: var(--accent); }
 
+/* --- Lesen: Folgen --- */
+/* /lesen/folgen (src/lesen/folgen-page.js, /static/lesen-folgen.js): Karten mit großem Abspiel-Knopf, Schritten beim Entstehen */
+.folgen { display: grid; gap: var(--s-3); margin: 0; padding: 0; list-style: none; }
+.folge { display: grid; gap: var(--s-3); padding: var(--s-4); background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-lg); min-width: 0; }
+.folge.is-current { border-color: var(--accent-line); background: color-mix(in srgb, var(--accent-soft) 55%, var(--surface)); }
+.folge.is-failed { border-color: color-mix(in srgb, var(--danger) 30%, var(--line)); }
+.folge [hidden] { display: none !important; }
+.folge-card { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: var(--s-4); min-width: 0; }
+.folge.is-failed .folge-card { grid-template-columns: 1fr; }
+.folge-text { display: grid; gap: 2px; min-width: 0; }
+.folge-text .lesen-title { overflow-wrap: anywhere; }
+.folge-art { justify-self: start; font-size: var(--t-xs); font-weight: 650; letter-spacing: .03em; text-transform: uppercase; color: var(--accent); }
+
+.folge-play { flex: none; display: grid; place-items: center; width: 60px; height: 60px; padding: 0; border: 0; border-radius: 50%; cursor: pointer;
+  background: var(--accent); color: var(--on-accent); box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 35%, transparent);
+  transition: transform .15s var(--ease), background .15s var(--ease); }
+.folge-play:hover { background: var(--accent-hover); }
+.folge-play:active { transform: scale(.94); }
+.folge-play svg { width: 28px; height: 28px; fill: currentColor; }
+.folge-play .folge-icon-play { margin-left: 3px; }
+.folge-play .folge-icon-pause, .folge-play[aria-pressed=true] .folge-icon-play { display: none; }
+.folge-play[aria-pressed=true] .folge-icon-pause { display: block; }
+.folge.is-playing .folge-play { animation: folge-pulse 2.4s var(--ease) infinite; }
+@keyframes folge-pulse { 50% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--accent) 14%, transparent); } }
+
+.folge-player { display: grid; gap: var(--s-2); }
+.folge-seek { width: 100%; margin: 0; accent-color: var(--accent); height: 28px; }
+.folge-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s-2); }
+.folge-time { font-variant-numeric: tabular-nums; color: var(--text-2); font-size: var(--t-sm); }
+.folge-skip { display: inline-flex; align-items: center; gap: var(--s-1); }
+.folge-skip .btn { min-height: 40px; font-variant-numeric: tabular-nums; }
+.folge-rate select { min-height: 40px; }
+.folge-player .problem { margin: 0; }
+.folge-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1) var(--s-2); }
+.folge-actions form { display: inline; margin: 0; }
+.folge > .problem, .folge > .meta { margin: 0; }
+
+/* Entstehend: Schritte als Leiste, darunter Fortschritt */
+.folge-spinner { width: 28px; height: 28px; border-radius: 50%; border: 3px solid var(--line); border-top-color: var(--accent); animation: spin 1s linear infinite; }
+.folge-steps { display: flex; margin: 0; padding: 0; list-style: none; counter-reset: folge; }
+.folge-steps li { flex: 1; position: relative; display: grid; justify-items: center; gap: 6px; font-size: var(--t-xs); color: var(--text-3); text-align: center; counter-increment: folge; }
+.folge-steps li::before { content: counter(folge); display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; position: relative; z-index: 1;
+  font-weight: 700; font-size: 11px; background: var(--surface); border: 2px solid var(--line-strong); color: var(--text-3); }
+.folge-steps li + li::after { content: ''; position: absolute; top: 10px; right: 50%; width: 100%; height: 2px; background: var(--line); }
+.folge-steps li.done::before { content: '✓'; background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.folge-steps li.done + li::after, .folge-steps li[aria-current=step]::after { background: var(--accent); }
+.folge-steps li[aria-current=step] { color: var(--text); font-weight: 650; }
+.folge-steps li[aria-current=step]::before { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+.folge-progress { display: grid; gap: var(--s-1); }
+.folge-bar { display: block; width: 100%; height: 8px; border: 0; border-radius: var(--r-full); overflow: hidden; background: var(--line); -webkit-appearance: none; appearance: none; color: var(--accent); }
+.folge-bar::-webkit-progress-bar { background: var(--line); border-radius: var(--r-full); }
+.folge-bar::-webkit-progress-value { background: var(--accent); border-radius: var(--r-full); transition: width .6s var(--ease); }
+.folge-bar::-moz-progress-bar { background: var(--accent); border-radius: var(--r-full); }
+.folge-wait { display: block; position: relative; height: 8px; border-radius: var(--r-full); overflow: hidden; background: var(--line); }
+.folge-wait::after { content: ''; position: absolute; inset: 0 auto 0 0; width: 35%; border-radius: inherit; background: var(--accent); animation: folge-wait 1.6s var(--ease) infinite; }
+@keyframes folge-wait { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+@media (max-width: 520px) {
+  .folge-steps li { font-size: 11px; }
+  .folge-play { width: 54px; height: 54px; }
+}
+
 /* --- Lesen: Offline --- */
 /* Markierungen, die noch im Puffer auf Netz warten (lesen-doc.js, CSS Custom Highlight API) */
 ::highlight(lesen-wartet) { background-color: color-mix(in srgb, #facc15 22%, transparent); text-decoration: underline dashed var(--warn); }

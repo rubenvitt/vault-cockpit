@@ -16,6 +16,14 @@ final class AppModel {
         let minutes: Int
     }
 
+    /// Wunsch der Seite `/lesen/folgen`, eine fertige Folge im nativen Player abzuspielen.
+    struct EpisodeRequest: Identifiable {
+        let id = UUID()
+        let episodeID: String
+        let title: String
+        let kind: String
+    }
+
     let config: AppConfiguration
     private let keychain: KeychainStore
     private let authenticator = WebAuthenticator()
@@ -31,6 +39,7 @@ final class AppModel {
     /// Neue Web-Hülle nach jedem Login, damit sie mit dem frischen Cookie startet.
     var webViewID = UUID()
     var listening: ListenRequest?
+    var episode: EpisodeRequest?
     var showsMenu = false
 
     init(config: AppConfiguration = AppConfiguration()) {

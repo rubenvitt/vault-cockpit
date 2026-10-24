@@ -72,6 +72,8 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
       audio: (params) => listenAudio(store, speech, params),
       voice: () => speech?.voice() ?? null,
     },
+    /** Pfad der fertigen MP3 einer Folge oder null (für `/api/app/folge`). */
+    episodeAudio: (id) => episodes?.audioPath(id) ?? null,
     uploads: { ...add.uploads, ...feeds.uploads },
     pages: {
       ...add.pages,

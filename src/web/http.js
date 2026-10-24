@@ -30,13 +30,14 @@ const OFFLINE_JS = staticFile('offline.js', 'utf8');
 const INBOX_JS = staticFile('lesen-eingang.js', 'utf8');
 const LESEN_DOC_JS = staticFile('lesen-doc.js', 'utf8');
 const LESEN_HOEREN_JS = staticFile('lesen-hoeren.js', 'utf8');
+const LESEN_FOLGEN_JS = staticFile('lesen-folgen.js', 'utf8');
 const LESEN_LINKS_JS = staticFile('lesen-verbinden.js', 'utf8');
 // sigma + graphology + ForceAtlas2, gebündelt mit `npm run vendor` und eingecheckt.
 const GRAPH_LIB = staticFile('vendor/graph-lib.js', 'utf8');
 // Design-System (Tokens, Bausteine, Wochenansicht) plus die Teile der übrigen Seiten.
 const CSS = staticFile('cockpit.css', 'utf8') + GRAPH_CSS + NOTE_CSS + REVIEW_CSS + PLAN_CSS + HEALTH_CSS + OFFLINE_CSS;
 const hash = (s) => createHash('sha256').update(s).digest('base64url').slice(0, 10);
-const VERSION = { css: hash(CSS), js: hash(CLIENT_JS), graph: hash(GRAPH_JS), graphLib: hash(GRAPH_LIB), offline: hash(OFFLINE_JS), inbox: hash(INBOX_JS), lesenDoc: hash(LESEN_DOC_JS), lesenHoeren: hash(LESEN_HOEREN_JS), lesenLinks: hash(LESEN_LINKS_JS) };
+const VERSION = { css: hash(CSS), js: hash(CLIENT_JS), graph: hash(GRAPH_JS), graphLib: hash(GRAPH_LIB), offline: hash(OFFLINE_JS), inbox: hash(INBOX_JS), lesenDoc: hash(LESEN_DOC_JS), lesenHoeren: hash(LESEN_HOEREN_JS), lesenFolgen: hash(LESEN_FOLGEN_JS), lesenLinks: hash(LESEN_LINKS_JS) };
 versionAssets(VERSION);
 
 /** Web-App-Manifest: Das Cockpit startet auf dem iPhone und unter Android wie eine App. */
@@ -72,6 +73,7 @@ const PUBLIC = new Map([
   ['/static/lesen-eingang.js', { type: 'text/javascript; charset=utf-8', body: INBOX_JS, version: VERSION.inbox }],
   ['/static/lesen-doc.js', { type: 'text/javascript; charset=utf-8', body: LESEN_DOC_JS, version: VERSION.lesenDoc }],
   ['/static/lesen-hoeren.js', { type: 'text/javascript; charset=utf-8', body: LESEN_HOEREN_JS, version: VERSION.lesenHoeren }],
+  ['/static/lesen-folgen.js', { type: 'text/javascript; charset=utf-8', body: LESEN_FOLGEN_JS, version: VERSION.lesenFolgen }],
   ['/static/lesen-verbinden.js', { type: 'text/javascript; charset=utf-8', body: LESEN_LINKS_JS, version: VERSION.lesenLinks }],
   ['/manifest.webmanifest', { type: 'application/manifest+json; charset=utf-8', body: MANIFEST }],
   ['/static/icon.svg', { type: 'image/svg+xml', body: staticFile('icon.svg') }],
@@ -105,7 +107,7 @@ const HTML_HEADERS = {
   'content-type': 'text/html; charset=utf-8',
   'cache-control': 'no-store',
   'content-security-policy':
-    "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; manifest-src 'self'; worker-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+    "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; media-src 'self' blob:; manifest-src 'self'; worker-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
   'x-content-type-options': 'nosniff',
   'referrer-policy': 'same-origin',
 };
