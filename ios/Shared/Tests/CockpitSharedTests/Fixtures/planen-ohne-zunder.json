@@ -1,0 +1,59 @@
+{
+  "tz": "Europe/Berlin",
+  "today": "2026-10-14",
+  "query": {
+    "q": "",
+    "area": ""
+  },
+  "week": {
+    "id": "2026-W42",
+    "year": 2026,
+    "week": 42,
+    "monday": "2026-10-12",
+    "sunday": "2026-10-18",
+    "prev": "2026-W41",
+    "next": "2026-W43",
+    "current": true,
+    "past": false,
+    "days": [
+      {
+        "date": "2026-10-12",
+        "label": "Mo 12.10.",
+        "today": false
+      },
+      {
+        "date": "2026-10-13",
+        "label": "Di 13.10.",
+        "today": false
+      },
+      {
+        "date": "2026-10-14",
+        "label": "Mi 14.10.",
+        "today": true
+      },
+      {
+        "date": "2026-10-15",
+        "label": "Do 15.10.",
+        "today": false
+      },
+      {
+        "date": "2026-10-16",
+        "label": "Fr 16.10.",
+        "today": false
+      },
+      {
+        "date": "2026-10-17",
+        "label": "Sa 17.10.",
+        "today": false
+      },
+      {
+        "date": "2026-10-18",
+        "label": "So 18.10.",
+        "today": false
+      }
+    ]
+  },
+  "ok": false,
+  "error": "Zunder ist nicht eingerichtet",
+  "unconfigured": true
+}

@@ -31,7 +31,26 @@ make test      # Unit-Tests auf dem ersten verfügbaren iPhone-Simulator
   und App-API“). Danach `POST /api/app/einloesen`: das Cookie mit allen Attributen in
   `WKWebsiteDataStore.default().httpCookieStore`, der Geräte-Token in die geteilte Keychain-Gruppe.
   Gerätename: „iPhone · iPhone17,1 · 23.10.2026“ (`UIDevice.name` ist nur „iPhone“).
-- **Web-Hülle** (`WebShell.swift`): WKWebView randlos (die Seite nutzt `viewport-fit=cover` und
+- **Rahmen** (`Cockpit/Native/MainView.swift`, docs/ios-nativ.md): nach dem Login Reiter Woche
+  (nativ), Lesen (Web), Rückblick (nativ) und Einstellungen (Web). Die
+  nativen Bildschirme nehmen die Stores aus `CockpitShared` (`CockpitSession`: API mit dem
+  Geräte-Token, Zwischenspeicher, Meldungen); 401 von der API startet den nativen Login wie ein
+  abgelaufenes Cookie. Links im WKWebView auf `/`, `/rueckblick` und `/planen` wechseln den Reiter
+  (`NavigationDecision.native`), Notiz und Suche aus nativen Bildschirmen öffnen als Web-Blatt.
+  Die Leiste unten der Web-Seiten blendet ein Nutzerskript aus (die App hat ihre eigene).
+- **Woche** (`Cockpit/Native/WeekScreen.swift` und Nachbarn): zeigt sofort den gespeicherten
+  Stand („Stand von …“), Abhaken ändert die Zeile vor der Antwort des Servers, Menü ⋯ als Blatt,
+  Schnelleingabe unten mit Vorschau und Puffer ohne Netz, Meldungen mit „Rückgängig“ und Haptik.
+  Farben aus den Tokens von cockpit.css (`Theme.swift`, hell und dunkel).
+- **Rückblick** (`Cockpit/Native/ReviewScreen.swift`): Kennzahlen, je Lebensbereich die Balken
+  erledigt/geplant und Flammen-Zeit (wachsen beim Erscheinen herein), offen Gebliebenes zum
+  Aufklappen, Flammen; „Markierungen dieser Woche wiedersehen“ öffnet den Reiter Lesen. Gespeicherter
+  Stand und Blättern wie in der Woche (`WeekPaging.swift`).
+- **Woche planen** (`Cockpit/Native/PlanScreen.swift`, `PlanSections.swift`), aus der Woche
+  geschoben: Suche mit Bereich, „Holen“ als Phönix-Schritt oder an einem Tag, „Als Flamme“,
+  Vorschläge aus den Bereichen, „Flamme einplanen“ und „In KW n“. „Holen“ und „Aus der Woche“ zeigen
+  das Ergebnis sofort (`PlanStore.pending`), danach lädt die Seite neu.
+- **Web-Hülle** (`WebShell.swift`): ein WKWebView je Web-Reiter bzw. Blatt, randlos (die Seite nutzt `viewport-fit=cover` und
   `env(safe-area-inset-*)`), Ziehen zum Neuladen, Zurück-Geste. Fremde Hosts öffnen sich in
   `SFSafariViewController`, `mailto:` usw. im System. Datei-Upload zeigt WebKit selbst an; Antworten
   mit `Content-Disposition: attachment` (OPML, Wochenexport `.md`) werden geladen und ins
@@ -270,7 +289,7 @@ Den ersten Build einer Version prüft Apple (meist unter einem Tag), weitere Bui
 
 | Ordner | Inhalt |
 | --- | --- |
-| `Cockpit/` | App-Target: SwiftUI, Web-Hülle (VCP-92), Login, Player (VCP-94, `Cockpit/Player/`) |
+| `Cockpit/` | App-Target: SwiftUI, Web-Hülle (VCP-92), Login, Player (VCP-94, `Cockpit/Player/`), native Bildschirme (`Cockpit/Native/`) |
 | `Shared/` | Lokales Swift Package `CockpitShared`: Konfiguration, Keychain, API-Client. Alles, was App und Extension teilen |
 | `CockpitTests/` | Unit-Tests (laufen in der App als Host) |
 | `ShareExtension/` | Share Extension „Zum Lesestapel“ (VCP-93) |

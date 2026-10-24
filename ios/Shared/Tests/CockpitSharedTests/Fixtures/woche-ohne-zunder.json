@@ -1,0 +1,72 @@
+{
+  "tz": "Europe/Berlin",
+  "vaultName": "RNotes",
+  "week": {
+    "id": "2026-W43",
+    "year": 2026,
+    "week": 43,
+    "monday": "2026-10-19",
+    "sunday": "2026-10-25",
+    "prev": "2026-W42",
+    "next": "2026-W44",
+    "current": false,
+    "past": false
+  },
+  "today": "2026-10-14",
+  "feuer": {
+    "ok": true,
+    "data": null
+  },
+  "burning": null,
+  "flames": {
+    "ok": false,
+    "error": "Zunder ist nicht eingerichtet",
+    "unconfigured": true
+  },
+  "rocks": {
+    "ok": false,
+    "error": "Zunder ist nicht eingerichtet",
+    "unconfigured": true
+  },
+  "calendar": {
+    "ok": false,
+    "error": "Kalender ist nicht eingerichtet",
+    "unconfigured": true
+  },
+  "tasks": {
+    "ok": false,
+    "error": "Zunder ist nicht eingerichtet",
+    "unconfigured": true
+  },
+  "inbox": {
+    "vault": {
+      "ok": true,
+      "data": [
+        {
+          "path": "inbox/2026-10-13 0912 - Web-Cockpit.md",
+          "title": "2026-10-13 0912 - Web-Cockpit",
+          "type": null,
+          "updated": "2026-10-13T07:12:00.000Z"
+        },
+        {
+          "path": "inbox/Idee.md",
+          "title": "Idee",
+          "type": "notiz",
+          "updated": null
+        }
+      ]
+    },
+    "zunder": {
+      "ok": false,
+      "error": "Zunder ist nicht eingerichtet",
+      "unconfigured": true
+    },
+    "targets": [],
+    "folder": "inbox"
+  },
+  "can": {
+    "actions": true,
+    "notes": true,
+    "plan": true
+  }
+}

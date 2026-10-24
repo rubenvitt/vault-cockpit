@@ -1,0 +1,29 @@
+{
+  "ok": true,
+  "message": "Phönix-Schritt KW 42: Belege sortieren",
+  "task": {
+    "id": "t1",
+    "ref": null,
+    "title": "Belege sortieren",
+    "status": "open",
+    "due": null,
+    "phoenix": {
+      "role": "feuer_schritt",
+      "fire": "2026-W42"
+    },
+    "location": {
+      "kind": "project",
+      "id": "p1",
+      "name": "Steuer 2026",
+      "area_id": "a1",
+      "area_name": "Finanzen"
+    }
+  },
+  "undo": {
+    "action": "/aktion/woche/zuruecksetzen",
+    "fields": {
+      "id": "t1",
+      "phoenix": ""
+    }
+  }
+}

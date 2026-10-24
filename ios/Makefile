@@ -10,7 +10,7 @@ DESTINATION ?= platform=iOS Simulator,id=$(SIMULATOR_ID)
 XCODEBUILD = xcodebuild -project $(PROJECT) -scheme $(SCHEME) -destination '$(DESTINATION)' \
 	-derivedDataPath build CODE_SIGNING_ALLOWED=NO CURRENT_PROJECT_VERSION=$(BUILD_NUMBER)
 
-.PHONY: project build test clean
+.PHONY: project build test shared-test clean
 
 project:
 	xcodegen generate
@@ -18,8 +18,12 @@ project:
 build: project
 	$(XCODEBUILD) build
 
-test: project
+test: project shared-test
 	$(XCODEBUILD) test
+
+# Logik in CockpitShared ohne Simulator (läuft auch unter Linux).
+shared-test:
+	cd Shared && swift test
 
 clean:
 	rm -rf build $(PROJECT)

@@ -1,0 +1,20 @@
+{
+  "ok": true,
+  "message": "Aufgabe angelegt: INB-7 liegt in Gesundheit, fällig morgen",
+  "result": {
+    "kind": "task",
+    "id": "c2",
+    "ref": "INB-7",
+    "url": "https://zunder.test/#/aufgabe/c2",
+    "title": "Zahnarzt anrufen",
+    "due": "2026-10-15",
+    "dueLabel": "morgen",
+    "location": {
+      "kind": "area",
+      "id": "a2",
+      "name": "Gesundheit"
+    },
+    "phoenix": null,
+    "notes": []
+  }
+}

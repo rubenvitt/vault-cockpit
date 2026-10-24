@@ -221,9 +221,16 @@ test('Login: PKCE, nonce, Sitzungs-Cookie, Rücksprung und Wochenseite', async (
 
     const api = await call('/api/woche');
     assert.equal(api.status, 200);
-    assert.equal((await api.json()).week.id, '2026-W42');
+    const body = await api.json();
+    assert.equal(body.week.id, '2026-W42');
+    assert.deepEqual(body.can, { actions: false, notes: false, plan: false }, 'ohne Aktionen bietet die App nichts Schreibendes an');
     assert.equal((await call('/api/woche?woche=kaputt')).status, 400);
     assert.equal((await call('/?woche=kaputt')).status, 400);
+    // Rückblick als JSON für die native App.
+    const review = await call('/api/rueckblick?woche=2026-W42');
+    assert.equal(review.status, 200);
+    assert.equal((await review.json()).totals.done, 3);
+    assert.equal((await call('/api/rueckblick?woche=kaputt')).status, 400);
 
     await login();
     const out = await call('/logout', { method: 'POST' });
@@ -693,6 +700,8 @@ test('Wochenseite: Abhaken-Formulare, Schnelleingabe und Script nur mit Aktionen
       assert.equal(js.status, 200);
       assert.match(js.headers.get('content-type'), /text\/javascript/);
       assert.match(await js.text(), /Rückgängig/);
+      // Dieselbe Auskunft für die native App.
+      assert.deepEqual((await (await call('/api/woche?woche=2026-W42')).json()).can, { actions: true, notes: false, plan: false });
     },
     {},
     { actions: fakeActions() },

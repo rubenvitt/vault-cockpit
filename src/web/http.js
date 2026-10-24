@@ -212,6 +212,19 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   // Prüft Signatur, Ablauf, Generation und das Subject gegen ALLOWED_SUBJECTS.
   const sessionOf = (req) => sessions.read(req);
 
+  /**
+   * Native App: Mit Geräte-Token (`Authorization: Bearer vct_…`, Recht `app`) gelten die
+   * JSON-Endpunkte (`/api/…`), die Aktionen und Bilder aus Notizen wie mit einer Sitzung.
+   * Seiten, Einstellungen, Tokens und Sicherung bleiben beim Cookie. Ein CSRF-Token braucht
+   * es dafür nicht: Den Header schickt kein Browser von selbst mit.
+   */
+  const appSessionOf = (req, path) => {
+    if (!appAccess || !/^Bearer /.test(String(req.headers.authorization ?? ''))) return null;
+    if (!(path.startsWith('/api/') || ACTION_ROUTES.has(path) || path === '/notiz/bild')) return null;
+    const device = appAccess.device(req);
+    return device ? { sub: `app:${device.name}`, name: device.name, app: true } : null;
+  };
+
   // CSRF: zusätzlich zu SameSite=Lax und der Herkunftsprüfung ein Token, das an
   // den Login dieser Sitzung gebunden ist. Ohne Speicher auf dem Server.
   const csrfOf = (req) => {
@@ -545,7 +558,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     const form = await readForm(req, res, reading?.uploads?.[path]);
     if (!form) return;
     const back = safeNext(form.get('back'));
-    if (!csrfOk(req, form.get('csrf'))) {
+    if (!session.app && !csrfOk(req, form.get('csrf'))) {
       const message = 'Die Seite ist veraltet. Bitte neu laden und noch einmal versuchen.';
       return wantsJson ? json(res, 403, { error: 'csrf', message }) : send(res, 403, renderMessage('Nicht gespeichert', message, { link: { href: back, label: 'Neu laden' } }));
     }
@@ -572,7 +585,8 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     const id = url.searchParams.get('woche');
     const model = await cockpit.week(id || null);
     if (!model) return json(res, 400, { error: 'invalid_week', error_description: 'Kalenderwoche wie 2026-W42 erwartet' });
-    return json(res, 200, model);
+    // `can`: was die Seite anbietet (Schreiben, Feuer-Notiz, Planen), wie `writeContext` für die HTML-Seite.
+    return json(res, 200, { ...model, can: { actions: Boolean(actions), notes: Boolean(notes), plan: Boolean(plan) } });
   }
 
   async function settingsPage(req, res, session, { status = 200, notice = null, error = null, created = null } = {}) {
@@ -852,7 +866,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   const BACKUP_ROUTES = backup ? { '/einstellungen/sicherung': downloadBackup, '/einstellungen/sicherung/wiederherstellen': restoreBackup } : {};
   const ACTION_ROUTES = new Set(Object.keys(ACTIONS));
   const SHORTCUT_ROUTES = new Map(shortcuts.map((s) => [`/kurzbefehle/${s.slug}.shortcut`, s]));
-  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...PUBLIC.keys(), '/', '/api/woche', '/api/sitzung', '/api/suche', ...(actions ? ['/api/erfassen/vorschau'] : []), '/rueckblick', ...(notes ? ['/notiz', '/notiz/bild'] : []), ...(plan ? ['/planen'] : []), '/graph', '/api/graph', ...Object.keys(READING_PAGES), '/einstellungen', ...(health ? ['/zustand'] : []), ...(tokens ? Object.keys(TOKEN_ROUTES) : []), ...Object.keys(BACKUP_ROUTES), '/einstellungen/abmelden', '/login', '/auth/callback', '/logout']);
+  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...PUBLIC.keys(), '/', '/api/woche', '/api/rueckblick', ...(plan ? ['/api/planen'] : []), '/api/sitzung', '/api/suche', ...(actions ? ['/api/erfassen/vorschau'] : []), '/rueckblick', ...(notes ? ['/notiz', '/notiz/bild'] : []), ...(plan ? ['/planen'] : []), '/graph', '/api/graph', ...Object.keys(READING_PAGES), '/einstellungen', ...(health ? ['/zustand'] : []), ...(tokens ? Object.keys(TOKEN_ROUTES) : []), ...Object.keys(BACKUP_ROUTES), '/einstellungen/abmelden', '/login', '/auth/callback', '/logout']);
   if (notes) ROUTES.add('/wissen');
   if (notes || reading) ROUTES.add('/api/lesen/offline');
   for (const p of appAccess ? [...appAccess.paths, SITE_ASSOCIATION_PATH, APP_CALLBACK_PATH] : []) ROUTES.add(p);
@@ -886,8 +900,9 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       if (path === '/logout' && method === 'POST') {
         return redirect(res, '/login', [sessions.clear()]);
       }
-      const session = sessionOf(req);
-      if (session) sessions.renew(res, session);
+      const cookieSession = sessionOf(req);
+      if (cookieSession) sessions.renew(res, cookieSession);
+      const session = cookieSession ?? appSessionOf(req, path);
       if (path === '/einstellungen') {
         if (!session) return redirect(res, '/login?next=%2Feinstellungen');
         if (method === 'POST') return saveSettings(req, res, session);
@@ -937,6 +952,14 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       if (path === '/api/woche') {
         if (!session) return json(res, 401, { error: 'unauthorized', error_description: 'Anmeldung unter /login nötig' });
         return api(req, res, url);
+      }
+      if (path === '/api/rueckblick' || (path === '/api/planen' && plan)) {
+        if (!session) return json(res, 401, { error: 'unauthorized', error_description: 'Anmeldung unter /login nötig' });
+        const id = url.searchParams.get('woche') || null;
+        const p = (k) => url.searchParams.get(k) ?? '';
+        const model = path === '/api/planen' ? await plan.view(id, { q: p('q'), area: p('bereich'), from: p('aus') }) : await cockpit.review?.(id);
+        if (!model) return json(res, 400, { error: 'invalid_week', error_description: 'Kalenderwoche wie 2026-W42 erwartet' });
+        return json(res, 200, model);
       }
       if (path === '/api/graph') {
         if (!session) return json(res, 401, { error: 'unauthorized', error_description: 'Anmeldung unter /login nötig' });
