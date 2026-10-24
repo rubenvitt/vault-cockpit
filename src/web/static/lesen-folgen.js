@@ -125,7 +125,8 @@
 
   function toggle(li) {
     if (app) {
-      app.postMessage({ type: 'folge', id: li.dataset.folge, titel: li.dataset.title, art: li.dataset.art });
+      // Länge und Größe vom Server: Die App erkennt daran eine erneuerte MP3 im Cache.
+      app.postMessage({ type: 'folge', id: li.dataset.folge, titel: li.dataset.title, art: li.dataset.art, dauer: Number(li.dataset.seconds) || 0, groesse: Number(li.dataset.bytes) || 0 });
       return;
     }
     if (current !== li) load(li);
@@ -209,6 +210,12 @@
     store.set(key, audio.currentTime > 3 && !near ? String(Math.floor(audio.currentTime)) : null);
   }
 
+  /** Länge: die des Browsers, mindestens die vom Server (feste Bitrate), falls der Browser sich verschätzt. */
+  function length() {
+    const known = Number(current?.dataset.seconds) || 0;
+    return Math.max(Number.isFinite(audio.duration) ? audio.duration : 0, known);
+  }
+
   function position() {
     const session = navigator.mediaSession;
     if (!audio || !session?.setPositionState || !Number.isFinite(audio.duration)) return;
@@ -234,8 +241,8 @@
     audio.addEventListener('loadedmetadata', () => {
       if (!current) return;
       const seek = part(current, 'seek');
-      seek.max = String(Math.floor(audio.duration));
-      part(current, 'dur').textContent = clock(audio.duration);
+      seek.max = String(Math.floor(length()));
+      part(current, 'dur').textContent = clock(length());
       position();
     });
     audio.addEventListener('timeupdate', () => {

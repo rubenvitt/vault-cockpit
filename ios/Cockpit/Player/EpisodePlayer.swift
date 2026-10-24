@@ -38,6 +38,9 @@ final class EpisodePlayer {
 
     private let api: APIClient?
     private let defaults: UserDefaults
+    /// Laut Server (0 = unbekannt): Länge als Untergrenze, Größe erkennt eine erneuerte MP3 im Cache.
+    private let knownSeconds: Double
+    private let knownBytes: Int
     @ObservationIgnored private var player: AVPlayer?
     @ObservationIgnored private var timeObserver: Any?
     @ObservationIgnored private var commandTargets: [(MPRemoteCommand, Any)] = []
@@ -47,8 +50,10 @@ final class EpisodePlayer {
     private let log = Logger(subsystem: "dev.rubeen.cockpit", category: "folge")
 
     /// `api` nil: nicht angemeldet; eine Folge im Cache spielt trotzdem.
-    init(id: String, title: String, kind: String, api: APIClient?, defaults: UserDefaults) {
+    init(id: String, title: String, kind: String, seconds: Double = 0, bytes: Int = 0, api: APIClient?, defaults: UserDefaults) {
         self.id = id
+        knownSeconds = seconds
+        knownBytes = bytes
         self.title = title
         self.kind = kind
         self.api = api
@@ -57,14 +62,14 @@ final class EpisodePlayer {
         tempo = Self.tempos.contains(saved) ? saved : 1
     }
 
-    static func live(id: String, title: String, kind: String) -> EpisodePlayer {
+    static func live(id: String, title: String, kind: String, seconds: Double = 0, bytes: Int = 0) -> EpisodePlayer {
         let config = AppConfiguration()
         let defaults = config.appGroup.isEmpty ? .standard : UserDefaults(suiteName: config.appGroup) ?? .standard
         var api: APIClient?
         if let token = (try? KeychainStore(accessGroup: config.keychainGroup).token()) ?? nil {
             api = APIClient(baseURL: config.serverURL, token: token)
         }
-        return EpisodePlayer(id: id, title: title, kind: kind, api: api, defaults: defaults)
+        return EpisodePlayer(id: id, title: title, kind: kind, seconds: seconds, bytes: bytes, api: api, defaults: defaults)
     }
 
     /// Ablage im Cache; die ID kommt von der Seite, deshalb nur sichere Zeichen im Dateinamen.
@@ -72,6 +77,13 @@ final class EpisodePlayer {
         let safe = String(id.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) || $0 == "-" }.prefix(80).map(Character.init))
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         return caches.appending(path: "Folgen", directoryHint: .isDirectory).appending(path: "\(safe.isEmpty ? "folge" : safe).mp3")
+    }
+
+    /// Liegt die Folge schon im Cache? Mit bekannter Größe nur, wenn sie passt: Der Server bereinigt
+    /// ältere MP3s (Info-Frames, falsche Länge auf iOS), dann wird neu geladen.
+    nonisolated static func isCached(_ file: URL, bytes: Int) -> Bool {
+        guard let size = (try? FileManager.default.attributesOfItem(atPath: file.path))?[.size] as? Int else { return false }
+        return bytes <= 0 || size == bytes
     }
 
     /// `75` → `1:15`, `3725` → `1:02:05`.
@@ -89,7 +101,7 @@ final class EpisodePlayer {
     func start() async {
         guard player == nil, !isLoading else { return }
         let file = Self.file(for: id)
-        if !FileManager.default.fileExists(atPath: file.path) {
+        if !Self.isCached(file, bytes: knownBytes) {
             guard let api else {
                 message = "Bitte in der Cockpit-App neu anmelden."
                 return
@@ -114,7 +126,7 @@ final class EpisodePlayer {
         player.defaultRate = Float(tempo)
         self.player = player
         let length = (try? await item.asset.load(.duration))?.seconds ?? 0
-        duration = length.isFinite ? length : 0
+        duration = max(length.isFinite ? length : 0, knownSeconds)
         let saved = defaults.double(forKey: spotKey)
         if saved > 3, duration == 0 || saved < duration - 5 {
             position = saved
@@ -180,6 +192,11 @@ final class EpisodePlayer {
     private func tick(_ seconds: Double) {
         guard seconds.isFinite, !isScrubbing else { return }
         position = seconds
+        // Verschätzt sich AVFoundation trotzdem, wächst die Länge mit, statt dass die Stelle hinausläuft.
+        if seconds > duration {
+            duration = seconds
+            updateNowPlaying()
+        }
         saveSpot()
     }
 

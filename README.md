@@ -711,6 +711,10 @@ iOS-App öffnet der Knopf den nativen Player (`/api/app/folge`, siehe
 [ios/README.md](ios/README.md)). Die MP3 kommt mit `Range`
 (`/lesen/folgen/audio?id=…`), damit Safari sie spielt und Vorspulen geht; die
 Content-Security-Policy der Seiten erlaubt Audio dafür mit `media-src 'self' blob:`.
+Beim Zusammensetzen bleiben nur die Audio-Frames: ohne ID3 und ohne den Info-Frame,
+den ElevenLabs an den Anfang jedes Stücks schreibt. Der nennt nur die Länge seines
+Stücks, und iOS/Safari hielten die ganze Folge sonst für so lang wie das erste.
+Ältere Folgen bereinigt der Dienst beim Start einmal; die App lädt sie dann neu.
 
 Kosten: ElevenLabs rechnet nach Zeichen. Ein Text mit 15 Minuten Lesezeit hat
 rund 20 000 Zeichen; mit `eleven_multilingual_v2` kostet das 20 000 Credits, mit

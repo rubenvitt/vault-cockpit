@@ -5,7 +5,7 @@ import { PassThrough } from 'node:stream';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createEpisodes, chunkText, dialogueBatches, stripId3, EpisodeError } from '../src/lesen/folgen.js';
+import { createEpisodes, chunkText, dialogueBatches, stripId3, audioFrames, EpisodeError } from '../src/lesen/folgen.js';
 import { parseRange, progressOf, clock, newSummary } from '../src/lesen/folgen-page.js';
 import { createClaudeWriter, WriterError } from '../src/lesen/claude.js';
 import { createReadingStore } from '../src/lesen/store.js';
@@ -38,6 +38,43 @@ test('Folgen: Text in Stücke an Satzgrenzen, Gespräch in Abschnitte, ID3 weg, 
   assert.deepEqual(parseRange('bytes=0-999', 100), [0, 99]);
   assert.equal(parseRange('bytes=200-300', 100), false);
 });
+
+/** MPEG-1 Layer III, 128 kbit/s, 44,1 kHz, mono: 417 Bytes je Frame; `tag` macht daraus einen Info-Frame wie vom Encoder. */
+function frame(fill, tag = null) {
+  const f = Buffer.alloc(417, fill);
+  f.set([0xff, 0xfb, 0x90, 0xc0]);
+  if (tag) f.write(tag, 4 + 17, 'latin1');
+  return f;
+}
+const id3 = Buffer.concat([Buffer.from('ID3'), Buffer.from([4, 0, 0, 0, 0, 0, 3]), Buffer.from('abc')]);
+
+test('Folgen: MP3-Stücke ohne ID3 und Info-Frame, sonst stimmt die Länge auf iOS nicht', () => {
+  const piece = (n) => Buffer.concat([id3, frame(0, 'Info'), ...Array.from({ length: n }, (_, i) => frame(i + 1))]);
+  const clean = audioFrames(piece(3));
+  assert.equal(clean.length, 3 * 417, 'nur die Audio-Frames');
+  assert.equal(clean[4], 1);
+  assert.doesNotMatch(clean.toString('latin1'), /Info|ID3/);
+  // Eine alte Folge: Stücke aneinander, Info-Frames mitten im Strom.
+  const old = Buffer.concat([piece(2), stripId3(piece(2)), stripId3(piece(1))]);
+  assert.equal(audioFrames(old).length, 5 * 417);
+  assert.ok(audioFrames(audioFrames(old)).equals(audioFrames(old)), 'zweimal bereinigt bleibt gleich');
+  assert.equal(String(audioFrames(Buffer.from('[kein MP3]'))), '[kein MP3]');
+  assert.equal(String(audioFrames(Buffer.concat([id3, Buffer.from('MP3')]))), 'MP3');
+});
+
+test('Folgen: fertige ältere Folge wird beim Start bereinigt', () =>
+  withDir(async (dir) => {
+    const at = '2026-10-23T09:00:00Z';
+    const old = Buffer.concat([id3, frame(0, 'Info'), frame(1), frame(0, 'Info'), frame(2)]);
+    writeFileSync(join(dir, 'f1.mp3'), old);
+    writeFileSync(join(dir, 'folgen.json'), JSON.stringify([{ id: 'f1', kind: 'podcast', minutes: 5, title: 'Alt', docs: [], status: 'fertig', bytes: old.length, created_at: at, updated_at: at }]));
+    const { episodes } = setup(dir);
+    await new Promise((res) => setTimeout(res, 1700));
+    const ep = episodes.get('f1');
+    assert.equal(ep.frames, true);
+    assert.equal(ep.bytes, 2 * 417);
+    assert.equal(readFileSync(join(dir, 'f1.mp3')).length, 2 * 417);
+  }));
 
 /** Stapel mit zwei Texten, falsches ElevenLabs, falscher Claude, falsche Inbox. */
 function setup(dir, { tts = TTS, writer = null, failDialogue = () => false, before = () => {} } = {}) {

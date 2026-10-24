@@ -22,6 +22,9 @@ final class AppModel {
         let episodeID: String
         let title: String
         let kind: String
+        /// Laut Server, 0 = unbekannt.
+        var seconds: Double = 0
+        var bytes: Int = 0
     }
 
     let config: AppConfiguration

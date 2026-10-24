@@ -37,8 +37,9 @@ enum NavigationDecision: Equatable {
 enum BridgeMessage: Equatable {
     /// `/lesen/hoeren`: `{type: 'hoeren', zeit}`
     case listen(minutes: Int)
-    /// `/lesen/folgen`: `{type: 'folge', id, titel, art}`, fertige Folge im nativen Player.
-    case episode(id: String, title: String, kind: String)
+    /// `/lesen/folgen`: `{type: 'folge', id, titel, art, dauer, groesse}`, fertige Folge im nativen Player.
+    /// `seconds` und `bytes` laut Server, 0 = unbekannt.
+    case episode(id: String, title: String, kind: String, seconds: Double, bytes: Int)
 
     init?(_ body: Any) {
         guard let body = body as? [String: Any] else { return nil }
@@ -47,7 +48,13 @@ enum BridgeMessage: Equatable {
             self = .listen(minutes: (body["zeit"] as? NSNumber)?.intValue ?? 15)
         case "folge":
             guard let id = body["id"] as? String, !id.isEmpty else { return nil }
-            self = .episode(id: id, title: body["titel"] as? String ?? "Folge", kind: body["art"] as? String ?? "Folge")
+            self = .episode(
+                id: id,
+                title: body["titel"] as? String ?? "Folge",
+                kind: body["art"] as? String ?? "Folge",
+                seconds: (body["dauer"] as? NSNumber)?.doubleValue ?? 0,
+                bytes: (body["groesse"] as? NSNumber)?.intValue ?? 0
+            )
         default:
             return nil
         }
@@ -250,7 +257,8 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         guard message.frameInfo.isMainFrame, message.frameInfo.securityOrigin.host == model.config.serverURL.host() else { return }
         switch BridgeMessage(message.body) {
         case .listen(let minutes): model.listening = AppModel.ListenRequest(minutes: minutes)
-        case .episode(let id, let title, let kind): model.episode = AppModel.EpisodeRequest(episodeID: id, title: title, kind: kind)
+        case .episode(let id, let title, let kind, let seconds, let bytes):
+            model.episode = AppModel.EpisodeRequest(episodeID: id, title: title, kind: kind, seconds: seconds, bytes: bytes)
         case nil: break
         }
     }

@@ -36,8 +36,11 @@ final class WebShellTests: XCTestCase {
     func testBridgeMessage() {
         XCTAssertEqual(BridgeMessage(["type": "hoeren", "zeit": NSNumber(value: 30)]), .listen(minutes: 30))
         XCTAssertEqual(BridgeMessage(["type": "hoeren"]), .listen(minutes: 15))
-        XCTAssertEqual(BridgeMessage(["type": "folge", "id": "f1", "titel": "Podcast: Vom Lesen", "art": "Podcast"]), .episode(id: "f1", title: "Podcast: Vom Lesen", kind: "Podcast"))
-        XCTAssertEqual(BridgeMessage(["type": "folge", "id": "f1"]), .episode(id: "f1", title: "Folge", kind: "Folge"))
+        XCTAssertEqual(
+            BridgeMessage(["type": "folge", "id": "f1", "titel": "Podcast: Vom Lesen", "art": "Podcast", "dauer": NSNumber(value: 642), "groesse": NSNumber(value: 10_272_000)]),
+            .episode(id: "f1", title: "Podcast: Vom Lesen", kind: "Podcast", seconds: 642, bytes: 10_272_000)
+        )
+        XCTAssertEqual(BridgeMessage(["type": "folge", "id": "f1"]), .episode(id: "f1", title: "Folge", kind: "Folge", seconds: 0, bytes: 0))
         XCTAssertNil(BridgeMessage(["type": "folge"]), "ohne ID nichts abzuspielen")
         XCTAssertNil(BridgeMessage(["type": "anders"]))
         XCTAssertNil(BridgeMessage("hoeren"))
@@ -62,5 +65,15 @@ final class WebShellTests: XCTestCase {
         XCTAssertEqual(EpisodePlayer.clock(75), "1:15")
         XCTAssertEqual(EpisodePlayer.clock(3725), "1:02:05")
         XCTAssertEqual(EpisodePlayer.clock(.nan), "0:00")
+    }
+
+    func testCachedEpisodeIsReloadedWhenServerSizeChanged() throws {
+        let file = FileManager.default.temporaryDirectory.appending(path: "\(UUID().uuidString).mp3")
+        defer { try? FileManager.default.removeItem(at: file) }
+        XCTAssertFalse(EpisodePlayer.isCached(file, bytes: 0), "nichts im Cache")
+        try Data(count: 10).write(to: file)
+        XCTAssertTrue(EpisodePlayer.isCached(file, bytes: 10))
+        XCTAssertTrue(EpisodePlayer.isCached(file, bytes: 0), "Größe unbekannt: Cache nehmen")
+        XCTAssertFalse(EpisodePlayer.isCached(file, bytes: 8), "bereinigt auf dem Server: neu laden")
     }
 }

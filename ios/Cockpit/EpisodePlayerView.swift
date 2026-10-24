@@ -8,7 +8,7 @@ struct EpisodePlayerView: View {
     @Environment(\.dismiss) private var dismiss
 
     init(request: AppModel.EpisodeRequest) {
-        _player = State(initialValue: EpisodePlayer.live(id: request.episodeID, title: request.title, kind: request.kind))
+        _player = State(initialValue: EpisodePlayer.live(id: request.episodeID, title: request.title, kind: request.kind, seconds: request.seconds, bytes: request.bytes))
     }
 
     init(player: EpisodePlayer) {
@@ -66,6 +66,8 @@ struct EpisodePlayerView: View {
                 Button("Fertig") { dismiss() }
             }
         }
+        // Akzent wie im Web-Cockpit (--accent).
+        .tint(Color(red: 0.76, green: 0.25, blue: 0.05))
         .task { await player.start() }
         .onDisappear { player.close() }
     }

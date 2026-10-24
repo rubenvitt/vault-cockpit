@@ -181,7 +181,7 @@ export function episodeCard(ep, { ctx, resumable = false, at = Date.now() }) {
     const seconds = secondsOf(ep);
     const src = `/lesen/folgen/audio?id=${id}`;
     const note = ep.note ? `<a href="/notiz?pfad=${encodeURIComponent(ep.note)}" class="btn quiet">Report-Notiz</a>` : '';
-    return `<li class="folge is-ready" data-folge="${esc(ep.id)}" data-status="fertig" data-src="${esc(src)}" data-title="${esc(ep.title)}" data-art="${esc(KINDS[ep.kind] ?? '')}" data-seconds="${seconds ?? ''}">
+    return `<li class="folge is-ready" data-folge="${esc(ep.id)}" data-status="fertig" data-src="${esc(src)}" data-title="${esc(ep.title)}" data-art="${esc(KINDS[ep.kind] ?? '')}" data-seconds="${seconds ?? ''}" data-bytes="${ep.bytes ?? ''}">
     <div class="folge-card">
       <button type="button" class="folge-play" data-play aria-label="Abspielen: ${esc(ep.title)}" hidden>${PLAY}${PAUSE}</button>
       <a href="${esc(src)}" class="folge-play folge-nojs" aria-label="Abspielen: ${esc(ep.title)}">${PLAY}</a>
