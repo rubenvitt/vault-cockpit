@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 // Antworten der App-API, Felder wie im README („iOS-App: Login und App-API“).
 
@@ -141,11 +144,13 @@ public struct SessionCookie: Decodable, Equatable, Sendable {
         if secure { properties[.secure] = "TRUE" }
         // Für HttpOnly gibt es keinen öffentlichen Schlüssel, Foundation liest diesen.
         if httpOnly { properties[HTTPCookiePropertyKey("HttpOnly")] = "TRUE" }
+        #if !os(Linux)
         switch sameSite.lowercased() {
         case "lax": properties[.sameSitePolicy] = HTTPCookieStringPolicy.sameSiteLax
         case "strict": properties[.sameSitePolicy] = HTTPCookieStringPolicy.sameSiteStrict
         default: break
         }
+        #endif
         return HTTPCookie(properties: properties)
     }
 }

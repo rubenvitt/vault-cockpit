@@ -28,6 +28,7 @@ public struct PendingShares: Sendable {
         self.directory = directory
     }
 
+    #if !os(Linux)
     /// `nil` ohne App-Group-Berechtigung (Simulator-Build ohne Signieren).
     public init?(appGroup: String) {
         guard !appGroup.isEmpty,
@@ -35,6 +36,7 @@ public struct PendingShares: Sendable {
         else { return nil }
         directory = container.appending(path: "PendingShares", directoryHint: .isDirectory)
     }
+    #endif
 
     /// Legt die Anfrage ab. `pdf` wird in den Puffer kopiert (als Datei, nicht über den Speicher).
     public func add(_ share: PendingShare, pdf: URL? = nil) throws {

@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Fehlerantwort des Servers (`{error, status, message}`) oder ein HTTP-Status ohne solchen Body.
 public struct APIError: Error, Equatable, LocalizedError {
