@@ -6,19 +6,9 @@
   'use strict';
 
   const toasts = document.querySelector('.toasts');
-
-  // Ladeleiste oben, solange eine neue Seite kommt (Links und Formulare ohne Script-Weg).
-  const loading = () => document.documentElement.classList.add('navigating');
-  addEventListener('pageshow', () => document.documentElement.classList.remove('navigating'));
-  document.addEventListener('click', (e) => {
-    const a = e.target instanceof Element ? e.target.closest('a[href]') : null;
-    if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-    if (a.target || a.hasAttribute('download') || a.origin !== location.origin || a.hash) return;
-    loading();
-  });
-  document.addEventListener('submit', (e) => {
-    if (!e.defaultPrevented && e.target instanceof HTMLFormElement && !e.target.matches('.tick, .act, .capture')) loading();
-  });
+  // Rückmeldung bei Seitenwechseln und Haptik in der App: `/static/ui.js` auf jeder Seite.
+  const haptik = (art) => window.cockpitHaptik?.(art);
+  const go = (url) => (window.cockpitWechsel ? window.cockpitWechsel(url) : location.assign(url));
 
   function post(form, extra = {}) {
     const body = new URLSearchParams(new FormData(form));
@@ -137,12 +127,14 @@
     show(li, status);
     if (status === 'done') li.classList.add('just-done');
     try {
+      if (status === 'done') haptik('erfolg');
       const data = await post(form, { status, prev: before });
       show(li, data.task.status);
       const undo = data.undo;
       toast(data.message, undo ? { action: { label: 'Rückgängig', run: () => (li.isConnected ? setStatus(li, undo.fields.status) : replay(undo)) } } : {});
     } catch (err) {
       show(li, before);
+      haptik('fehler');
       toast(err.message, { kind: 'error' });
     } finally {
       li.classList.remove('busy');
@@ -167,7 +159,9 @@
 
   // Immer nur ein Menü offen; Klick daneben oder Escape schließt.
   document.addEventListener('toggle', (e) => {
-    if (e.target instanceof HTMLDetailsElement && e.target.classList.contains('menu') && e.target.open) closeMenus(e.target);
+    if (!(e.target instanceof HTMLDetailsElement && e.target.classList.contains('menu') && e.target.open)) return;
+    closeMenus(e.target);
+    haptik('auswahl');
   }, true);
   document.addEventListener('click', (e) => {
     if (!(e.target instanceof Element) || !e.target.closest('details.menu')) closeMenus();
@@ -201,7 +195,7 @@
     try {
       const data = await send(undo.action, new URLSearchParams({ ...undo.fields, csrf: csrf() }));
       if (data.redirect) {
-        location.assign(data.redirect);
+        go(data.redirect);
         return;
       }
       toast(data.message);
@@ -225,7 +219,7 @@
       const data = await post(form, extra);
       // Die Notiz liegt jetzt woanders: dorthin, die Meldung kommt vom Server mit.
       if (data.redirect) {
-        location.assign(data.redirect);
+        go(data.redirect);
         return;
       }
       if (fromToast) dismiss(fromToast);

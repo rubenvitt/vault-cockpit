@@ -49,8 +49,15 @@ make test      # Unit-Tests auf dem ersten verfügbaren iPhone-Simulator
 - **Brücke** `cockpit` (`window.webkit.messageHandlers.cockpit`): `/lesen/hoeren` schickt
   `{type: 'hoeren', zeit}`; die App öffnet den nativen Player `PlayerView(minutes:)` (unten).
   `/lesen/folgen` schickt `{type: 'folge', id, titel, art}`; die App öffnet `EpisodePlayerView`
-  (Folgen, unten).
+  (Folgen, unten). Jede Seite (`/static/ui.js`) schickt `{type: 'haptik', art}` mit `auswahl`
+  (Reiter, Menü), `leicht`, `erfolg` (abgehakt) oder `fehler`; die App gibt das passende
+  Haptik-Signal.
   Nachrichten nimmt die App nur vom Hauptframe des eigenen Hosts an.
+- **Rückmeldung beim Tippen** (`/static/ui.js`, `cockpit.css`): Der getippte Link bleibt gedrückt,
+  der Reiter unten wechselt sofort, unter der Statusleiste wächst eine Ladeleiste, und dauert es
+  länger als 0,3 s, tritt der alte Inhalt zurück. Seitenwechsel blenden über (Cross-Document View
+  Transitions, ab iOS 18.2). Bis die erste Seite malt, zeigt der WKWebView den Hintergrund des
+  Cockpits statt Weiß.
 
 ## Player „Unterwegs hören“ (VCP-94)
 

@@ -668,6 +668,12 @@ test('Wochenseite: Abhaken-Formulare, Schnelleingabe und Script nur mit Aktionen
     const html = await (await call('/')).text();
     assert.ok(!html.includes('/static/cockpit.js'));
     assert.ok(!html.includes('/aktion/'));
+    // Rückmeldung beim Tippen und Seitenwechsel gibt es auf jeder Seite, auch ohne Aktionen.
+    assert.match(html, /<script src="\/static\/ui\.js\?v=[\w-]{10}" defer><\/script>/);
+    const ui = await call('/static/ui.js', { cookies: false });
+    assert.equal(ui.status, 200);
+    assert.match(ui.headers.get('content-type'), /text\/javascript/);
+    assert.match(await ui.text(), /haptik/);
   });
   await withServer(
     async ({ call, login }) => {

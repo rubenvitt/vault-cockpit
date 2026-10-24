@@ -8,6 +8,8 @@
   const graphHref = (path) => `/graph?pfad=${encodeURIComponent(path)}`;
   const noteHref = (path) => `/notiz?pfad=${encodeURIComponent(path)}`;
   const toast = (message, opts) => window.cockpit?.toast(message, opts);
+  // Seitenwechsel mit Rückmeldung (`/static/ui.js`).
+  const go = (url) => (window.cockpitWechsel ? window.cockpitWechsel(url) : location.assign(url));
 
   function el(tag, attrs = {}, ...children) {
     const e = document.createElement(tag);
@@ -102,7 +104,7 @@
         mark(active + (e.key === 'ArrowDown' ? 1 : -1));
       } else if (e.key === 'Enter' && active >= 0) {
         e.preventDefault();
-        location.assign(items()[active].href);
+        go(items()[active].href);
       } else if (e.key === 'Escape') {
         open(false);
       }
@@ -487,7 +489,7 @@
   renderer.on('doubleClickNode', ({ node, preventSigmaDefault }) => {
     preventSigmaDefault();
     const a = graph.getNodeAttributes(node);
-    if (a.kind === 'note' && a.path) location.assign(graphHref(a.path));
+    if (a.kind === 'note' && a.path) go(graphHref(a.path));
   });
   renderer.on('clickStage', () => select(null));
   document.addEventListener('keydown', (e) => {

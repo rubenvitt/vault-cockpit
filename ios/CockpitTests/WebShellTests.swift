@@ -42,6 +42,10 @@ final class WebShellTests: XCTestCase {
         )
         XCTAssertEqual(BridgeMessage(["type": "folge", "id": "f1"]), .episode(id: "f1", title: "Folge", kind: "Folge", seconds: 0, bytes: 0))
         XCTAssertNil(BridgeMessage(["type": "folge"]), "ohne ID nichts abzuspielen")
+        XCTAssertEqual(BridgeMessage(["type": "haptik", "art": "auswahl"]), .haptic(.selection))
+        XCTAssertEqual(BridgeMessage(["type": "haptik", "art": "erfolg"]), .haptic(.success))
+        XCTAssertNil(BridgeMessage(["type": "haptik", "art": "laut"]), "unbekannte Art")
+        XCTAssertNil(BridgeMessage(["type": "haptik"]))
         XCTAssertNil(BridgeMessage(["type": "anders"]))
         XCTAssertNil(BridgeMessage("hoeren"))
     }

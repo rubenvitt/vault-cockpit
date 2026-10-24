@@ -24,6 +24,7 @@ import { openPoints, SYNTHESIS } from './synthesis-render.js';
 import { evidenceRoutes } from '../lesen/synthesis-evidence.js';
 
 const staticFile = (name, enc) => readFileSync(new URL(`./static/${name}`, import.meta.url), enc);
+const UI_JS = staticFile('ui.js', 'utf8');
 const CLIENT_JS = staticFile('cockpit.js', 'utf8');
 const GRAPH_JS = staticFile('graph.js', 'utf8');
 const OFFLINE_JS = staticFile('offline.js', 'utf8');
@@ -37,7 +38,7 @@ const GRAPH_LIB = staticFile('vendor/graph-lib.js', 'utf8');
 // Design-System (Tokens, Bausteine, Wochenansicht) plus die Teile der übrigen Seiten.
 const CSS = staticFile('cockpit.css', 'utf8') + GRAPH_CSS + NOTE_CSS + REVIEW_CSS + PLAN_CSS + HEALTH_CSS + OFFLINE_CSS;
 const hash = (s) => createHash('sha256').update(s).digest('base64url').slice(0, 10);
-const VERSION = { css: hash(CSS), js: hash(CLIENT_JS), graph: hash(GRAPH_JS), graphLib: hash(GRAPH_LIB), offline: hash(OFFLINE_JS), inbox: hash(INBOX_JS), lesenDoc: hash(LESEN_DOC_JS), lesenHoeren: hash(LESEN_HOEREN_JS), lesenFolgen: hash(LESEN_FOLGEN_JS), lesenLinks: hash(LESEN_LINKS_JS) };
+const VERSION = { css: hash(CSS), ui: hash(UI_JS), js: hash(CLIENT_JS), graph: hash(GRAPH_JS), graphLib: hash(GRAPH_LIB), offline: hash(OFFLINE_JS), inbox: hash(INBOX_JS), lesenDoc: hash(LESEN_DOC_JS), lesenHoeren: hash(LESEN_HOEREN_JS), lesenFolgen: hash(LESEN_FOLGEN_JS), lesenLinks: hash(LESEN_LINKS_JS) };
 versionAssets(VERSION);
 
 /** Web-App-Manifest: Das Cockpit startet auf dem iPhone und unter Android wie eine App. */
@@ -66,6 +67,7 @@ const MANIFEST = JSON.stringify({
 /** Öffentliche Dateien ohne Sitzung: Stylesheet, Script, Manifest, Icons. */
 const PUBLIC = new Map([
   ['/static/cockpit.css', { type: 'text/css; charset=utf-8', body: CSS, version: VERSION.css }],
+  ['/static/ui.js', { type: 'text/javascript; charset=utf-8', body: UI_JS, version: VERSION.ui }],
   ['/static/cockpit.js', { type: 'text/javascript; charset=utf-8', body: CLIENT_JS, version: VERSION.js }],
   ['/static/graph.js', { type: 'text/javascript; charset=utf-8', body: GRAPH_JS, version: VERSION.graph }],
   ['/static/vendor/graph-lib.js', { type: 'text/javascript; charset=utf-8', body: GRAPH_LIB, version: VERSION.graphLib }],
