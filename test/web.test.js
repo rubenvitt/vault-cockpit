@@ -224,6 +224,11 @@ test('Login: PKCE, nonce, Sitzungs-Cookie, Rücksprung und Wochenseite', async (
     assert.equal((await api.json()).week.id, '2026-W42');
     assert.equal((await call('/api/woche?woche=kaputt')).status, 400);
     assert.equal((await call('/?woche=kaputt')).status, 400);
+    // Rückblick als JSON für die native App.
+    const review = await call('/api/rueckblick?woche=2026-W42');
+    assert.equal(review.status, 200);
+    assert.equal((await review.json()).totals.done, 3);
+    assert.equal((await call('/api/rueckblick?woche=kaputt')).status, 400);
 
     await login();
     const out = await call('/logout', { method: 'POST' });

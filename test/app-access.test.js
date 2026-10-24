@@ -405,3 +405,35 @@ test('App-API: MP3 einer fertigen Folge mit Range für den nativen Player; Seite
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('Geräte-Token: JSON und Aktionen des Cockpits ohne Cookie und CSRF, Seiten und Einstellungen nicht', async () => {
+  await withServer(async ({ base, call, tokens, store }) => {
+    const app = tokens.create('Rubens iPhone', 'app').token;
+    const search = tokens.create('Suche', 'search').token;
+    // Ohne Woche im Testaufbau: 400 statt 401 heißt, die Anmeldung hat gegriffen.
+    assert.equal((await call('/api/woche', { bearer: app })).status, 400);
+    assert.equal((await call('/api/woche', { bearer: search })).status, 401, 'nur Recht „App“');
+    assert.equal((await call('/api/woche', { bearer: 'vct_falsch' })).status, 401);
+    assert.equal((await call('/api/woche')).status, 401);
+
+    const { doc } = store.addDocument({ url: 'https://blatt.test/e', title: 'Im Eingang', status: 'eingang', reading_minutes: 3 });
+    const post = (bearer, fields) =>
+      fetch(`${base}/aktion/lesen/sortieren`, {
+        method: 'POST',
+        headers: { 'x-forwarded-host': 'vault.test', accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded', ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) },
+        body: new URLSearchParams(fields),
+      });
+    assert.equal((await post(search, { id: doc.id, ziel: 'stapel' })).status, 401);
+    const ok = await post(app, { id: doc.id, ziel: 'stapel' });
+    assert.equal(ok.status, 200);
+    const body = await ok.json();
+    assert.equal(body.ok, true);
+    assert.equal(body.doc.status, 'stapel');
+    assert.equal(body.undo.action, '/aktion/lesen/sortieren');
+    assert.equal(store.get(doc.id).status, 'stapel');
+
+    // HTML-Seiten und Einstellungen bleiben beim Cookie.
+    assert.equal((await call('/lesen/eingang', { bearer: app, jar: {} })).status, 303);
+    assert.equal((await call('/einstellungen', { bearer: app, jar: {} })).status, 303);
+  });
+});

@@ -236,6 +236,16 @@ export function createAppAccess({ sessions, tokens, reading, publicUrl, appId = 
       return `${redirectTo}?${new URLSearchParams({ code, state: app.state })}`;
     },
 
+    /**
+     * Geräte-Token mit Recht `app` aus `Authorization: Bearer …`, sonst null (antwortet nicht selbst).
+     * Für die native App auf den JSON-Endpunkten und Aktionen des Cockpits (src/web/http.js).
+     */
+    device(req) {
+      const m = /^Bearer (\S+)$/.exec(String(req.headers.authorization ?? ''));
+      const t = m ? tokens.find(m[1]) : null;
+      return t && grantsOf(t.scope).includes('app') ? t : null;
+    },
+
     /** Abbruch oder Ablehnung zurück an die App, damit das Login-Blatt zugeht. */
     deny: (app, error) => `${redirectTo}?${new URLSearchParams({ error, state: app.state })}`,
 
