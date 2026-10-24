@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createEpisodes, chunkText, dialogueBatches, stripId3, EpisodeError } from '../src/lesen/folgen.js';
-import { parseRange, progressOf, clock } from '../src/lesen/folgen-page.js';
+import { parseRange, progressOf, clock, newSummary } from '../src/lesen/folgen-page.js';
 import { createClaudeWriter, WriterError } from '../src/lesen/claude.js';
 import { createReadingStore } from '../src/lesen/store.js';
 import { readingRoutes } from '../src/lesen/http.js';
@@ -258,6 +258,10 @@ test('Folgen: Fortschritt in Schritten, Prozent und Restzeit statt „1 von 4“
   assert.match(speaking.label, /25 %, noch etwa 3 Min\./);
   const reading = progressOf({ kind: 'vorlesen', status: 'spricht', done: 0, total: 10 }, t0);
   assert.deepEqual([reading.steps.length, reading.step, reading.percent], [3, 1, 0]);
+  assert.deepEqual(newSummary({ kind: 'podcast', texts: 3, chars: 0, minutes: 10 }), { main: 'Podcast · 3 Texte · 10 Min.', cost: 'rund 9.000 Zeichen bei ElevenLabs, dazu dein Claude-Abo' });
+  assert.deepEqual(newSummary({ kind: 'vorlesen', texts: 1, chars: 1800, minutes: 10 }), { main: 'Vorlesen · 1 Text · etwa 2 Min.', cost: 'rund 1.800 Zeichen bei ElevenLabs' });
+  assert.equal(newSummary({ kind: 'vorlesen', texts: 2, chars: 0 }).cost, 'Schon alles gehört, kostet nichts');
+  assert.equal(newSummary({ kind: 'report', texts: 0 }).main, 'Bitte mindestens einen Text wählen');
   assert.equal(clock(75), '1:15');
   assert.equal(clock(3725), '1:02:05');
 });
@@ -274,6 +278,9 @@ test('Folgen: Seiten ohne JavaScript, Anlegen per Formular, Audio mit Range', ()
     assert.match(neu, new RegExp(`name="doc" value="${b.id}" checked`));
     assert.match(neu, /name="art" value="vorlesen" checked/);
     assert.match(neu, /rund \d+ Zeichen bei ElevenLabs/);
+    assert.match(neu, /<input type="radio" name="laenge" value="10" checked>/, 'Länge als Auswahl statt Liste');
+    assert.match(neu, /data-chars="\d+"/, 'Zeichen je Text für die Zusammenfassung');
+    assert.match(neu, /lesen-folgen\.js/);
     assert.match((await page('/lesen/stapel?zeit=15')).html, /href="\/lesen\/folgen\/neu\?zeit=15" class="btn quiet">Folge erzeugen/);
 
     const form = new URLSearchParams([['art', 'vorlesen'], ['doc', a.id], ['laenge', '10']]);

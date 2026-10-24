@@ -7,10 +7,45 @@
 // In der iOS-App schickt der Knopf nur `{type:'folge', id, titel, art}` an die
 // App; dort spielt der native Player (Sperrbildschirm, AirPlay, Hintergrund).
 //
+// Auf `/lesen/folgen/neu` rechnet es den Satz am Knopf (Art, Texte, Dauer,
+// Kosten) beim Umschalten neu, wie `newSummary` in src/lesen/folgen-page.js.
+//
 // Solange eine Folge entsteht, holt die Seite alle paar Sekunden
 // `/lesen/folgen/stand` und tauscht die Karten der entstehenden Folgen aus.
 (() => {
   'use strict';
+
+  const form = document.querySelector('[data-folge-neu]');
+  if (form) {
+    const fmt = new Intl.NumberFormat('de-DE');
+    const KINDS = { vorlesen: 'Vorlesen', podcast: 'Podcast', report: 'Report' };
+    const summary = form.querySelector('[data-summary]');
+    const costLine = form.querySelector('[data-cost]');
+    const show = (main, cost) => {
+      summary.textContent = main;
+      costLine.textContent = cost;
+    };
+    const submit = form.querySelector('button[type=submit]');
+    const update = () => {
+      const kind = form.querySelector('input[name=art]:checked')?.value;
+      const docs = [...form.querySelectorAll('input[name=doc]:checked')];
+      const minutes = Number(form.querySelector('input[name=laenge]:checked')?.value) || 10;
+      if (!kind) return;
+      submit.disabled = !docs.length;
+      if (!docs.length) return show('Bitte mindestens einen Text wählen', '');
+      const n = `${docs.length} ${docs.length === 1 ? 'Text' : 'Texte'}`;
+      if (kind === 'vorlesen') {
+        const chars = docs.reduce((sum, d) => sum + (Number(d.dataset.chars) || 0), 0);
+        show(`Vorlesen · ${n} · etwa ${Math.max(1, Math.round(chars / 900))} Min.`, chars ? `rund ${fmt.format(chars)} Zeichen bei ElevenLabs` : 'Schon alles gehört, kostet nichts');
+      } else {
+        show(`${KINDS[kind]} · ${n} · ${minutes} Min.`, `rund ${fmt.format(minutes * 900)} Zeichen bei ElevenLabs, dazu dein Claude-Abo`);
+      }
+    };
+    form.addEventListener('change', update);
+    // Doppeltes Absenden würde zwei Folgen bezahlen.
+    form.addEventListener('submit', () => setTimeout(() => (submit.disabled = true)));
+    update();
+  }
 
   const list = document.querySelector('.folgen');
   if (!list) return;
