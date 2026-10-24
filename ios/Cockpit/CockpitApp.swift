@@ -23,6 +23,7 @@ struct CockpitApp: App {
                 if scenePhase == .active, model.phase == .loggedIn { await model.sendPendingShares() }
             }
             .sheet(item: $model.listening) { PlayerView(minutes: $0.minutes) }
+            .sheet(item: $model.episode) { EpisodePlayerView(request: $0) }
             .confirmationDialog("Cockpit", isPresented: $model.showsMenu) {
                 Button("Abmelden", role: .destructive) { Task { await model.logout() } }
             } message: {

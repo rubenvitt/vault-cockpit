@@ -693,10 +693,24 @@ Abo-Token `CLAUDE_CODE_OAUTH_TOKEN`: keine Werkzeuge (`--tools ""`), `--safe-mod
 (kein CLAUDE.md, keine Hooks, Skills, Plugins oder MCP-Server), leeres
 Arbeitsverzeichnis, die Texte über stdin, das Ergebnis als JSON nach
 `--json-schema`. Modell unter **Einstellungen → Vorlesen → Folgen**, Standard
-`sonnet`, das schont das Abo-Limit. Es entsteht immer nur eine Folge zugleich;
-was ein Neustart unterbricht, steht danach als Fehler da (neu anstoßen kostet
-noch einmal). Die MP3 kommt mit `Range` (`/lesen/folgen/audio?id=…`), damit Safari
-sie spielt und Vorspulen geht.
+`sonnet`, das schont das Abo-Limit. Es entsteht immer nur eine Folge zugleich.
+
+Bezahltes geht nicht verloren: Claudes Skript liegt als `<id>.skript.json`, sobald
+es da ist, die schon gesprochenen Abschnitte bleiben in `<id>.mp3.part`. Nach einem
+Fehler setzt **Fortsetzen** dort an und bezahlt nur, was fehlt; nach einem Neustart
+(Deploy) läuft eine Folge mit Skript von selbst weiter. Nur wenn Claude noch nicht
+fertig war, muss Claude noch einmal schreiben, das entscheidet man selbst
+(„Erneut versuchen“).
+
+Die Liste zeigt jede Folge als Karte: entstehende mit Schritten (Eingereiht →
+Claude schreibt → Stimmen sprechen → Fertig), Fortschrittsbalken und geschätzter
+Restzeit, live über `/lesen/folgen/stand`; fertige mit großem Abspiel-Knopf
+(`/static/lesen-folgen.js`): Stelle, ±15/30 Sekunden, Tempo, gemerkte Stelle je
+Folge, Titel und Knöpfe auf dem Sperrbildschirm über die Media Session. In der
+iOS-App öffnet der Knopf den nativen Player (`/api/app/folge`, siehe
+[ios/README.md](ios/README.md)). Die MP3 kommt mit `Range`
+(`/lesen/folgen/audio?id=…`), damit Safari sie spielt und Vorspulen geht; die
+Content-Security-Policy der Seiten erlaubt Audio dafür mit `media-src 'self' blob:`.
 
 Kosten: ElevenLabs rechnet nach Zeichen. Ein Text mit 15 Minuten Lesezeit hat
 rund 20 000 Zeichen; mit `eleven_multilingual_v2` kostet das 20 000 Credits, mit

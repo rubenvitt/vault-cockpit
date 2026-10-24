@@ -67,6 +67,23 @@ public struct APIClient: Sendable {
         return data
     }
 
+    /// Lädt die MP3 einer fertigen Folge (`/api/app/folge`) nach `destination`; eine Datei dort
+    /// wird ersetzt. 404, wenn es die Folge nicht gibt oder sie noch entsteht.
+    public func downloadEpisode(id: String, to destination: URL) async throws {
+        var request = URLRequest(url: baseURL.appending(path: "api/app/folge").appending(queryItems: [URLQueryItem(name: "id", value: id)]))
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("audio/mpeg", forHTTPHeaderField: "Accept")
+        let (file, response) = try await session.download(for: request)
+        let files = FileManager.default
+        defer { try? files.removeItem(at: file) }
+        // Bei einem Fehler steht die Meldung des Servers (JSON) in der Datei.
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if !(200..<300).contains(status) { try Self.check((try? Data(contentsOf: file)) ?? Data(), response) }
+        try files.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if files.fileExists(atPath: destination.path) { try files.removeItem(at: destination) }
+        try files.moveItem(at: file, to: destination)
+    }
+
     /// Speichert die Lesestelle; `anchor` in Zeichen des Textes. Liefert den Fortschritt laut Server.
     @discardableResult
     public func saveProgress(id: String, progress: Double, anchor: Int? = nil) async throws -> Double {

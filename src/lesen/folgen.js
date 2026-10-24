@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, renameSync, mkdirSync, appendFileSync, rmSync, statSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, mkdirSync, appendFileSync, rmSync, statSync, existsSync, truncateSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { htmlText } from './anchor.js';
@@ -19,9 +19,13 @@ import { createElevenLabs, DIALOGUE_CHARS } from './tts.js';
  *   Vault-Inbox, eine Stimme liest die Sprechfassung.
  *
  * Claude läuft über die CLI mit dem Abo (src/lesen/claude.js). Die Folgen
- * liegen unter `dir` (`folgen.json` und je Folge `<id>.mp3`), es läuft immer
- * nur eine. Was beim Neustart mitten drin war, steht danach als Fehler da:
- * neu anstoßen kostet noch einmal, also entscheidet das der Nutzer.
+ * liegen unter `dir` (`folgen.json`, je Folge `<id>.mp3`), es läuft immer nur
+ * eine. Nichts Bezahltes geht verloren: Claudes Skript liegt als
+ * `<id>.skript.json`, sobald es da ist, und die schon gesprochenen Abschnitte
+ * bleiben in `<id>.mp3.part`. Nach einem Fehler setzt `retry` dort fort; nach
+ * einem Neustart geht das von selbst, wenn das Skript schon da ist (Vorlesen
+ * holt Gesprochenes ohnehin aus dem Satz-Cache). Fehlt das Skript, müsste
+ * Claude noch einmal schreiben; das entscheidet der Nutzer.
  */
 
 export const KINDS = { vorlesen: 'Vorlesen', podcast: 'Podcast', report: 'Report' };
@@ -38,6 +42,8 @@ const PARALLEL = 3;
 const DOC_INPUT = 60_000;
 const TOTAL_INPUT = 300_000;
 const STATES = { wartet: 'wartet', schreibt: 'Claude schreibt', spricht: 'wird gesprochen', fertig: 'fertig', fehler: 'Fehler' };
+/** `mp3_44100_128` (src/lesen/tts.js) hat eine feste Bitrate: 16 000 Bytes je Sekunde. */
+export const BYTES_PER_SECOND = 16_000;
 
 export class EpisodeError extends Error {
   constructor(message, status = 400) {
@@ -229,6 +235,23 @@ export function createEpisodes({ dir, store, tts, speech = null, voices, writer,
 
   const find = (id) => episodes.find((e) => e.id === id) ?? null;
   const audioPath = (id) => join(dir, `${id}.mp3`);
+  const scriptPath = (id) => join(dir, `${id}.skript.json`);
+
+  /** Claudes Antwort, sobald sie da ist: Ein zweiter Versuch fragt Claude nicht noch einmal. */
+  function loadScript(id) {
+    try {
+      return JSON.parse(readFileSync(scriptPath(id), 'utf8'));
+    } catch {
+      return null;
+    }
+  }
+  function saveScript(id, script) {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(`${scriptPath(id)}.tmp`, JSON.stringify(script), { mode: 0o600 });
+    renameSync(`${scriptPath(id)}.tmp`, scriptPath(id));
+  }
+  /** Lässt sich ohne Claude fortsetzen: Vorlesen immer, sonst mit gesichertem Skript. */
+  const resumable = (ep) => ep.kind === 'vorlesen' || existsSync(scriptPath(ep.id));
 
   function update(ep, fields) {
     Object.assign(ep, fields, { updated_at: now().toISOString() });
@@ -263,54 +286,64 @@ export function createEpisodes({ dir, store, tts, speech = null, voices, writer,
     const docs = ep.docs.map((id) => store.get(id)).filter(Boolean);
     if (!docs.length) throw new EpisodeError('Die Texte gibt es nicht mehr');
 
-    // Was gesprochen wird: Stücke für eine Stimme oder Gesprächsabschnitte.
+    // Was gesprochen wird, je Stück `() => { audio, paid }`: Sätze für eine Stimme oder Gesprächsabschnitte.
     let jobs;
-    // Beim Vorlesen: nur Sätze, die nicht schon im Cache lagen.
-    let billed = null;
     if (ep.kind === 'vorlesen') {
       if (!speech) throw new EpisodeError('Vorlesen braucht die Stimme vom Server');
       const parts = docs.flatMap((d) => narration(d, cfg.model)).filter((p) => p.text);
-      billed = 0;
-      jobs = parts.map((p) => () => {
-        if (!speech.cached(p)) billed += p.text.length;
-        return speech.audio(p);
+      // Bezahlt wird nur, was nicht schon im Cache lag.
+      jobs = parts.map((p) => async () => {
+        const paid = speech.cached(p) ? 0 : p.text.length;
+        return { audio: await speech.audio(p), paid };
       });
     } else {
-      update(ep, { status: 'schreibt' });
-      const input = sourceInput(docs);
+      let script = loadScript(ep.id);
+      if (!script) {
+        update(ep, { status: 'schreibt', writing_at: now().toISOString() });
+        script = await writer.write({ ...(ep.kind === 'podcast' ? podcastJob(docs, ep.minutes) : reportJob(docs, ep.minutes)), input: sourceInput(docs) });
+        saveScript(ep.id, script);
+      }
       if (ep.kind === 'podcast') {
-        const script = await writer.write({ ...podcastJob(docs, ep.minutes), input });
         const { host, guest } = voices();
         const turns = (script.turns ?? []).filter((t) => String(t.text ?? '').trim()).map((t) => ({ text: String(t.text).trim(), voice: t.speaker === 'B' ? guest : host }));
         if (turns.length < 2) throw new EpisodeError('Claude hat kein Gespräch geliefert');
-        const batches = dialogueBatches(turns);
-        jobs = batches.map((inputs) => () => el.dialogue({ inputs }));
+        jobs = dialogueBatches(turns).map((inputs) => async () => ({ audio: await el.dialogue({ inputs }), paid: inputs.reduce((n, i) => n + i.text.length, 0) }));
         update(ep, { title: cleanTitle(script.title, ep.title), chars: turns.reduce((s, t) => s + t.text.length, 0) });
       } else {
-        const script = await writer.write({ ...reportJob(docs, ep.minutes), input });
         const title = cleanTitle(script.title, ep.title);
-        const sources = docs.map((d) => `- [${String(d.title || d.url).replace(/[[\]]/g, '')}](${d.url})`).join('\n');
-        const date = now().toISOString().slice(0, 10);
-        const text = `_Report aus dem Lesestapel, ${date}, ${docs.length} ${docs.length === 1 ? 'Text' : 'Texte'} (Cockpit)_\n\n${String(script.note ?? '').trim()}\n\n## Quellen\n\n${sources}\n`;
-        const note = await capture({ title, text, captureId: `folge-${ep.id}` });
+        // Die Notiz nur einmal; `captureId` macht auch einen zweiten Versuch harmlos.
+        if (!ep.note) {
+          const sources = docs.map((d) => `- [${String(d.title || d.url).replace(/[[\]]/g, '')}](${d.url})`).join('\n');
+          const date = now().toISOString().slice(0, 10);
+          const text = `_Report aus dem Lesestapel, ${date}, ${docs.length} ${docs.length === 1 ? 'Text' : 'Texte'} (Cockpit)_\n\n${String(script.note ?? '').trim()}\n\n## Quellen\n\n${sources}\n`;
+          const note = await capture({ title, text, captureId: `folge-${ep.id}` });
+          update(ep, { note: note?.path ?? null });
+        }
         const parts = chunkText(String(script.spoken ?? ''), NARRATION_CHARS);
         if (!parts.length) throw new EpisodeError('Claude hat keine Sprechfassung geliefert');
-        jobs = parts.map((t, i) => () => el.synthesize({ text: t, previous: parts[i - 1] ?? null, next: parts[i + 1] ?? null }));
-        update(ep, { title, note: note?.path ?? null, chars: parts.join('').length });
+        jobs = parts.map((t, i) => async () => ({ audio: await el.synthesize({ text: t, previous: parts[i - 1] ?? null, next: parts[i + 1] ?? null }), paid: t.length }));
+        update(ep, { title, chars: parts.join('').length });
       }
     }
 
-    update(ep, { status: 'spricht', done: 0, total: jobs.length });
     const part = `${audioPath(ep.id)}.part`;
     mkdirSync(dir, { recursive: true });
-    writeFileSync(part, Buffer.alloc(0), { mode: 0o600 });
+    // Fortsetzen: Was schon gesprochen in `.part` liegt, bleibt; ein halb geschriebenes Stück fällt weg.
+    const from = ep.done > 0 && ep.total === jobs.length && Number.isInteger(ep.part_bytes) && existsSync(part) && statSync(part).size >= ep.part_bytes ? ep.done : 0;
+    if (from) truncateSync(part, ep.part_bytes);
+    else writeFileSync(part, Buffer.alloc(0), { mode: 0o600 });
+    const at = now().toISOString();
+    update(ep, { status: 'spricht', done: from, total: jobs.length, part_bytes: from ? ep.part_bytes : 0, paid: from ? (ep.paid ?? 0) : 0, speaking_at: at, speaking_from: from });
     // Satzweise mehrere zugleich (Vorlesen); Gespräch und Report nacheinander, die Stücke sind groß.
-    await inOrder(jobs, ep.kind === 'vorlesen' ? PARALLEL : 1, (audio, i) => {
-      appendFileSync(part, i === 0 ? audio : stripId3(audio));
-      update(ep, { done: i + 1 });
+    await inOrder(jobs.slice(from), ep.kind === 'vorlesen' ? PARALLEL : 1, ({ audio, paid }, i) => {
+      const k = from + i;
+      const chunk = k === 0 ? audio : stripId3(audio);
+      appendFileSync(part, chunk);
+      update(ep, { done: k + 1, part_bytes: ep.part_bytes + chunk.length, paid: ep.paid + paid });
     });
     renameSync(part, audioPath(ep.id));
-    update(ep, { ...(billed === null ? {} : { chars: billed }), status: 'fertig', bytes: statSync(audioPath(ep.id)).size, finished_at: now().toISOString() });
+    rmSync(scriptPath(ep.id), { force: true });
+    update(ep, { ...(ep.kind === 'vorlesen' ? { chars: ep.paid } : {}), status: 'fertig', bytes: statSync(audioPath(ep.id)).size, finished_at: now().toISOString() });
     logger.info?.(`Folge „${ep.title}“ (${KINDS[ep.kind]}) fertig, ${ep.chars} Zeichen`);
   }
 
@@ -322,7 +355,7 @@ export function createEpisodes({ dir, store, tts, speech = null, voices, writer,
     try {
       await produce(ep);
     } catch (err) {
-      rmSync(`${audioPath(ep.id)}.part`, { force: true });
+      // `.part` und Skript bleiben für `retry`.
       logger.warn?.(`Folge „${ep.title}“: ${err.message}`);
       update(ep, { status: 'fehler', error: err.message });
     } finally {
@@ -331,9 +364,12 @@ export function createEpisodes({ dir, store, tts, speech = null, voices, writer,
     return next();
   }
 
-  // Beim Start: Unterbrochenes als Fehler, Wartendes wieder einreihen.
+  // Beim Start: Unterbrochenes fortsetzen, wenn das ohne Claude geht, sonst als Fehler; Wartendes wieder einreihen.
   for (const ep of episodes) {
-    if (ep.status === 'schreibt' || ep.status === 'spricht') Object.assign(ep, { status: 'fehler', error: 'Durch einen Neustart unterbrochen. Neu anstoßen kostet noch einmal.' });
+    if (ep.status === 'schreibt' || ep.status === 'spricht') {
+      if (resumable(ep)) Object.assign(ep, { status: 'wartet' });
+      else Object.assign(ep, { status: 'fehler', error: 'Durch einen Neustart unterbrochen, bevor Claudes Skript da war.' });
+    }
     if (ep.status === 'wartet') queue.push(ep.id);
   }
   if (episodes.length) save();
@@ -346,6 +382,11 @@ export function createEpisodes({ dir, store, tts, speech = null, voices, writer,
     availability,
     list: () => [...episodes].reverse(),
     get: find,
+    /** Nach einem Fehler: setzt fort, ohne Claude noch einmal zu fragen, wenn das Skript schon da ist. */
+    resumable: (id) => {
+      const ep = find(id);
+      return Boolean(ep && resumable(ep));
+    },
     audioPath: (id) => (find(id)?.status === 'fertig' && existsSync(audioPath(id)) ? audioPath(id) : null),
     /** Zeichen und Texte vor dem Anstoßen, für die Auswahlseite. */
     preview({ kind, docIds, minutes = 10 }) {
@@ -382,12 +423,27 @@ export function createEpisodes({ dir, store, tts, speech = null, voices, writer,
       return Object.assign(created, { done: next() });
     },
 
+    /**
+     * Fehlgeschlagene Folge noch einmal einreihen. Gesprochenes und Claudes
+     * Skript bleiben, bezahlt wird nur, was fehlt. `done` wie bei `create`.
+     */
+    retry(id) {
+      const ep = find(id);
+      if (!ep) throw new EpisodeError('Diese Folge gibt es nicht', 404);
+      if (ep.status !== 'fehler') throw new EpisodeError('Nur eine fehlgeschlagene Folge lässt sich fortsetzen', 409);
+      const missing = availability()[ep.kind];
+      if (missing) throw new EpisodeError(missing, 409);
+      update(ep, { status: 'wartet', error: null });
+      queue.push(ep.id);
+      return Object.assign({ ...ep }, { done: next() });
+    },
+
     remove(id) {
       const ep = find(id);
       if (!ep) throw new EpisodeError('Diese Folge gibt es nicht', 404);
       if (running === id) throw new EpisodeError('Die Folge entsteht gerade; danach löschen');
       episodes = episodes.filter((e) => e.id !== id);
-      rmSync(audioPath(id), { force: true });
+      for (const f of [audioPath(id), `${audioPath(id)}.part`, scriptPath(id)]) rmSync(f, { force: true });
       save();
       return ep;
     },

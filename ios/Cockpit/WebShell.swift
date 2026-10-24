@@ -37,10 +37,20 @@ enum NavigationDecision: Equatable {
 enum BridgeMessage: Equatable {
     /// `/lesen/hoeren`: `{type: 'hoeren', zeit}`
     case listen(minutes: Int)
+    /// `/lesen/folgen`: `{type: 'folge', id, titel, art}`, fertige Folge im nativen Player.
+    case episode(id: String, title: String, kind: String)
 
     init?(_ body: Any) {
-        guard let body = body as? [String: Any], body["type"] as? String == "hoeren" else { return nil }
-        self = .listen(minutes: (body["zeit"] as? NSNumber)?.intValue ?? 15)
+        guard let body = body as? [String: Any] else { return nil }
+        switch body["type"] as? String {
+        case "hoeren":
+            self = .listen(minutes: (body["zeit"] as? NSNumber)?.intValue ?? 15)
+        case "folge":
+            guard let id = body["id"] as? String, !id.isEmpty else { return nil }
+            self = .episode(id: id, title: body["titel"] as? String ?? "Folge", kind: body["art"] as? String ?? "Folge")
+        default:
+            return nil
+        }
     }
 }
 
@@ -240,6 +250,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         guard message.frameInfo.isMainFrame, message.frameInfo.securityOrigin.host == model.config.serverURL.host() else { return }
         switch BridgeMessage(message.body) {
         case .listen(let minutes): model.listening = AppModel.ListenRequest(minutes: minutes)
+        case .episode(let id, let title, let kind): model.episode = AppModel.EpisodeRequest(episodeID: id, title: title, kind: kind)
         case nil: break
         }
     }

@@ -10,6 +10,9 @@ import { createReadingStore } from '../src/lesen/store.js';
 import { readingRoutes } from '../src/lesen/http.js';
 import { createReadingApi } from '../src/lesen/api.js';
 import { SpeechError } from '../src/lesen/tts.js';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const ISSUER = 'https://id.test';
 const CLIENT = 'cockpit-web';
@@ -60,13 +63,13 @@ const pkce = () => {
   return { verifier, challenge: createHash('sha256').update(verifier).digest('base64url') };
 };
 
-async function withServer(run, { sub = 'ruben', publicUrl = 'https://vault.test', allowDevScheme = false, speech = null } = {}) {
+async function withServer(run, { sub = 'ruben', publicUrl = 'https://vault.test', allowDevScheme = false, speech = null, episodes = null } = {}) {
   const idp = fakeIdp({ sub });
   const clock = { t: Date.now() };
   const tokens = createTokenStore({ logger: quiet });
   const store = createReadingStore({ path: ':memory:' });
   const changed = [];
-  const reading = readingRoutes({ store, speech, logger: quiet, onChange: (id) => changed.push(id) });
+  const reading = readingRoutes({ store, speech, episodes, logger: quiet, onChange: (id) => changed.push(id) });
   const logs = [];
   const logger = { info: (m) => logs.push(m), warn: (m) => logs.push(m), error: (m) => logs.push(m) };
   const webHttp = createWebHttp({
@@ -375,4 +378,30 @@ test('App-API: Satz als MP3 von der Stimme auf dem Server, `stimme` in der Wiede
     assert.equal((await (await call('/api/app/stapel?zeit=15', { bearer })).json()).stimme, null);
     assert.equal((await call(`/api/app/audio?id=${doc.id}&von=0&bis=17`, { bearer })).status, 404);
   });
+});
+
+test('App-API: MP3 einer fertigen Folge mit Range für den nativen Player; Seiten erlauben Audio', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cockpit-app-folge-'));
+  const file = join(dir, 'f1.mp3');
+  writeFileSync(file, 'ID3-folge');
+  const episodes = { audioPath: (id) => (id === 'f1' ? file : null), list: () => [], resumable: () => false, availability: () => ({}) };
+  try {
+    await withServer(
+      async ({ call, tokens }) => {
+        assert.equal((await call('/api/app/folge?id=f1')).status, 401);
+        const bearer = tokens.create('iPhone', 'app').token;
+        const full = await call('/api/app/folge?id=f1', { bearer });
+        assert.equal(full.status, 200);
+        assert.equal(full.headers.get('content-type'), 'audio/mpeg');
+        assert.equal(full.headers.get('accept-ranges'), 'bytes');
+        assert.equal(Buffer.from(await full.arrayBuffer()).toString(), 'ID3-folge');
+        assert.equal((await call('/api/app/folge?id=gibtsnicht', { bearer })).status, 404);
+        // Ohne `media-src` blockt die Content-Security-Policy jedes <audio> (Folgen, Vorlesen mit Server-Stimme).
+        assert.match((await call('/app/angemeldet')).headers.get('content-security-policy'), /media-src 'self' blob:/);
+      },
+      { episodes },
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

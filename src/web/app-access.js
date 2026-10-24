@@ -5,6 +5,7 @@ import { SettingsError } from '../cockpit/settings.js';
 import { SCOPES, grantsOf } from '../cockpit/tokens.js';
 import { SpeechError } from '../lesen/tts.js';
 import { readLimited, FormError } from './multipart.js';
+import { audioResponse } from '../lesen/folgen-page.js';
 
 /**
  * Login und JSON-API der iOS-App (VCP-91). Die App ist eine Hülle um das
@@ -33,7 +34,8 @@ import { readLimited, FormError } from './multipart.js';
  * `GET /api/app/stapel?zeit=15`, `GET /api/app/text?id=…`,
  * `GET /api/app/audio?id=…&von=…&bis=…` (MP3 eines Satzes, nur mit Stimme vom
  * Server; welche, sagt `stimme` in `/api/app/stapel`), `POST /api/app/fortschritt`, `POST /api/app/markierung`, `GET /api/app/ich`,
- * `POST /api/app/abmelden` (widerruft den Token selbst).
+ * `GET /api/app/folge?id=…` (MP3 einer fertigen Folge, mit `Range`, für den
+ * nativen Player), `POST /api/app/abmelden` (widerruft den Token selbst).
  * Dieselbe Logik wie `/lesen/hoeren` und die `/aktion/lesen/…`-Aktionen.
  * Fehler wie src/lesen/api.js: `{ error, status, message }`.
  */
@@ -179,6 +181,16 @@ export function createAppAccess({ sessions, tokens, reading, publicUrl, appId = 
         const data = await reading.listen.audio({ id: q.get('id'), von: q.get('von'), bis: q.get('bis') });
         res.writeHead(200, { 'content-type': 'audio/mpeg', 'content-length': data.length, 'cache-control': 'private, max-age=86400', 'x-content-type-options': 'nosniff' });
         return res.end(req.method === 'HEAD' ? undefined : data);
+      },
+    ],
+    '/api/app/folge': [
+      'GET',
+      (req, res, url) => {
+        const path = reading.episodeAudio?.(url.searchParams.get('id') ?? '');
+        if (!path) return fail(res, 404, 'Diese Folge gibt es nicht oder sie ist noch nicht fertig');
+        const r = audioResponse(path, req.headers.range);
+        res.writeHead(r.status, { ...r.headers, 'x-content-type-options': 'nosniff' });
+        return res.end(req.method === 'HEAD' ? undefined : r.body);
       },
     ],
     '/api/app/fortschritt': [

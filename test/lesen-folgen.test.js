@@ -2,11 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createEpisodes, chunkText, dialogueBatches, stripId3, EpisodeError } from '../src/lesen/folgen.js';
-import { parseRange } from '../src/lesen/folgen-page.js';
+import { parseRange, progressOf, clock } from '../src/lesen/folgen-page.js';
 import { createClaudeWriter, WriterError } from '../src/lesen/claude.js';
 import { createReadingStore } from '../src/lesen/store.js';
 import { readingRoutes } from '../src/lesen/http.js';
@@ -40,7 +40,7 @@ test('Folgen: Text in Stücke an Satzgrenzen, Gespräch in Abschnitte, ID3 weg, 
 });
 
 /** Stapel mit zwei Texten, falsches ElevenLabs, falscher Claude, falsche Inbox. */
-function setup(dir, { tts = TTS, writer = null } = {}) {
+function setup(dir, { tts = TTS, writer = null, failDialogue = () => false, before = () => {} } = {}) {
   const store = createReadingStore({ path: ':memory:' });
   const a = store.addDocument({ url: 'https://blatt.test/a', title: 'Vom Lesen', site: 'blatt.test', status: 'stapel', reading_minutes: 3, content_html: '<p>Erster Satz hier. Zweiter Satz dort.</p>' }).doc;
   const b = store.addDocument({ url: 'https://blatt.test/b', title: 'Vom Hören', status: 'stapel', reading_minutes: 2, content_html: '<p>Hören geht auch.</p>' }).doc;
@@ -53,6 +53,7 @@ function setup(dir, { tts = TTS, writer = null } = {}) {
       return Buffer.from(`[${input.text}]`);
     },
     dialogue: async ({ inputs }) => {
+      if (failDialogue(calls.dialogue.length)) throw new Error('ElevenLabs nicht erreichbar (ETIMEDOUT)');
       calls.dialogue.push(inputs);
       return Buffer.from(inputs.map((i) => `${i.voice}:${i.text}`).join('|'));
     },
@@ -65,6 +66,7 @@ function setup(dir, { tts = TTS, writer = null } = {}) {
       return { title: 'Report/Woche', note: '## Überblick\n\nZwei Texte.', spoken: 'Zwei Texte. Beide kurz.' };
     },
   };
+  before({ a, b });
   let current = tts;
   const speech = createSpeech({ settings: () => current, provider, logger: quiet });
   const episodes = createEpisodes({
@@ -178,21 +180,87 @@ test('Folgen: ohne Stimme oder Claude nicht anlegbar, Fehler bleibt stehen, Lös
     assert.equal(noClaude.episodes.availability().vorlesen, null);
   }));
 
-test('Folgen: nach einem Neustart ist Unterbrochenes ein Fehler, Wartendes läuft weiter', () =>
+test('Folgen: nach einem Fehler geht es weiter, ohne Claude oder Gesprochenes noch einmal zu bezahlen', () =>
+  withDir(async (dir) => {
+    const long = (n) => `${'Satz. '.repeat(n)}`.trim();
+    const writer = {
+      available: () => true,
+      write: async (job) => {
+        writes.push(job);
+        return { title: 'Lang', turns: [{ speaker: 'A', text: long(250) }, { speaker: 'B', text: long(250) }, { speaker: 'A', text: long(250) }] };
+      },
+    };
+    const writes = [];
+    // Der zweite Abschnitt scheitert beim ersten Versuch.
+    let failures = 1;
+    const { a, episodes, calls } = setup(dir, { writer, failDialogue: (n) => n === 1 && failures-- > 0 });
+    const ep = episodes.create({ kind: 'podcast', docIds: [a.id], minutes: 5 });
+    await ep.done;
+    const failed = episodes.get(ep.id);
+    assert.equal(failed.status, 'fehler');
+    assert.match(failed.error, /ETIMEDOUT/);
+    assert.equal(failed.done, 1);
+    assert.equal(failed.total, 3);
+    assert.ok(episodes.resumable(ep.id), 'Skript liegt bereit');
+    assert.ok(existsSync(join(dir, `${ep.id}.mp3.part`)), 'Gesprochenes bleibt');
+
+    const again = episodes.retry(ep.id);
+    assert.equal(again.status, 'wartet');
+    await again.done;
+    const done = episodes.get(ep.id);
+    assert.equal(done.status, 'fertig', done.error);
+    assert.equal(writes.length, 1, 'Claude nur einmal');
+    assert.equal(calls.dialogue.length, 3, 'jeder Abschnitt genau einmal');
+    const audio = String(readFileSync(episodes.audioPath(ep.id)));
+    assert.equal(audio, calls.dialogue.map((inputs) => inputs.map((i) => `${i.voice}:${i.text}`).join('|')).join(''), 'Reihenfolge bleibt');
+    assert.equal(existsSync(join(dir, `${ep.id}.skript.json`)), false, 'Skript nach dem Fertigwerden weg');
+    assert.throws(() => episodes.retry(ep.id), /fehlgeschlagene/);
+  }));
+
+test('Folgen: nach einem Neustart läuft weiter, was ohne Claude geht; sonst bleibt ein Fehler', () =>
   withDir(async (dir) => {
     const at = '2026-10-23T09:00:00Z';
-    writeFileSync(
-      join(dir, 'folgen.json'),
-      JSON.stringify([
-        { id: 'x1', kind: 'vorlesen', title: 'Halb', docs: [], status: 'spricht', chars: 10, created_at: at, updated_at: at },
-        { id: 'x2', kind: 'vorlesen', title: 'Fertig', docs: [], status: 'fertig', chars: 10, created_at: at, updated_at: at },
-      ]),
-    );
-    const { episodes } = setup(dir);
+    const before = ({ a }) => {
+      writeFileSync(
+        join(dir, 'folgen.json'),
+        JSON.stringify([
+          { id: 'x1', kind: 'podcast', minutes: 5, title: 'Ohne Skript', docs: [a.id], status: 'schreibt', chars: 10, created_at: at, updated_at: at },
+          { id: 'x2', kind: 'podcast', minutes: 5, title: 'Mit Skript', docs: [a.id], status: 'spricht', done: 0, total: 1, chars: 10, created_at: at, updated_at: at },
+          { id: 'x3', kind: 'vorlesen', title: 'Fertig', docs: [], status: 'fertig', chars: 10, created_at: at, updated_at: at },
+        ]),
+      );
+      writeFileSync(join(dir, 'x2.skript.json'), JSON.stringify({ title: 'Gerettet', turns: [{ speaker: 'A', text: 'Hallo.' }, { speaker: 'B', text: 'Hi.' }] }));
+    };
+    const { episodes, calls } = setup(dir, { before });
     assert.equal(episodes.get('x1').status, 'fehler');
     assert.match(episodes.get('x1').error, /Neustart/);
-    assert.equal(episodes.get('x2').status, 'fertig');
+    assert.equal(episodes.resumable('x1'), false);
+    assert.equal(episodes.get('x2').status, 'wartet', 'mit Skript gleich wieder eingereiht');
+    assert.equal(episodes.get('x3').status, 'fertig');
+    // Die Warteschlange startet eine Sekunde nach dem Aufbau.
+    await new Promise((res) => setTimeout(res, 1200));
+    assert.equal(episodes.get('x2').status, 'fertig', episodes.get('x2').error);
+    assert.equal(episodes.get('x2').title, 'Gerettet');
+    assert.equal(calls.writes.length, 0, 'Claude wird nicht gefragt');
+    assert.equal(String(readFileSync(episodes.audioPath('x2'))), 'Host:Hallo.|Gast:Hi.');
   }));
+
+test('Folgen: Fortschritt in Schritten, Prozent und Restzeit statt „1 von 4“', () => {
+  const t0 = Date.parse('2026-10-23T10:00:00Z');
+  const waiting = progressOf({ kind: 'podcast', status: 'wartet' }, t0);
+  assert.deepEqual([waiting.steps, waiting.step, waiting.percent], [['Eingereiht', 'Claude schreibt', 'Stimmen sprechen', 'Fertig'], 0, null]);
+  const writing = progressOf({ kind: 'report', status: 'schreibt', writing_at: '2026-10-23T09:58:00Z' }, t0);
+  assert.equal(writing.step, 1);
+  assert.equal(writing.percent, null);
+  assert.match(writing.label, /Claude schreibt den Report, seit 2 Min\./);
+  const speaking = progressOf({ kind: 'podcast', status: 'spricht', done: 1, total: 4, speaking_at: '2026-10-23T09:59:00Z', speaking_from: 0 }, t0);
+  assert.deepEqual([speaking.step, speaking.percent], [2, 25]);
+  assert.match(speaking.label, /25 %, noch etwa 3 Min\./);
+  const reading = progressOf({ kind: 'vorlesen', status: 'spricht', done: 0, total: 10 }, t0);
+  assert.deepEqual([reading.steps.length, reading.step, reading.percent], [3, 1, 0]);
+  assert.equal(clock(75), '1:15');
+  assert.equal(clock(3725), '1:02:05');
+});
 
 test('Folgen: Seiten ohne JavaScript, Anlegen per Formular, Audio mit Range', () =>
   withDir(async (dir) => {
@@ -218,7 +286,17 @@ test('Folgen: Seiten ohne JavaScript, Anlegen per Formular, Audio mit Range', ()
     const [ep] = episodes.list();
     assert.equal(ep.status, 'fertig');
     const list = (await page('/lesen/folgen')).html;
-    assert.match(list, new RegExp(`<audio controls preload="none" src="/lesen/folgen/audio\\?id=${ep.id}"></audio>`));
+    assert.match(list, new RegExp(`data-src="/lesen/folgen/audio\\?id=${ep.id}"`));
+    assert.match(list, /<button type="button" class="folge-play" data-play aria-label="Abspielen: Vorlesen: Vom Lesen" hidden>/, 'Knopf für den Player');
+    assert.match(list, new RegExp(`<a href="/lesen/folgen/audio\\?id=${ep.id}" class="folge-play folge-nojs"`), 'ohne JavaScript: Link auf die MP3');
+    assert.match(list, /lesen-folgen\.js/);
+    assert.doesNotMatch(list, /<audio/);
+
+    const stand = await page('/lesen/folgen/stand');
+    assert.equal(stand.headers['content-type'], 'application/json; charset=utf-8');
+    const items = JSON.parse(stand.body).items;
+    assert.deepEqual(items.map((i) => [i.id, i.status, i.busy]), [[ep.id, 'fertig', false]]);
+    assert.match(items[0].html, /^<li class="folge is-ready"/);
 
     const full = await page(`/lesen/folgen/audio?id=${ep.id}`);
     assert.equal(full.status, 200);

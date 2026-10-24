@@ -48,6 +48,8 @@ make test      # Unit-Tests auf dem ersten verfügbaren iPhone-Simulator
   gilt bis zum Ablauf oder bis „Überall abmelden“.
 - **Brücke** `cockpit` (`window.webkit.messageHandlers.cockpit`): `/lesen/hoeren` schickt
   `{type: 'hoeren', zeit}`; die App öffnet den nativen Player `PlayerView(minutes:)` (unten).
+  `/lesen/folgen` schickt `{type: 'folge', id, titel, art}`; die App öffnet `EpisodePlayerView`
+  (Folgen, unten).
   Nachrichten nimmt die App nur vom Hauptframe des eigenen Hosts an.
 
 ## Player „Unterwegs hören“ (VCP-94)
@@ -114,6 +116,15 @@ xcrun simctl launch booted dev.rubeen.cockpit -PlayerDemo
 Der erste Satz braucht im Simulator einige Sekunden, bis die Sprachausgabe geladen ist.
 Nur auf dem Gerät prüfbar: gesperrter Bildschirm, AirPods-Gesten, CarPlay-Audio, Premium-Stimme
 (Einstellungen → Bedienungshilfen → Gesprochene Inhalte → Stimmen → Deutsch laden).
+
+## Player für Folgen
+
+`EpisodePlayerView` mit `Cockpit/Player/EpisodePlayer.swift`: lädt die fertige MP3 einmal über
+`GET /api/app/folge?id=…` (Geräte-Token) nach `Caches/Folgen/<id>.mp3` und spielt sie mit
+`AVPlayer`, danach auch ohne Netz. Sperrbildschirm und Kontrollzentrum zeigen Titel, Art, Länge
+und Stelle; Fernbedienung mit Abspielen/Pause, ±15/30 Sekunden, Stelle ziehen und Tempo. Anrufe
+unterbrechen und setzen fort, Kopfhörer ab hält an, AirPlay über `AVRoutePickerView`. Die Stelle
+je Folge bleibt in den UserDefaults der App Group.
 
 ## `CockpitShared` für Share Extension (VCP-93) und Player (VCP-94)
 
