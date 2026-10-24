@@ -1,0 +1,25 @@
+{
+  "ok": true,
+  "message": "Fällig Do 15.10.: Zahnarzt Termin",
+  "task": {
+    "id": "t5",
+    "ref": null,
+    "title": "Zahnarzt Termin",
+    "status": "open",
+    "due": "2026-10-15",
+    "phoenix": null,
+    "location": {
+      "kind": "area",
+      "id": "a2",
+      "name": "Gesundheit",
+      "area_name": "Gesundheit"
+    }
+  },
+  "undo": {
+    "action": "/aktion/faellig",
+    "fields": {
+      "id": "t5",
+      "due": "keine"
+    }
+  }
+}

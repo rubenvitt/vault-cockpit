@@ -1,0 +1,314 @@
+{
+  "tz": "Europe/Berlin",
+  "vaultName": "RNotes",
+  "week": {
+    "id": "2026-W42",
+    "year": 2026,
+    "week": 42,
+    "monday": "2026-10-12",
+    "sunday": "2026-10-18",
+    "prev": "2026-W41",
+    "next": "2026-W43",
+    "current": true,
+    "past": false
+  },
+  "today": "2026-10-14",
+  "feuer": {
+    "ok": true,
+    "data": {
+      "path": "phoenix/Feuer W3.md",
+      "title": "Feuer W3 - 2026-Q4",
+      "status": "aktiv",
+      "zeitraum": "12.10.2026 – 18.10.2026",
+      "alignment": "Ziel 1 · Sichtbar werden",
+      "goal": "**Am Mi 14.10. um 14:00 hältst du den Workshop** mit fertigen Folien.",
+      "firstMove": "💻 Laptop auf."
+    }
+  },
+  "burning": {
+    "id": "t9",
+    "ref": null,
+    "title": "Lauf-Flamme",
+    "status": "open",
+    "due": "2026-10-14T06:00:00Z",
+    "area": "Gesundheit",
+    "project": null,
+    "phoenix": "flamme",
+    "fire": "2026-W42",
+    "running": true,
+    "url": "https://zunder.test/#/aufgabe/t9",
+    "startedAt": "2026-10-14T09:40:00Z"
+  },
+  "flames": {
+    "ok": true,
+    "data": [
+      {
+        "id": "t7",
+        "ref": null,
+        "title": "Steuer-Flamme",
+        "status": "done",
+        "due": "2026-10-13T09:00:00Z",
+        "area": "Finanzen",
+        "project": null,
+        "phoenix": "flamme",
+        "fire": "2026-W42",
+        "running": false,
+        "url": "https://zunder.test/#/aufgabe/t7",
+        "startedAt": "2026-10-13T09:00:00Z",
+        "endedAt": "2026-10-13T10:30:00Z",
+        "minutes": 90
+      },
+      {
+        "id": "t9",
+        "ref": null,
+        "title": "Lauf-Flamme",
+        "status": "open",
+        "due": "2026-10-14T06:00:00Z",
+        "area": "Gesundheit",
+        "project": null,
+        "phoenix": "flamme",
+        "fire": "2026-W42",
+        "running": true,
+        "url": "https://zunder.test/#/aufgabe/t9",
+        "startedAt": "2026-10-14T09:40:00Z",
+        "endedAt": null,
+        "minutes": null
+      }
+    ]
+  },
+  "rocks": {
+    "ok": true,
+    "data": [
+      {
+        "area": "Finanzen",
+        "tasks": [
+          {
+            "id": "t3",
+            "ref": null,
+            "title": "Steuerberater anrufen",
+            "status": "done",
+            "due": "2026-10-13",
+            "area": "Finanzen",
+            "project": null,
+            "phoenix": null,
+            "fire": null,
+            "running": false,
+            "url": "https://zunder.test/#/aufgabe/t3"
+          },
+          {
+            "id": "t2",
+            "ref": "FIN-2",
+            "title": "Steuererklärung abgeben",
+            "status": "open",
+            "due": "2026-10-16",
+            "area": "Finanzen",
+            "project": null,
+            "phoenix": null,
+            "fire": null,
+            "running": false,
+            "url": "https://zunder.test/#/aufgabe/t2"
+          }
+        ],
+        "done": 1
+      },
+      {
+        "area": "Gesundheit",
+        "tasks": [
+          {
+            "id": "t6",
+            "ref": null,
+            "title": "Laufschuhe",
+            "status": "blocked",
+            "due": null,
+            "area": "Gesundheit",
+            "project": null,
+            "phoenix": "feuer_schritt",
+            "fire": "2026-W42",
+            "running": false,
+            "url": "https://zunder.test/#/aufgabe/t6"
+          }
+        ],
+        "done": 0
+      }
+    ],
+    "partial": false
+  },
+  "calendar": {
+    "ok": true,
+    "data": [
+      {
+        "date": "2026-10-12",
+        "label": "Mo 12.10.",
+        "today": false,
+        "events": []
+      },
+      {
+        "date": "2026-10-13",
+        "label": "Di 13.10.",
+        "today": false,
+        "events": []
+      },
+      {
+        "date": "2026-10-14",
+        "label": "Mi 14.10.",
+        "today": true,
+        "events": [
+          {
+            "title": "SAS-Workshop, Berlin",
+            "start": "2026-10-14T12:00:00.000Z",
+            "end": "2026-10-14T15:30:00.000Z",
+            "allDay": false,
+            "location": "Maritim; Raum 2",
+            "calendar": "Privat"
+          }
+        ]
+      },
+      {
+        "date": "2026-10-15",
+        "label": "Do 15.10.",
+        "today": false,
+        "events": [
+          {
+            "title": "Daily",
+            "start": "2026-10-15T06:45:00.000Z",
+            "end": "2026-10-15T07:00:00.000Z",
+            "allDay": false,
+            "location": null,
+            "calendar": "Privat"
+          }
+        ]
+      },
+      {
+        "date": "2026-10-16",
+        "label": "Fr 16.10.",
+        "today": false,
+        "events": []
+      },
+      {
+        "date": "2026-10-17",
+        "label": "Sa 17.10.",
+        "today": false,
+        "events": [
+          {
+            "title": "Mini-Aschezeit",
+            "start": "2026-10-16T22:00:00.000Z",
+            "end": "2026-10-18T22:00:00.000Z",
+            "allDay": true,
+            "location": null,
+            "calendar": "Privat"
+          }
+        ]
+      },
+      {
+        "date": "2026-10-18",
+        "label": "So 18.10.",
+        "today": false,
+        "events": [
+          {
+            "title": "Mini-Aschezeit",
+            "start": "2026-10-16T22:00:00.000Z",
+            "end": "2026-10-18T22:00:00.000Z",
+            "allDay": true,
+            "location": null,
+            "calendar": "Privat"
+          }
+        ]
+      }
+    ],
+    "errors": [
+      {
+        "calendar": "Arbeit",
+        "error": "CalDAV antwortet mit HTTP 401"
+      }
+    ]
+  },
+  "tasks": {
+    "ok": true,
+    "data": [
+      {
+        "id": "t8",
+        "ref": "GES-3",
+        "title": "Impfpass suchen",
+        "status": "open",
+        "due": "2026-10-01",
+        "area": "Gesundheit",
+        "project": null,
+        "phoenix": null,
+        "fire": null,
+        "running": false,
+        "url": "https://zunder.test/#/aufgabe/t8",
+        "overdue": true
+      }
+    ]
+  },
+  "inbox": {
+    "vault": {
+      "ok": true,
+      "data": [
+        {
+          "path": "inbox/2026-10-13 0912 - Web-Cockpit.md",
+          "title": "2026-10-13 0912 - Web-Cockpit",
+          "type": null,
+          "updated": "2026-10-13T07:12:00.000Z"
+        },
+        {
+          "path": "inbox/Idee.md",
+          "title": "Idee",
+          "type": "notiz",
+          "updated": null
+        }
+      ]
+    },
+    "zunder": {
+      "ok": true,
+      "data": [
+        {
+          "id": "i1",
+          "ref": null,
+          "title": "Neu erfasst",
+          "status": "open",
+          "due": null,
+          "area": "Inbox",
+          "project": null,
+          "phoenix": null,
+          "fire": null,
+          "running": false,
+          "url": "https://zunder.test/#/aufgabe/i1"
+        }
+      ]
+    },
+    "targets": [
+      {
+        "id": "a1",
+        "name": "Finanzen",
+        "projects": [
+          {
+            "id": "p1",
+            "name": "Steuer 2026"
+          }
+        ]
+      },
+      {
+        "id": "a2",
+        "name": "Gesundheit",
+        "projects": []
+      },
+      {
+        "id": "a4",
+        "name": "Programmieren",
+        "projects": [
+          {
+            "id": "pdev",
+            "name": "Vault Cockpit"
+          }
+        ]
+      }
+    ],
+    "folder": "inbox"
+  },
+  "can": {
+    "actions": true,
+    "notes": true,
+    "plan": true
+  }
+}

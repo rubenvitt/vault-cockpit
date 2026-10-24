@@ -1,0 +1,26 @@
+{
+  "ok": true,
+  "message": "Aus KW 42 genommen: Belege sortieren",
+  "task": {
+    "id": "t1",
+    "ref": null,
+    "title": "Belege sortieren",
+    "status": "open",
+    "due": null,
+    "phoenix": null,
+    "location": {
+      "kind": "project",
+      "id": "p1",
+      "name": "Steuer 2026",
+      "area_id": "a1",
+      "area_name": "Finanzen"
+    }
+  },
+  "undo": {
+    "action": "/aktion/woche/zuruecksetzen",
+    "fields": {
+      "id": "t1",
+      "phoenix": "feuer_schritt:2026-W42"
+    }
+  }
+}

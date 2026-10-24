@@ -585,7 +585,8 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     const id = url.searchParams.get('woche');
     const model = await cockpit.week(id || null);
     if (!model) return json(res, 400, { error: 'invalid_week', error_description: 'Kalenderwoche wie 2026-W42 erwartet' });
-    return json(res, 200, model);
+    // `can`: was die Seite anbietet (Schreiben, Feuer-Notiz, Planen), wie `writeContext` für die HTML-Seite.
+    return json(res, 200, { ...model, can: { actions: Boolean(actions), notes: Boolean(notes), plan: Boolean(plan) } });
   }
 
   async function settingsPage(req, res, session, { status = 200, notice = null, error = null, created = null } = {}) {

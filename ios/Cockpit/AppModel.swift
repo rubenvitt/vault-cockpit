@@ -2,13 +2,42 @@ import AuthenticationServices
 import CockpitShared
 import Observation
 import OSLog
+import UIKit
 import WebKit
 
-/// Anmeldestand der App: Login, Abmelden, Wunsch nach dem Player.
+/// Reiter nach dem Login. Woche und Rückblick sind nativ, Lesen und Einstellungen (noch) Web.
+enum AppTab: Hashable {
+    case week, reading, review, settings
+
+    /// Web-Pfad, auf den nach einem abgelaufenen Login zurückgesprungen wird.
+    var path: String {
+        switch self {
+        case .week: "/"
+        case .reading: "/lesen"
+        case .review: "/rueckblick"
+        case .settings: "/einstellungen"
+        }
+    }
+}
+
+/// Ziele im Stapel des Reiters „Woche“.
+enum WeekDestination: Hashable {
+    /// „Woche planen“ bzw. „Einplanen“: Woche und Vorbelegung wie `/planen?woche=…&aus=…`;
+    /// `flame` springt zu „Flamme einplanen“ (`#flamme`).
+    case plan(String?, PlanQuery, flame: Bool = false)
+}
+
+/// Anmeldestand der App: Login, Abmelden, Reiter, Wunsch nach dem Player.
 @MainActor
 @Observable
 final class AppModel {
     enum Phase { case loggedOut, loggedIn }
+
+    /// Web-Seite als Blatt über den nativen Reitern (Suche, Notiz, …).
+    struct WebPage: Identifiable {
+        let id = UUID()
+        let path: String
+    }
 
     /// Wunsch der Seite `/lesen/hoeren`, den nativen Player zu öffnen.
     struct ListenRequest: Identifiable {
@@ -45,19 +74,39 @@ final class AppModel {
     var episode: EpisodeRequest?
     var showsMenu = false
 
+    /// Gewählter Reiter.
+    var tab: AppTab = .week
+    /// Stapel des Reiters „Woche“ (Planen).
+    var weekPath: [WeekDestination] = []
+    /// Startpfade der Web-Reiter; nach dem Login z. B. die Seite, auf der die Sitzung ablief.
+    var readingPath = AppTab.reading.path
+    var settingsPath = AppTab.settings.path
+    /// Zählt hoch, wenn ein nativer Bildschirm den Reiter „Lesen“ auf `readingPath` schickt (neu laden).
+    var readingLoads = 0
+    var webSheet: WebPage?
+    /// Zählt hoch, wenn die Schnelleingabe den Fokus bekommen soll (`/?erfassen=1`).
+    var captureFocusRequest = 0
+    /// Stores der nativen Bildschirme mit dem Geräte-Token; nil ohne Anmeldung.
+    private(set) var cockpit: CockpitSession?
+    /// Ein Link hat den Rückblick mit eigener Woche geöffnet (`open(_:)`), `tabChanged` lässt sie stehen.
+    @ObservationIgnored private var reviewRouted = false
+
     init(config: AppConfiguration = AppConfiguration()) {
         self.config = config
         keychain = KeychainStore(accessGroup: config.keychainGroup)
         // Ohne Token gleich der Login; ist nur das Cookie abgelaufen, fängt die Web-Hülle `/login` ab.
-        phase = ((try? keychain.token()) ?? nil) == nil ? .loggedOut : .loggedIn
+        let token = (try? keychain.token()) ?? nil
+        phase = token == nil ? .loggedOut : .loggedIn
+        if let token { startCockpit(token: token) }
         #if DEBUG
         // Player ohne Anmeldung im Simulator vorführen (`-PlayerDemo`, siehe ios/README.md).
         if DemoListenService.isRequested { listening = ListenRequest(minutes: 15) }
         #endif
     }
 
-    var startURL: URL {
-        URL(string: startPath, relativeTo: config.serverURL)?.absoluteURL ?? config.serverURL
+    /// Adresse eines Pfads auf dem Server, z. B. `/lesen`.
+    func url(for path: String) -> URL {
+        URL(string: path, relativeTo: config.serverURL)?.absoluteURL ?? config.serverURL
     }
 
     func login() async {
@@ -81,6 +130,10 @@ final class AppModel {
                 // Im Simulator ohne Signieren fehlt die Keychain-Gruppe (-34018).
                 log.error("Geräte-Token nicht gespeichert: \(error.localizedDescription, privacy: .public)")
             }
+            // Die nativen Bildschirme nehmen den Token aus der Antwort, auch wenn die Keychain fehlt.
+            startCockpit(token: result.token.token)
+            open(afterLogin: startPath)
+            startPath = "/"
             webViewID = UUID()
             phase = .loggedIn
         } catch {
@@ -97,6 +150,87 @@ final class AppModel {
         startPath = next
         phase = .loggedOut
         Task { await login() }
+    }
+
+    /// Die API hat den Geräte-Token abgelehnt (401): wie eine abgelaufene Sitzung, zurück auf den Reiter.
+    func apiUnauthorized() {
+        guard phase == .loggedIn, !isLoggingIn else { return }
+        sessionExpired(next: tab.path)
+    }
+
+    // MARK: Native Bildschirme
+
+    /// Neue Stores mit `token`; die alten (vorige Anmeldung) halten an.
+    private func startCockpit(token: String) {
+        cockpit?.stop()
+        let session = CockpitSession(serverURL: config.serverURL, token: token)
+        session.context.onUnauthorized = { [weak self] in self?.apiUnauthorized() }
+        session.context.openURL = { url in ExternalLink.open(url) }
+        session.context.openPath = { [weak self] path in self?.open(path: path) }
+        session.start()
+        cockpit = session
+    }
+
+    /// Link auf eine Seite, die nativ ist: Reiter wechseln, Woche oder Rückblick laden, Planen öffnen.
+    func open(_ route: NativeRoute) {
+        webSheet = nil
+        switch route {
+        case .week(let week, let focusCapture):
+            tab = .week
+            weekPath = []
+            if focusCapture { captureFocusRequest += 1 }
+            if let cockpit { Task { await cockpit.week.load(week: week) } }
+        case .review(let week):
+            reviewRouted = tab != .review
+            tab = .review
+            if let cockpit { Task { await cockpit.review.load(week: week) } }
+        case .plan(let week, let query):
+            tab = .week
+            weekPath = [.plan(week, query)]
+        }
+    }
+
+    /// Reiter „Lesen“ auf einer Seite öffnen, z. B. „Markierungen dieser Woche wiedersehen“ aus dem Rückblick.
+    func openReading(path: String) {
+        webSheet = nil
+        readingPath = path
+        readingLoads += 1
+        tab = .reading
+    }
+
+    /// Reiter gewechselt (Leiste oder Link). Wie der Link „Rückblick“ im Web zeigt der Rückblick
+    /// die Woche, die gerade offen ist; ein Link mit eigener Woche geht vor.
+    func tabChanged(from old: AppTab, to new: AppTab) {
+        defer { reviewRouted = false }
+        guard new == .review, old == .week, !reviewRouted, let cockpit, let shown = cockpit.week.model?.week else { return }
+        let week = shown.current ? nil : shown.id
+        if cockpit.review.requestedWeek != week {
+            Task { await cockpit.review.load(week: week) }
+        }
+    }
+
+    /// Web-Pfad aus einem nativen Bildschirm (`redirect`, Notiz, Suche): nativ, wenn es geht, sonst als Blatt.
+    func open(path: String) {
+        if let route = NativeRoute(webPath: path) {
+            open(route)
+        } else {
+            webSheet = WebPage(path: path)
+        }
+    }
+
+    /// Nach dem Login dorthin, wo die Sitzung ablief: nativer Bildschirm, Web-Reiter oder Blatt.
+    private func open(afterLogin path: String) {
+        if NativeRoute(webPath: path) != nil {
+            open(path: path)
+        } else if path.hasPrefix(AppTab.reading.path) {
+            readingPath = path
+            tab = .reading
+        } else if path.hasPrefix(AppTab.settings.path) {
+            settingsPath = path
+            tab = .settings
+        } else {
+            webSheet = WebPage(path: path)
+        }
     }
 
     /// Sendet, was die Share Extension gepuffert hat (kein Netz, Extension beendet, abgemeldet).
@@ -128,6 +262,16 @@ final class AppModel {
         } catch {
             log.error("Geräte-Token nicht gelöscht: \(error.localizedDescription, privacy: .public)")
         }
+        // Gespeicherte Stände gehören zum Konto. Der Puffer der Schnelleingabe bleibt und geht nach dem nächsten Login raus.
+        cockpit?.stop()
+        cockpit = nil
+        SnapshotStore.applicationSupport().removeAll()
+        tab = .week
+        weekPath = []
+        readingPath = AppTab.reading.path
+        readingLoads = 0
+        settingsPath = AppTab.settings.path
+        webSheet = nil
         startPath = "/"
         loginError = nil
         self.notice = notice

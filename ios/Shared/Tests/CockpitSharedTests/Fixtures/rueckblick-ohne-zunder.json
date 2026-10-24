@@ -1,0 +1,16 @@
+{
+  "tz": "Europe/Berlin",
+  "week": {
+    "id": "2026-W42",
+    "year": 2026,
+    "week": 42,
+    "monday": "2026-10-12",
+    "sunday": "2026-10-18",
+    "prev": "2026-W41",
+    "next": "2026-W43",
+    "current": true
+  },
+  "ok": false,
+  "error": "Zunder ist nicht eingerichtet",
+  "unconfigured": true
+}

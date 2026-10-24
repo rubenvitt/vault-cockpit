@@ -1,0 +1,29 @@
+{
+  "ok": true,
+  "message": "Flamme Do 15.10. 09:00 eingeplant: Folien bauen",
+  "task": {
+    "id": "n1",
+    "ref": null,
+    "title": "Folien bauen",
+    "status": "open",
+    "due": "2026-10-15T07:00:00Z",
+    "phoenix": {
+      "role": "flamme",
+      "fire": "2026-W42"
+    },
+    "location": {
+      "kind": "area",
+      "id": "a2",
+      "name": "Gesundheit",
+      "area_name": "Gesundheit"
+    }
+  },
+  "undo": {
+    "action": "/aktion/status",
+    "fields": {
+      "id": "n1",
+      "status": "dropped"
+    }
+  },
+  "redirect": "/planen?woche=2026-W42#flamme"
+}

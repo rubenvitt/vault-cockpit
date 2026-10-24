@@ -1,0 +1,28 @@
+{
+  "ok": true,
+  "message": "Phönix-Schritt KW 42: Zahnarzt Termin",
+  "task": {
+    "id": "t5",
+    "ref": null,
+    "title": "Zahnarzt Termin",
+    "status": "open",
+    "due": "2026-10-15",
+    "phoenix": {
+      "role": "feuer_schritt",
+      "fire": "2026-W42"
+    },
+    "location": {
+      "kind": "area",
+      "id": "a2",
+      "name": "Gesundheit",
+      "area_name": "Gesundheit"
+    }
+  },
+  "undo": {
+    "action": "/aktion/phoenix",
+    "fields": {
+      "id": "t5",
+      "fire": ""
+    }
+  }
+}
