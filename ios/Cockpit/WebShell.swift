@@ -40,6 +40,15 @@ enum BridgeMessage: Equatable {
     /// `/lesen/folgen`: `{type: 'folge', id, titel, art, dauer, groesse}`, fertige Folge im nativen Player.
     /// `seconds` und `bytes` laut Server, 0 = unbekannt.
     case episode(id: String, title: String, kind: String, seconds: Double, bytes: Int)
+    /// Jede Seite (`/static/ui.js`): `{type: 'haptik', art}` beim Wechsel des Reiters, Abhaken usw.
+    case haptic(Haptic)
+
+    enum Haptic: String {
+        case selection = "auswahl"
+        case light = "leicht"
+        case success = "erfolg"
+        case error = "fehler"
+    }
 
     init?(_ body: Any) {
         guard let body = body as? [String: Any] else { return nil }
@@ -55,6 +64,9 @@ enum BridgeMessage: Equatable {
                 seconds: (body["dauer"] as? NSNumber)?.doubleValue ?? 0,
                 bytes: (body["groesse"] as? NSNumber)?.intValue ?? 0
             )
+        case "haptik":
+            guard let haptic = (body["art"] as? String).flatMap(Haptic.init(rawValue:)) else { return nil }
+            self = .haptic(haptic)
         default:
             return nil
         }
@@ -99,6 +111,10 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         configuration.userContentController.add(WeakMessageHandler(self), name: "cockpit")
 
         webView = WKWebView(frame: .zero, configuration: configuration)
+        // Bis die erste Seite malt: der Hintergrund des Cockpits (`--bg`) statt Weiß, auch im Dunkelmodus.
+        webView.isOpaque = false
+        webView.backgroundColor = .cockpitBackground
+        webView.scrollView.backgroundColor = .cockpitBackground
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
@@ -259,7 +275,28 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         case .listen(let minutes): model.listening = AppModel.ListenRequest(minutes: minutes)
         case .episode(let id, let title, let kind, let seconds, let bytes):
             model.episode = AppModel.EpisodeRequest(episodeID: id, title: title, kind: kind, seconds: seconds, bytes: bytes)
+        case .haptic(let haptic): feedback(haptic)
         case nil: break
+        }
+    }
+
+    private func feedback(_ haptic: BridgeMessage.Haptic) {
+        switch haptic {
+        case .selection: UISelectionFeedbackGenerator().selectionChanged()
+        case .light: UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        case .success: UINotificationFeedbackGenerator().notificationOccurred(.success)
+        case .error: UINotificationFeedbackGenerator().notificationOccurred(.error)
+        }
+    }
+}
+
+private extension UIColor {
+    /// `--bg` aus cockpit.css (`THEME` in layout.js).
+    static var cockpitBackground: UIColor {
+        UIColor { traits in
+            traits.userInterfaceStyle == .dark
+                ? UIColor(red: 0x14 / 255, green: 0x13 / 255, blue: 0x11 / 255, alpha: 1)
+                : UIColor(red: 0xF7 / 255, green: 0xF5 / 255, blue: 0xF1 / 255, alpha: 1)
         }
     }
 }

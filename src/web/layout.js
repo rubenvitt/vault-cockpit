@@ -11,7 +11,7 @@ export const esc = (s) =>
  * Adressen der eigenen Dateien. `createWebHttp` hängt beim Start einen
  * Inhalts-Hash an, damit nach einem Deploy kein altes CSS aus dem Cache kommt.
  */
-export const assets = { css: '/static/cockpit.css', js: '/static/cockpit.js', graph: '/static/graph.js', graphLib: '/static/vendor/graph-lib.js', offline: '/static/offline.js', inbox: '/static/lesen-eingang.js', lesenDoc: '/static/lesen-doc.js', lesenHoeren: '/static/lesen-hoeren.js', lesenFolgen: '/static/lesen-folgen.js', lesenLinks: '/static/lesen-verbinden.js' };
+export const assets = { css: '/static/cockpit.css', ui: '/static/ui.js', js: '/static/cockpit.js', graph: '/static/graph.js', graphLib: '/static/vendor/graph-lib.js', offline: '/static/offline.js', inbox: '/static/lesen-eingang.js', lesenDoc: '/static/lesen-doc.js', lesenHoeren: '/static/lesen-hoeren.js', lesenFolgen: '/static/lesen-folgen.js', lesenLinks: '/static/lesen-verbinden.js' };
 
 export function versionAssets(versions) {
   for (const [key, v] of Object.entries(versions)) if (v && assets[key]) assets[key] = `${assets[key].split('?')[0]}?v=${v}`;
@@ -22,7 +22,8 @@ export const THEME = { light: '#f7f5f1', dark: '#141311' };
 
 /**
  * `script` lädt `/static/cockpit.js`, `scripts` weitere eigene Dateien (z. B. den Graphen).
- * `/static/offline.js` (Service Worker, Offline-Puffer) hängt an jeder Seite, nach den anderen.
+ * `/static/ui.js` (Rückmeldung beim Tippen) steht an jeder Seite vorn, `/static/offline.js`
+ * (Service Worker, Offline-Puffer) hinten.
  */
 export function head(title, { script = false, scripts = [] } = {}) {
   return `<head>
@@ -40,6 +41,7 @@ export function head(title, { script = false, scripts = [] } = {}) {
 <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
 <link rel="stylesheet" href="${esc(assets.css)}">
+<script src="${esc(assets.ui)}" defer></script>
 ${script ? `<script src="${esc(assets.js)}" defer></script>` : ''}
 ${scripts.map((src) => `<script src="${esc(src)}" defer></script>`).join('\n')}
 <script src="${esc(assets.offline)}" defer></script>
