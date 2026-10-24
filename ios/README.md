@@ -228,6 +228,26 @@ XCODE_ACCOUNT=1 ios/scripts/testflight.sh
 Per GitHub: Jeder Push auf `main`, der `ios/` ändert, lädt automatisch zu TestFlight hoch. Sonst den Workflow „iOS TestFlight“ manuell starten oder einen Tag `ios/v…` pushen (z. B. `git tag ios/v1.0-1 && git push origin ios/v1.0-1`). Mit einer Xcode-Beta lädt App Store Connect nichts an, lokal geht dann nur `EXPORT_DESTINATION=export`. Er braucht die Repo-Secrets
 `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8_BASE64` (Inhalt der `.p8`, base64) und `APPLE_TEAM_ID`.
 
+### An Testgruppen verteilen
+
+Nach dem Upload verteilt der Job `distribute` den Build an die Gruppen aus der Repo-Variable
+`TESTFLIGHT_GROUPS` (Settings → Secrets and variables → Actions → Variables, kommagetrennt, z. B.
+`Extern`). Ohne die Variable bleibt es beim Upload. Der Job wartet, bis App Store Connect den
+Build verarbeitet hat, setzt „Was testen“ aus den Commit-Betreffs seit dem letzten Push, hängt
+den Build an die Gruppen und reicht ihn zur Beta-Prüfung ein, sobald eine externe Gruppe dabei
+ist. Lokal: `BUILD_NUMBER=… TESTFLIGHT_GROUPS=Extern ios/scripts/testflight-distribute.js`.
+
+Einmal von Hand in App Store Connect (TestFlight):
+
+- Die Gruppe anlegen; der Name muss genau zu `TESTFLIGHT_GROUPS` passen.
+- „Testinformationen“ ausfüllen: Beschreibung, Feedback-E-Mail und die Angaben zur Beta-Prüfung
+  (Kontakt, Demo-Zugang). Ohne sie lehnt Apple das Einreichen ab.
+- Der API-Key braucht die Rolle „App Manager“ oder „Admin“; mit „Developer“ darf er hochladen,
+  aber keine Gruppen und keine Beta-Prüfung verwalten.
+
+Den ersten Build einer Version prüft Apple (meist unter einem Tag), weitere Builds derselben
+`MARKETING_VERSION` gibt Apple meist sofort frei.
+
 ## Wohin mit neuem Code
 
 | Ordner | Inhalt |
