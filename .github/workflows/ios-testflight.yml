@@ -3,6 +3,7 @@ name: iOS TestFlight
 # Archiviert, signiert automatisch und lädt zu TestFlight hoch, ohne lokales Xcode (lokale
 # Betas nimmt App Store Connect nicht an). Startet von selbst bei jedem Push auf main, der ios/
 # ändert, dazu manuell oder per Tag `ios/v…` (geht auch für Branches, die noch nicht auf main sind).
+# Danach verteilt `distribute` den Build an die Gruppen aus der Repo-Variable TESTFLIGHT_GROUPS.
 on:
   workflow_dispatch:
   push:
@@ -18,9 +19,17 @@ concurrency:
 jobs:
   upload:
     runs-on: macos-latest
+    outputs:
+      build-number: ${{ steps.build-number.outputs.value }}
     steps:
       - uses: actions/checkout@v4
       - run: brew install xcodegen
+      # Hier statt im Skript, damit `distribute` den Build wiederfindet.
+      - id: build-number
+        run: |
+          n=$(date -u +%Y%m%d.%H%M)
+          echo "value=$n" >> "$GITHUB_OUTPUT"
+          echo "BUILD_NUMBER=$n" >> "$GITHUB_ENV"
       - name: API-Key ablegen
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
@@ -35,6 +44,44 @@ jobs:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: ios/scripts/testflight.sh
+      - name: API-Key löschen
+        if: always()
+        run: rm -f "$ASC_KEY_PATH"
+
+  # Wartet auf Apples Verarbeitung (oft 5–15 Minuten), deshalb auf Ubuntu statt auf macOS.
+  distribute:
+    needs: upload
+    if: vars.TESTFLIGHT_GROUPS != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      - name: API-Key ablegen
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+        run: |
+          key="$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
+          (umask 077; printf '%s' "$ASC_KEY_P8_BASE64" | base64 --decode > "$key")
+          echo "ASC_KEY_PATH=$key" >> "$GITHUB_ENV"
+      - name: An Gruppen verteilen
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          BUILD_NUMBER: ${{ needs.upload.outputs.build-number }}
+          TESTFLIGHT_GROUPS: ${{ vars.TESTFLIGHT_GROUPS }}
+          BEFORE: ${{ github.event.before }}
+        # „Was testen“: Commit-Betreffs seit dem letzten Push, ohne Merges und ohne Präfix wie `fix(ios):`.
+        run: |
+          if git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then range="$BEFORE..$GITHUB_SHA"; else range="-1 $GITHUB_SHA"; fi
+          notes=$(git log --no-merges --format='- %s' $range | sed -E 's/^- [a-z]+(\([^)]*\))?!?: /- /')
+          [ -n "$notes" ] || notes="- $(git log -1 --format=%s "$GITHUB_SHA")"
+          WHATS_NEW="$notes" node ios/scripts/testflight-distribute.js
       - name: API-Key löschen
         if: always()
         run: rm -f "$ASC_KEY_PATH"
