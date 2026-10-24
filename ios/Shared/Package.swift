@@ -12,6 +12,7 @@ let package = Package(
     targets: [
         .target(name: "CockpitShared"),
         // Logik ohne Oberfläche; läuft auch unter Linux (`swift test`).
-        .testTarget(name: "CockpitSharedTests", dependencies: ["CockpitShared"]),
+        // Fixtures: echte Antworten des Servers (src/cockpit, src/web/http.js) mit Test-Attrappen.
+        .testTarget(name: "CockpitSharedTests", dependencies: ["CockpitShared"], resources: [.copy("Fixtures")]),
     ]
 )

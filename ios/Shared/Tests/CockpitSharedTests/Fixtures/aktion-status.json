@@ -1,0 +1,25 @@
+{
+  "ok": true,
+  "message": "Erledigt: FIN-2 Steuererklärung abgeben",
+  "task": {
+    "id": "t2",
+    "ref": "FIN-2",
+    "title": "Steuererklärung abgeben",
+    "status": "done",
+    "due": "2026-10-16",
+    "phoenix": null,
+    "location": {
+      "kind": "area",
+      "id": "a1",
+      "name": "Finanzen",
+      "area_name": "Finanzen"
+    }
+  },
+  "undo": {
+    "action": "/aktion/status",
+    "fields": {
+      "id": "t2",
+      "status": "open"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "ok": true,
+  "message": "Flamme gestoppt: Lauf-Flamme · 25 min",
+  "task": {
+    "id": "t9",
+    "ref": null,
+    "title": "Lauf-Flamme",
+    "status": "open",
+    "due": "2026-10-14T06:00:00Z",
+    "phoenix": {
+      "role": "flamme",
+      "fire": "2026-W42"
+    },
+    "location": {
+      "kind": "area",
+      "id": "a2",
+      "name": "Gesundheit",
+      "area_name": "Gesundheit"
+    },
+    "running": false,
+    "startedAt": "2026-10-14T10:00:00Z",
+    "endedAt": "2026-10-14T10:25:00Z",
+    "timing": true
+  }
+}

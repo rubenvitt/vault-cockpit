@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "message": "Im Lesestapel: Ein Artikel",
+  "result": {
+    "kind": "article",
+    "id": "d1",
+    "title": "Ein Artikel",
+    "duplicate": false
+  }
+}

@@ -1,3 +1,4 @@
+import CockpitShared
 import SafariServices
 import SwiftUI
 import WebKit
@@ -14,8 +15,12 @@ enum NavigationDecision: Equatable {
     case external(URL)
     /// `mailto:`, `tel:` usw.: an das System.
     case system(URL)
+    /// Seite, die die App nativ zeigt (`/`, `/rueckblick`, `/planen`): Reiter wechseln statt HTML laden.
+    case native(NativeRoute)
 
-    static func decide(_ url: URL, method: String, server: URL, isMainFrame: Bool) -> NavigationDecision {
+    /// `webOnly`: Pfad, der trotzdem im WKWebView bleibt (die Web-Ansicht, die einen nativen
+    /// Bildschirm vertritt, blättert in sich selbst).
+    static func decide(_ url: URL, method: String, server: URL, isMainFrame: Bool, webOnly: String? = nil) -> NavigationDecision {
         guard let scheme = url.scheme?.lowercased() else { return .allow }
         if ["about", "blob", "data"].contains(scheme) { return .allow }
         guard scheme == "http" || scheme == "https" else { return .system(url) }
@@ -28,6 +33,7 @@ enum NavigationDecision: Equatable {
         case "/logout" where method == "POST":
             return .logout
         default:
+            if isMainFrame, method == "GET", let route = NativeRoute(url: url), route.path != webOnly { return .native(route) }
             return .allow
         }
     }
@@ -73,11 +79,17 @@ enum BridgeMessage: Equatable {
     }
 }
 
+/// Ein Reiter oder Blatt mit dem Cockpit im WKWebView, ab `startPath`. Jeder hat seinen eigenen
+/// WKWebView; Cookies und Service Worker teilen sie über `WKWebsiteDataStore.default()`.
 struct WebShell: UIViewControllerRepresentable {
     let model: AppModel
+    /// Erste Seite, z. B. `/lesen`. Nie ein nativer Pfad (außer `webOnly`).
+    let startPath: String
+    /// Nativer Pfad, der hier trotzdem als Web-Seite läuft (Platzhalter für Rückblick und Planen).
+    var webOnly: String?
 
     func makeUIViewController(context: Context) -> WebViewController {
-        WebViewController(model: model)
+        WebViewController(model: model, startPath: startPath, webOnly: webOnly)
     }
 
     func updateUIViewController(_ controller: WebViewController, context: Context) {}
@@ -87,13 +99,24 @@ struct WebShell: UIViewControllerRepresentable {
 /// Datei-Upload (`<input type=file>`) zeigt WebKit selbst an.
 final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate, WKScriptMessageHandler {
     private let model: AppModel
+    private let startPath: String
+    private let webOnly: String?
     private var webView: WKWebView!
     private var downloads: [ObjectIdentifier: URL] = [:]
     /// `POST /logout` läuft; die Weiterleitung auf `/login` danach meldet nativ ab statt neu an.
     private var loggingOut = false
 
-    init(model: AppModel) {
+    /// Die Leiste unten (`nav.tabbar`) gibt es in der App schon nativ. Über CSSOM statt `<style>`,
+    /// das die Content-Security-Policy der Seiten nicht erlaubt.
+    static let hideTabBarScript = """
+    document.documentElement.style.setProperty('--tabbar', '0px');
+    document.querySelectorAll('nav.tabbar').forEach(function (n) { n.style.setProperty('display', 'none', 'important'); });
+    """
+
+    init(model: AppModel, startPath: String, webOnly: String? = nil) {
         self.model = model
+        self.startPath = startPath
+        self.webOnly = webOnly
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -109,6 +132,9 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         configuration.allowsInlineMediaPlayback = true
         // WKUserContentController hält seine Handler stark; der Umweg vermeidet den Kreis.
         configuration.userContentController.add(WeakMessageHandler(self), name: "cockpit")
+        for time in [WKUserScriptInjectionTime.atDocumentStart, .atDocumentEnd] {
+            configuration.userContentController.addUserScript(WKUserScript(source: Self.hideTabBarScript, injectionTime: time, forMainFrameOnly: true))
+        }
 
         webView = WKWebView(frame: .zero, configuration: configuration)
         // Bis die erste Seite malt: der Hintergrund des Cockpits (`--bg`) statt Weiß, auch im Dunkelmodus.
@@ -138,7 +164,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        webView.load(URLRequest(url: model.startURL))
+        webView.load(URLRequest(url: model.url(for: startPath)))
     }
 
     @objc private func showMenu(_ press: UILongPressGestureRecognizer) {
@@ -151,7 +177,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         guard let url = action.request.url else { return .cancel }
         if action.shouldPerformDownload { return .download }
         let isMainFrame = action.targetFrame?.isMainFrame ?? true
-        switch NavigationDecision.decide(url, method: action.request.httpMethod ?? "GET", server: model.config.serverURL, isMainFrame: isMainFrame) {
+        switch NavigationDecision.decide(url, method: action.request.httpMethod ?? "GET", server: model.config.serverURL, isMainFrame: isMainFrame, webOnly: webOnly) {
         case .allow:
             // target=_blank auf eigene Seiten: im selben WKWebView öffnen.
             if action.targetFrame == nil {
@@ -173,6 +199,8 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
             present(SFSafariViewController(url: url), animated: true)
         case .system(let url):
             await UIApplication.shared.open(url)
+        case .native(let route):
+            model.open(route)
         }
         return .cancel
     }
@@ -286,17 +314,6 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         case .light: UIImpactFeedbackGenerator(style: .light).impactOccurred()
         case .success: UINotificationFeedbackGenerator().notificationOccurred(.success)
         case .error: UINotificationFeedbackGenerator().notificationOccurred(.error)
-        }
-    }
-}
-
-private extension UIColor {
-    /// `--bg` aus cockpit.css (`THEME` in layout.js).
-    static var cockpitBackground: UIColor {
-        UIColor { traits in
-            traits.userInterfaceStyle == .dark
-                ? UIColor(red: 0x14 / 255, green: 0x13 / 255, blue: 0x11 / 255, alpha: 1)
-                : UIColor(red: 0xF7 / 255, green: 0xF5 / 255, blue: 0xF1 / 255, alpha: 1)
         }
     }
 }

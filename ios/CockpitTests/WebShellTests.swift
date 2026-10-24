@@ -1,4 +1,5 @@
 @testable import Cockpit
+import CockpitShared
 import WebKit
 import XCTest
 
@@ -31,6 +32,28 @@ final class WebShellTests: XCTestCase {
         let local = URL(string: "http://localhost:3000")!
         XCTAssertEqual(NavigationDecision.decide(URL(string: "http://localhost:3000/login")!, method: "GET", server: local, isMainFrame: true), .login(next: "/"))
         XCTAssertEqual(NavigationDecision.decide(URL(string: "http://localhost:8080/")!, method: "GET", server: local, isMainFrame: true), .external(URL(string: "http://localhost:8080/")!))
+    }
+
+    func testNativePagesSwitchTabs() {
+        XCTAssertEqual(decide("https://vault.test/"), .native(.week(nil)))
+        XCTAssertEqual(decide("https://vault.test"), .native(.week(nil)))
+        XCTAssertEqual(decide("https://vault.test/?woche=2026-W42"), .native(.week("2026-W42")))
+        XCTAssertEqual(decide("https://vault.test/rueckblick?woche=2026-W41"), .native(.review("2026-W41")))
+        XCTAssertEqual(decide("https://vault.test/planen?woche=2026-W42&aus=t1#flamme"), .native(.plan("2026-W42", PlanQuery(from: "t1"))))
+        XCTAssertEqual(decide("https://vault.test/", method: "POST"), .allow, "nur Seitenaufrufe")
+        XCTAssertEqual(decide("https://vault.test/", mainFrame: false), .allow)
+        XCTAssertEqual(decide("https://vault.test/notiz?pfad=inbox%2Fa.md"), .allow)
+        // Die Web-Ansicht, die einen nativen Bildschirm vertritt, blättert in sich selbst.
+        let review = NavigationDecision.decide(URL(string: "https://vault.test/rueckblick?woche=2026-W40")!, method: "GET", server: server, isMainFrame: true, webOnly: "/rueckblick")
+        XCTAssertEqual(review, .allow)
+        let week = NavigationDecision.decide(URL(string: "https://vault.test/?woche=2026-W40")!, method: "GET", server: server, isMainFrame: true, webOnly: "/rueckblick")
+        XCTAssertEqual(week, .native(.week("2026-W40")))
+    }
+
+    @MainActor
+    func testWebTabsHideTheirOwnTabBar() {
+        XCTAssertTrue(WebViewController.hideTabBarScript.contains("nav.tabbar"))
+        XCTAssertTrue(WebViewController.hideTabBarScript.contains("--tabbar"))
     }
 
     func testBridgeMessage() {

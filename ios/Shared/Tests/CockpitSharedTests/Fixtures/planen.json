@@ -1,0 +1,234 @@
+{
+  "tz": "Europe/Berlin",
+  "today": "2026-10-14",
+  "query": {
+    "q": "steuer",
+    "area": ""
+  },
+  "week": {
+    "id": "2026-W42",
+    "year": 2026,
+    "week": 42,
+    "monday": "2026-10-12",
+    "sunday": "2026-10-18",
+    "prev": "2026-W41",
+    "next": "2026-W43",
+    "current": true,
+    "past": false,
+    "days": [
+      {
+        "date": "2026-10-12",
+        "label": "Mo 12.10.",
+        "today": false
+      },
+      {
+        "date": "2026-10-13",
+        "label": "Di 13.10.",
+        "today": false
+      },
+      {
+        "date": "2026-10-14",
+        "label": "Mi 14.10.",
+        "today": true
+      },
+      {
+        "date": "2026-10-15",
+        "label": "Do 15.10.",
+        "today": false
+      },
+      {
+        "date": "2026-10-16",
+        "label": "Fr 16.10.",
+        "today": false
+      },
+      {
+        "date": "2026-10-17",
+        "label": "Sa 17.10.",
+        "today": false
+      },
+      {
+        "date": "2026-10-18",
+        "label": "So 18.10.",
+        "today": false
+      }
+    ]
+  },
+  "ok": true,
+  "areas": [
+    {
+      "id": "a1",
+      "name": "Finanzen"
+    },
+    {
+      "id": "a2",
+      "name": "Gesundheit"
+    },
+    {
+      "id": "a4",
+      "name": "Programmieren"
+    }
+  ],
+  "results": {
+    "ok": true,
+    "data": [
+      {
+        "id": "t2",
+        "ref": "FIN-2",
+        "title": "Steuererklärung abgeben",
+        "status": "open",
+        "due": "2026-10-16",
+        "area": "Finanzen",
+        "project": null,
+        "phoenix": null,
+        "fire": null,
+        "planned": "faellig",
+        "url": "https://zunder.test/#/aufgabe/t2"
+      }
+    ]
+  },
+  "suggestions": [
+    {
+      "area": "Finanzen",
+      "areaId": "a1",
+      "ok": true,
+      "error": null,
+      "tasks": [
+        {
+          "id": "t1",
+          "ref": null,
+          "title": "Belege sortieren",
+          "status": "open",
+          "due": null,
+          "area": "Finanzen",
+          "project": "Steuer 2026",
+          "phoenix": null,
+          "fire": null,
+          "planned": null,
+          "url": "https://zunder.test/#/aufgabe/t1"
+        }
+      ],
+      "more": 0
+    },
+    {
+      "area": "Gesundheit",
+      "areaId": "a2",
+      "ok": true,
+      "error": null,
+      "tasks": [
+        {
+          "id": "t5",
+          "ref": null,
+          "title": "Zahnarzt Termin",
+          "status": "open",
+          "due": null,
+          "area": "Gesundheit",
+          "project": null,
+          "phoenix": null,
+          "fire": null,
+          "planned": null,
+          "url": "https://zunder.test/#/aufgabe/t5"
+        }
+      ],
+      "more": 0
+    }
+  ],
+  "planned": {
+    "ok": true,
+    "partial": false,
+    "error": null,
+    "flames": [
+      {
+        "id": "t7",
+        "ref": null,
+        "title": "Steuer-Flamme",
+        "status": "done",
+        "due": "2026-10-13T09:00:00Z",
+        "area": "Finanzen",
+        "project": null,
+        "phoenix": "flamme",
+        "fire": "2026-W42",
+        "planned": "flamme",
+        "url": "https://zunder.test/#/aufgabe/t7"
+      },
+      {
+        "id": "t9",
+        "ref": null,
+        "title": "Lauf-Flamme",
+        "status": "open",
+        "due": "2026-10-14T06:00:00Z",
+        "area": "Gesundheit",
+        "project": null,
+        "phoenix": "flamme",
+        "fire": "2026-W42",
+        "planned": "flamme",
+        "url": "https://zunder.test/#/aufgabe/t9"
+      }
+    ],
+    "rocks": [
+      {
+        "area": "Finanzen",
+        "areaId": "a1",
+        "tasks": [
+          {
+            "id": "t3",
+            "ref": null,
+            "title": "Steuerberater anrufen",
+            "status": "done",
+            "due": "2026-10-13",
+            "area": "Finanzen",
+            "project": null,
+            "phoenix": null,
+            "fire": null,
+            "planned": "faellig",
+            "url": "https://zunder.test/#/aufgabe/t3"
+          },
+          {
+            "id": "t2",
+            "ref": "FIN-2",
+            "title": "Steuererklärung abgeben",
+            "status": "open",
+            "due": "2026-10-16",
+            "area": "Finanzen",
+            "project": null,
+            "phoenix": null,
+            "fire": null,
+            "planned": "faellig",
+            "url": "https://zunder.test/#/aufgabe/t2"
+          }
+        ]
+      },
+      {
+        "area": "Gesundheit",
+        "areaId": "a2",
+        "tasks": [
+          {
+            "id": "t6",
+            "ref": null,
+            "title": "Laufschuhe",
+            "status": "blocked",
+            "due": null,
+            "area": "Gesundheit",
+            "project": null,
+            "phoenix": "feuer_schritt",
+            "fire": "2026-W42",
+            "planned": "feuer_schritt",
+            "url": "https://zunder.test/#/aufgabe/t6"
+          }
+        ]
+      }
+    ]
+  },
+  "from": {
+    "id": "t1",
+    "ref": null,
+    "title": "Belege sortieren",
+    "status": "open",
+    "due": null,
+    "area": "Finanzen",
+    "project": "Steuer 2026",
+    "phoenix": null,
+    "fire": null,
+    "planned": null,
+    "url": "https://zunder.test/#/aufgabe/t1"
+  }
+}

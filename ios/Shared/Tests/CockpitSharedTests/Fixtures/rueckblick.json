@@ -1,0 +1,95 @@
+{
+  "tz": "Europe/Berlin",
+  "week": {
+    "id": "2026-W42",
+    "year": 2026,
+    "week": 42,
+    "monday": "2026-10-12",
+    "sunday": "2026-10-18",
+    "prev": "2026-W41",
+    "next": "2026-W43",
+    "current": true
+  },
+  "ok": true,
+  "areas": [
+    {
+      "area": "Finanzen",
+      "planned": 3,
+      "done": 2,
+      "extra": 0,
+      "minutes": 90,
+      "open": [
+        {
+          "id": "t2",
+          "ref": "FIN-2",
+          "title": "Steuererklärung abgeben",
+          "status": "open",
+          "due": "2026-10-16",
+          "area": "Finanzen",
+          "project": null,
+          "phoenix": null,
+          "fire": null,
+          "running": false,
+          "url": "https://zunder.test/#/aufgabe/t2"
+        }
+      ]
+    },
+    {
+      "area": "Gesundheit",
+      "planned": 2,
+      "done": 0,
+      "extra": 1,
+      "minutes": 0,
+      "open": [
+        {
+          "id": "t9",
+          "ref": null,
+          "title": "Lauf-Flamme",
+          "status": "open",
+          "due": "2026-10-14T06:00:00Z",
+          "area": "Gesundheit",
+          "project": null,
+          "phoenix": "flamme",
+          "fire": "2026-W42",
+          "running": true,
+          "url": "https://zunder.test/#/aufgabe/t9"
+        },
+        {
+          "id": "t6",
+          "ref": null,
+          "title": "Laufschuhe",
+          "status": "blocked",
+          "due": null,
+          "area": "Gesundheit",
+          "project": null,
+          "phoenix": "feuer_schritt",
+          "fire": "2026-W42",
+          "running": false,
+          "url": "https://zunder.test/#/aufgabe/t6"
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "planned": 5,
+    "done": 2,
+    "extra": 1,
+    "minutes": 90
+  },
+  "flames": [
+    {
+      "id": "t7",
+      "ref": null,
+      "title": "Steuer-Flamme",
+      "status": "done",
+      "due": "2026-10-13T09:00:00Z",
+      "area": "Finanzen",
+      "project": null,
+      "phoenix": "flamme",
+      "fire": "2026-W42",
+      "running": false,
+      "url": "https://zunder.test/#/aufgabe/t7",
+      "minutes": 90
+    }
+  ]
+}

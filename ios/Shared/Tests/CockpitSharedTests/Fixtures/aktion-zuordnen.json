@@ -1,0 +1,25 @@
+{
+  "ok": true,
+  "message": "Gesundheit: Neu erfasst",
+  "task": {
+    "id": "i1",
+    "ref": null,
+    "title": "Neu erfasst",
+    "status": "open",
+    "due": null,
+    "phoenix": null,
+    "location": {
+      "kind": "area",
+      "id": "a2",
+      "name": "Gesundheit",
+      "area_name": "Gesundheit"
+    }
+  },
+  "undo": {
+    "action": "/aktion/zuordnen",
+    "fields": {
+      "id": "i1",
+      "ziel": "inbox"
+    }
+  }
+}

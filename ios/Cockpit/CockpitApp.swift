@@ -11,16 +11,25 @@ struct CockpitApp: App {
             Group {
                 switch model.phase {
                 case .loggedIn:
-                    WebShell(model: model)
-                        .id(model.webViewID)
-                        .ignoresSafeArea()
+                    if let session = model.cockpit {
+                        MainView(model: model, session: session)
+                    } else {
+                        // Ohne Stores (kommt nach dem Login nicht vor, dort gibt es immer einen Token): das Cockpit im Web.
+                        WebShell(model: model, startPath: "/lesen")
+                            .id(model.webViewID)
+                            .ignoresSafeArea()
+                    }
                 case .loggedOut:
                     LoginView(model: model)
                 }
             }
-            // Geteiltes, das die Share Extension ohne Netz gepuffert hat, beim Start, im Vordergrund und nach dem Login nachsenden.
+            // Geteiltes, das die Share Extension ohne Netz gepuffert hat, beim Start, im Vordergrund und nach dem Login nachsenden;
+            // ebenso den Puffer der Schnelleingabe.
             .task(id: scenePhase == .active && model.phase == .loggedIn) {
-                if scenePhase == .active, model.phase == .loggedIn { await model.sendPendingShares() }
+                if scenePhase == .active, model.phase == .loggedIn {
+                    await model.sendPendingShares()
+                    await model.cockpit?.foreground()
+                }
             }
             .sheet(item: $model.listening) { PlayerView(minutes: $0.minutes) }
             .sheet(item: $model.episode) { EpisodePlayerView(request: $0) }
