@@ -79,6 +79,26 @@ test('Einstellungen: Prüfung von Brücken-Tag, Absendern, Abstand und Embedding
   assert.deepEqual(old.mail.senders, []);
 });
 
+test('Einstellungen: Ingest ins Wiki, leer = Standard (nachts um 3, sonnet, 20), Prüfung von Stunde, Höchstzahl und Modell', () => {
+  const s = createSettingsStore({ logger: quiet });
+  assert.deepEqual(s.get().ingest, { nightly: true, hour: 3, model: 'sonnet', limit: 20 });
+  s.save({ ingest: { nightly: false, hour: '0', model: 'opus', limit: '5' }, calendars: [] });
+  assert.deepEqual(s.get().ingest, { nightly: false, hour: 0, model: 'opus', limit: 5 });
+  assert.deepEqual(s.stored().ingest, { nightly: false, hour: 0, model: 'opus', limit: 5 });
+  s.save({ ingest: { nightly: null, hour: '', model: '', limit: null }, calendars: [] });
+  assert.deepEqual(s.get().ingest, { nightly: true, hour: 3, model: 'sonnet', limit: 20 });
+  const bad = [
+    [{ ingest: { hour: '24' } }, /Ingest-Uhrzeit/],
+    [{ ingest: { hour: '3.5' } }, /Ingest-Uhrzeit/],
+    [{ ingest: { limit: '0' } }, /Höchstzahl/],
+    [{ ingest: { limit: '101' } }, /Höchstzahl/],
+    [{ ingest: { model: 'claude opus' } }, /Ingest-Modell/],
+  ];
+  for (const [input, msg] of bad) assert.throws(() => validateSettings(input), (e) => e instanceof SettingsError && msg.test(e.message));
+  // Ältere Datei ohne Abschnitt: alles Standard.
+  assert.deepEqual(validateSettings({ calendars: [] }).ingest, { nightly: null, hour: null, model: null, limit: null });
+});
+
 test('Einstellungen: Dauer der Web-Sitzung, leer = Standard, Generation bleibt beim Speichern', () =>
   withDir((dir) => {
     const file = join(dir, 'cockpit-settings.json');

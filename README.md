@@ -683,9 +683,25 @@ des Zeitfensters zum Abhaken, die Art und die geschätzten Zeichen bei ElevenLab
   Stimmen unter **Einstellungen → Vorlesen → Folgen** (Standard: Moderation = Stimme
   vom Vorlesen, Gast „Sarah“ `EXAVITQu4vr4xnSDxMaL`).
 - **Report** (5, 10 oder 20 Minuten): Claude schreibt einen Bericht mit Überblick,
-  Kernaussagen je Text, Querverbindungen und offenen Fragen. Er kommt als Notiz
-  (mit Quellenliste) über die Schnelleingabe in die Vault-Inbox, und eine Stimme
-  liest die Sprechfassung.
+  Kernaussagen je Text, Querverbindungen und offenen Fragen, dazu eine
+  Sprechfassung; eine Stimme liest sie.
+
+Podcast und Report landen als Transkript im Vault, unter
+`30-ressourcen/audio-reports/` neben den übrigen Audio-Reports, als
+`JJJJ-MM-TT-<art>-<titel>.md` (gibt es den Namen schon, mit Kurz-ID dahinter).
+Angelegt wird die Notiz, sobald Claudes Skript da ist, also schon vor dem
+Sprechen, und je Folge nur einmal, auch beim Fortsetzen. Im Frontmatter stehen
+`type: folge`, `art` (`podcast` oder `report`), `titel`, `erzeugt`, `minuten`,
+`quellen` (Wikilinks auf die Lesestapel-Notizen der Texte, soweit es sie gibt) und
+`ingest: offen`, damit ein Claude-Skill sie später ins Wiki holt. Darunter beim
+Report der Bericht und `## Sprechfassung`, beim Podcast `## Gespräch` (je
+Wortbeitrag ein Absatz, **Moderation** oder **Gast**), zuletzt `## Quellen`
+(Wikilink auf die Lesestapel-Notiz, sonst die URL). Claudes Text ist entschärft
+wie beim [Ingest](#ingest-ins-wiki). Lässt sich die Notiz nicht anlegen (Vault nur
+lesbar, Ordner vertraulich, ausgeschlossen oder Readwise), steht das im Log und
+die Folge entsteht ohne Transkript. Vorlesen bekommt keine Notiz,
+das sind die Texte selbst. Ist eine Folge fertig, gleich welcher Art, bekommen ihre
+Texte den Vermerk „gehört“; scheitert der, bleibt die Folge trotzdem fertig.
 
 Claude läuft über die Claude Code CLI im Container (`claude -p`, im Image
 installiert, Version per Build-Arg `CLAUDE_CODE_VERSION`, leer = ohne) mit dem
@@ -706,7 +722,8 @@ Die Liste zeigt jede Folge als Karte: entstehende mit Schritten (Eingereiht →
 Claude schreibt → Stimmen sprechen → Fertig), Fortschrittsbalken und geschätzter
 Restzeit, live über `/lesen/folgen/stand`; fertige mit großem Abspiel-Knopf
 (`/static/lesen-folgen.js`): Stelle, ±15/30 Sekunden, Tempo, gemerkte Stelle je
-Folge, Titel und Knöpfe auf dem Sperrbildschirm über die Media Session. In der
+Folge, Titel und Knöpfe auf dem Sperrbildschirm über die Media Session, bei
+Podcast und Report mit „Im Vault“ aufs Transkript. In der
 iOS-App öffnet der Knopf den nativen Player (`/api/app/folge`, siehe
 [ios/README.md](ios/README.md)). Die MP3 kommt mit `Range`
 (`/lesen/folgen/audio?id=…`), damit Safari sie spielt und Vorspulen geht; die
@@ -721,6 +738,38 @@ rund 20 000 Zeichen; mit `eleven_multilingual_v2` kostet das 20 000 Credits, mit
 `eleven_flash_v2_5` die Hälfte bei etwas weniger natürlicher Betonung. Das Modell
 steht unter **Einstellungen → Vorlesen → Stimme und Modell**. Beim Öffnen von
 `/lesen/hoeren` holt die Seite schon den ersten Satz, auch ohne Abspielen.
+
+**Ingest-Oberfläche** (`src/lesen/ingest-page.js`, nur mit Ingest-Dienst, siehe
+[Ingest](#ingest)): In der Unternavigation steht **Ingest** zwischen Stapel und
+Folgen, mit der Zahl der bereiten Entwürfe. Die Übersicht `/lesen/ingest` zeigt
+bereite Entwürfe als Karten (Quelle, zwei bis drei Kernaussagen, „3
+Verknüpfungen · 1 Synthese · 2 neue Seiten“), darunter **In Arbeit** und
+**Fehler** (mit „Erneut entwerfen“) und oben **Ganzen Stapel entwerfen** (für
+Texte ohne Entwurf und fehlgeschlagene, wie der Dienst; verworfene nicht). Die
+Prüfansicht `/lesen/ingest/doc?id=…` ist zum Lesen in ein, zwei Minuten gedacht:
+**Das Wichtigste** (Kernaussagen, Neu für dich, Bestätigt, Widerspricht mit dem
+Hinweis auf `/wiki-lint`, Dockt an), die Source-Page mit änderbarem Titel,
+Summary (Zähler bis 80), Slug und Tags samt Vorschau, dann die Vorschläge zum
+Abhaken, gruppiert: Verknüpfen, Bestätigungen, **Synthesen & Fragen** (als
+Karten, Text zum Aufklappen, standardmäßig aus), neue Seiten und Relationen. Der
+Titel einer bestehenden Seite ist selbst der Link auf sie; Wikilinks in Claudes
+Text erscheinen mit dem Titel der Seite (aus `links` des Dienstes, sonst aus
+Digest und Vorschlägen), unbekannte als lesbarer Text.
+**Ins Wiki übernehmen** (Leiste unten, mit der Zahl der gewählten Elemente; auf
+dem Handy nur der Knopf) führt zum nächsten bereiten Entwurf, die Meldung
+verlinkt die neue Source-Page und nennt Verknüpfungen und Bestätigungen getrennt.
+Daneben **Neu entwerfen**, **Ohne Wiki erledigen** (gelesen, weg, mit
+Rückgängig) und **Entwurf verwerfen** (der Text bleibt auf dem Stapel). Ohne
+JavaScript ist alles ein Formular; mit `/static/lesen-ingest.js` gibt es
+„alle/keine“ je Gruppe, Tasten (J/K nächster/voriger Entwurf, Enter zweimal =
+übernehmen, E = ohne Wiki erledigen) und den Live-Stand über
+`/lesen/ingest/stand`. Im Stapel trägt jeder Text ein Abzeichen („Ingest
+bereit“, „wird entworfen…“, „Ingest-Fehler“) oder den Knopf **Ingest
+entwerfen**, die Leseansicht hat **Ingest prüfen** bzw. **Ingest entwerfen**.
+Was Claude schreibt, gilt als Fremdtext: maskiert, Markdown nur über den
+Vorschau-Renderer des Cockpits. Für die App: `/api/lesen/ingest` und
+`/api/lesen/ingest/doc?id=…` (ohne Dienst `enabled: false`), `ingest` je Eintrag
+in `/api/lesen/stapel` und in `/api/lesen/doc`.
 
 **Wiedersehen** (`/lesen/wiedersehen`, VCP-74) holt Markierungen nach einem
 einfachen Leitner-Schema zurück: Box 1 bis 5 mit 1, 3, 7, 21 und 60 Tagen
@@ -741,17 +790,21 @@ feste Versionen).
 
 **Nach dem Lesen entscheiden** (VCP-96): In der Leseansicht steht
 **Fertig, weg** (Taste E) neben **In den Vault** (Taste V) mit dem Häkchen
-**mit Volltext** (Standard aus). „Fertig, weg“ setzt den Status `weg` mit
+**mit Volltext** (Standard an, der Volltext ist die Rohquelle fürs Wiki; in der
+iOS-App ist „In den Vault“ mit Volltext, lange drücken bietet „ohne
+Volltext“). Wer `volltext` nicht mitschickt, bekommt wie bisher keinen; nur die
+Oberflächen setzen das Häkchen vorab. „Fertig, weg“ setzt den Status `weg` mit
 Lesedatum (`read_at`) und schreibt nichts in den Vault; eine schon vorhandene
 Notiz bleibt unangetastet. „Weg“ im Eingang hat kein Lesedatum, das Aufräumen
 kann beides unterscheiden. „In den Vault“ legt die Lesestapel-Notiz an oder
 frischt sie auf, auch ohne Markierungen, mit `lesestatus: gelesen`, `gelesen:`
 und der Kurzfassung; mit Häkchen kommt der Artikel als Markdown in einen
-eigenen generierten Bereich unter „## Text“ (vor „## Eigene Gedanken“). Der Text
-ist dann archiviert (`archiv`). Im Eingang (Knopf, Taste A) und auf dem Stapel
-(je Eintrag ein Knopf) gibt es **Im Vault ablegen**: Notiz immer mit Volltext,
-`lesestatus: ungelesen` und ohne `gelesen:`; der Text bekommt den Status
-`abgelegt` und verlässt Eingang und Stapel. Wer ihn später doch liest und „In den
+eigenen generierten Bereich unter „## Text“ (vor „## Eigene Gedanken“) und
+`ingest: offen` ins Frontmatter. Der Text ist dann archiviert (`archiv`). Im
+Eingang (Knopf, Taste A) und auf dem Stapel (je Eintrag ein Knopf) gibt es
+**Im Vault ablegen**: Notiz immer mit Volltext, `lesestatus: ungelesen` und
+ohne `gelesen:`; der Text bekommt den Status `abgelegt` und verlässt Eingang
+und Stapel. Wer ihn später doch liest und „In den
 Vault“ wählt, bekommt `lesestatus: gelesen` und `gelesen:` nachgetragen, der
 Volltext bleibt, wie er ist. Alle drei lassen sich rückgängig machen (Status
 zurück, im Eingang auch mit Z); eine schon geschriebene Notiz bleibt dabei
@@ -764,13 +817,34 @@ Obsidian etwas auslösen würden (`#`, `[[`, `$`, `==`, `%%` …), sind maskiert
 
 **Markierungen im Vault** (VCP-75): Der Vault bleibt Quelle der Wahrheit. Wird
 ein Text mit Markierungen archiviert, legt das Cockpit über den Editor eine
-Notiz an, Standard `30-ressourcen/lesestapel/<slug>.md` (änderbar unter
-**Einstellungen → Lesestapel**); Fortschritt 1 allein reicht seit VCP-96 nicht
-mehr, das entscheidet „In den Vault“. Ihr Frontmatter hat `type: lesestapel`,
-`lesestapel_id`, `quelle`, `url`, `gespeichert`, `lesestatus`
-(`gelesen`/`ungelesen`), `gelesen` und `themen`. Jede Markierung steht
-als Zitat mit eigener Block-ID (`[[vom-lesen#^hl-1a2b3c4d]]`), darunter Notiz und
-Verknüpfungen als Wikilinks:
+Notiz an, Standard `raw/YYYY-MM-DD_<slug>.md` (Ordner änderbar unter
+**Einstellungen → Lesestapel**, ein dort gesetzter gilt weiter); Fortschritt 1
+allein reicht seit VCP-96 nicht mehr, das entscheidet „In den Vault“. `raw/`
+und der Dateiname folgen den Rohquellen des Wikis: Der Skill `wiki-ingest` holt
+die Notiz von dort, statt die Adresse noch einmal abzurufen. Das Datum ist der
+Tag des Speicherns in der eingestellten Zeitzone (wie `gespeichert`), bei
+gleichem Namen kommt eine Kurz-ID dazu. Notizen von früher (etwa in
+`30-ressourcen/lesestapel/`) bleiben, wo sie sind. Ihr Frontmatter hat
+`type: lesestapel`, `lesestapel_id`, `quelle`, `url`, `gespeichert`,
+`lesestatus` (`gelesen`/`ungelesen`), `gelesen` und `themen`, dazu:
+
+- `ingest: offen`, sobald die Notiz den Volltext bekommt (beim Anlegen oder
+  nachgetragen), aber nur, wenn das Feld fehlt. Der Skill setzt danach ein
+  Datum; das Cockpit überschreibt es nie und setzt es nie zurück. Ein
+  ingestierter Text gilt als gelesen. Der Ingest des Cockpits setzt `offen`
+  nicht (sonst holte der Skill den Text nach einem Abbruch ein zweites Mal),
+  sondern am Ende gleich das Datum.
+- `gehoert: YYYY-MM-DD`, der Tag, an dem der Text zuletzt gehört wurde
+  (`heard_at` im Lesestapel, gesetzt über `heard` aus
+  `src/lesen/vault-export.js`): beim Anlegen, wenn er schon gehört war, und in
+  vorhandenen Notizen sofort nachgetragen; ein früherer Tag weicht dem
+  neueren.
+
+Jede Markierung steht als Zitat mit eigener Block-ID
+(`[[2026-10-20_vom-lesen#^hl-1a2b3c4d]]`), darunter Notiz und Verknüpfungen als
+Wikilinks. Zitat und Notiz sind entschärft wie Claudes Text im Wiki (siehe
+[Ingest](#ingest-ins-wiki)): `<…>` steht als Text da, statt als HTML zu
+verschwinden, Bilder von fremden Servern werden Links, Abfrage-Blöcke laufen nicht.
 
 ```markdown
 ## Markierungen
@@ -845,6 +919,109 @@ und auf `/zustand` steht der Fehler beim Feed. Icons werden einmal geholt und al
 `data:`-Adresse gespeichert, weil die Content-Security-Policy keine fremden Bilder
 lädt. Unten auf der Seite: OPML importieren (Datei aus einem anderen Reader,
 Ordner werden flach übernommen) und exportieren.
+
+#### Ingest ins Wiki
+
+Texte aus dem Stapel kommen auf Wunsch ins Mycel-Wiki (`wiki/`), nach den
+Konventionen der Skills `wiki` und `wiki-ingest`. Nichts landet ohne Bestätigung
+im Wiki: Claude schreibt nur einen **Entwurf**, den man unter **Lesen → Ingest**
+prüft und abhakt. Bis dahin bleibt der Text im Stapel.
+
+**Entwerfen** (`src/lesen/ingest.js`), per Knopf je Text, für den ganzen Stapel
+oder nachts: Claude bekommt den Volltext als Markdown (gekürzt auf 60 000 Zeichen),
+die Markierungen mit Notizen (das stärkste Signal) und bis zu 25 Kandidaten aus
+`wiki/` mit Pfad, Typ, Titel und `summary`, gefunden über die hybride Suche nach
+Titel, Auszug und Markierungen. Zurück kommt JSON nach Schema: Kernaussagen, was
+neu ist, was bestätigt, widerspricht oder andockt, die Source-Page (Slug, Titel,
+Summary, Confidence, Tags, Body als Destillation mit Wikilinks) und Vorschläge.
+Danach prüft das Cockpit deterministisch: Pfade nur auf Kandidaten, also Seiten,
+die Claude gezeigt wurden (Unbekanntes fällt weg), Source-Pages nie zum Verknüpfen
+oder Bestätigen (in deren `sources` stehen Rohquellen; Bezüge zwischen Quellen nur
+als Wikilink oder Relation), Slugs kebab-case ohne Umlaute, ein „neuer“ Slug, den es
+im Wiki schon gibt, wird zum Verknüpfen (vorgewählt nur bei einem Kandidaten), einer,
+den es sonst im Vault gibt (auch vertraulich), fällt mit Hinweis weg, Wikilinks nur
+auf Kandidaten, vorhandene Wiki-Seiten oder vorgeschlagene neue Seiten (der Rest wird
+Text), nichts in vertraulichen, ausgeschlossenen oder Readwise-Ordnern. Claudes
+Markdown wird entschärft (`src/lesen/wiki-markdown.js`), denn ein Text kann per
+Prompt-Injection Anweisungen enthalten: Bilder von fremden Servern (die beim Öffnen
+in Obsidian Inhalte über die Adresse verraten könnten) werden Links, rohes HTML wird
+Text, Templater-Tags (`<% … %>`, auch im Frontmatter) sind getrennt, Code-Blöcke
+`dataviewjs`, `dataview`, `query` und `tasks` heißen `text`, Dataview-Inline-Abfragen
+laufen nicht. Steht in der Rohquelle schon `ingest: <Datum>` oder `übersprungen` (der
+Skill war schneller), entsteht kein Entwurf: Der Text gilt als verworfen, mit dem
+Grund als Meldung, und Claude wird nicht gefragt. Jeder Vorschlag hat eine
+feste ID: `v` verknüpfen, `n` neue Entity oder neues Konzept, `s` Synthese, `q`
+Frage, `b` Bestätigung, `r` Relation. Verknüpfen, Bestätigen und Relationen sind
+vorausgewählt, alles Neue ist abgewählt. Der Entwurf liegt in der Tabelle `ingests`
+von `lesestapel.db` (also in der Sicherung). Es entsteht immer nur ein Entwurf
+zugleich; nach einem Neustart werden angefangene wieder eingereiht.
+
+**Übernehmen** schreibt in festen Schritten über den Editor, jeder für sich
+wiederholbar; der Fortschritt steht in der Datenbank. Bricht ein Schritt ab
+(etwa weil der Sync eine Seite gleichzeitig ändert), bleibt der Entwurf bereit,
+die Prüfansicht nennt den Abbruch (steht die Source-Page schon, sind ihre Felder
+dann fest), und der nächste Versuch setzt dort fort, ohne etwas doppelt zu schreiben:
+
+1. **Rohquelle**: die Lesestapel-Notiz über den Exporter, mit Volltext und
+   `lesestatus: gelesen` (wie „In den Vault“ mit Volltext, aber ohne `ingest: offen`).
+2. **Source-Page** `wiki/sources/<slug>.md` (gibt es den Dateinamen schon irgendwo
+   im Vault, auch vertraulich, mit angehängter Kurz-ID; liegt am gemerkten Pfad
+   nach einem Abbruch inzwischen eine fremde Seite, ebenso): `type: source`, `title`, `summary`, `created`, `updated`,
+   `sources` (Pfad der Rohquelle), `url`, `tags`, `status: active`, `confidence`
+   und `relations` aus den gewählten Relationen (`"uses [[ziel]]"`). Im Body die
+   Destillation, unter „## Markiert“ jede Markierung mit Link auf ihren Block in der
+   Rohquelle (`[[<rohquelle>#^hl-…]]`), unter „## Verknüpft“ gewählte Seiten, auf die
+   der Body noch nicht verweist, unter „## Quelle“ Rohquelle und Original. Links auf
+   abgewählte oder weggelassene neue Seiten werden Text; Links auf den Slug aus dem
+   Entwurf zeigen auf den tatsächlichen, wenn er sich geändert hat.
+3. **Neue Seiten** (gewählt) in `wiki/entities/`, `wiki/concepts/`,
+   `wiki/synthesis/` oder `wiki/questions/`, mit `sources: ["[[<source-slug>]]"]`,
+   `entity-type` bzw. `art` und „## Quellen“. Ist der Pfad inzwischen belegt, wird
+   die Seite verknüpft statt überschrieben; gibt es den Namen inzwischen anderswo,
+   wird die beschreibbare Wiki-Seite dieses Namens verknüpft (keine Source-Page),
+   sonst fällt die neue Seite weg.
+4. **Verknüpfen und Bestätigen** an bestehenden Seiten: `[[<source-slug>]]` in
+   `sources` (ohne Doppelte), `updated` bzw. `confirmed` auf heute, `status: faded`
+   wird wieder `active` (Fragen `open`), und eine Zeile `- [[<source-slug>]]` unter
+   „## Quellen“, gefunden wie vom Editor (jede Ebene, nicht in Code-Blöcken); fehlt
+   die Überschrift oder gibt es sie mehrfach, kommt die Zeile ans Ende.
+5. **Log**: ein Eintrag `## [YYYY-MM-DD] ingest (cockpit) | <Titel>` mit Source-Page,
+   Rohquelle, Neu, Verknüpft und Bestätigt am Ende von `wiki/log.md`. Schließt die
+   Policy das Log aus dem Index aus (wie in `policy.example.json`), hängt das
+   Cockpit direkt an die Datei an, nie über einen Symlink hinaus (geöffnet mit
+   `O_NOFOLLOW`, gelesen und geschrieben über denselben Deskriptor).
+6. **Rohquelle**: `ingest: <heute>`, `wiki_source: "[[<source-slug>]]"`,
+   `lesestatus: gelesen` ins Frontmatter.
+7. **Archiv**: Der Text ist gelesen (`archiv` mit Lesedatum).
+
+Das Ergebnis nennt `source`, `raw`, `written` (neu angelegt), `linked`
+(verknüpft) und `confirmed` (bestätigt; nur Bestätigtes zählt nicht als
+verknüpft), wie der Log-Eintrag. Hat der Skill die Rohquelle inzwischen
+ingestiert (`ingest: <Datum>` oder `übersprungen`, bevor Schritt 6 lief), lehnt
+Übernehmen mit 409 ab.
+
+Verwerfen löscht nur den Entwurf, der Text bleibt im Stapel und wird nachts nicht
+noch einmal entworfen; „ohne Wiki erledigen“ setzt ihn dazu auf „weg“ mit
+Lesedatum. Ist Übernehmen angefangen, gehen weder Verwerfen noch ein neuer
+Entwurf (409, erst fortsetzen); Übernommenes wird nie neu entworfen.
+
+**Nachtlauf**: Alle 10 Minuten sieht der Dienst nach, ob es in der Zeitzone der
+Einstellungen die eingestellte Stunde ist und der Lauf heute noch fehlt (der Tag
+steht in `/data/ingest-nacht.txt`, und im Speicher, falls die Datei nicht
+schreibbar ist). Gibt es die Stunde wegen der Zeitumstellung nicht, läuft er in
+der Stunde danach. Dann reiht er Stapel-Texte ohne Entwurf ein,
+älteste zuerst; fehlgeschlagene kommen noch einmal dran, verworfene nicht.
+
+**Einstellungen → Lesestapel → Ingest ins Wiki**: nachts entwerfen (Standard an),
+Uhrzeit (Standard 3), Claude-Modell (Standard `sonnet`, schont das Abo) und
+höchstens so viele Texte je Nacht (Standard 20). Claude läuft wie bei den Folgen
+über die CLI mit `CLAUDE_CODE_OAUTH_TOKEN`; ohne Token ist Ingest aus.
+
+Grenzen: Supersession und Widersprüche löst das Cockpit nicht auf; sie stehen nur
+als Hinweis im Entwurf, aufgelöst wird per `/wiki-lint`. Relationen gehen nur von
+der Source-Page zu schon vorhandenen Seiten. Abweichung vom Mycel-Grundsatz „raw
+nie editieren“: Die Rohquelle ist die Lesestapel-Notiz, und die pflegt das Cockpit
+weiter (Frontmatter, die generierten Bereiche „Markierungen“ und „Text“).
 
 #### Von außen speichern
 

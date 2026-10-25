@@ -1,8 +1,9 @@
-import { esc } from '../web/layout.js';
+import { esc, assets } from '../web/layout.js';
 import { hidden } from '../web/render.js';
 import { readingPage } from './pages.js';
 import { NO_FEED } from './store.js';
 import { docJson, groupsJson, jsonReply } from './json.js';
+import { ingestBadge } from './ingest-page.js';
 
 /**
  * Stapel nach Zeitfenster (VCP-72): `/lesen/stapel?zeit=15` füllt die Zeit
@@ -11,6 +12,9 @@ import { docJson, groupsJson, jsonReply } from './json.js';
  * Formular (VCP-96), funktioniert ohne JavaScript. `?gruppe=` schränkt auf
  * eine Feed-Gruppe oder „ohne Feed“ ein (VCP-97), auch im Eingang.
  * `/api/lesen/stapel` liefert dieselbe Auswahl als JSON für die App.
+ * Mit dem Ingest-Dienst trägt jeder Eintrag ein Abzeichen („Ingest bereit“,
+ * „wird entworfen…“, „Ingest-Fehler“) oder den Knopf „Ingest entwerfen“
+ * (src/lesen/ingest-page.js), gefragt mit einer Abfrage für den ganzen Stapel.
  */
 
 export const WINDOWS = [5, 15, 30, 60];
@@ -132,7 +136,10 @@ function allBody({ items }, sort, file, gruppe) {
 /** Eintrag des Stapels als JSON: Restzeit (`null` ohne bekannte Lesezeit) und ob angefangen. */
 export const stackItemJson = (d) => ({ ...docJson(d), remaining: known(d) ? (d.remaining ?? remainingMinutes(d)) : null, started: started(d) });
 
-export function stackRoutes({ store, vault = false, folgen = false }) {
+/** `statusFor` liefert eine Map; ein schlichtes Objekt geht auch. */
+const statusIn = (m, id) => (m instanceof Map ? m.get(id) : m?.[id]) ?? null;
+
+export function stackRoutes({ store, vault = false, folgen = false, ingest = null }) {
   /** Zeitfenster, Sortierung und Gruppe aus der Query, dazu die Texte des Stapels. */
   const query = (url) => {
     const zeit = Number(url.searchParams.get('zeit'));
@@ -149,19 +156,30 @@ export function stackRoutes({ store, vault = false, folgen = false }) {
       async '/lesen/stapel'(ctx) {
         const { minutes, sortParam, sort, filter, docs } = query(ctx.url);
         // Im Vault ablegen (VCP-96): je Eintrag ein Formular, die Aktion steht in src/lesen/doc.js.
-        const file = vault
+        const ablegen = vault
           ? (d) => `<form method="post" action="/aktion/lesen/ablegen" class="act lesen-ablegen">${hidden({ csrf: ctx.write.csrf, back: ctx.write.back, id: d.id })}<button type="submit" class="btn quiet">Im Vault ablegen<span class="sr-only">: ${esc(d.title || d.url)}</span></button></form>`
           : null;
+        let file = ablegen;
+        if (ingest) {
+          const statuses = ingest.statusFor(docs.map((d) => d.id));
+          const available = Boolean(ingest.available()?.ok);
+          const badge = (d) => ingestBadge(d.id, statusIn(statuses, d.id), { ctx, title: d.title || d.url, available });
+          file = (d) => {
+            const parts = [badge(d), ablegen ? ablegen(d) : ''].filter(Boolean).join('');
+            return parts ? `<div class="lesen-item-acts">${parts}</div>` : '';
+          };
+        }
         const selection = stackSelection(docs, { zeit: minutes, sort });
         const content = !docs.length ? '<p class="empty">Auf dem Stapel liegt nichts.</p>' : minutes ? windowBody(selection, minutes, file) : allBody(selection, sort, file, filter.group);
         const groups = groupChips('/lesen/stapel', filter, { zeit: minutes, sort: sortParam === sort && !minutes ? sort : null });
         // „Unterwegs hören“ ohne `gruppe`: /lesen/hoeren kennt nur `zeit`.
-        return { html: readingPage(ctx, { key: 'stapel', title: 'Stapel', body: `<section>${groups}${windowPicker(minutes, filter.group)}<p class="stapel-hoeren"><a href="/lesen/hoeren?zeit=${minutes ?? 15}" class="btn quiet">Unterwegs hören</a>${folgen ? ` <a href="/lesen/folgen/neu?zeit=${minutes ?? 30}" class="btn quiet">Folge erzeugen</a>` : ''}</p>${content}</section>` }) };
+        return { html: readingPage(ctx, { key: 'stapel', title: 'Stapel', body: `<section>${groups}${windowPicker(minutes, filter.group)}<p class="stapel-hoeren"><a href="/lesen/hoeren?zeit=${minutes ?? 15}" class="btn quiet">Unterwegs hören</a>${folgen ? ` <a href="/lesen/folgen/neu?zeit=${minutes ?? 30}" class="btn quiet">Folge erzeugen</a>` : ''}</p>${content}</section>`, scripts: ingest ? [assets.lesenIngest] : [] }) };
       },
       /** Stapel als JSON: Einträge mit Restzeit, beim Zeitfenster `window` (x von y Min., n weitere, ob etwas passt). */
       async '/api/lesen/stapel'(ctx) {
         const { minutes, sort, filter, docs } = query(ctx.url);
         const { items, total, rest, fits } = stackSelection(docs, { zeit: minutes, sort });
+        const statuses = ingest ? ingest.statusFor(items.map((d) => d.id)) : null;
         return jsonReply(200, {
           ok: true,
           zeit: minutes,
@@ -172,7 +190,9 @@ export function stackRoutes({ store, vault = false, folgen = false }) {
           groups: groupsJson(filter.groups),
           showGroups: filter.groups.length > 0 || Boolean(filter.group),
           count: docs.length,
-          items: items.map(stackItemJson),
+          // `ingest`: Status des Entwurfs (`bereit`, `entwirft` …) oder null; ohne Dienst fehlt das Feld.
+          items: items.map((d) => (ingest ? { ...stackItemJson(d), ingest: statusIn(statuses, d.id) } : stackItemJson(d))),
+          ingest: Boolean(ingest),
           window: minutes ? { used: total, of: minutes, more: rest, fits } : null,
           vault,
           episodes: folgen,

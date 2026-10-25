@@ -14,7 +14,8 @@ import { writePrivate } from '../cockpit/settings.js';
  * (will ich lesen), `archiv` (gelesen, Notiz im Vault), `abgelegt` (ungelesen
  * mit Volltext im Vault, VCP-96), `weg` (verworfen; mit `read_at` „fertig,
  * weg“ nach dem Lesen, ohne vor dem Lesen). `previous_status` hält den Stand vor
- * dem letzten Wechsel für „Rückgängig“.
+ * dem letzten Wechsel für „Rückgängig“. `heard_at` sagt, wann der Text zuletzt
+ * gehört wurde (`markHeard`), unabhängig vom Status.
  *
  * Kein WAL: Die Datei ist klein, es schreibt nur dieser Dienst, und ohne
  * `-wal`/`-shm` daneben bleibt Sichern und Zurückschreiben einfach.
@@ -111,7 +112,28 @@ export const MIGRATIONS = [
   ALTER TABLE feeds ADD COLUMN group_id TEXT REFERENCES feed_groups(id) ON DELETE SET NULL;`,
   // Diskussion zum Feed-Eintrag (Hacker News, Reddit), neben dem Artikel unter `url`.
   `ALTER TABLE documents ADD COLUMN comments_url TEXT;`,
+  // Gehört (Folgen): wann der Text zuletzt in einer Folge vorkam, für `gehoert:` in der Notiz.
+  `ALTER TABLE documents ADD COLUMN heard_at TEXT;`,
+  // Ingest ins Wiki (src/lesen/ingest.js): Entwurf je Dokument, `draft` und `applied` als JSON.
+  `CREATE TABLE ingests (
+    doc_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'wartet',
+    origin TEXT NOT NULL DEFAULT 'knopf',
+    draft TEXT,
+    error TEXT,
+    applied TEXT,
+    model TEXT,
+    requested_at TEXT NOT NULL,
+    drafted_at TEXT,
+    applied_at TEXT,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX ingests_status ON ingests(status, updated_at);`,
 ];
+
+/** Zustände eines Ingest-Entwurfs (src/lesen/ingest.js). */
+export const INGEST_STATUSES = ['wartet', 'entwirft', 'bereit', 'fehler', 'uebernommen', 'verworfen'];
+const INGEST_EDIT = ['status', 'origin', 'draft', 'error', 'applied', 'model', 'requested_at', 'drafted_at', 'applied_at'];
 
 export class ReadingError extends Error {}
 
@@ -128,6 +150,8 @@ const fromRow = (row) => (row ? { ...row, topics: JSON.parse(row.topics ?? '[]')
  * Es gilt Feed ODER Gruppe: `false` am Feed heißt „nichts Eigenes gesetzt“.
  */
 const feedRow = (row) => (row ? { ...row, paused: Boolean(row.paused), to_stack: Boolean(row.to_stack), group_paused: Boolean(row.group_paused), group_to_stack: Boolean(row.group_to_stack) } : null);
+const parseJson = (v) => (v == null ? null : JSON.parse(v));
+const ingestRow = (row) => (row ? { ...row, draft: parseJson(row.draft), applied: parseJson(row.applied) } : null);
 const groupRow = (row) => (row ? { ...row, paused: Boolean(row.paused), to_stack: Boolean(row.to_stack) } : null);
 const FEED_SELECT = 'SELECT f.*, g.paused AS group_paused, g.to_stack AS group_to_stack FROM feeds f LEFT JOIN feed_groups g ON g.id = f.group_id';
 /** WHERE-Teil für den Gruppenfilter über `origin` (Dokumente kennen nur ihren Feed). */
@@ -246,7 +270,7 @@ export function createReadingStore({ path, now = () => Date.now() }) {
      * `group`: nur aus Feeds dieser Gruppe, `NO_FEED` nur nicht aus Feeds.
      */
     list({ status = null, group = null, limit = 100, offset = 0 } = {}) {
-      const cols = 'id, url, canonical_url, comments_url, title, author, site, kind, origin, excerpt, word_count, reading_minutes, status, previous_status, progress, scroll_anchor, topics, saved_at, status_changed_at, read_at, archived_at, updated_at';
+      const cols = 'id, url, canonical_url, comments_url, title, author, site, kind, origin, excerpt, word_count, reading_minutes, status, previous_status, progress, scroll_anchor, topics, saved_at, status_changed_at, read_at, archived_at, heard_at, updated_at';
       const [where, args] = groupWhere(group);
       const rows = status
         ? db.prepare(`SELECT ${cols} FROM documents WHERE status = ? AND ${where} ORDER BY saved_at DESC, rowid DESC LIMIT ? OFFSET ?`).all(status, ...args, limit, offset)
@@ -316,6 +340,21 @@ export function createReadingStore({ path, now = () => Date.now() }) {
       if (p.topics) p.topics = JSON.stringify(p.topics);
       update('documents', id, p, ['canonical_url', 'title', 'author', 'site', 'kind', 'excerpt', 'content_html', 'content_text', 'word_count', 'reading_minutes', 'topics', 'updated_at']);
       return get(id);
+    },
+
+    /**
+     * Gehört (Folgen): setzt `heard_at` auf `at` (Standard jetzt); ein älterer
+     * Wert weicht dem neueren, ein neuerer bleibt. Unbekannte IDs fallen weg;
+     * liefert die Dokumente.
+     */
+    markHeard(ids, at = null) {
+      const when = new Date(at ?? now());
+      if (Number.isNaN(when.getTime())) throw new ReadingError('Ungültiger Zeitpunkt für „gehört“');
+      const t = when.toISOString();
+      const known = [...new Set(ids.map(String))].filter((id) => get(id));
+      const set = db.prepare('UPDATE documents SET heard_at = ?, updated_at = ? WHERE id = ? AND (heard_at IS NULL OR heard_at < ?)');
+      inTransaction(() => known.forEach((id) => set.run(t, iso(), id, t)));
+      return known.map(get);
     },
 
     deleteDocument: (id) => db.prepare('DELETE FROM documents WHERE id = ?').run(String(id ?? '')).changes > 0,
@@ -472,6 +511,54 @@ export function createReadingStore({ path, now = () => Date.now() }) {
     },
     /** Alle bekannten Einträge eines Feeds (GUID bzw. Adresse) als Set; leer heißt: noch nie abgerufen. */
     knownEntries: (feedId) => new Set(db.prepare('SELECT guid FROM feed_entries WHERE feed_id = ?').all(String(feedId ?? '')).map((r) => r.guid)),
+
+    // --- Ingest ins Wiki ---------------------------------------------------------
+
+    /** Entwurf zum Dokument oder null; `draft` und `applied` als Objekte. */
+    getIngest: (docId) => ingestRow(db.prepare('SELECT * FROM ingests WHERE doc_id = ?').get(String(docId ?? ''))),
+    /**
+     * Legt den Eintrag an oder ändert ihn: nur die erlaubten Felder aus `patch`,
+     * `draft`/`applied` als Objekt (oder null). Liefert den neuen Stand.
+     */
+    saveIngest(docId, patch) {
+      const id = String(docId ?? '');
+      must(get(id), 'Dieses Dokument');
+      if (patch.status && !INGEST_STATUSES.includes(patch.status)) throw new ReadingError(`Unbekannter Ingest-Status ${patch.status}`);
+      const t = iso();
+      const p = { ...patch };
+      for (const k of ['draft', 'applied']) if (k in p && p[k] !== null && typeof p[k] !== 'string') p[k] = JSON.stringify(p[k]);
+      if (!db.prepare('SELECT 1 FROM ingests WHERE doc_id = ?').get(id)) {
+        db.prepare('INSERT INTO ingests (doc_id, requested_at, updated_at) VALUES (?, ?, ?)').run(id, p.requested_at ?? t, t);
+      }
+      const keys = Object.keys(p).filter((k) => INGEST_EDIT.includes(k));
+      db.prepare(`UPDATE ingests SET ${[...keys.map((k) => `${k} = ?`), 'updated_at = ?'].join(', ')} WHERE doc_id = ?`).run(...keys.map((k) => bindable(p[k])), t, id);
+      return ingestRow(db.prepare('SELECT * FROM ingests WHERE doc_id = ?').get(id));
+    },
+    /** Neueste zuerst, mit `status` nur diese; samt Titel, Adresse, Quelle, Lesezeit und Status des Dokuments (`doc_*`). */
+    listIngests({ status = null, limit = 500 } = {}) {
+      const statuses = status == null ? null : [status].flat().map(String);
+      const where = statuses ? `WHERE i.status IN (${statuses.map(() => '?').join(', ')})` : '';
+      return db
+        .prepare(
+          `SELECT i.*, d.title AS doc_title, d.url AS doc_url, d.site AS doc_site, d.reading_minutes AS doc_reading_minutes, d.status AS doc_status
+             FROM ingests i JOIN documents d ON d.id = i.doc_id ${where} ORDER BY i.updated_at DESC, i.rowid DESC LIMIT ?`,
+        )
+        .all(...(statuses ?? []), limit)
+        .map(ingestRow);
+    },
+    /** Anzahl je Ingest-Status. */
+    ingestCounts() {
+      const out = Object.fromEntries(INGEST_STATUSES.map((s) => [s, 0]));
+      for (const r of db.prepare('SELECT status, COUNT(*) AS n FROM ingests GROUP BY status').all()) out[r.status] = r.n;
+      return out;
+    },
+    /** Status je Dokument als Map, eine Abfrage (für die Abzeichen im Stapel). */
+    ingestStatuses(docIds) {
+      const ids = [...new Set([...(docIds ?? [])].map(String))];
+      if (!ids.length) return new Map();
+      const rows = db.prepare('SELECT doc_id, status FROM ingests WHERE doc_id IN (SELECT value FROM json_each(?))').all(JSON.stringify(ids));
+      return new Map(rows.map((r) => [r.doc_id, r.status]));
+    },
 
     // --- Sicherung ------------------------------------------------------------
 

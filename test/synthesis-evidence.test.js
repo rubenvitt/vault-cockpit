@@ -116,8 +116,8 @@ test('Anhängen schreibt nur in den eigenen Bereich, legt die Lesestapel-Notiz a
   assert.equal(after.slice(now.to), before.slice(old.to));
   const lesestapel = exporter.notePath(store.getHighlight(hl.fresh.id).doc_id);
   assert.ok(lesestapel);
-  assert.equal(lesestapel, '30-ressourcen/lesestapel/ueber-obst.md');
-  assert.equal(now.inner, `${OLD_ENTRY}\n\n> Ein Apfel\n>\n> — [[ueber-obst#^${blockId(hl.fresh.id)}]] · Über Obst · obst.test`);
+  assert.equal(lesestapel, 'raw/2026-09-01_ueber-obst.md');
+  assert.equal(now.inner, `${OLD_ENTRY}\n\n> Ein Apfel\n>\n> — [[2026-09-01_ueber-obst#^${blockId(hl.fresh.id)}]] · Über Obst · obst.test`);
   assert.equal(now.edited, false);
 
   // Noch einmal: nichts doppelt, kein Rückgängig.

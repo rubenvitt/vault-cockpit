@@ -368,6 +368,18 @@ test('Zusammengeführtes Formular: der gespeicherte Stand ergibt sich selbst, Ha
   assert.throws(() => mergeSettingsForm(settings.stored(), new URLSearchParams({ 'cal.x.name': 'a' })), (err) => err.field === 'cal.x.name');
 });
 
+test('Zusammengeführtes Formular: Ingest-Einstellungen überstehen das Speichern eines anderen Felds', () => {
+  const settings = createSettingsStore({ logger: quiet });
+  settings.save({ ...FULL, ingest: { nightly: false, hour: 5, model: 'opus', limit: 7 } });
+  const f = formOfSettings(settings.stored());
+  assert.equal(f.get('ingest.nightly'), 'aus');
+  assert.equal(f.get('ingest.hour'), '5');
+  const merged = mergeSettingsForm(settings.stored(), new URLSearchParams({ tz: 'UTC' }));
+  assert.equal(merged.get('ingest.model'), 'opus');
+  assert.equal(merged.get('ingest.limit'), '7');
+  assert.equal(mergeSettingsForm(settings.stored(), new URLSearchParams({ 'ingest.hour': '6' })).get('ingest.hour'), '6');
+});
+
 test('Überall abmelden als JSON: Browser-Sitzungen enden, der Geräte-Token gilt weiter', async () => {
   await withSettingsApp(async ({ get, post, settings }) => {
     const { csrf } = (await get('/api/sitzung', { cookie: true })).body;

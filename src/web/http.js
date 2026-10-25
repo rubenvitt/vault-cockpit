@@ -36,12 +36,13 @@ const LESEN_HOEREN_JS = staticFile('lesen-hoeren.js', 'utf8');
 const LESEN_FOLGEN_JS = staticFile('lesen-folgen.js', 'utf8');
 const LESEN_LINKS_JS = staticFile('lesen-verbinden.js', 'utf8');
 const LESEN_FEEDS_JS = staticFile('lesen-feeds.js', 'utf8');
+const LESEN_INGEST_JS = staticFile('lesen-ingest.js', 'utf8');
 // sigma + graphology + ForceAtlas2, gebündelt mit `npm run vendor` und eingecheckt.
 const GRAPH_LIB = staticFile('vendor/graph-lib.js', 'utf8');
 // Design-System (Tokens, Bausteine, Wochenansicht) plus die Teile der übrigen Seiten.
 const CSS = staticFile('cockpit.css', 'utf8') + GRAPH_CSS + NOTE_CSS + REVIEW_CSS + PLAN_CSS + HEALTH_CSS + OFFLINE_CSS;
 const hash = (s) => createHash('sha256').update(s).digest('base64url').slice(0, 10);
-const VERSION = { css: hash(CSS), ui: hash(UI_JS), js: hash(CLIENT_JS), graph: hash(GRAPH_JS), graphLib: hash(GRAPH_LIB), offline: hash(OFFLINE_JS), inbox: hash(INBOX_JS), lesenDoc: hash(LESEN_DOC_JS), lesenHoeren: hash(LESEN_HOEREN_JS), lesenFolgen: hash(LESEN_FOLGEN_JS), lesenLinks: hash(LESEN_LINKS_JS), lesenFeeds: hash(LESEN_FEEDS_JS) };
+const VERSION = { css: hash(CSS), ui: hash(UI_JS), js: hash(CLIENT_JS), graph: hash(GRAPH_JS), graphLib: hash(GRAPH_LIB), offline: hash(OFFLINE_JS), inbox: hash(INBOX_JS), lesenDoc: hash(LESEN_DOC_JS), lesenHoeren: hash(LESEN_HOEREN_JS), lesenFolgen: hash(LESEN_FOLGEN_JS), lesenLinks: hash(LESEN_LINKS_JS), lesenFeeds: hash(LESEN_FEEDS_JS), lesenIngest: hash(LESEN_INGEST_JS) };
 versionAssets(VERSION);
 
 /** Web-App-Manifest: Das Cockpit startet auf dem iPhone und unter Android wie eine App. */
@@ -81,6 +82,7 @@ const PUBLIC = new Map([
   ['/static/lesen-folgen.js', { type: 'text/javascript; charset=utf-8', body: LESEN_FOLGEN_JS, version: VERSION.lesenFolgen }],
   ['/static/lesen-verbinden.js', { type: 'text/javascript; charset=utf-8', body: LESEN_LINKS_JS, version: VERSION.lesenLinks }],
   ['/static/lesen-feeds.js', { type: 'text/javascript; charset=utf-8', body: LESEN_FEEDS_JS, version: VERSION.lesenFeeds }],
+  ['/static/lesen-ingest.js', { type: 'text/javascript; charset=utf-8', body: LESEN_INGEST_JS, version: VERSION.lesenIngest }],
   ['/manifest.webmanifest', { type: 'application/manifest+json; charset=utf-8', body: MANIFEST }],
   ['/static/icon.svg', { type: 'image/svg+xml', body: staticFile('icon.svg') }],
   ...['apple-touch-icon', 'icon-192', 'icon-512', 'icon-maskable-512'].map((n) => [`/static/icons/${n}.png`, { type: 'image/png', body: staticFile(`icons/${n}.png`) }]),
@@ -612,7 +614,8 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       const draft = path === '/aktion/erfassen' || path === '/aktion/notiz/anhaengen' ? form.get('text') : null;
       return backPage(req, res, back, session, { status: err.status, flash: { kind: 'error', message: err.message }, draft });
     }
-    const flash = flashCookie({ kind: 'ok', message: body.message, undo: body.undo ?? null });
+    // `link`: Ziel zum Weitergehen in der Meldung (etwa die neue Source-Page nach dem Ingest), nur eigene Pfade.
+    const flash = flashCookie({ kind: 'ok', message: body.message, undo: body.undo ?? null, link: body.link ?? null });
     // Muss die Seite wechseln (Notiz verschoben), kommt die Meldung per Cookie mit.
     if (wantsJson) {
       if (body.redirect && !session.app) res.appendHeader('set-cookie', flash);
@@ -716,6 +719,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
         model: field('tts.model'),
       },
       episodes: { host: field('episodes.host'), guest: field('episodes.guest'), model: field('episodes.model') },
+      ingest: { nightly: choice('ingest.nightly'), hour: field('ingest.hour'), model: field('ingest.model'), limit: field('ingest.limit') },
       calendars: calendarsIn,
       hiddenEvents: form.has('hiddenEvents') ? field('hiddenEvents').split(',') : stored.hiddenEvents,
       // Die Generation ändert nur „Überall abmelden“.
@@ -1080,7 +1084,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
 
   /** Seite aus dem Bereich Lesen (src/lesen/http.js). */
   async function readingPage(req, res, url, session) {
-    const r = await READING_PAGES[url.pathname]({ url, range: req.headers.range ?? null, user: session.name ?? session.sub, tz: settings.get().tz, write: { csrf: csrfOf(req), back: url.pathname + url.search }, flash: takeFlash(req, res) });
+    const r = await READING_PAGES[url.pathname]({ url, range: req.headers.range ?? null, user: session.name ?? session.sub, tz: settings.get().tz, write: { csrf: csrfOf(req), back: url.pathname + url.search }, flash: takeFlash(req, res), nav: reading.nav ?? null });
     if (r.redirect) return redirect(res, r.redirect);
     // Leseansicht und Stapel darf der Service Worker für offline behalten (VCP-80); welche Artikel, sagt `/api/lesen/offline`.
     const offline = r.html && (r.status ?? 200) === 200 && (url.pathname === '/lesen/doc' || (url.pathname === '/lesen/stapel' && !url.search)) ? { [OFFLINE_MARK]: 'lesen' } : {};
@@ -1234,7 +1238,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       if (path === '/graph') return graphPage(req, res, url, session);
       if (READING_PAGES[path]) return readingPage(req, res, url, session);
       if (path === '/notiz') return notePage(req, res, url, session);
-      if (path === '/wissen') return send(res, 200, await wissenPage({ notes, search, evidence, url, user: session.name ?? session.sub }), url.search ? {} : { [OFFLINE_MARK]: 'lesen' });
+      if (path === '/wissen') return send(res, 200, await wissenPage({ notes, search, evidence, url, user: session.name ?? session.sub, nav: reading?.nav ?? null }), url.search ? {} : { [OFFLINE_MARK]: 'lesen' });
       if (path === '/rueckblick') return reviewPage(req, res, url, session);
       if (path === '/planen' && plan) return planPage(req, res, url, session);
       if (path === '/zustand' && health) return healthPage(req, res, session);

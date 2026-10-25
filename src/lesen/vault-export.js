@@ -5,6 +5,7 @@ import { localDate } from '../cockpit/week.js';
 import { sectionBlock, findSection, writeSection } from '../vault/generated-section.js';
 import { esc } from '../web/layout.js';
 import { htmlToMarkdown } from './extract.js';
+import { safeWikiMarkdown } from './wiki-markdown.js';
 
 /**
  * Lesestapel → Vault (VCP-75): eine Notiz je Text, damit der Vault Quelle der
@@ -12,13 +13,21 @@ import { htmlToMarkdown } from './extract.js';
  *
  * Angelegt wird sie mit „In den Vault“ oder „Im Vault ablegen“ (`save`,
  * VCP-96), sonst beim Archivieren, sobald es Markierungen gibt, im Ordner aus
- * den Einstellungen (Standard `30-ressourcen/lesestapel`), über den Editor und
- * nie in vertraulichen, ausgeschlossenen oder Readwise-Ordnern. Danach schreibt
- * das Cockpit nur noch den generierten Bereich „markierungen“ unter
- * „## Markierungen“ neu (src/vault/generated-section.js), auf Wunsch den
- * Bereich „text“ (Volltext als Markdown) unter „## Text“, und trägt
- * `lesestatus: gelesen` samt `gelesen:` nach; „## Eigene Gedanken“ darunter und
- * alles andere bleibt unberührt.
+ * den Einstellungen (Standard `raw`, die Rohquellen des Wikis), über den Editor
+ * und nie in vertraulichen, ausgeschlossenen oder Readwise-Ordnern. Der
+ * Dateiname folgt den Rohquellen: `YYYY-MM-DD_<slug>.md` mit dem Tag des
+ * Speicherns. Danach schreibt das Cockpit nur noch den generierten Bereich
+ * „markierungen“ unter „## Markierungen“ neu (src/vault/generated-section.js),
+ * auf Wunsch den Bereich „text“ (Volltext als Markdown) unter „## Text“, und
+ * trägt `lesestatus: gelesen` samt `gelesen:` nach; „## Eigene Gedanken“
+ * darunter und alles andere bleibt unberührt.
+ *
+ * Mit dem Volltext kommt `ingest: offen` ins Frontmatter, wenn das Feld noch
+ * fehlt: Der Skill `wiki-ingest` holt die Notiz dann als Rohquelle und setzt
+ * dort ein Datum, das Cockpit fasst es danach nicht mehr an. Der Ingest des
+ * Cockpits (src/lesen/ingest.js) setzt es nicht (`markIngest: false`), sonst
+ * holte der Skill den Text nach einem Abbruch ein zweites Mal. `gehoert:` trägt
+ * den Tag, an dem der Text zuletzt gehört wurde (`heard`, aus den Folgen).
  *
  * Gefunden wird die Notiz über `lesestapel_id` im Frontmatter (Index), nicht
  * über einen Pfad: Umbenennen und Verschieben in Obsidian schadet nicht. Liegt
@@ -41,7 +50,7 @@ import { htmlToMarkdown } from './extract.js';
  */
 
 export const NOTE_TYPE = 'lesestapel';
-export const DEFAULT_FOLDER = '30-ressourcen/lesestapel';
+export const DEFAULT_FOLDER = 'raw';
 export const SECTION = 'markierungen';
 const HEADING = 'Markierungen';
 const LABEL = 'aus dem Lesestapel, das Cockpit schreibt bis zum Endmarker neu';
@@ -75,8 +84,9 @@ export function renderHighlights(highlights, links = new Map()) {
     .map((h) => {
       const id = blockId(h.id);
       // Zitate stehen ganz hinter `> `, Notizen ohne `<!--`: so ähnelt keine Zeile einem Marker.
-      const quote = String(h.quote).trim().split(/\r?\n/).map((l) => `> ${l}`.trimEnd()).join('\n');
-      const note = h.note?.trim().replaceAll('<!--', '&lt;!--');
+      // Beides entschärft (src/lesen/wiki-markdown.js): Obsidian blendet `<…>` sonst als HTML aus, und ein Zitat aus dem Artikel bliebe angreifbar.
+      const quote = safeWikiMarkdown(String(h.quote).trim().replace(/\r\n?/g, '\n')).split('\n').map((l) => `> ${l}`.trimEnd()).join('\n');
+      const note = h.note?.trim() ? safeWikiMarkdown(h.note.trim()).replaceAll('<!--', '&lt;!--') : null;
       const targets = [...new Set(links.get(id) ?? [])];
       // Die Block-ID einer Zitat-Gruppe steht in Obsidian in eigener Zeile, mit Leerzeile davor.
       return [quote, `^${id}`, note, targets.length ? `${LINKS} ${targets.map((t) => `[[${t}]]`).join(' · ')}` : null].filter(Boolean).join('\n\n');
@@ -103,21 +113,29 @@ export function slugOf(text) {
 /** Volltext des Dokuments als Markdown für den Bereich „text“. */
 export const fullTextOf = (doc) => htmlToMarkdown(doc.content_html) || 'Für diesen Text gibt es keinen Lesetext.';
 
+/** Lokaler Tag eines Zeitpunkts (ISO) oder null. */
+const dayOf = (iso, tz) => (iso ? localDate(new Date(iso), tz) : null);
+/** `gehoert:` setzen? Nur wenn es fehlt oder einen früheren Tag nennt. */
+const laterThan = (current, day) => Boolean(day) && !(String(current ?? '') >= day);
+
 const textBlock = (doc) => sectionBlock(TEXT_SECTION, fullTextOf(doc), { label: TEXT_LABEL, spaced: true });
 
 /**
  * Die neue Notiz: Frontmatter, Titel, Link zum Original, Kurzfassung,
- * Markierungen, mit `fullText` der Volltext, Platz für eigene Gedanken.
- * `read`: gelesen (Datum aus `read_at`, sonst `readAt`) oder ungelesen.
+ * Markierungen, mit `fullText` der Volltext (und `ingest: offen`, außer bei
+ * `markIngest: false`), Platz für
+ * eigene Gedanken. `read`: gelesen (Datum aus `read_at`, sonst `readAt`) oder
+ * ungelesen; `gehoert:` mit `heard_at`.
  */
-export function noteContent(doc, inner, { tz, read = false, readAt = null, fullText = false }) {
+export function noteContent(doc, inner, { tz, read = false, readAt = null, fullText = false, markIngest = true }) {
   const str = (v) => JSON.stringify(String(v));
-  const day = (iso) => (iso ? localDate(new Date(iso), tz) : null);
+  const day = (iso) => dayOf(iso, tz);
   const title = String(doc.title || doc.url).replace(/\s+/g, ' ').trim();
   const url = /^https?:\/\//i.test(doc.url ?? '') ? doc.url : null;
   const comments = /^https?:\/\//i.test(doc.comments_url ?? '') ? doc.comments_url : null;
   const link = (u) => u.replace(/[<>]/g, encodeURIComponent);
   const gelesen = read ? day(doc.read_at ?? readAt) : null;
+  const gehoert = day(doc.heard_at);
   // Die Kurzfassung kommt von der Webseite: eine Zeile, maskiert wie der Volltext.
   const excerpt = doc.excerpt ? htmlToMarkdown(`<p>${esc(doc.excerpt)}</p>`).replace(/\s+/g, ' ') : '';
   return [
@@ -129,6 +147,8 @@ export function noteContent(doc, inner, { tz, read = false, readAt = null, fullT
     `gespeichert: ${day(doc.saved_at)}`,
     `lesestatus: ${read ? 'gelesen' : 'ungelesen'}`,
     ...(gelesen ? [`gelesen: ${gelesen}`] : []),
+    ...(gehoert ? [`gehoert: ${gehoert}`] : []),
+    ...(fullText && markIngest ? ['ingest: offen'] : []),
     ...(doc.topics.length ? ['themen:', ...doc.topics.map((t) => `  - ${str(t)}`)] : ['themen: []']),
     '---',
     '',
@@ -172,16 +192,17 @@ export function createReadingExport({ vaultPath, index, editor, policy, store, s
     return null;
   }
 
-  function create(doc, inner, { read, fullText }) {
+  function create(doc, inner, { read, fullText, markIngest }) {
     const folder = settings.get().readingNotes?.folder ?? DEFAULT_FOLDER;
     const probe = `${folder}/_.md`;
     if (policy.isExcluded(probe) || policy.sensitivityOf(probe) || policy.classify(probe) !== 'core') {
       return { state: 'übersprungen', reason: `„${folder}“ ist vertraulich, ausgeschlossen oder Readwise; dort legt das Cockpit keine Lesestapel-Notiz an` };
     }
-    const slug = slugOf(doc.title || doc.url);
-    const name = [`${slug}.md`, `${slug}-${blockId(doc.id).slice(3)}.md`].find((n) => !existsSync(join(vaultPath, folder, n)));
-    if (!name) throw new Error(`In „${folder}“ gibt es schon „${slug}.md“`);
-    const r = editor.create({ folder, name, content: noteContent(doc, inner, { tz: settings.get().tz, read, readAt: now().toISOString(), fullText }) });
+    // Wie die Rohquellen des Wikis (`raw/YYYY-MM-DD_slug.md`), der Tag wie bei `gespeichert:`.
+    const base = `${dayOf(doc.saved_at, settings.get().tz)}_${slugOf(doc.title || doc.url)}`;
+    const name = [`${base}.md`, `${base}-${blockId(doc.id).slice(3)}.md`].find((n) => !existsSync(join(vaultPath, folder, n)));
+    if (!name) throw new Error(`In „${folder}“ gibt es schon „${base}.md“`);
+    const r = editor.create({ folder, name, content: noteContent(doc, inner, { tz: settings.get().tz, read, readAt: now().toISOString(), fullText, markIngest }) });
     return { state: 'angelegt', path: r.path };
   }
 
@@ -189,9 +210,10 @@ export function createReadingExport({ vaultPath, index, editor, policy, store, s
    * Eine Notiz anlegen oder ihren Bereich neu schreiben; `force` legt auch ohne
    * Markierungen an, `link` ergänzt einen Wikilink. `read` (Standard: archiviert)
    * trägt `lesestatus: gelesen` und `gelesen:` nach, `fullText` schreibt den
-   * Bereich „text“ (fehlt er, kommt er vor „## Eigene Gedanken“).
+   * Bereich „text“ (fehlt er, kommt er vor „## Eigene Gedanken“) und
+   * `ingest: offen`, wenn `ingest` fehlt und `markIngest` gilt; `gehoert:` folgt `heard_at`.
    */
-  function exportDoc(docId, { force = false, link = null, read = undefined, fullText = false } = {}) {
+  function exportDoc(docId, { force = false, link = null, read = undefined, fullText = false, markIngest = true } = {}) {
     const doc = store.get(docId);
     if (!doc) return { state: 'weg' };
     const found = locate(doc.id);
@@ -209,7 +231,7 @@ export function createReadingExport({ vaultPath, index, editor, policy, store, s
     }
     if (link) links.set(link.id, [...(links.get(link.id) ?? []), link.target]);
     const inner = renderHighlights(highlights, links);
-    if (!found) return { ...create(doc, inner, { read: isRead, fullText }), doc: doc.id };
+    if (!found) return { ...create(doc, inner, { read: isRead, fullText, markIngest }), doc: doc.id };
 
     // Vorzeitig (Verknüpfen) oder ungelesen (Ablegen) angelegt: Lesestand nachtragen, nie zurücknehmen.
     const fm = index.getNote(found.path)?.frontmatter ?? {};
@@ -217,6 +239,10 @@ export function createReadingExport({ vaultPath, index, editor, policy, store, s
     if (isRead && fm.lesestatus !== 'gelesen') set.lesestatus = 'gelesen';
     if (isRead && fm.gelesen == null) set.gelesen = localDate(new Date(doc.read_at ?? now().toISOString()), settings.get().tz);
     if (!isRead && fm.lesestatus == null) set.lesestatus = 'ungelesen';
+    // `ingest` setzt danach der Skill (ein Datum): nur anlegen, nie überschreiben.
+    if (fullText && markIngest && fm.ingest == null) set.ingest = 'offen';
+    const gehoert = dayOf(doc.heard_at, settings.get().tz);
+    if (laterThan(fm.gehoert, gehoert)) set.gehoert = gehoert;
     if (Object.keys(set).length) editor.setFrontmatter({ path: found.path, set });
     if (fullText && findSection(content, TEXT_SECTION)) {
       writeSection({ vaultPath, editor, path: found.path, name: TEXT_SECTION, inner: fullTextOf(doc), label: TEXT_LABEL, spaced: true, create: false });
@@ -294,12 +320,44 @@ export function createReadingExport({ vaultPath, index, editor, policy, store, s
      * „In den Vault“ (`read: true`) und „Im Vault ablegen“ (`read: false`,
      * VCP-96): Notiz sofort anlegen oder auffrischen, auch ohne Markierungen;
      * `fullText` schreibt den Volltext dazu, ein vorhandener bleibt sonst
-     * unberührt. Zustand wie `addLink`; Fehler des Editors wirft er.
+     * unberührt; `markIngest: false` lässt `ingest: offen` weg (Ingest des
+     * Cockpits). Zustand wie `addLink`; Fehler des Editors wirft er.
      */
-    save: (docId, { read, fullText = false }) => exportDoc(String(docId), { force: true, read: Boolean(read), fullText }),
+    save: (docId, { read, fullText = false, markIngest = true }) => exportDoc(String(docId), { force: true, read: Boolean(read), fullText, markIngest }),
 
     /** Pfad der Lesestapel-Notiz zum Dokument oder null. */
     notePath: (docId) => locate(String(docId))?.path ?? null,
+
+    /**
+     * Gehört (Folgen): `heard_at` im Lesestapel setzen und, wo es schon eine
+     * beschreibbare Notiz gibt, sofort `gehoert:` mit dem Tag. Ohne Notiz
+     * bleibt es beim Lesestapel; eine später angelegte bekommt das Feld beim
+     * Anlegen. Liefert je Dokument den Zustand: `vermerkt` (ohne Notiz),
+     * `geschrieben`, `aktuell`, `übersprungen` (vertraulich oder importiert),
+     * `weg` (unbekannt) oder `fehler`; dann holt der entprellte Export es nach.
+     */
+    heard(docIds) {
+      const ids = [...new Set([...docIds].map(String))];
+      const docs = new Map(store.markHeard(ids, now()).map((d) => [d.id, d]));
+      return ids.map((id) => {
+        const doc = docs.get(id);
+        if (!doc) return { state: 'weg', doc: id };
+        const found = locate(id);
+        if (!found) return { state: 'vermerkt', doc: id };
+        if (!found.writable) return { state: 'übersprungen', path: found.path, doc: id, reason: `„${found.path}“ liegt in einem vertraulichen oder importierten Ordner` };
+        const gehoert = dayOf(doc.heard_at, settings.get().tz);
+        if (!laterThan(index.getNote(found.path)?.frontmatter.gehoert, gehoert)) return { state: 'aktuell', path: found.path, doc: id };
+        try {
+          editor.setFrontmatter({ path: found.path, set: { gehoert } });
+          return { state: 'geschrieben', path: found.path, doc: id };
+        } catch (err) {
+          pending.add(id);
+          schedule();
+          logger.warn?.(`Lesestapel → Vault: „gehört“ später noch einmal — ${err.message}`);
+          return { state: 'fehler', path: found.path, doc: id, error: err.message };
+        }
+      });
+    },
     pending: () => [...pending],
     status: () => ({ ...status }),
     stop() {
