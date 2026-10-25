@@ -11,6 +11,7 @@ import { readingRoutes } from '../src/lesen/http.js';
 import { FetchError, safeFetch } from '../src/lesen/fetch.js';
 import { parseFeed, findFeedLink, matchesFilter, createFeedPoller } from '../src/lesen/feeds.js';
 import { parseOpml, toOpml } from '../src/lesen/opml.js';
+import { docJson } from '../src/lesen/json.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
 const SECRET = 'x'.repeat(40);
@@ -61,7 +62,7 @@ test('Feeds: RSS, Atom und JSON Feed werden gelesen', () => {
   const r = parseFeed(rss([rssItem(1)]), 'https://blog.test/feed');
   assert.equal(r.title, 'Blog & Co');
   assert.equal(r.siteUrl, 'https://blog.test/');
-  assert.deepEqual({ ...r.entries[0], html: undefined }, { key: 'blog-1', url: 'https://blog.test/p/1', title: 'Beitrag 1', author: 'Ann', html: undefined, published: T0 - 9 * 3600_000 });
+  assert.deepEqual({ ...r.entries[0], html: undefined }, { key: 'blog-1', url: 'https://blog.test/p/1', title: 'Beitrag 1', author: 'Ann', html: undefined, published: T0 - 9 * 3600_000, comments: null });
   assert.match(r.entries[0].html, /<script>/, 'ungesäubert, gesäubert wird beim Anlegen');
 
   const a = parseFeed(ATOM, 'https://atom.test/feed.xml');
@@ -84,6 +85,33 @@ test('Feeds: RSS, Atom und JSON Feed werden gelesen', () => {
   for (const bad of ['<html><body>Kein Feed</body></html>', 'einfach Text', '{"kaputt":', '{"title":"ohne items"}']) {
     assert.throws(() => parseFeed(bad, 'https://x.test/'), /Feed/, bad);
   }
+});
+
+const HN_ITEM = `<item><title>Ambitioniert</title><description><![CDATA[<p>Article URL: <a href="https://kuehn.test/ambitious/">https://kuehn.test/ambitious/</a></p><p>Points: 508</p>]]></description>
+  <link>https://kuehn.test/ambitious/</link><comments>https://news.ycombinator.com/item?id=50225695</comments><guid isPermaLink="false">https://news.ycombinator.com/item?id=50225695</guid></item>`;
+const redditEntry = (id, inner) => `<entry><id>t3_${id}</id><title>Post ${id}</title><link href="https://www.reddit.com/r/prog/comments/${id}/post/"/><updated>2026-10-19T10:00:00Z</updated>
+  <content type="html">${inner.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</content></entry>`;
+const redditBody = (id, link) => `<table><tr><td><a href="https://www.reddit.com/r/prog/comments/${id}/post/"><img src="https://b.thumbs.redditmedia.com/x.jpg" alt="Post"/></a></td><td> submitted by <a href="https://www.reddit.com/user/ann"> /u/ann </a><br/><span><a href="${link}">[link]</a></span> <span><a href="https://www.reddit.com/r/prog/comments/${id}/post/">[comments]</a></span></td></tr></table>`;
+const REDDIT = `<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><title>prog</title>
+${redditEntry('a1', redditBody('a1', 'https://kuehn.test/artikel?x=1&y=2'))}
+${redditEntry('a2', `<div class="md"><p>Ein Textbeitrag.</p></div>${redditBody('a2', 'https://www.reddit.com/r/prog/comments/a2/post/')}`)}
+${redditEntry('a3', redditBody('a3', 'https://i.redd.it/bild.jpg'))}
+</feed>`;
+
+test('Feeds: Link-Sammler – Artikel als Adresse, Diskussion als Kommentar-Link (Hacker News, Reddit)', () => {
+  const hn = parseFeed(rss([HN_ITEM]), 'https://hnrss.org/frontpage').entries[0];
+  assert.equal(hn.url, 'https://kuehn.test/ambitious/');
+  assert.equal(hn.comments, 'https://news.ycombinator.com/item?id=50225695');
+
+  const [link, self, image] = parseFeed(REDDIT, 'https://www.reddit.com/r/prog/.rss').entries;
+  assert.deepEqual([link.url, link.comments], ['https://kuehn.test/artikel?x=1&y=2', 'https://www.reddit.com/r/prog/comments/a1/post/']);
+  assert.equal(link.key, 't3_a1', 'Schlüssel bleibt');
+  assert.deepEqual([self.url, self.comments], ['https://www.reddit.com/r/prog/comments/a2/post/', null], 'Textbeitrag bleibt bei Reddit');
+  assert.deepEqual([image.url, image.comments], ['https://www.reddit.com/r/prog/comments/a3/post/', null], 'Bild bei Reddit bleibt bei Reddit');
+
+  // WordPress: <comments> zeigt auf den Beitrag selbst, das ist kein eigener Link.
+  const wp = parseFeed(rss(['<item><title>x</title><link>https://blog.test/x/</link><comments>https://blog.test/x/#respond</comments></item>']), 'https://blog.test/').entries[0];
+  assert.equal(wp.comments, null);
 });
 
 test('Feeds: XML löst keine Entitäten aus der DTD auf (XXE)', () => {
@@ -246,6 +274,27 @@ test('Feeds: direkt auf den Stapel, Stichwort-Filter, Seite nicht erreichbar →
   assert.deepEqual(blog.map((d) => [d.title, d.status]), [['Beitrag 1', 'stapel']]);
   assert.equal(store.get(blog[0].id).content_text, 'Rust kurz', 'Seite nicht erreichbar: der Feed-Inhalt bleibt');
   assert.equal(docsOf(store, feeds.json).length, 0, 'pausiert');
+});
+
+test('Feeds: Hacker-News- und Reddit-Einträge holen den Artikel und behalten den Kommentar-Link', async () => {
+  const { store, routes, pages, pageCalls, poller } = setup({ rssItems: [HN_ITEM] });
+  routes['https://reddit.test/r/prog/.rss'] = REDDIT;
+  const reddit = store.addFeed({ url: 'https://reddit.test/r/prog/.rss', interval_minutes: 30 }).feed;
+  pages['https://kuehn.test/ambitious/'] = ARTICLE;
+  pages['https://kuehn.test/artikel?x=1&y=2'] = ARTICLE;
+  await poller.runDue();
+  const hn = store.find({ url: 'https://kuehn.test/ambitious/' });
+  assert.equal(hn.title, 'Ambitioniert');
+  assert.match(hn.content_text, /Der volle Artikel/, 'Artikel statt „Article URL: …“');
+  assert.equal(hn.comments_url, 'https://news.ycombinator.com/item?id=50225695');
+  assert.equal(docJson(hn).commentsUrl, 'https://news.ycombinator.com/item?id=50225695');
+  const link = store.find({ url: 'https://kuehn.test/artikel?x=1&y=2' });
+  assert.match(link.content_text, /Der volle Artikel/);
+  assert.equal(link.comments_url, 'https://www.reddit.com/r/prog/comments/a1/post/');
+  assert.ok(pageCalls.includes('https://kuehn.test/artikel?x=1&y=2'));
+  const self = docsOf(store, reddit).find((d) => d.title === 'Post a2');
+  assert.equal(self.url, 'https://www.reddit.com/r/prog/comments/a2/post/');
+  assert.equal(self.comments_url, null);
 });
 
 test('Feeds: Gruppe pausiert → keiner ihrer Feeds wird abgerufen; direkt auf den Stapel über die Gruppe', async () => {

@@ -93,6 +93,9 @@ const squash = (s) => String(s ?? '').replace(/\s+/g, ' ').trim();
  */
 export function extractArticle(html, url) {
   const { document } = parseHTML(html);
+  // HTML darf `<head>`/`<body>` weglassen (etwa danluu.com); linkedom hängt den Inhalt dann neben den leeren Body, Readability fände nichts.
+  const loose = [...document.documentElement.childNodes].filter((n) => n !== document.head && n !== document.body);
+  if (document.body && !document.body.childNodes.length && loose.length) document.body.append(...loose);
   const canonical = safeUrl(document.querySelector('link[rel~="canonical"]')?.getAttribute('href'), url);
   const pageTitle = squash(document.querySelector('title')?.textContent);
   let article = null;

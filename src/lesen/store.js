@@ -109,11 +109,13 @@ export const MIGRATIONS = [
     created_at TEXT NOT NULL
   );
   ALTER TABLE feeds ADD COLUMN group_id TEXT REFERENCES feed_groups(id) ON DELETE SET NULL;`,
+  // Diskussion zum Feed-Eintrag (Hacker News, Reddit), neben dem Artikel unter `url`.
+  `ALTER TABLE documents ADD COLUMN comments_url TEXT;`,
 ];
 
 export class ReadingError extends Error {}
 
-const DOC_FIELDS = ['url', 'canonical_url', 'title', 'author', 'site', 'kind', 'origin', 'client_id', 'excerpt', 'content_html', 'content_text', 'word_count', 'reading_minutes', 'status', 'topics'];
+const DOC_FIELDS = ['url', 'canonical_url', 'comments_url', 'title', 'author', 'site', 'kind', 'origin', 'client_id', 'excerpt', 'content_html', 'content_text', 'word_count', 'reading_minutes', 'status', 'topics'];
 const HIGHLIGHT_EDIT = ['quote', 'prefix', 'suffix', 'start_hint', 'note', 'color', 'review_box', 'review_due', 'review_state'];
 const FEED_EDIT = ['url', 'site_url', 'title', 'icon', 'paused', 'to_stack', 'keyword_filter', 'interval_minutes', 'etag', 'last_modified', 'last_fetch_at', 'last_error', 'error_count', 'next_fetch_at', 'group_id'];
 const GROUP_EDIT = ['name', 'paused', 'to_stack'];
@@ -244,7 +246,7 @@ export function createReadingStore({ path, now = () => Date.now() }) {
      * `group`: nur aus Feeds dieser Gruppe, `NO_FEED` nur nicht aus Feeds.
      */
     list({ status = null, group = null, limit = 100, offset = 0 } = {}) {
-      const cols = 'id, url, canonical_url, title, author, site, kind, origin, excerpt, word_count, reading_minutes, status, previous_status, progress, scroll_anchor, topics, saved_at, status_changed_at, read_at, archived_at, updated_at';
+      const cols = 'id, url, canonical_url, comments_url, title, author, site, kind, origin, excerpt, word_count, reading_minutes, status, previous_status, progress, scroll_anchor, topics, saved_at, status_changed_at, read_at, archived_at, updated_at';
       const [where, args] = groupWhere(group);
       const rows = status
         ? db.prepare(`SELECT ${cols} FROM documents WHERE status = ? AND ${where} ORDER BY saved_at DESC, rowid DESC LIMIT ? OFFSET ?`).all(status, ...args, limit, offset)

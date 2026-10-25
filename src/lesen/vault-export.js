@@ -115,6 +115,8 @@ export function noteContent(doc, inner, { tz, read = false, readAt = null, fullT
   const day = (iso) => (iso ? localDate(new Date(iso), tz) : null);
   const title = String(doc.title || doc.url).replace(/\s+/g, ' ').trim();
   const url = /^https?:\/\//i.test(doc.url ?? '') ? doc.url : null;
+  const comments = /^https?:\/\//i.test(doc.comments_url ?? '') ? doc.comments_url : null;
+  const link = (u) => u.replace(/[<>]/g, encodeURIComponent);
   const gelesen = read ? day(doc.read_at ?? readAt) : null;
   // Die Kurzfassung kommt von der Webseite: eine Zeile, maskiert wie der Volltext.
   const excerpt = doc.excerpt ? htmlToMarkdown(`<p>${esc(doc.excerpt)}</p>`).replace(/\s+/g, ' ') : '';
@@ -132,7 +134,7 @@ export function noteContent(doc, inner, { tz, read = false, readAt = null, fullT
     '',
     `# ${title}`,
     '',
-    ...(url ? [`[Original](<${url.replace(/[<>]/g, encodeURIComponent)}>)${doc.author ? ` · ${doc.author}` : ''}`, ''] : []),
+    ...(url ? [`[Original](<${link(url)}>)${comments ? ` · [Kommentare](<${link(comments)}>)` : ''}${doc.author ? ` · ${doc.author}` : ''}`, ''] : []),
     ...(excerpt ? [excerpt, ''] : []),
     `## ${HEADING}`,
     '',

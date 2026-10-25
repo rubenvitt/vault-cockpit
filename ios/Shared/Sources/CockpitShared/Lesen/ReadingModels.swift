@@ -40,6 +40,8 @@ public struct ReadingDoc: Decodable, Equatable, Hashable, Identifiable, Sendable
     public let id: String
     public let url: String
     public let canonicalUrl: String?
+    /// Diskussion zum Feed-Eintrag (Hacker News, Reddit); ältere Server schicken sie nicht.
+    public let commentsUrl: String?
     public let title: String?
     public let author: String?
     public let site: String?

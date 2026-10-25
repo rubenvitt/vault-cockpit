@@ -206,6 +206,7 @@ struct ReaderScreen: View {
             title: doc.displayTitle,
             meta: CockpitFormat.meta([doc.site, doc.author, doc.readingMinutes > 0 ? "\(doc.readingMinutes) min" : nil]),
             original: original(model),
+            comments: comments(model),
             blocks: model.blocks,
             level: ReaderAppearance.clamp(level),
             sans: sans,
@@ -216,6 +217,12 @@ struct ReaderScreen: View {
     /// „Original“: nur Web-Adressen (PDFs haben keine).
     private func original(_ model: ReadingDocModel) -> URL? {
         guard let url = URL(string: model.doc.url), let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
+        return url
+    }
+
+    /// „Kommentare“: Diskussion zum Feed-Eintrag, nur Web-Adressen.
+    private func comments(_ model: ReadingDocModel) -> URL? {
+        guard let raw = model.doc.commentsUrl, let url = URL(string: raw), let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
         return url
     }
 
@@ -399,6 +406,13 @@ struct ReaderScreen: View {
                         ExternalLink.open(url)
                     } label: {
                         Label("Original", systemImage: "safari")
+                    }
+                    if let comments = comments(model) {
+                        Button {
+                            ExternalLink.open(comments)
+                        } label: {
+                            Label("Kommentare", systemImage: "bubble.left.and.bubble.right")
+                        }
                     }
                     ShareLink(item: url) {
                         Label("Teilen", systemImage: "square.and.arrow.up")

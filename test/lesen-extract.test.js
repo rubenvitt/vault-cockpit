@@ -87,6 +87,14 @@ test('extractArticle: fremde Canonical-URL wird ignoriert', () => {
   assert.equal(extractArticle(html, 'https://beispiel.test/a').canonical_url, null);
 });
 
+test('extractArticle: Seite ohne <head> und <body> (erlaubt in HTML5) liefert trotzdem den Text', () => {
+  const html = `<!DOCTYPE html><html lang=en><meta charset=utf-8><title>Kühn</title><style>p{}</style><header><strong>Kühn</strong><hr></header><main>${'<p>Ein Absatz ohne schließende Tags, aber mit genug Wörtern für Readability.'.repeat(12)}</main><footer>Fuß</footer>`;
+  const a = extractArticle(html, 'https://kuehn.test/a/');
+  assert.equal(a.title, 'Kühn');
+  assert.ok(a.word_count > 100, `nur ${a.word_count} Wörter`);
+  assert.match(a.content_text, /Ein Absatz ohne schließende Tags/);
+});
+
 test('Markdown (VCP-96): Absätze, Überschriften, Hervorhebungen, Links, Code, Zitate, Tabellen', () => {
   const html = sanitizeHtml(
     `<h1>Über &amp; Unter</h1><p>Ein <strong> fetter </strong>Satz, <em>betont</em>, <s>alt</s>, <mark>wichtig</mark> und <a href="/a b?x=<1>">ein [Link]</a>.</p>

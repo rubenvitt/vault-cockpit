@@ -17,6 +17,7 @@ export const docJson = (d) => ({
   id: d.id,
   url: d.url,
   canonicalUrl: d.canonical_url ?? null,
+  commentsUrl: d.comments_url ?? null,
   title: d.title ?? null,
   author: d.author ?? null,
   site: d.site ?? null,
