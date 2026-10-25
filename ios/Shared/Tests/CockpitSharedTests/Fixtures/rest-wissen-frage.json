@@ -1,0 +1,39 @@
+{
+  "q": "Willen",
+  "art": "",
+  "status": "entwurf",
+  "lesen": false,
+  "reading": true,
+  "arts": [
+    "Brücke",
+    "Vertiefung"
+  ],
+  "statuses": [
+    "entwurf",
+    "stabil"
+  ],
+  "hits": [
+    {
+      "path": "wiki/synthesis/Selbstkontrolle.md",
+      "title": "Selbstkontrolle",
+      "art": "Brücke",
+      "status": "entwurf",
+      "confidence": "mittel",
+      "summary": "Willenskraft ist kein Muskel, sagt [[Hund]]",
+      "updated": "2026-10-20"
+    }
+  ],
+  "recent": [
+    {
+      "path": "wiki/synthesis/Selbstkontrolle.md",
+      "title": "Selbstkontrolle",
+      "art": "Brücke",
+      "status": "entwurf",
+      "confidence": "mittel",
+      "summary": "Willenskraft ist kein Muskel, sagt [[Hund]]",
+      "updated": "2026-10-20"
+    }
+  ],
+  "degraded": null,
+  "total": 2
+}

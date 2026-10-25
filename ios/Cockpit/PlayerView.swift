@@ -1,8 +1,8 @@
 import CockpitShared
 import SwiftUI
 
-/// Nativer Vorlese-Player „Unterwegs hören“ (VCP-94). Öffnet sich, wenn `/lesen/hoeren` in der App
-/// „Abspielen“ meldet (`BridgeMessage.listen`); `minutes` ist das Zeitfenster der Seite. Spielt
+/// Nativer Vorlese-Player „Unterwegs hören“ (VCP-94). Öffnet sich mit „Unterwegs hören“ im Stapel
+/// oder einem Link auf `/lesen/hoeren` (`AppModel.listening`); `minutes` ist das Zeitfenster. Spielt
 /// gleich los und läuft bei gesperrtem Bildschirm weiter (Hintergrundmodus `audio`).
 struct PlayerView: View {
     @State private var player: Player

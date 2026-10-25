@@ -1,0 +1,5 @@
+{
+  "error": "invalid",
+  "message": "Der Token braucht einen Namen",
+  "field": "name"
+}

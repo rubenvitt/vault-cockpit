@@ -6,8 +6,9 @@ import { createAppAccess, APP_CALLBACK_PATH, SITE_ASSOCIATION_PATH } from './app
 import { renderDraftRescue } from './session-render.js';
 import { renderWeek, renderMessage, renderSettings, dueLabel } from './render.js';
 import { versionAssets, THEME } from './layout.js';
-import { renderGraph, renderSearch, GRAPH_CSS } from './graph-render.js';
+import { renderGraph, renderSearch, graphJson, GRAPH_CSS } from './graph-render.js';
 import { renderNote, NOTE_CSS } from './note-render.js';
+import { noteJson } from './note-json.js';
 import { renderReview, REVIEW_CSS } from './review-render.js';
 import { renderPlan, planRoutes, PLAN_CSS } from './plan-page.js';
 import { renderHealth, healthAlert, HEALTH_CSS } from './health-render.js';
@@ -15,11 +16,12 @@ import { offlineFiles, readingOfflineUrls, OFFLINE_CSS, OFFLINE_MARK, SYNTHESIS_
 import { SettingsError, MAX_CALENDARS, TTS_PROVIDERS } from '../cockpit/settings.js';
 import { describeWeek, weekOf } from '../cockpit/week.js';
 import { ActionError, SETTABLE } from '../cockpit/actions.js';
-import { BackupError, MAX_BACKUP } from '../cockpit/backup.js';
+import { BackupError, MAX_BACKUP, checkPassphrase } from '../cockpit/backup.js';
+import { settingsJson, mergeSettingsForm, tokensJson, scopesJson, shortcutsJson, shortcutsIntro, backupJson, SCOPE_LABELS } from './settings-json.js';
 import { readMultipart, FormError } from './multipart.js';
 import { restoredMessage } from './backup-render.js';
 import { placement } from '../capture/syntax.js';
-import { wissenPage } from './wissen-page.js';
+import { wissenPage, wissenView, wissenQuery } from './wissen-page.js';
 import { openPoints, SYNTHESIS } from './synthesis-render.js';
 import { evidenceRoutes } from '../lesen/synthesis-evidence.js';
 
@@ -180,6 +182,17 @@ for (const [path, file] of offlineFiles(PUBLIC, { html: HTML_HEADERS }).entries)
  *   dem der Offline-Puffer die Schnelleingabe nachsendet (401 ohne Sitzung).
  *   `GET /api/lesen/offline` nennt die Seiten, die der Service Worker als
  *   Lesestoff für unterwegs speichern darf (src/web/offline.js).
+ * - JSON für die native App (auch mit Sitzung): `GET /api/notiz?pfad=…` (Notizseite,
+ *   Text als Baum, src/web/note-json.js), `GET /api/wissen?q=…&art=…&status=…&lesen=1`,
+ *   `GET /api/suche?q=…&alle=1` (alle Treffer statt der besten acht), `GET /api/zustand`;
+ *   `/api/graph` bringt die Listen der Graphseite mit, `/api/woche` unter `alert` die
+ *   gestörten Dienste.
+ * - Einstellungen für die App (src/web/settings-json.js): `GET`/`POST /api/einstellungen`
+ *   (Felder wie das Formular, fehlende bleiben), `POST /api/einstellungen/abmelden`
+ *   („Überall abmelden“), `GET`/`POST /api/einstellungen/tokens` und
+ *   `POST /api/einstellungen/tokens/widerrufen`, `GET`/`POST /api/einstellungen/sicherung`
+ *   (Stand bzw. Datei) und `POST /api/einstellungen/sicherung/wiederherstellen`,
+ *   `GET /api/einstellungen/kurzbefehle`; die Kurzbefehle selbst lädt die App mit Geräte-Token.
  * - `GET /login?app=1&state=…&challenge=…` und `/api/app/…` — Login und
  *   JSON-API der iOS-App mit Geräte-Token (src/web/app-access.js);
  *   `GET /.well-known/apple-app-site-association` und `GET /app/angemeldet`
@@ -216,15 +229,17 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
 
   /**
    * Native App: Mit Geräte-Token (`Authorization: Bearer vct_…`, Recht `app`) gelten die
-   * JSON-Endpunkte (`/api/…`), die Aktionen und Bilder aus Notizen wie mit einer Sitzung.
-   * Seiten, Einstellungen, Tokens und Sicherung bleiben beim Cookie. Ein CSRF-Token braucht
-   * es dafür nicht: Den Header schickt kein Browser von selbst mit.
+   * JSON-Endpunkte (`/api/…`, auch Einstellungen, Tokens und Sicherung unter
+   * `/api/einstellungen…`), die Aktionen, Bilder aus Notizen und die Kurzbefehle zum Laden
+   * wie mit einer Sitzung. HTML-Seiten und ihre Formulare (`/einstellungen…`) bleiben beim
+   * Cookie. Ein CSRF-Token braucht es dafür nicht: Den Header schickt kein Browser von selbst mit.
+   * `tokenId`: der Geräte-Token selbst (in der Token-Liste `current`).
    */
   const appSessionOf = (req, path) => {
     if (!appAccess || !/^Bearer /.test(String(req.headers.authorization ?? ''))) return null;
-    if (!(path.startsWith('/api/') || ACTION_ROUTES.has(path) || path === '/notiz/bild')) return null;
+    if (!(path.startsWith('/api/') || ACTION_ROUTES.has(path) || path === '/notiz/bild' || SHORTCUT_ROUTES.has(path))) return null;
     const device = appAccess.device(req);
-    return device ? { sub: `app:${device.name}`, name: device.name, app: true } : null;
+    return device ? { sub: `app:${device.name}`, name: device.name, app: true, tokenId: device.id } : null;
   };
 
   // CSRF: zusätzlich zu SameSite=Lax und der Herkunftsprüfung ein Token, das an
@@ -325,6 +340,39 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     return send(res, 200, renderHealth(services, { tz: settings.get().tz, user: session.name ?? session.sub, now: now() }));
   }
 
+  /** Was Notizseite und `/api/notiz` außer der Notiz zeigen: Ziele, Verwandte, Vorschläge, Belege. */
+  async function noteExtras(note) {
+    const related = notes.related?.(note.path) ?? null;
+    return {
+      targets: notes.targets(note.path),
+      archive: notes.archiveFolder(),
+      vaultName: settings.get().vaultName,
+      related,
+      graph: Boolean(graph),
+      // Vorschläge zum Ablegen nur für Inbox-Notizen und nur, wenn die Seite schreiben darf.
+      suggestions: actions && note.inInbox ? (notes.suggest?.(note.path, related) ?? null) : null,
+      zunder: Boolean(actions && settings.get().zunder),
+      evidence: evidence && note.frontmatter?.type === SYNTHESIS ? await evidence.suggest(note.path) : null,
+    };
+  }
+
+  /** Notiz als JSON für die App (`/api/notiz?pfad=…`, siehe src/web/note-json.js). */
+  async function noteApi(req, res, url) {
+    const path = url.searchParams.get('pfad') ?? '';
+    const note = notes.get(path);
+    if (!note) return json(res, 404, { error: 'not_found', message: `„${path}“ gibt es nicht, oder sie liegt in einem vertraulichen oder ausgeschlossenen Ordner.` });
+    return json(res, 200, noteJson(note, { write: Boolean(actions), ...(await noteExtras(note)) }));
+  }
+
+  /**
+   * Zustand als JSON (`/api/zustand`): die Dienste wie auf `/zustand` (frisch geprüft),
+   * `failing` wie `alert` in `/api/woche`, `checkedAt` der Stand.
+   */
+  async function healthApi() {
+    const services = await health.check();
+    return { checkedAt: new Date(now()).toISOString(), failing: services.filter((s) => s.state === 'error').map(({ id, name }) => ({ id, name })), services };
+  }
+
   /** Notizseite `/notiz?pfad=…`: Vorschau und Verarbeiten. */
   async function notePage(req, res, url, session, { status = 200, flash = null, draft = null } = {}) {
     const path = url.searchParams.get('pfad') ?? '';
@@ -332,25 +380,15 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     if (!note) {
       return send(res, 404, renderMessage('Notiz nicht verfügbar', `„${path}“ gibt es nicht, oder sie liegt in einem vertraulichen oder ausgeschlossenen Ordner.`, { link: { href: '/', label: 'Zur Woche' } }));
     }
-    const { vaultName } = settings.get();
     const back = url.pathname + url.search;
     const kept = draft === null && actions ? sessions.takeDraft(req, res, (d) => d.action === '/aktion/notiz/anhaengen' && d.back === back) : null;
-    const related = notes.related?.(note.path) ?? null;
     const html = renderNote(note, {
       user: session.name ?? session.sub,
       write: actions ? writeContext(req) : null,
       back,
       flash: flash ?? takeFlash(req, res) ?? (kept ? DRAFT_FLASH : null),
       draft: draft ?? kept?.text ?? null,
-      targets: notes.targets(note.path),
-      archive: notes.archiveFolder(),
-      vaultName,
-      related,
-      graph: Boolean(graph),
-      // Vorschläge zum Ablegen nur für Inbox-Notizen und nur, wenn die Seite schreiben darf.
-      suggestions: actions && note.inInbox ? (notes.suggest?.(note.path, related) ?? null) : null,
-      zunder: Boolean(actions && settings.get().zunder),
-      evidence: evidence && note.frontmatter?.type === SYNTHESIS ? await evidence.suggest(note.path) : null,
+      ...(await noteExtras(note)),
     });
     // Synthesen darf der Service Worker für offline behalten (VCP-80), aber nie mit einem Entwurf im Feld.
     const offline = status === 200 && !kept && !draft && note.path.startsWith(`${SYNTHESIS_FOLDER}/`) ? { [OFFLINE_MARK]: 'lesen' } : {};
@@ -494,11 +532,11 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
                 // Von der Notizseite aus geht es zur neuen Adresse der Notiz.
                 const redirect = back.startsWith('/notiz') ? notePageOf(r.path) : null;
                 const undo = r.changed && from ? { action: '/aktion/notiz/ablegen', fields: { pfad: r.path, ordner: from, back: redirect ? notePageOf(r.from) : back } } : null;
-                return { message: r.changed ? `Abgelegt in ${folder}/` : `Liegt schon in ${folder}/`, path: r.path, redirect, undo };
+                return { message: r.changed ? `Abgelegt in ${folder}/` : `Liegt schon in ${folder}/`, path: r.path, from: r.from, folder, redirect, undo };
               },
               async '/aktion/notiz/tags'(form) {
                 const r = notes.setTags(form.get('pfad'), form.get('tags'));
-                return { message: r.tags.length ? `Tags: ${r.tags.map((t) => `#${t}`).join(' ')}` : 'Tags entfernt', path: r.path };
+                return { message: r.tags.length ? `Tags: ${r.tags.map((t) => `#${t}`).join(' ')}` : 'Tags entfernt', path: r.path, tags: r.tags };
               },
               async '/aktion/notiz/anhaengen'(form) {
                 const r = notes.append(form.get('pfad'), form.get('text'));
@@ -513,7 +551,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
               async '/aktion/verlinken'(form, session) {
                 const r = notes.link(form.get('pfad'), form.get('ziel'));
                 if (r.changed) logger.info?.(`Cockpit: ${r.path} → [[${r.target}]] (${session.sub})`);
-                return { message: r.changed ? `Verlinkt: ${r.title}` : `Schon verlinkt: ${r.title}`, path: r.path, target: r.target };
+                return { message: r.changed ? `Verlinkt: ${r.title}` : `Schon verlinkt: ${r.title}`, path: r.path, target: r.target, title: r.title, changed: Boolean(r.changed) };
               },
               async '/aktion/feuer/anlegen'(form, session) {
                 const r = notes.createFeuer(form.get('woche'), form.get('ziel'), form.get('zug'));
@@ -528,14 +566,14 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
                 const r = await actions.synthesisTasks({ path: note.path, points });
                 logger.info?.(`Cockpit: ${r.created} offene Punkte aus ${note.path} nach Zunder (${session.sub})`);
                 const message = r.created ? `Nach Zunder: ${r.created} ${r.created === 1 ? 'Aufgabe' : 'Aufgaben'}${r.existing ? `, ${r.existing} schon dort` : ''}` : 'Alle offenen Punkte sind schon in Zunder';
-                return { message, path: note.path };
+                return { message, path: note.path, created: r.created, existing: r.existing ?? 0 };
               },
               ...(evidence ? evidenceRoutes(evidence, { logger }) : {}),
               async '/aktion/notiz/checkbox'(form) {
                 const done = form.get('erledigt') === '1';
                 const r = notes.toggle(form.get('pfad'), form.get('n'), form.get('line'), done);
                 const undo = { action: '/aktion/notiz/checkbox', fields: { pfad: r.path, n: form.get('n'), line: r.line, erledigt: done ? '0' : '1' } };
-                return { message: done ? 'Abgehakt' : 'Wieder offen', path: r.path, undo };
+                return { message: done ? 'Abgehakt' : 'Wieder offen', path: r.path, n: Number(form.get('n')), line: r.line, done, undo };
               },
             }
           : {}),
@@ -577,7 +615,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     const flash = flashCookie({ kind: 'ok', message: body.message, undo: body.undo ?? null });
     // Muss die Seite wechseln (Notiz verschoben), kommt die Meldung per Cookie mit.
     if (wantsJson) {
-      if (body.redirect) res.appendHeader('set-cookie', flash);
+      if (body.redirect && !session.app) res.appendHeader('set-cookie', flash);
       return json(res, 200, body);
     }
     return redirect(res, body.redirect ?? back, [flash]);
@@ -588,16 +626,21 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     const model = await cockpit.week(id || null);
     if (!model) return json(res, 400, { error: 'invalid_week', error_description: 'Kalenderwoche wie 2026-W42 erwartet' });
     // `can`: was die Seite anbietet (Schreiben, Feuer-Notiz, Planen), wie `writeContext` für die HTML-Seite.
-    return json(res, 200, { ...model, can: { actions: Boolean(actions), notes: Boolean(notes), plan: Boolean(plan) } });
+    // `alert`: gestörte Hintergrunddienste `[{ id, name }]` für den roten Hinweis „Störung“ (wie `healthAlert`).
+    return json(res, 200, { ...model, can: { actions: Boolean(actions), notes: Boolean(notes), plan: Boolean(plan) }, alert: health ? health.failing() : [] });
   }
 
+  /** Erreichbarkeit der Kalender in dieser Woche (`{ [id]: { ok, count } | { ok: false, error } }`). */
+  async function calendarChecks() {
+    if (!calendars || !settings.get().calendars.length) return {};
+    const tz = settings.get().tz;
+    const week = describeWeek(weekOf(new Date(now()), tz), tz);
+    return calendars.check(week.start, week.end);
+  }
+  const captureOn = () => (typeof captureEnabled === 'function' ? captureEnabled() : captureEnabled);
+
   async function settingsPage(req, res, session, { status = 200, notice = null, error = null, created = null } = {}) {
-    let checks = {};
-    if (calendars && settings.get().calendars.length) {
-      const tz = settings.get().tz;
-      const week = describeWeek(weekOf(new Date(now()), tz), tz);
-      checks = await calendars.check(week.start, week.end);
-    }
+    const checks = await calendarChecks();
     const html = renderSettings({
       stored: settings.stored(),
       defaults: settings.defaults(),
@@ -607,7 +650,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       tokens: tokens?.list() ?? null,
       created,
       shortcuts,
-      captureEnabled: typeof captureEnabled === 'function' ? captureEnabled() : captureEnabled,
+      captureEnabled: captureOn(),
       tz: settings.get().tz,
       user: session.name ?? session.sub,
       csrf: csrfOf(req),
@@ -643,6 +686,8 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
         username,
         password: username ? field(`cal.${i}.password`) || prev?.password : null,
         filter: field(`cal.${i}.filter`).split(','),
+        // Nur für die Fehlermeldung: welches Feld `cal.N.…` gemeint ist.
+        formIndex: i,
       });
     }
     const clear = Boolean(form.get('zunder.clear'));
@@ -815,6 +860,179 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     return send(res, 200, renderMessage('Überall abgemeldet', 'Die Anmeldung ist auf allen Geräten beendet, auch hier.', { link: { href: '/login?next=%2Feinstellungen', label: 'Neu anmelden' } }));
   }
 
+  /*
+   * Einstellungen, Tokens, Sicherung und Kurzbefehle als JSON für die native App
+   * (src/web/settings-json.js), mit Geräte-Token oder Sitzung. Antworten
+   * `{ ok, message, … }`, Fehler `{ error, message, field? }`; mit Sitzung braucht
+   * jedes POST das CSRF-Token wie die Seite. Geheimnisse gehen nie hinaus.
+   */
+  const unauthorized = (res) => json(res, 401, { error: 'unauthorized', message: 'Die Anmeldung ist abgelaufen. Bitte neu anmelden.' });
+  const invalid = (res, err, status = 400) => json(res, status, { error: 'invalid', message: err.message, ...(err.field ? { field: err.field } : {}) });
+
+  /** Formular einer JSON-Schreibroute; `null`, wenn schon geantwortet wurde (fremde Herkunft, zu groß, CSRF). */
+  async function readApiForm(req, res, session) {
+    const form = await readForm(req, res);
+    if (!form) return null;
+    if (!session.app && !csrfOk(req, form.get('csrf'))) {
+      json(res, 403, { error: 'csrf', message: 'Die Seite ist veraltet. Bitte neu laden und noch einmal versuchen.' });
+      return null;
+    }
+    return form;
+  }
+
+  /** `GET /api/einstellungen`: alles, was die Einstellungsseite zeigt (Felder, Stände, Kalender, Tokens, Kurzbefehle, Sicherung). */
+  async function settingsApi(req, res, url, session) {
+    return json(res, 200, settingsJson({
+      stored: settings.stored(),
+      defaults: settings.defaults(),
+      checks: await calendarChecks(),
+      tokens: tokens?.list() ?? null,
+      currentToken: session.tokenId ?? null,
+      shortcuts,
+      captureEnabled: captureOn(),
+      backup: backup?.status() ?? null,
+    }));
+  }
+
+  /**
+   * `POST /api/einstellungen`: Felder wie das HTML-Formular (`fromForm`). Was fehlt, bleibt
+   * wie gespeichert; leere Geheimnisfelder behalten den Wert, `….clear=1` löscht ihn.
+   */
+  async function saveSettingsApi(req, res, url, session) {
+    const form = await readApiForm(req, res, session);
+    if (!form) return;
+    try {
+      settings.save(fromForm(mergeSettingsForm(settings.stored(), form)));
+    } catch (err) {
+      if (err instanceof SettingsError) return invalid(res, err);
+      throw err;
+    }
+    logger.info?.(`Cockpit-Einstellungen gespeichert von ${session.sub}`);
+    return json(res, 200, { ok: true, message: 'Gespeichert.' });
+  }
+
+  /** `POST /api/einstellungen/abmelden`: „Überall abmelden“ (alle Sitzungs-Cookies); Geräte-Tokens bleiben. */
+  async function revokeSessionsApi(req, res, url, session) {
+    const form = await readApiForm(req, res, session);
+    if (!form) return;
+    sessions.revokeAll();
+    logger.info?.(`Cockpit: alle Sitzungen beendet von ${session.sub}`);
+    if (!session.app) res.appendHeader('set-cookie', sessions.clear());
+    return json(res, 200, { ok: true, message: 'Überall abgemeldet: Die Anmeldung im Browser ist auf allen Geräten beendet. Geräte-Tokens der App bleiben gültig.' });
+  }
+
+  const tokenList = (session) => ({ tokens: tokensJson(tokens.list(), session.tokenId ?? null), scopes: scopesJson() });
+
+  /** `POST /api/einstellungen/tokens` `{ name, scope }`: der Klartext steht nur in dieser Antwort. */
+  async function createTokenApi(req, res, url, session) {
+    const form = await readApiForm(req, res, session);
+    if (!form) return;
+    let created;
+    try {
+      created = tokens.create(form.get('name'), form.get('scope') || 'search');
+    } catch (err) {
+      if (err instanceof SettingsError) return invalid(res, err);
+      throw err;
+    }
+    logger.info?.(`API-Token „${created.name}“ angelegt von ${session.sub}`);
+    const entry = tokens.list().find((t) => t.id === created.id);
+    const label = SCOPE_LABELS[created.scope] ?? created.scope;
+    return json(res, 200, {
+      ok: true,
+      message: `${label}-Token „${created.name}“ angelegt. Jetzt kopieren, er wird nicht noch einmal angezeigt.`,
+      token: { token: created.token, id: created.id, name: created.name, scope: created.scope, scopeLabel: label, createdAt: entry?.createdAt ?? null },
+      ...tokenList(session),
+    });
+  }
+
+  /** `POST /api/einstellungen/tokens/widerrufen` `{ id }`; `self`: der Geräte-Token dieser Anfrage, danach gilt er nicht mehr. */
+  async function revokeTokenApi(req, res, url, session) {
+    const form = await readApiForm(req, res, session);
+    if (!form) return;
+    const id = form.get('id') ?? '';
+    if (!tokens.revoke(id)) return json(res, 404, { error: 'not_found', message: 'Diesen Token gibt es nicht mehr.' });
+    logger.info?.(`API-Token widerrufen von ${session.sub}`);
+    return json(res, 200, { ok: true, message: 'Token widerrufen.', id, self: id === session.tokenId, ...tokenList(session) });
+  }
+
+  /** `POST /api/einstellungen/sicherung` `{ passphrase, passphrase2 }`: die verschlüsselte Sicherung als Datei. */
+  async function backupApi(req, res, url, session) {
+    const form = await readApiForm(req, res, session);
+    if (!form) return;
+    const passphrase = form.get('passphrase') ?? '';
+    let file;
+    try {
+      try {
+        checkPassphrase(passphrase);
+      } catch (err) {
+        if (err instanceof BackupError) err.field = 'passphrase';
+        throw err;
+      }
+      if (passphrase !== (form.get('passphrase2') ?? '')) throw Object.assign(new BackupError('Die beiden Passphrasen stimmen nicht überein'), { field: 'passphrase2' });
+      file = await backup.create(passphrase, { repeat: form.get('passphrase2') ?? '' });
+    } catch (err) {
+      if (err instanceof BackupError) return invalid(res, err);
+      throw err;
+    }
+    logger.info?.(`Sicherung heruntergeladen von ${session.sub} (${file.files.join(', ')})`);
+    res.writeHead(200, {
+      'content-type': 'application/json; charset=utf-8',
+      'content-disposition': `attachment; filename="${file.filename}"`,
+      'cache-control': 'no-store',
+      'x-content-type-options': 'nosniff',
+    });
+    return res.end(file.body);
+  }
+
+  /**
+   * `POST /api/einstellungen/sicherung/wiederherstellen` (multipart: `datei`, `passphrase`,
+   * `ersetzen=1`): wie die Seite, Antwort als JSON, danach Neustart. `relogin`: Das
+   * Sitzungs-Secret kam mit, Cookies gelten nicht mehr; `tokensReplaced`: Die API-Tokens kamen
+   * mit, der Geräte-Token gilt nach dem Neustart nur, wenn er in der Sicherung stand.
+   */
+  async function restoreBackupApi(req, res, url, session) {
+    if (foreignOrigin(req)) return json(res, 403, { error: 'forbidden', error_description: 'fremde Herkunft' });
+    let form;
+    try {
+      form = await readMultipart(req, { limit: MAX_BACKUP + 64 * 1024 });
+    } catch (err) {
+      if (!(err instanceof FormError)) throw err;
+      return res.destroyed ? undefined : json(res, err.status, { error: 'bad_form', message: err.message });
+    }
+    if (!session.app && !csrfOk(req, form.fields.get('csrf'))) return json(res, 403, { error: 'csrf', message: 'Die Seite ist veraltet. Bitte neu laden und noch einmal versuchen.' });
+    let result;
+    try {
+      result = await backup.restore(form.files.get('datei')?.data ?? null, form.fields.get('passphrase') ?? '', { replace: form.fields.get('ersetzen') === '1' });
+    } catch (err) {
+      if (err instanceof BackupError) return invalid(res, err);
+      throw err;
+    }
+    logger.info?.(`Sicherung vom ${result.createdAt} wiederhergestellt von ${session.sub} (${result.files.join(', ')}), Neustart`);
+    const msg = restoredMessage(result, settings.get().tz);
+    const relogin = result.files.includes('session-secret');
+    res.once('finish', () => restart());
+    if (relogin && !session.app) res.appendHeader('set-cookie', sessions.clear());
+    return json(res, 200, { ok: true, message: msg.text, title: msg.title, createdAt: result.createdAt, files: result.files, skipped: result.skipped, restart: true, relogin, tokensReplaced: result.files.includes('api-tokens.json') });
+  }
+
+  /** Pfad → Methode → Handler; alle nur angemeldet (Sitzung oder Geräte-Token). */
+  const SETTINGS_API = {
+    '/api/einstellungen': { GET: settingsApi, POST: saveSettingsApi },
+    '/api/einstellungen/abmelden': { POST: revokeSessionsApi },
+    '/api/einstellungen/kurzbefehle': { GET: (req, res) => json(res, 200, { shortcuts: shortcutsJson(shortcuts), captureEnabled: captureOn(), intro: shortcutsIntro(captureOn()) }) },
+    ...(tokens
+      ? {
+          '/api/einstellungen/tokens': { GET: (req, res, url, session) => json(res, 200, tokenList(session)), POST: createTokenApi },
+          '/api/einstellungen/tokens/widerrufen': { POST: revokeTokenApi },
+        }
+      : {}),
+    ...(backup
+      ? {
+          '/api/einstellungen/sicherung': { GET: (req, res) => json(res, 200, backupJson(backup.status())), POST: backupApi },
+          '/api/einstellungen/sicherung/wiederherstellen': { POST: restoreBackupApi },
+        }
+      : {}),
+  };
 
   async function graphPage(req, res, url, session) {
     const path = url.searchParams.get('pfad');
@@ -830,13 +1048,18 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     return send(res, 200, renderGraph(g, { vaultName, user, tz, write: writeContext(req), back: url.pathname + url.search, flash: takeFlash(req, res), notes: Boolean(notes) }));
   }
 
-  /** Live-Suche: die besten Treffer, knapp; `type` filtert nach Frontmatter-`type` (z. B. `synthesis`). */
+  /**
+   * Live-Suche: die besten Treffer, knapp; `type` filtert nach Frontmatter-`type` (z. B. `synthesis`).
+   * Mit `alle=1` alle Treffer wie auf der Suchseite (`/graph?q=…`); `notes` sagt, ob ein Treffer
+   * die Notiz öffnet (sonst den Graphen).
+   */
   async function searchApi(req, res, url) {
     const q = (url.searchParams.get('q') ?? '').trim().slice(0, 500);
-    if (!q || !search) return json(res, 200, { query: q, results: [], total: 0 });
+    const all = url.searchParams.get('alle') === '1';
+    if (!q || !search) return json(res, 200, { query: q, results: [], total: 0, degraded: null, notes: Boolean(notes) });
     const r = await search(q, { type: url.searchParams.get('type') || null });
-    const results = r.results.slice(0, 8).map((x) => ({ path: x.path, title: x.title ?? x.path, snippet: x.snippet ?? null, streams: x.streams ?? [] }));
-    return json(res, 200, { query: q, results, total: r.total, degraded: r.degraded ?? null });
+    const results = (all ? r.results : r.results.slice(0, 8)).map((x) => ({ path: x.path, title: x.title ?? x.path, snippet: x.snippet ?? null, streams: x.streams ?? [] }));
+    return json(res, 200, { query: q, results, total: r.total, degraded: r.degraded ?? null, notes: Boolean(notes) });
   }
 
   /** Vorschau der Schnelleingabe („Aufgabe · morgen · Gesundheit“), dieselbe Logik wie beim Anlegen. */
@@ -852,7 +1075,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   async function graphApi(req, res, url) {
     const g = graph ? await graph.around(url.searchParams.get('pfad') ?? '') : null;
     if (!g) return json(res, 404, { error: 'not_found', error_description: 'Notiz nicht im Index' });
-    return json(res, 200, g);
+    return json(res, 200, graphJson(g, { vaultName: settings.get().vaultName, link: Boolean(actions && notes), notes: Boolean(notes) }));
   }
 
   /** Seite aus dem Bereich Lesen (src/lesen/http.js). */
@@ -868,8 +1091,9 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   const BACKUP_ROUTES = backup ? { '/einstellungen/sicherung': downloadBackup, '/einstellungen/sicherung/wiederherstellen': restoreBackup } : {};
   const ACTION_ROUTES = new Set(Object.keys(ACTIONS));
   const SHORTCUT_ROUTES = new Map(shortcuts.map((s) => [`/kurzbefehle/${s.slug}.shortcut`, s]));
-  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...PUBLIC.keys(), '/', '/api/woche', '/api/rueckblick', ...(plan ? ['/api/planen'] : []), '/api/sitzung', '/api/suche', ...(actions ? ['/api/erfassen/vorschau'] : []), '/rueckblick', ...(notes ? ['/notiz', '/notiz/bild'] : []), ...(plan ? ['/planen'] : []), '/graph', '/api/graph', ...Object.keys(READING_PAGES), '/einstellungen', ...(health ? ['/zustand'] : []), ...(tokens ? Object.keys(TOKEN_ROUTES) : []), ...Object.keys(BACKUP_ROUTES), '/einstellungen/abmelden', '/login', '/auth/callback', '/logout']);
-  if (notes) ROUTES.add('/wissen');
+  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...Object.keys(SETTINGS_API), ...PUBLIC.keys(), '/', '/api/woche', '/api/rueckblick', ...(plan ? ['/api/planen'] : []), '/api/sitzung', '/api/suche', ...(actions ? ['/api/erfassen/vorschau'] : []), '/rueckblick', ...(notes ? ['/notiz', '/notiz/bild'] : []), ...(plan ? ['/planen'] : []), '/graph', '/api/graph', ...Object.keys(READING_PAGES), '/einstellungen', ...(health ? ['/zustand'] : []), ...(tokens ? Object.keys(TOKEN_ROUTES) : []), ...Object.keys(BACKUP_ROUTES), '/einstellungen/abmelden', '/login', '/auth/callback', '/logout']);
+  if (notes) for (const p of ['/wissen', '/api/wissen', '/api/notiz']) ROUTES.add(p);
+  if (health) ROUTES.add('/api/zustand');
   if (notes || reading) ROUTES.add('/api/lesen/offline');
   for (const p of appAccess ? [...appAccess.paths, SITE_ASSOCIATION_PATH, APP_CALLBACK_PATH] : []) ROUTES.add(p);
 
@@ -925,6 +1149,12 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
         }
         return action(req, res, path, session);
       }
+      if (SETTINGS_API[path]) {
+        if (!session) return unauthorized(res);
+        const run = SETTINGS_API[path][method];
+        if (!run) return json(res, 405, { error: 'method_not_allowed' });
+        return run(req, res, url, session);
+      }
       if (path === '/einstellungen/abmelden') {
         if (!session) return redirect(res, '/login?next=%2Feinstellungen');
         if (method === 'POST') return revokeSessions(req, res, session);
@@ -943,6 +1173,8 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       if (method !== 'GET') return json(res, 405, { error: 'method_not_allowed' });
 
       if (SHORTCUT_ROUTES.has(path)) {
+        // Die App lädt mit Geräte-Token; ein abgelehnter Token bekommt 401 statt der Login-Seite.
+        if (!session && /^Bearer /.test(String(req.headers.authorization ?? ''))) return unauthorized(res);
         if (!session) return redirect(res, '/login?next=%2Feinstellungen');
         const s = SHORTCUT_ROUTES.get(path);
         res.writeHead(200, {
@@ -994,6 +1226,10 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       }
       // JSON aus dem Bereich Lesen (`/api/lesen/…`): ohne Sitzung 401 statt Login-Seite.
       if (!session && path.startsWith('/api/')) return json(res, 401, { error: 'unauthorized', message: 'Die Anmeldung ist abgelaufen. Bitte neu anmelden.' });
+      // JSON für die App: Notiz, Wissen, Zustand (dieselben Daten wie die Seiten).
+      if (path === '/api/notiz') return noteApi(req, res, url);
+      if (path === '/api/wissen') return json(res, 200, await wissenView({ notes, search, evidence }, wissenQuery(url)));
+      if (path === '/api/zustand') return json(res, 200, await healthApi());
       if (!session) return redirect(res, `/login?next=${encodeURIComponent(url.pathname + url.search)}`);
       if (path === '/graph') return graphPage(req, res, url, session);
       if (READING_PAGES[path]) return readingPage(req, res, url, session);

@@ -1,5 +1,5 @@
 import { esc, formHead } from './render.js';
-import { inlineMd } from './markdown-render.js';
+import { inlineMd, renderInline, plainText } from './markdown-render.js';
 
 /** Frontmatter-`type` der Synthesen in `wiki/synthesis`. */
 export const SYNTHESIS = 'synthesis';
@@ -59,17 +59,35 @@ export function synthesisChips({ art = null, status = null, confidence = null })
 }
 
 /**
- * Kopf einer Synthese auf der Notizseite: Zusammenfassung groß, Chips, Thesen
- * (die H2-Überschriften als Sprungmarken) und offene Punkte. `html` ist der
- * schon gerenderte Text: Seine `<h3 id>` (H2 der Notiz, eine Ebene tiefer)
- * liefern die Anker, so passen sie genau. „Als Aufgaben nach Zunder“ gibt es
- * nur mit Schreibrecht und Zunder-Zugang (`zunder`).
+ * Thesen einer Synthese: ihre H2-Überschriften (auch in Callouts) aus dem Baum
+ * von `parseMarkdown`, in der Reihenfolge im Text, mit Anker-Id, lesbarem Text
+ * und dem HTML ohne Tags (für die Sprungmarken der Seite). Der Bereich mit
+ * Belegen aus dem Lesestapel (src/lesen/synthesis-evidence.js) ist keine These.
  */
-export function synthesisHead(note, html, { ctx, zunder = false }) {
+export function synthesisOutline(blocks) {
+  const out = [];
+  const walk = (list) => {
+    for (const b of list) {
+      if (b.type === 'callout') walk(b.children);
+      if (b.type !== 'heading' || b.level !== 2) continue;
+      const html = renderInline(b.content);
+      if (html !== 'Aus dem Lesestapel') out.push({ id: b.id, text: plainText(b.content), html: html.replace(/<[^>]*>/g, '') });
+    }
+  };
+  walk(blocks);
+  return out;
+}
+
+/**
+ * Kopf einer Synthese auf der Notizseite: Zusammenfassung groß, Chips, Thesen
+ * (die H2-Überschriften als Sprungmarken, siehe `synthesisOutline`; `blocks`
+ * ist der Baum der Notiz) und offene Punkte. „Als Aufgaben nach Zunder“ gibt
+ * es nur mit Schreibrecht und Zunder-Zugang (`zunder`).
+ */
+export function synthesisHead(note, blocks, { ctx, zunder = false }) {
   const fm = note.frontmatter ?? {};
   const summary = fmValue(fm.summary);
-  // Der Bereich mit Belegen aus dem Lesestapel (src/lesen/synthesis-evidence.js) ist keine These.
-  const theses = [...html.matchAll(/<h3 id="([^"]+)">(.*?)<\/h3>/g)].filter(([, , label]) => label !== 'Aus dem Lesestapel').map(([, id, label]) => `<li><a href="#${id}">${label.replace(/<[^>]*>/g, '')}</a></li>`);
+  const theses = synthesisOutline(blocks).map((t) => `<li><a href="#${t.id}">${t.html}</a></li>`);
   const points = openPoints(note.body);
   const button = points.length && zunder && ctx.write ? `${formHead(ctx, '/aktion/synthese/aufgaben', { pfad: note.path })}<button type="submit" class="chip">Als Aufgaben nach Zunder</button></form>` : '';
   return `<section class="synth-head">

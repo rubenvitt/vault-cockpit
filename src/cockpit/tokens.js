@@ -64,9 +64,9 @@ export function createTokenStore({ file = null, logger = console, now = () => Da
     /** Legt einen Token an und gibt den Klartext zurück — das einzige Mal. */
     create(name, scope = 'search') {
       const n = String(name ?? '').trim();
-      if (!n) throw new SettingsError('Der Token braucht einen Namen');
-      if (n.length > 80) throw new SettingsError('Name ist zu lang (höchstens 80 Zeichen)');
-      if (!SCOPES.includes(scope)) throw new SettingsError(`Unbekanntes Recht „${scope}“`);
+      if (!n) throw new SettingsError('Der Token braucht einen Namen', 'name');
+      if (n.length > 80) throw new SettingsError('Name ist zu lang (höchstens 80 Zeichen)', 'name');
+      if (!SCOPES.includes(scope)) throw new SettingsError(`Unbekanntes Recht „${scope}“`, 'scope');
       if (tokens.length >= MAX_TOKENS) throw new SettingsError(`Höchstens ${MAX_TOKENS} Tokens`);
       const token = PREFIX + randomBytes(32).toString('base64url');
       const entry = { id: randomUUID(), name: n, scope, hash: sha256(token).toString('hex'), createdAt: new Date(now()).toISOString() };

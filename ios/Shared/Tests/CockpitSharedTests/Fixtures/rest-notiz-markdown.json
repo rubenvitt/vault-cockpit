@@ -1,0 +1,596 @@
+{
+  "path": "wiki/Alles.md",
+  "title": "Alles, was die Vorschau kann",
+  "folder": "wiki",
+  "tags": [],
+  "inInbox": false,
+  "type": null,
+  "obsidian": "obsidian://open?vault=Vault&file=wiki%2FAlles",
+  "frontmatter": [
+    {
+      "key": "source",
+      "text": "Bello",
+      "content": [
+        {
+          "type": "wikilink",
+          "target": "Hund",
+          "heading": null,
+          "alias": "Bello",
+          "embed": false,
+          "path": "wiki/Hund.md",
+          "self": false,
+          "anchor": null,
+          "status": "note",
+          "text": "Bello"
+        }
+      ]
+    },
+    {
+      "key": "bewertung",
+      "text": "4",
+      "content": [
+        {
+          "type": "text",
+          "text": "4"
+        }
+      ]
+    },
+    {
+      "key": "liste",
+      "text": "a, b",
+      "content": [
+        {
+          "type": "text",
+          "text": "a, b"
+        }
+      ]
+    }
+  ],
+  "synthesis": null,
+  "evidence": null,
+  "blocks": [
+    {
+      "type": "heading",
+      "level": 1,
+      "id": "h-alles-was-die-vorschau-kann",
+      "content": [
+        {
+          "type": "text",
+          "text": "Alles, was die Vorschau kann"
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "text": "Ein Absatz mit "
+        },
+        {
+          "type": "bold",
+          "children": [
+            {
+              "type": "text",
+              "text": "fett"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": ", "
+        },
+        {
+          "type": "italic",
+          "children": [
+            {
+              "type": "text",
+              "text": "kursiv"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": ", "
+        },
+        {
+          "type": "strike",
+          "children": [
+            {
+              "type": "text",
+              "text": "weg"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": ", "
+        },
+        {
+          "type": "mark",
+          "children": [
+            {
+              "type": "text",
+              "text": "markiert"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": ", "
+        },
+        {
+          "type": "code",
+          "text": "code"
+        },
+        {
+          "type": "text",
+          "text": ", "
+        },
+        {
+          "type": "tag",
+          "tag": "tag"
+        },
+        {
+          "type": "text",
+          "text": " und "
+        },
+        {
+          "type": "url",
+          "url": "https://example.org/x."
+        },
+        {
+          "type": "break"
+        },
+        {
+          "type": "text",
+          "text": "Zweite Zeile mit "
+        },
+        {
+          "type": "link",
+          "url": "https://example.org/a",
+          "text": "Link"
+        },
+        {
+          "type": "text",
+          "text": ", "
+        },
+        {
+          "type": "wikilink",
+          "status": "note",
+          "text": "Plan",
+          "target": "../00-inbox/Idee.md#Idee",
+          "heading": "Idee",
+          "alias": "Plan",
+          "embed": false,
+          "path": "00-inbox/Idee.md",
+          "self": false,
+          "anchor": "h-idee"
+        },
+        {
+          "type": "text",
+          "text": ", "
+        },
+        {
+          "type": "wikilink",
+          "target": "Hund",
+          "heading": "Über den Hund",
+          "alias": "Hund oben",
+          "embed": false,
+          "path": "wiki/Hund.md",
+          "self": false,
+          "anchor": "h-über-den-hund",
+          "status": "note",
+          "text": "Hund oben"
+        },
+        {
+          "type": "text",
+          "text": ", "
+        },
+        {
+          "type": "wikilink",
+          "target": "",
+          "heading": "Tabelle",
+          "alias": null,
+          "embed": false,
+          "path": "wiki/Alles.md",
+          "self": true,
+          "anchor": "h-tabelle",
+          "status": "note",
+          "text": "Tabelle"
+        },
+        {
+          "type": "text",
+          "text": " und "
+        },
+        {
+          "type": "wikilink",
+          "target": "foto.png",
+          "heading": null,
+          "alias": "Bild ansehen",
+          "embed": false,
+          "path": "00-inbox/foto.png",
+          "self": false,
+          "anchor": null,
+          "status": "image",
+          "text": "Bild ansehen",
+          "src": "/notiz/bild?pfad=00-inbox%2Ffoto.png"
+        },
+        {
+          "type": "text",
+          "text": "."
+        }
+      ]
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "id": "h-listen",
+      "content": [
+        {
+          "type": "text",
+          "text": "Listen"
+        }
+      ]
+    },
+    {
+      "type": "list",
+      "ordered": true,
+      "items": [
+        {
+          "depth": 0,
+          "task": null,
+          "content": [
+            {
+              "type": "text",
+              "text": "erstens"
+            }
+          ]
+        },
+        {
+          "depth": 0,
+          "task": null,
+          "content": [
+            {
+              "type": "text",
+              "text": "zweitens"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "items": [
+        {
+          "depth": 0,
+          "task": {
+            "done": false,
+            "n": 0,
+            "line": "- [ ] offen mit [[Hund]]"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "offen mit "
+            },
+            {
+              "type": "wikilink",
+              "target": "Hund",
+              "heading": null,
+              "alias": null,
+              "embed": false,
+              "path": "wiki/Hund.md",
+              "self": false,
+              "anchor": null,
+              "status": "note",
+              "text": "Hund"
+            }
+          ]
+        },
+        {
+          "depth": 1,
+          "task": {
+            "done": true,
+            "n": 1,
+            "line": "- [x] erledigt, eingerückt"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "erledigt, eingerückt"
+            }
+          ]
+        },
+        {
+          "depth": 0,
+          "task": null,
+          "content": [
+            {
+              "type": "text",
+              "text": "normal"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "quote",
+      "content": [
+        {
+          "type": "text",
+          "text": "Ein Zitat"
+        },
+        {
+          "type": "break"
+        },
+        {
+          "type": "text",
+          "text": "über zwei Zeilen"
+        }
+      ]
+    },
+    {
+      "type": "callout",
+      "kind": "warning",
+      "family": "warn",
+      "label": "Warnung",
+      "title": [
+        {
+          "type": "text",
+          "text": "Aufklappbar mit "
+        },
+        {
+          "type": "bold",
+          "children": [
+            {
+              "type": "text",
+              "text": "Titel"
+            }
+          ]
+        }
+      ],
+      "foldable": true,
+      "open": true,
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "Text im Callout"
+            }
+          ]
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            {
+              "depth": 0,
+              "task": {
+                "done": false,
+                "n": null,
+                "line": null
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "nur Anzeige"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "callout",
+      "kind": "faq",
+      "family": "warn",
+      "label": "Frage",
+      "title": [
+        {
+          "type": "text",
+          "text": "Frage"
+        }
+      ],
+      "foldable": true,
+      "open": false,
+      "children": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "Zugeklappt, ohne Titel"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "id": "h-tabelle",
+      "content": [
+        {
+          "type": "text",
+          "text": "Tabelle"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "align": [
+        null,
+        "center",
+        "right"
+      ],
+      "head": [
+        [
+          {
+            "type": "text",
+            "text": "Links"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "text": "Mitte"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "text": "Rechts"
+          }
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "type": "wikilink",
+              "target": "Hund",
+              "heading": null,
+              "alias": null,
+              "embed": false,
+              "path": "wiki/Hund.md",
+              "self": false,
+              "anchor": null,
+              "status": "note",
+              "text": "Hund"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "text": "a|b"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "text": "3"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "text": "nur eine"
+            }
+          ],
+          [],
+          []
+        ]
+      ]
+    },
+    {
+      "type": "code",
+      "lang": "swift",
+      "text": "let x = 1"
+    },
+    {
+      "type": "rule"
+    },
+    {
+      "type": "embed",
+      "link": {
+        "type": "wikilink",
+        "target": "Hund",
+        "heading": null,
+        "alias": null,
+        "embed": true,
+        "path": "wiki/Hund.md",
+        "self": false,
+        "anchor": null,
+        "status": "note",
+        "text": "Hund"
+      }
+    },
+    {
+      "type": "embed",
+      "link": {
+        "type": "wikilink",
+        "target": "plan.pdf",
+        "heading": null,
+        "alias": null,
+        "embed": true,
+        "path": null,
+        "self": false,
+        "anchor": null,
+        "status": "file",
+        "text": "plan.pdf"
+      }
+    },
+    {
+      "type": "embed",
+      "link": {
+        "type": "wikilink",
+        "target": "weg.png",
+        "heading": null,
+        "alias": null,
+        "embed": true,
+        "path": null,
+        "self": false,
+        "anchor": null,
+        "status": "missing",
+        "text": "weg.png"
+      }
+    },
+    {
+      "type": "image",
+      "path": "00-inbox/foto.png",
+      "src": "/notiz/bild?pfad=00-inbox%2Ffoto.png",
+      "alt": "Skizze",
+      "width": null,
+      "height": null
+    }
+  ],
+  "related": {
+    "backlinks": [],
+    "similar": [
+      {
+        "path": "00-inbox/Idee.md",
+        "title": "Idee",
+        "type": null,
+        "folder": "00-inbox",
+        "score": null,
+        "linked": false
+      },
+      {
+        "path": "wiki/Hund.md",
+        "title": "Hund",
+        "type": null,
+        "folder": "wiki",
+        "score": null,
+        "linked": true
+      },
+      {
+        "path": "wiki/Training.md",
+        "title": "Training",
+        "type": null,
+        "folder": "wiki",
+        "score": null,
+        "linked": false
+      }
+    ],
+    "source": "text",
+    "problem": "Ohne Embeddings (Einstellungen → Embeddings) ähnlich nach Volltext"
+  },
+  "suggestions": null,
+  "targets": [
+    "00-inbox",
+    "40-archiv",
+    "wiki/synthesis"
+  ],
+  "archive": "40-archiv",
+  "can": {
+    "write": true,
+    "graph": true
+  }
+}

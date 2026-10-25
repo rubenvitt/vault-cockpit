@@ -14,10 +14,8 @@ struct CockpitApp: App {
                     if let session = model.cockpit {
                         MainView(model: model, session: session)
                     } else {
-                        // Ohne Stores (kommt nach dem Login nicht vor, dort gibt es immer einen Token): das Cockpit im Web.
-                        WebShell(model: model, startPath: "/lesen")
-                            .id(model.webViewID)
-                            .ignoresSafeArea()
+                        // Ohne Stores (kommt nach dem Login nicht vor, dort gibt es immer einen Token): neu anmelden.
+                        LoginView(model: model)
                     }
                 case .loggedOut:
                     LoginView(model: model)
@@ -33,11 +31,6 @@ struct CockpitApp: App {
             }
             .sheet(item: $model.listening) { PlayerView(minutes: $0.minutes) }
             .sheet(item: $model.episode) { EpisodePlayerView(request: $0) }
-            .confirmationDialog("Cockpit", isPresented: $model.showsMenu) {
-                Button("Abmelden", role: .destructive) { Task { await model.logout() } }
-            } message: {
-                Text("Angemeldet bei \(model.config.serverURL.host() ?? "")")
-            }
         }
     }
 }

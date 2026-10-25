@@ -40,6 +40,16 @@ struct WeekScreen: View {
         }
         .navigationTitle(store.model?.week.label ?? "Woche")
         .toolbar {
+            // „Suche“ aus der Navigation des Webs (`/graph`).
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    toasts.signal(.selection)
+                    model.open(page: .search(""))
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                }
+                .accessibilityLabel("Vault durchsuchen")
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 if store.state.isRefreshing && store.model != nil {
                     ProgressView()
@@ -56,9 +66,20 @@ struct WeekScreen: View {
     @ViewBuilder private var header: some View {
         if let week = store.model?.week {
             VStack(alignment: .leading, spacing: 10) {
-                Text(CockpitFormat.weekRange(week))
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.text2)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(CockpitFormat.weekRange(week))
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.text2)
+                    Spacer(minLength: 0)
+                    if !store.alert.isEmpty {
+                        HealthAlertButton(alert: store.alert) {
+                            toasts.signal(.selection)
+                            model.open(page: .health)
+                        }
+                        .transition(.scale.combined(with: .opacity))
+                    }
+                }
+                .animation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.8), value: store.alert)
                 WeekPager(week: week, onPrevious: {
                     go(.leading) { await store.showPrevious() }
                 }, onNext: {
@@ -161,5 +182,34 @@ struct WeekSkeleton: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label)
+    }
+}
+
+/// Roter Hinweis „Störung“ im Kopf der Woche, solange ein Dienst einen Fehler meldet
+/// (`healthAlert` im Web); führt zum Zustand der Dienste.
+struct HealthAlertButton: View {
+    let alert: [ServiceAlert]
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(Theme.danger)
+                    .frame(width: 7, height: 7)
+                    .accessibilityHidden(true)
+                Text("Störung")
+                    .font(.footnote.weight(.semibold))
+            }
+            .foregroundStyle(Theme.danger)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Theme.dangerSoft, in: Capsule())
+            .overlay { Capsule().strokeBorder(Theme.danger.opacity(0.3)) }
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Störung: \(alert.map(\.name).joined(separator: ", "))")
+        .accessibilityHint("Öffnet den Zustand der Dienste")
     }
 }

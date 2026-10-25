@@ -14,6 +14,7 @@ final class FakeTransport: HTTPTransport, @unchecked Sendable {
     private var recorded: [URLRequest] = []
     private var waiting: [CheckedContinuation<Void, Never>] = []
     private var handler: Handler
+    private var headers: [String: [String: String]] = [:]
     var hold = false
 
     init(_ handler: @escaping Handler = { _ in (200, Data("{}".utf8)) }) {
@@ -25,6 +26,11 @@ final class FakeTransport: HTTPTransport, @unchecked Sendable {
 
     func respond(_ handler: @escaping Handler) {
         lock.withLock { self.handler = handler }
+    }
+
+    /// Zusätzliche Kopfzeilen für Antworten auf `path` (z. B. `Content-Disposition`).
+    func setHeaders(_ fields: [String: String], for path: String) {
+        lock.withLock { headers[path] = fields }
     }
 
     func release() {
@@ -46,9 +52,10 @@ final class FakeTransport: HTTPTransport, @unchecked Sendable {
                 lock.withLock { waiting.append(c) }
             }
         }
-        let handler = lock.withLock { self.handler }
+        let (handler, extra) = lock.withLock { (self.handler, headers[request.url?.path ?? ""] ?? [:]) }
         let reply = try handler(request)
-        let response = HTTPURLResponse(url: request.url!, statusCode: reply.status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"])!
+        let fields = ["Content-Type": "application/json"].merging(extra) { _, new in new }
+        let response = HTTPURLResponse(url: request.url!, statusCode: reply.status, httpVersion: "HTTP/1.1", headerFields: fields)!
         return (reply.body, response)
     }
 }
@@ -75,6 +82,28 @@ func formFields(_ request: URLRequest) -> [String: String] {
         fields[parts[0]] = parts.count > 1 ? parts[1] : ""
     }
     return fields
+}
+
+/// Textfelder und Dateien eines `multipart/form-data`-Bodys (Name → Inhalt, Dateiname).
+func multipartParts(_ request: URLRequest) -> [String: (value: String, filename: String?)] {
+    guard let type = request.value(forHTTPHeaderField: "Content-Type"), let range = type.range(of: "boundary="),
+          let body = request.httpBody, let text = String(data: body, encoding: .utf8) else { return [:] }
+    let boundary = "--" + type[range.upperBound...]
+    var parts: [String: (String, String?)] = [:]
+    for chunk in text.components(separatedBy: boundary) {
+        guard let split = chunk.range(of: "\r\n\r\n") else { continue }
+        let head = chunk[..<split.lowerBound]
+        var value = String(chunk[split.upperBound...])
+        // "\r\n" ist ein einziges Zeichen (Graphem).
+        if value.hasSuffix("\r\n") { value.removeLast() }
+        func attribute(_ key: String) -> String? {
+            guard let start = head.range(of: "\(key)=\"") else { return nil }
+            let rest = head[start.upperBound...]
+            return rest.firstIndex(of: "\"").map { String(rest[..<$0]) }
+        }
+        if let name = attribute("name") { parts[name] = (value, attribute("filename")) }
+    }
+    return parts
 }
 
 func queryValue(_ request: URLRequest, _ name: String) -> String? {

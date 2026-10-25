@@ -1,7 +1,8 @@
 import CockpitShared
 import SwiftUI
 
-/// Rahmen nach dem Login: Woche, Lesen und Rückblick nativ, Einstellungen als Web-Reiter. App und
+/// Rahmen nach dem Login: Reiter Woche, Lesen, Rückblick und Einstellungen, alle nativ. Notiz,
+/// Graph, Suche und Zustand kommen als Blatt mit eigenem Stapel (`AppModel.pageSheet`). App und
 /// Sitzung stehen im Environment (`@Environment(AppModel.self)`, `@Environment(CockpitSession.self)`).
 @MainActor
 struct MainView: View {
@@ -19,7 +20,7 @@ struct MainView: View {
             ReviewScreen(model: model, store: session.review, toasts: session.toasts)
                 .tabItem { Label("Rückblick", systemImage: "chart.bar") }
                 .tag(AppTab.review)
-            webTab(model.settingsPath)
+            SettingsTab(model: model, session: session)
                 .tabItem { Label("Einstellungen", systemImage: "gearshape") }
                 .tag(AppTab.settings)
         }
@@ -35,22 +36,17 @@ struct MainView: View {
             case .error: return SensoryFeedback.error
             }
         }
-        .sheet(item: $model.webSheet) { page in
-            WebSheet(model: model, page: page)
+        .sheet(item: $model.pageSheet) { sheet in
+            // App, Sitzung und Lesedienste ausdrücklich auch im Blatt (Notiz, Graph, Zustand …).
+            PageSheetView(model: model, sheet: sheet)
+                .environment(model)
+                .environment(session)
+                .readerServices(ReaderServices(context: session.context, buffer: session.reading))
         }
         .environment(model)
         .environment(session)
         // Kontext und Puffer für Leseansichten, auch aus Blättern heraus.
         .readerServices(ReaderServices(context: session.context, buffer: session.reading))
-    }
-
-    /// Eigener WKWebView je Reiter; nach jedem Login neu (frisches Cookie).
-    private func webTab(_ path: String) -> some View {
-        WebShell(model: model, startPath: path)
-            .id(model.webViewID)
-            // Die Seite setzt oben selbst `env(safe-area-inset-top)`; unten endet sie an der Reiterleiste.
-            .ignoresSafeArea(.container, edges: .top)
-            .background(Theme.bg)
     }
 }
 
@@ -69,6 +65,78 @@ struct WeekTab: View {
                         PlanScreen(model: model, store: session.plan, toasts: session.toasts, can: session.week.model?.capabilities ?? .all, week: week, query: query, focusFlame: flame)
                     }
                 }
+        }
+    }
+}
+
+/// Reiter „Einstellungen“ mit eigenem Stapel: Abschnitte und „Zustand der Dienste“.
+@MainActor
+struct SettingsTab: View {
+    @Bindable var model: AppModel
+    let session: CockpitSession
+
+    var body: some View {
+        NavigationStack(path: $model.settingsPath) {
+            SettingsScreen()
+                .navigationDestination(for: SettingsDestination.self) { destination in
+                    switch destination {
+                    case .section(let id):
+                        SettingsSectionScreen(sectionID: id)
+                    case .health:
+                        HealthScreen()
+                    }
+                }
+        }
+    }
+}
+
+/// Blatt mit einer Seite (Notiz, Graph, Suche, Zustand) und eigenem Stapel: Links darin legen die
+/// nächste Seite obendrauf (`AppModel.open(page:)`), „Fertig“ schließt alles.
+@MainActor
+struct PageSheetView: View {
+    @Bindable var model: AppModel
+    let sheet: PageSheet
+
+    var body: some View {
+        NavigationStack(path: $model.pageSheetPath) {
+            PageView(route: sheet.root)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Fertig") { model.closePageSheet() }
+                    }
+                }
+                .navigationDestination(for: PageRoute.self) { route in
+                    PageView(route: route)
+                }
+        }
+    }
+}
+
+/// Bildschirm zu einer Seite des Cockpits (`PageRoute`). Braucht einen `NavigationStack`.
+@MainActor
+struct PageView: View {
+    let route: PageRoute
+
+    var body: some View {
+        switch route {
+        case .note(let path, let anchor):
+            NoteScreen(path: path, anchor: anchor)
+        case .graph(let path):
+            GraphScreen(path: path)
+        case .search(let query):
+            SearchScreen(query: query)
+        case .wissen(let query):
+            WissenScreen(query: query)
+                .navigationTitle("Wissen")
+                .navigationBarTitleDisplayMode(.inline)
+        case .health:
+            HealthScreen()
+        case .settings:
+            SettingsScreen()
+        case .feeds:
+            FeedsScreen()
+                .navigationTitle("Feeds")
+                .navigationBarTitleDisplayMode(.inline)
         }
     }
 }

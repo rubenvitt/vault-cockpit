@@ -1,0 +1,5 @@
+{
+  "error": "invalid",
+  "message": "Die Passphrase braucht mindestens 12 Zeichen",
+  "field": "passphrase"
+}

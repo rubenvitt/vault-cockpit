@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "message": "Als Beleg angehängt: Vom Wollen",
+  "path": "wiki/synthesis/Selbstkontrolle.md",
+  "undo": {
+    "action": "/aktion/synthese/beleg/entfernen",
+    "fields": {
+      "pfad": "wiki/synthesis/Selbstkontrolle.md",
+      "markierung": "hl-1"
+    }
+  }
+}

@@ -106,8 +106,8 @@ extension CockpitAPI {
     }
 }
 
-/// Seiten des Lesens, die die App nativ zeigt. Wie `NativeRoute` für Links aus WKWebView-Seiten
-/// (Feeds, Wissen) und `redirect` aus Aktionen (`/lesen/doc?id=…` nach „Jetzt lesen“).
+/// Seiten des Lesens im Reiter „Lesen“. Wie `NativeRoute` für Links (aus Notizen, Wissen, Feeds)
+/// und `redirect` aus Aktionen (`/lesen/doc?id=…` nach „Jetzt lesen“).
 public enum ReadingRoute: Equatable, Hashable, Sendable {
     /// `/lesen`, `/lesen/eingang?gruppe=`
     case inbox(group: String?)

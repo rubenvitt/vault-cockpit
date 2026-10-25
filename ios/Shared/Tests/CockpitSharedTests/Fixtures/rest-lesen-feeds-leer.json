@@ -1,0 +1,25 @@
+{
+  "groups": [],
+  "ungrouped": [],
+  "total": 0,
+  "limits": {
+    "minInterval": 5,
+    "maxInterval": 1440,
+    "defaultInterval": 30,
+    "maxOpmlBytes": 2097152
+  },
+  "opml": "/api/lesen/feeds.opml",
+  "bulk": {
+    "action": "/aktion/lesen/feeds/auswahl",
+    "actions": [
+      "gruppe",
+      "pausieren",
+      "fortsetzen",
+      "stapel-an",
+      "stapel-aus",
+      "abstand",
+      "entfernen"
+    ],
+    "newGroup": "neu"
+  }
+}

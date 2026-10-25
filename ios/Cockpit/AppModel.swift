@@ -5,7 +5,7 @@ import OSLog
 import UIKit
 import WebKit
 
-/// Reiter nach dem Login. Woche, Lesen und Rückblick sind nativ, Einstellungen (noch) Web.
+/// Reiter nach dem Login, alle nativ.
 enum AppTab: Hashable {
     case week, reading, review, settings
 
@@ -27,17 +27,26 @@ enum WeekDestination: Hashable {
     case plan(String?, PlanQuery, flame: Bool = false)
 }
 
+/// Ziele im Stapel des Reiters „Einstellungen“.
+enum SettingsDestination: Hashable {
+    /// Ein Abschnitt (`kalender`, `zunder`, …, `tokens`, `kurzbefehle`, `sicherung`).
+    case section(String)
+    /// „Zustand der Dienste“ (`/zustand`).
+    case health
+}
+
+/// Seite als Blatt über den Reitern (Notiz, Graph, Suche, Wissen mit Frage, Zustand): eigener
+/// Stapel, Links darin legen die nächste Seite obendrauf.
+struct PageSheet: Identifiable, Equatable {
+    let id = UUID()
+    let root: PageRoute
+}
+
 /// Anmeldestand der App: Login, Abmelden, Reiter, Wunsch nach dem Player.
 @MainActor
 @Observable
 final class AppModel {
     enum Phase { case loggedOut, loggedIn }
-
-    /// Web-Seite als Blatt über den nativen Reitern (Suche, Notiz, …).
-    struct WebPage: Identifiable {
-        let id = UUID()
-        let path: String
-    }
 
     /// Wunsch der Seite `/lesen/hoeren`, den nativen Player zu öffnen.
     struct ListenRequest: Identifiable {
@@ -66,13 +75,10 @@ final class AppModel {
     var loginError: String?
     /// Hinweis nach dem Abmelden, z. B. wenn der Token ohne Netz nicht widerrufen wurde.
     var notice: String?
-    /// Pfad, den die Web-Hülle nach dem nächsten Login öffnet.
+    /// Pfad, den die App nach dem nächsten Login öffnet (dort, wo die Sitzung ablief).
     var startPath = "/"
-    /// Neue Web-Hülle nach jedem Login, damit sie mit dem frischen Cookie startet.
-    var webViewID = UUID()
     var listening: ListenRequest?
     var episode: EpisodeRequest?
-    var showsMenu = false
 
     /// Gewählter Reiter.
     var tab: AppTab = .week
@@ -85,13 +91,17 @@ final class AppModel {
     var reviewWeek: String?
     /// Filter für „Markiert“ (`/lesen/markiert?quelle=&thema=`).
     var highlightQuery = HighlightQuery()
+    /// Auswahl für „Wissen“ (`/wissen?q=&art=&status=&lesen=1`).
+    var wissenQuery = WissenQuery()
     /// Zeitfenster für „Neue Folge“ (`/lesen/folgen/neu?zeit=`), nil = 30 Min.
     var newEpisodeZeit: Int?
     /// Blatt „Hinzufügen“ (Adresse oder PDF) im Reiter „Lesen“.
     var showsAdd = false
-    /// Startpfad des Web-Reiters; nach dem Login z. B. die Seite, auf der die Sitzung ablief.
-    var settingsPath = AppTab.settings.path
-    var webSheet: WebPage?
+    /// Stapel des Reiters „Einstellungen“ (Abschnitt, Zustand).
+    var settingsPath: [SettingsDestination] = []
+    /// Notiz, Graph, Suche, Wissen mit Frage oder Zustand als Blatt, mit eigenem Stapel.
+    var pageSheet: PageSheet?
+    var pageSheetPath: [PageRoute] = []
     /// Zählt hoch, wenn die Schnelleingabe den Fokus bekommen soll (`/?erfassen=1`).
     var captureFocusRequest = 0
     /// Stores der nativen Bildschirme mit dem Geräte-Token; nil ohne Anmeldung.
@@ -102,7 +112,7 @@ final class AppModel {
     init(config: AppConfiguration = AppConfiguration()) {
         self.config = config
         keychain = KeychainStore(accessGroup: config.keychainGroup)
-        // Ohne Token gleich der Login; ist nur das Cookie abgelaufen, fängt die Web-Hülle `/login` ab.
+        // Ohne Token gleich der Login; lehnt der Server den Token ab (401), meldet die App neu an.
         let token = (try? keychain.token()) ?? nil
         phase = token == nil ? .loggedOut : .loggedIn
         if let token { startCockpit(token: token) }
@@ -129,20 +139,18 @@ final class AppModel {
             let callback = try await authenticator.authenticate(url: request.url, callback: request.callback)
             let code = try request.code(from: callback)
             let result = try await APIClient.redeem(baseURL: config.serverURL, code: code, verifier: request.pkce.verifier, device: LoginRequest.currentDeviceName)
-            guard let cookie = result.cookie.httpCookie else { throw LoginError.invalidCookie }
-            await WKWebsiteDataStore.default().httpCookieStore.setCookie(cookie)
+            // Das Cookie braucht die App nicht mehr (kein WKWebView); sie arbeitet mit dem Geräte-Token.
             do {
                 try keychain.save(token: result.token.token)
             } catch {
-                // Die Web-Hülle läuft über das Cookie auch so; Share Extension und Player brauchen den Token.
-                // Im Simulator ohne Signieren fehlt die Keychain-Gruppe (-34018).
+                // Die Bildschirme laufen auch so (Token aus der Antwort); Share Extension und Player
+                // brauchen ihn aus der Keychain. Im Simulator ohne Signieren fehlt die Keychain-Gruppe (-34018).
                 log.error("Geräte-Token nicht gespeichert: \(error.localizedDescription, privacy: .public)")
             }
             // Die nativen Bildschirme nehmen den Token aus der Antwort, auch wenn die Keychain fehlt.
             startCockpit(token: result.token.token)
             open(afterLogin: startPath)
             startPath = "/"
-            webViewID = UUID()
             phase = .loggedIn
         } catch {
             let host = config.serverURL.host() ?? ""
@@ -153,7 +161,7 @@ final class AppModel {
         }
     }
 
-    /// Die Web-Hülle wollte auf `/login`: Sitzung abgelaufen, nativ neu anmelden.
+    /// Sitzung abgelaufen: nativ neu anmelden, danach weiter auf `next`.
     func sessionExpired(next: String) {
         startPath = next
         phase = .loggedOut
@@ -173,7 +181,7 @@ final class AppModel {
         cockpit?.stop()
         let session = CockpitSession(serverURL: config.serverURL, token: token)
         session.context.onUnauthorized = { [weak self] in self?.apiUnauthorized() }
-        session.context.openURL = { url in ExternalLink.open(url) }
+        session.context.openURL = { [weak self] url in self?.open(url: url) }
         session.context.openPath = { [weak self] path in self?.open(path: path) }
         session.start()
         cockpit = session
@@ -181,7 +189,7 @@ final class AppModel {
 
     /// Link auf eine Seite, die nativ ist: Reiter wechseln, Woche oder Rückblick laden, Planen öffnen.
     func open(_ route: NativeRoute) {
-        webSheet = nil
+        closePageSheet()
         switch route {
         case .week(let week, let focusCapture):
             tab = .week
@@ -199,19 +207,14 @@ final class AppModel {
     }
 
     /// Reiter „Lesen“ auf einer Seite öffnen, z. B. „Markierungen dieser Woche wiedersehen“ aus dem Rückblick.
-    /// Was noch nicht nativ ist (Feeds, Wissen), kommt als Blatt.
     func openReading(path: String) {
-        if let route = ReadingRoute(webPath: path) {
-            open(reading: route)
-        } else {
-            webSheet = WebPage(path: path)
-        }
+        open(path: path)
     }
 
     /// Link auf eine Seite des Lesens: Bereich wählen und laden, Leseansicht oder „Neue Folge“
     /// auf den Stapel legen, „Hinzufügen“ als Blatt, „Unterwegs hören“ im nativen Player.
     func open(reading route: ReadingRoute) {
-        webSheet = nil
+        closePageSheet()
         let wasReading = tab == .reading
         switch route {
         case .listen(let zeit):
@@ -246,6 +249,43 @@ final class AppModel {
         tab = .reading
     }
 
+    /// Notiz, Graph, Suche, Wissen, Zustand, Einstellungen oder Feeds. Einstellungen, Feeds und
+    /// Wissen wechseln den Reiter; die übrigen kommen als Blatt, und ist schon eines offen, auf
+    /// dessen Stapel (zurück führt zur Seite, von der der Link kam).
+    func open(page route: PageRoute) {
+        switch route {
+        case .settings(let section):
+            closePageSheet()
+            tab = .settings
+            settingsPath = section.map { [.section($0)] } ?? []
+        case .feeds:
+            closePageSheet()
+            show(.feeds)
+            tab = .reading
+        case .wissen(let query):
+            closePageSheet()
+            wissenQuery = query
+            show(.wissen)
+            tab = .reading
+        case .health where tab == .settings && pageSheet == nil:
+            // Aus den Einstellungen heraus auf deren Stapel.
+            if settingsPath.last != .health { settingsPath.append(.health) }
+        case .note, .graph, .search, .health:
+            if let sheet = pageSheet {
+                if (pageSheetPath.last ?? sheet.root) != route { pageSheetPath.append(route) }
+            } else {
+                pageSheetPath = []
+                pageSheet = PageSheet(root: route)
+            }
+        }
+    }
+
+    /// Blatt mit Seiten schließen (ein Link führt in einen Reiter).
+    func closePageSheet() {
+        pageSheet = nil
+        pageSheetPath = []
+    }
+
     /// Bereich der Unternavigation wählen; der Stapel (Leseansicht …) geht zu.
     private func show(_ section: LesenSection) {
         readingPath = []
@@ -263,26 +303,38 @@ final class AppModel {
         }
     }
 
-    /// Web-Pfad aus einem nativen Bildschirm (`redirect`, Notiz, Suche): nativ, wenn es geht, sonst als Blatt.
+    /// Web-Pfad aus einem nativen Bildschirm (`redirect`, Links in Notizen, Rückblick): der
+    /// passende Bildschirm (`NavigationDecision`). Was die App nicht kennt (andere Seiten des
+    /// Servers), öffnet sich im `SFSafariViewController`.
     func open(path: String) {
-        if let route = NativeRoute(webPath: path) {
-            open(route)
-        } else if let route = ReadingRoute(webPath: path) {
-            open(reading: route)
-        } else {
-            webSheet = WebPage(path: path)
+        if let decision = NavigationDecision.decide(path: path, server: config.serverURL) { follow(decision) }
+    }
+
+    /// Adresse aus einem nativen Bildschirm: eigene Seiten nativ, fremde im `SFSafariViewController`,
+    /// `mailto:`, `obsidian://` usw. an das System.
+    func open(url: URL) {
+        follow(NavigationDecision.decide(url, server: config.serverURL))
+    }
+
+    /// Führt eine Entscheidung aus: Reiter, Abschnitt, Blatt oder raus aus der App.
+    func follow(_ decision: NavigationDecision) {
+        switch decision {
+        case .native(let route): open(route)
+        case .reading(let route): open(reading: route)
+        case .page(let route): open(page: route)
+        case .browser(let url), .external(let url): ExternalLink.present(url)
+        case .system(let url): ExternalLink.system(url)
         }
     }
 
-    /// Nach dem Login dorthin, wo die Sitzung ablief: nativer Bildschirm, Web-Reiter oder Blatt.
+    /// Nach dem Login dorthin, wo die Sitzung ablief (Reiter, Abschnitt oder Seite); sonst bleibt
+    /// die Woche.
     private func open(afterLogin path: String) {
-        if NativeRoute(webPath: path) != nil || ReadingRoute(webPath: path) != nil {
-            open(path: path)
-        } else if path.hasPrefix(AppTab.settings.path) {
-            settingsPath = path
-            tab = .settings
-        } else {
-            webSheet = WebPage(path: path)
+        switch NavigationDecision.decide(path: path, server: config.serverURL) {
+        case .native(let route)?: open(route)
+        case .reading(let route)?: open(reading: route)
+        case .page(let route)?: open(page: route)
+        default: break
         }
     }
 
@@ -296,8 +348,9 @@ final class AppModel {
         }
     }
 
-    /// Geräte-Token auf dem Server widerrufen, dann Cookies, Website-Daten (auch Service Worker und
-    /// Offline-Puffer) und Token löschen. Ohne Netz wird trotzdem lokal gelöscht, mit Hinweis.
+    /// Geräte-Token auf dem Server widerrufen, dann Website-Daten (Cookies, Service Worker und
+    /// Offline-Puffer früherer Versionen mit Web-Hülle) und Token löschen. Ohne Netz wird
+    /// trotzdem lokal gelöscht, mit Hinweis.
     func logout() async {
         var notice: String?
         if let token = (try? keychain.token()) ?? nil {
@@ -325,10 +378,11 @@ final class AppModel {
         readingPath = []
         reviewWeek = nil
         highlightQuery = HighlightQuery()
+        wissenQuery = WissenQuery()
         newEpisodeZeit = nil
         showsAdd = false
-        settingsPath = AppTab.settings.path
-        webSheet = nil
+        settingsPath = []
+        closePageSheet()
         startPath = "/"
         loginError = nil
         self.notice = notice

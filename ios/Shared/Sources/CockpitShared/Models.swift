@@ -123,7 +123,8 @@ public struct DeviceToken: Decodable, Equatable, Sendable {
     public let scopes: [String]
 }
 
-/// Sitzungs-Cookie für den `WKHTTPCookieStore` des WKWebView.
+/// Sitzungs-Cookie aus dem Login (dieselbe Sitzung wie im Browser). Die native App braucht es
+/// nicht mehr; sie arbeitet mit dem Geräte-Token.
 public struct SessionCookie: Decodable, Equatable, Sendable {
     public let name: String
     public let value: String

@@ -18,6 +18,12 @@ final class CockpitSession {
     /// Eingang und „Hinzufügen“, Stapel: bleiben beim Wechsel der Bereiche stehen.
     let inbox: InboxStore
     let stack: StackStore
+    /// Einstellungen mit API-Tokens, Kurzbefehlen und Sicherung; Zustand der Dienste.
+    let settings: SettingsStore
+    let tokens: TokensStore
+    let shortcuts: ShortcutsStore
+    let backup: BackupStore
+    let health: HealthStore
 
     @ObservationIgnored private var monitor: NWPathMonitor?
     @ObservationIgnored private var online = true
@@ -34,6 +40,11 @@ final class CockpitSession {
         reading = ReadingBuffer(context: context)
         inbox = InboxStore(context: context)
         stack = StackStore(context: context)
+        settings = SettingsStore(context: context)
+        tokens = TokensStore(context: context)
+        shortcuts = ShortcutsStore(context: context)
+        backup = BackupStore(context: context)
+        health = HealthStore(context: context)
     }
 
     var toasts: ToastCenter { context.toasts }
@@ -85,6 +96,8 @@ final class CockpitSession {
             if plan.model != nil, plan.state.isStale || plan.state.isOffline { await plan.refresh() }
             if inbox.model != nil, inbox.state.isStale || inbox.state.isOffline { await inbox.refresh() }
             if stack.model != nil, stack.state.isStale || stack.state.isOffline { await stack.refresh() }
+            if settings.model != nil, settings.state.isStale || settings.state.isOffline { await settings.refresh() }
+            if health.model != nil, health.state.isStale || health.state.isOffline { await health.recheck() }
         }
     }
 }

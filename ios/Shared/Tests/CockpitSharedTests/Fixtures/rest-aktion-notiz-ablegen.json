@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "message": "Abgelegt in wiki/",
+  "path": "wiki/Idee.md",
+  "from": "00-inbox/Idee.md",
+  "folder": "wiki",
+  "redirect": "/notiz?pfad=wiki%2FIdee.md",
+  "undo": {
+    "action": "/aktion/notiz/ablegen",
+    "fields": {
+      "pfad": "wiki/Idee.md",
+      "ordner": "00-inbox",
+      "back": "/notiz?pfad=00-inbox%2FIdee.md"
+    }
+  }
+}
