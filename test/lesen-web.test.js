@@ -112,7 +112,7 @@ test('Lesen: URL speichern erscheint mit Titel, Quelle und Lesezeit im Eingang; 
       assert.equal(saved.headers.get('location'), '/lesen/eingang');
       const html = await (await call('/lesen/eingang')).text();
       assert.match(html, /<span class="toast-text">Gespeichert: Vom Lesen<\/span>/);
-      assert.match(html, /<p class="inbox-meta"><a href="https:\/\/blatt\.test\/vom-lesen" rel="noopener noreferrer">Blatt<\/a> · Artikel · \d+ min<\/p>\s*<h2 class="inbox-title">Vom Lesen<\/h2>/);
+      assert.match(html, /<p class="inbox-meta"><a href="https:\/\/blatt\.test\/vom-lesen" rel="noopener noreferrer" target="_blank">Blatt<\/a> · Artikel · \d+ min<\/p>\s*<h2 class="inbox-title">Vom Lesen<\/h2>/);
       assert.equal(store.list({ status: 'eingang' })[0].origin, 'formular');
 
       // Doppelt abgeschickt (gleiche cid): nichts Neues, mit JavaScript als JSON.
