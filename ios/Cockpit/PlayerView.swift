@@ -2,21 +2,16 @@ import CockpitShared
 import SwiftUI
 
 /// Nativer Vorlese-Player „Unterwegs hören“ (VCP-94). Öffnet sich mit „Unterwegs hören“ im Stapel
-/// oder einem Link auf `/lesen/hoeren` (`AppModel.listening`); `minutes` ist das Zeitfenster. Spielt
-/// gleich los und läuft bei gesperrtem Bildschirm weiter (Hintergrundmodus `audio`).
+/// oder einem Link auf `/lesen/hoeren` (`AppModel.listening`). Den Player hält `AppModel.nowPlaying`:
+/// „Fertig“ schließt nur das Blatt, vorgelesen wird weiter, auch bei gesperrtem Bildschirm
+/// (Hintergrundmodus `audio`) und unter den Reitern als Leiste. „Beenden“ hält an.
 struct PlayerView: View {
-    @State private var player: Player
+    @Bindable var player: Player
+    /// Wiedergabe beenden (`AppModel.closePlayer`).
+    let stop: @MainActor () -> Void
     /// Text, für den „Offline laden“ noch bestätigt werden muss (kostet Zeichen bei der Stimme vom Server).
     @State private var confirmDownload: QueueItem?
     @Environment(\.dismiss) private var dismiss
-
-    init(minutes: Int) {
-        _player = State(initialValue: Player.live(minutes: minutes))
-    }
-
-    init(player: Player) {
-        _player = State(initialValue: player)
-    }
 
     var body: some View {
         NavigationStack {
@@ -57,7 +52,12 @@ struct PlayerView: View {
             .navigationTitle("Unterwegs hören")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                Button("Fertig") { dismiss() }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Beenden", role: .destructive) { stop() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Fertig") { dismiss() }
+                }
             }
             .confirmationDialog(
                 "Offline laden?",
@@ -70,8 +70,6 @@ struct PlayerView: View {
                 Text("\(player.serverVoice ?? "Die Stimme vom Server") liest dafür den ganzen Text (\(item.minutes) Min.) auf einmal vor. Das kostet Zeichen, auch für Teile, die du nicht hörst.")
             }
         }
-        .task { await player.start() }
-        .onDisappear { player.close() }
         .onChange(of: player.minutes) { Task { await player.loadQueue() } }
     }
 
@@ -147,6 +145,6 @@ struct PlayerView: View {
 
 #if DEBUG
 #Preview {
-    PlayerView(player: Player(minutes: 15, service: DemoListenService(), speech: SystemSpeech(), defaults: .standard))
+    PlayerView(player: Player(minutes: 15, service: DemoListenService(), speech: SystemSpeech(), defaults: .standard), stop: {})
 }
 #endif

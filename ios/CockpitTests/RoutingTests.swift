@@ -13,7 +13,10 @@ final class RoutingTests: XCTestCase {
 
     @MainActor
     private func app() -> AppModel {
-        AppModel(config: AppConfiguration(info: ["CockpitServerURL": "https://vault.test"]))
+        let model = AppModel(config: AppConfiguration(info: ["CockpitServerURL": "https://vault.test"]))
+        // `/lesen/hoeren` startet den Player; hier ohne Netz und Ton.
+        model.players = .silent
+        return model
     }
 
     func testOwnPagesOpenNatively() {

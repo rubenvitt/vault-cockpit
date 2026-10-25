@@ -135,7 +135,7 @@ test('Service Worker: ohne Sitzung, nie aus dem HTTP-Cache, eigene CSP, App-Hül
 });
 
 test('Versions-Hash: ändert sich mit jeder Datei der App-Hülle, sonst nicht', () => {
-  const files = new Map([assets.css, assets.ui, assets.js, assets.offline, assets.lesenDoc, assets.lesenLinks, '/manifest.webmanifest', '/static/icon.svg', '/static/icons/icon-192.png', '/static/icons/icon-512.png', '/static/icons/icon-maskable-512.png', '/static/icons/apple-touch-icon.png'].map((p) => [p.split('?')[0], { body: `Inhalt von ${p}` }]));
+  const files = new Map([assets.css, assets.ui, assets.player, assets.js, assets.offline, assets.lesenDoc, assets.lesenLinks, '/manifest.webmanifest', '/static/icon.svg', '/static/icons/icon-192.png', '/static/icons/icon-512.png', '/static/icons/icon-maskable-512.png', '/static/icons/apple-touch-icon.png'].map((p) => [p.split('?')[0], { body: `Inhalt von ${p}` }]));
   const html = { 'content-type': 'text/html; charset=utf-8' };
   const a = offlineFiles(files, { html });
   assert.equal(offlineFiles(files, { html }).version, a.version);

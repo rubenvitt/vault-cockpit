@@ -620,7 +620,8 @@ Texte des Zeitfensters werden zur Wiedergabeliste. Vorgelesen wird auf dem Gerä
 mit der Web Speech API (`speechSynthesis`, deutsche Stimme bevorzugt), ohne
 Serverkosten, oder mit ElevenLabs (unten, „Stimme vom Server“). Bedienung: Abspielen/Pause, Nächster Text, Tempo (0,8× bis 1,8×,
 im Browser gemerkt) und **Das hier merken**, das den gerade gesprochenen Satz
-markiert. Den Text liefert der Server (`/lesen/hoeren/text?id=…`): Lesetext und
+markiert. Vorgelesen wird im [Player des Cockpits](#player-beim-seitenwechsel), der
+beim Wechsel auf andere Seiten weiterläuft. Den Text liefert der Server (`/lesen/hoeren/text?id=…`): Lesetext und
 Sätze mit Zeichenpositionen wie in `src/lesen/anchor.js`. Nach jedem Satz
 speichert die Seite den Anfang des nächsten als Lesestelle; die Leseansicht
 springt mit `#weiter` genau dorthin, und das nächste Hören setzt dort fort. Ohne
@@ -723,7 +724,9 @@ Claude schreibt → Stimmen sprechen → Fertig), Fortschrittsbalken und geschä
 Restzeit, live über `/lesen/folgen/stand`; fertige mit großem Abspiel-Knopf
 (`/static/lesen-folgen.js`): Stelle, ±15/30 Sekunden, Tempo, gemerkte Stelle je
 Folge, Titel und Knöpfe auf dem Sperrbildschirm über die Media Session, bei
-Podcast und Report mit „Im Vault“ aufs Transkript. In der
+Podcast und Report mit „Im Vault“ aufs Transkript. Abgespielt wird im
+[Player des Cockpits](#player-beim-seitenwechsel), die Folge läuft also auf
+anderen Seiten weiter. In der
 iOS-App öffnet der Knopf den nativen Player (`/api/app/folge`, siehe
 [ios/README.md](ios/README.md)). Die MP3 kommt mit `Range`
 (`/lesen/folgen/audio?id=…`), damit Safari sie spielt und Vorspulen geht; die
@@ -738,6 +741,39 @@ rund 20 000 Zeichen; mit `eleven_multilingual_v2` kostet das 20 000 Credits, mit
 `eleven_flash_v2_5` die Hälfte bei etwas weniger natürlicher Betonung. Das Modell
 steht unter **Einstellungen → Vorlesen → Stimme und Modell**. Beim Öffnen von
 `/lesen/hoeren` holt die Seite schon den ersten Satz, auch ohne Abspielen.
+
+#### Player beim Seitenwechsel
+
+Folgen und „Unterwegs hören“ spielen im Player des Cockpits (`/static/player.js`,
+auf jeder Seite vor den Seitenskripten, `window.cockpitPlayer`). Er hält Audio,
+Sprachausgabe, Media Session und eine Leiste unten (über der Tableiste, am
+Desktop als Karte): Abspielen/Pause, Titel mit Link zurück zur Seite, bei Folgen
+Stelle und ±15/30 Sekunden, beim Hören „Das hier merken“ und „Nächster Text“,
+dazu Meldungen (etwa „Die Gerätestimme liest weiter“, mit Rückgängig beim
+Merken) und Schließen. Die Seiten `/lesen/folgen` und `/lesen/hoeren` zeigen nur
+seinen Stand und geben ihre Knöpfe weiter. Es spielt immer nur eins: Eine Folge
+löst das Hören ab und umgekehrt, die Stelle der Folge bleibt gemerkt.
+
+Weiter läuft es so: Solange etwas geladen ist, fängt der Player Links,
+Formulare und Wechsel aus Scripten (`cockpitWechsel`) im Cockpit ab und macht
+die Seite zur Hülle. Die Seiten laden dann in einem Rahmen
+(`<iframe name="cockpit-seite">`), Formulare schickt der Browser selbst dorthin
+(`target`), Leiste und Ton bleiben im obersten Dokument und spielen ohne Pause.
+Die Seitenskripte bleiben, wie sie sind; im Rahmen nehmen sie den Player der
+Hülle (gleiche Herkunft). Adresse und Titel folgen dem Rahmen (`replaceState`),
+Neuladen öffnet also die Seite, auf der man ist (ohne Ton). Zurück geht durch
+die Seiten im Rahmen bis zur Ausgangsseite. Anmelden und Abmelden laufen im
+ganzen Fenster (`target="_top"`): Ist die Sitzung abgelaufen, zeigt `/login` im
+Rahmen (`Sec-Fetch-Dest: iframe`) statt Pocket ID einen Link zur Anmeldung,
+denn Pocket ID lässt sich nicht einrahmen. Externe Links öffnen wie bisher in
+einem neuen Tab.
+
+Im Browser geprüft (Chromium): Ton läuft über Navigation, Links und Formulare im
+Rahmen, Weiterleitung nach dem Absenden und Zurück. **Ungeprüft** ist das
+Verhalten in Safari auf dem iPhone, als Tab wie als Home-Screen-App: ob ein
+Tipp im Rahmen das Abspielen in der Hülle freigibt, Sperrbildschirm und ob die
+sicheren Ränder (Notch, Home-Indikator) im Rahmen stimmen. Für Hintergrund auf
+dem iPhone ist die [iOS-App](ios/README.md) der verlässliche Weg.
 
 **Ingest-Oberfläche** (`src/lesen/ingest-page.js`, nur mit Ingest-Dienst, siehe
 [Ingest](#ingest)): In der Unternavigation steht **Ingest** zwischen Stapel und
@@ -1269,7 +1305,10 @@ npm ci && npm test
   Subject). Das Sitzungs-Cookie ist `HttpOnly`, `Secure`, `SameSite=Lax` und gilt
   nicht für `/mcp`; das Subject wird bei jedem Request erneut gegen
   `ALLOWED_SUBJECTS` geprüft, „Überall abmelden“ widerruft alle Sitzungen. Die Content-Security-Policy erlaubt nur eigene Dateien
-  (Stylesheet und `/static/cockpit.js`, kein Inline-Script). Schreibende Aktionen
+  (Stylesheet und `/static/cockpit.js`, kein Inline-Script). Einrahmen dürfen die Seiten nur
+  sich selbst (`frame-src 'self'`, `frame-ancestors 'self'`), für den
+  [Player beim Seitenwechsel](#player-beim-seitenwechsel); fremde Seiten können das Cockpit
+  weiterhin nicht einrahmen (Clickjacking). Schreibende Aktionen
   (`/aktion/…`) brauchen Sitzung, gleiche Herkunft und ein CSRF-Token, das an das
   Sitzungs-Cookie gebunden ist; die Schnelleingabe schreibt nie in einen
   vertraulichen oder ausgeschlossenen Ordner der Policy.

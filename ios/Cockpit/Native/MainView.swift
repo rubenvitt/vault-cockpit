@@ -1,7 +1,8 @@
 import CockpitShared
 import SwiftUI
 
-/// Rahmen nach dem Login: Reiter Woche, Lesen, Rückblick und Einstellungen, alle nativ. Notiz,
+/// Rahmen nach dem Login: Reiter Woche, Lesen, Rückblick und Einstellungen, alle nativ, über der
+/// Tableiste die Leiste des Players, solange etwas spielt (`NowPlayingBar`). Notiz,
 /// Graph, Suche und Zustand kommen als Blatt mit eigenem Stapel (`AppModel.pageSheet`). App und
 /// Sitzung stehen im Environment (`@Environment(AppModel.self)`, `@Environment(CockpitSession.self)`).
 @MainActor
@@ -11,16 +12,21 @@ struct MainView: View {
 
     var body: some View {
         TabView(selection: $model.tab) {
+            // Je Reiter die Leiste „Läuft gerade“ über der Tableiste (`nowPlayingBar`).
             WeekTab(model: model, session: session)
+                .nowPlayingBar(model)
                 .tabItem { Label("Woche", systemImage: "calendar") }
                 .tag(AppTab.week)
             LesenScreen(model: model, session: session)
+                .nowPlayingBar(model)
                 .tabItem { Label("Lesen", systemImage: "book") }
                 .tag(AppTab.reading)
             ReviewScreen(model: model, store: session.review, toasts: session.toasts)
+                .nowPlayingBar(model)
                 .tabItem { Label("Rückblick", systemImage: "chart.bar") }
                 .tag(AppTab.review)
             SettingsTab(model: model, session: session)
+                .nowPlayingBar(model)
                 .tabItem { Label("Einstellungen", systemImage: "gearshape") }
                 .tag(AppTab.settings)
         }
