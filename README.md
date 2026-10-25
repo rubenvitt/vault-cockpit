@@ -683,9 +683,22 @@ des Zeitfensters zum Abhaken, die Art und die geschätzten Zeichen bei ElevenLab
   Stimmen unter **Einstellungen → Vorlesen → Folgen** (Standard: Moderation = Stimme
   vom Vorlesen, Gast „Sarah“ `EXAVITQu4vr4xnSDxMaL`).
 - **Report** (5, 10 oder 20 Minuten): Claude schreibt einen Bericht mit Überblick,
-  Kernaussagen je Text, Querverbindungen und offenen Fragen. Er kommt als Notiz
-  (mit Quellenliste) über die Schnelleingabe in die Vault-Inbox, und eine Stimme
-  liest die Sprechfassung.
+  Kernaussagen je Text, Querverbindungen und offenen Fragen, dazu eine
+  Sprechfassung; eine Stimme liest sie.
+
+Podcast und Report landen als Transkript im Vault, unter
+`30-ressourcen/audio-reports/` neben den übrigen Audio-Reports, als
+`JJJJ-MM-TT-<art>-<titel>.md` (gibt es den Namen schon, mit Kurz-ID dahinter).
+Angelegt wird die Notiz, sobald Claudes Skript da ist, also schon vor dem
+Sprechen, und je Folge nur einmal, auch beim Fortsetzen. Im Frontmatter stehen
+`type: folge`, `art` (`podcast` oder `report`), `titel`, `erzeugt`, `minuten`,
+`quellen` (Wikilinks auf die Lesestapel-Notizen der Texte, soweit es sie gibt) und
+`ingest: offen`, damit ein Claude-Skill sie später ins Wiki holt. Darunter beim
+Report der Bericht und `## Sprechfassung`, beim Podcast `## Gespräch` (je
+Wortbeitrag ein Absatz, **Moderation** oder **Gast**), zuletzt `## Quellen`
+(Wikilink auf die Lesestapel-Notiz, sonst die URL). Vorlesen bekommt keine Notiz,
+das sind die Texte selbst. Ist eine Folge fertig, gleich welcher Art, bekommen ihre
+Texte den Vermerk „gehört“; scheitert der, bleibt die Folge trotzdem fertig.
 
 Claude läuft über die Claude Code CLI im Container (`claude -p`, im Image
 installiert, Version per Build-Arg `CLAUDE_CODE_VERSION`, leer = ohne) mit dem
@@ -706,7 +719,8 @@ Die Liste zeigt jede Folge als Karte: entstehende mit Schritten (Eingereiht →
 Claude schreibt → Stimmen sprechen → Fertig), Fortschrittsbalken und geschätzter
 Restzeit, live über `/lesen/folgen/stand`; fertige mit großem Abspiel-Knopf
 (`/static/lesen-folgen.js`): Stelle, ±15/30 Sekunden, Tempo, gemerkte Stelle je
-Folge, Titel und Knöpfe auf dem Sperrbildschirm über die Media Session. In der
+Folge, Titel und Knöpfe auf dem Sperrbildschirm über die Media Session, bei
+Podcast und Report mit „Im Vault“ aufs Transkript. In der
 iOS-App öffnet der Knopf den nativen Player (`/api/app/folge`, siehe
 [ios/README.md](ios/README.md)). Die MP3 kommt mit `Range`
 (`/lesen/folgen/audio?id=…`), damit Safari sie spielt und Vorspulen geht; die

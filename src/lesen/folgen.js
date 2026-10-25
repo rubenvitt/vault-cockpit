@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { htmlText } from './anchor.js';
 import { sentences } from './listen.js';
 import { createElevenLabs, DIALOGUE_CHARS } from './tts.js';
+import { slugOf } from './vault-export.js';
+import { localDate } from '../cockpit/week.js';
 
 /**
  * Folgen aus dem Lesestapel: eine MP3, im Hintergrund erzeugt, auf Knopfdruck.
@@ -15,8 +17,17 @@ import { createElevenLabs, DIALOGUE_CHARS } from './tts.js';
  *   nichts mehr, und umgekehrt.
  * - **Podcast**: Claude schreibt ein Gespräch zweier Stimmen über die Texte,
  *   ElevenLabs spricht es mit Text-to-Dialogue (`eleven_v3`).
- * - **Report**: Claude schreibt einen Bericht; er kommt als Notiz in die
- *   Vault-Inbox, eine Stimme liest die Sprechfassung.
+ * - **Report**: Claude schreibt einen Bericht, eine Stimme liest die
+ *   Sprechfassung.
+ *
+ * Podcast und Report landen als Transkript im Vault (`noteFolder`, Standard
+ * `30-ressourcen/audio-reports`, neben den übrigen Audio-Reports), sobald
+ * Claudes Skript da ist, also vor dem Sprechen: `type: folge`, `art`,
+ * `quellen` als Wikilinks auf die Lesestapel-Notizen und `ingest: offen`,
+ * damit ein Claude-Skill sie später ins Wiki holt. Der Report mit Bericht und
+ * Sprechfassung, der Podcast mit dem Gespräch. Vorlesen braucht keine Notiz,
+ * das sind die Texte selbst. Ist eine Folge fertig (jede Art), bekommen ihre
+ * Texte über `heard` den Vermerk „gehört“.
  *
  * Claude läuft über die CLI mit dem Abo (src/lesen/claude.js). Die Folgen
  * liegen unter `dir` (`folgen.json`, je Folge `<id>.mp3`), es läuft immer nur
@@ -41,6 +52,10 @@ const PARALLEL = 3;
 // So viel Text je Dokument und insgesamt geht an Claude.
 const DOC_INPUT = 60_000;
 const TOTAL_INPUT = 300_000;
+/** Ordner der Transkripte im Vault, wo auch die übrigen Audio-Reports liegen. */
+export const DEFAULT_NOTE_FOLDER = '30-ressourcen/audio-reports';
+// Länge des Titels im Dateinamen.
+const SLUG_CHARS = 60;
 const STATES = { wartet: 'wartet', schreibt: 'Claude schreibt', spricht: 'wird gesprochen', fertig: 'fertig', fehler: 'Fehler' };
 /** `mp3_44100_128` (src/lesen/tts.js) hat eine feste Bitrate: 16 000 Bytes je Sekunde. */
 export const BYTES_PER_SECOND = 16_000;
@@ -261,10 +276,32 @@ const cleanTitle = (t, fallback) => String(t ?? '').replace(/[\\/\r\n]+/g, ' ').
  * - `speech`: Stimme mit Satz-Cache (src/lesen/tts.js `createSpeech`) fürs Vorlesen.
  * - `voices()`: `{ host, guest }` für den Podcast.
  * - `writer`: Claude (src/lesen/claude.js), `{ available(), write() }`.
- * - `capture({ title, text, captureId })`: legt die Report-Notiz in der Vault-Inbox an, liefert `{ path }`.
+ * - `createNote({ folder, name, content })`: legt das Transkript im Vault an
+ *   (Vault-Editor `create`, wirft, wenn es die Datei schon gibt), liefert `{ path }`.
+ * - `sourceNote(docId)`: Vault-Pfad der Lesestapel-Notiz eines Textes oder null.
+ * - `heard(docIds)`: Vermerk „gehört“, sobald eine Folge fertig ist.
+ * - `noteFolder`: Ordner der Transkripte; `tz`: Zeitzone fürs Datum (sonst UTC).
  * - `provider(cfg)`: ElevenLabs-Client (Tests ersetzen ihn).
+ *
+ * `createNote`, `sourceNote` und `heard` sind optional: Ohne sie gibt es keine
+ * Notiz, keine Wikilinks bzw. keinen Vermerk.
  */
-export function createEpisodes({ dir, store, tts, speech = null, voices, writer, capture, provider = (cfg) => createElevenLabs(cfg), logger = console, now = () => new Date() }) {
+export function createEpisodes({
+  dir,
+  store,
+  tts,
+  speech = null,
+  voices,
+  writer,
+  createNote = null,
+  sourceNote = null,
+  heard = null,
+  noteFolder = DEFAULT_NOTE_FOLDER,
+  tz = null,
+  provider = (cfg) => createElevenLabs(cfg),
+  logger = console,
+  now = () => new Date(),
+}) {
   const file = join(dir, 'folgen.json');
   let episodes = [];
   try {
@@ -327,6 +364,58 @@ export function createEpisodes({ dir, store, tts, speech = null, voices, writer,
     return minutes * CHARS_PER_MINUTE;
   }
 
+  const today = () => (tz ? localDate(now(), tz) : now().toISOString().slice(0, 10));
+
+  /**
+   * Transkript einer Folge im Vault: Frontmatter, Titel, Hinweiszeile, `body`
+   * und die Quellen (Wikilink auf die Lesestapel-Notiz, sonst die URL). Nur
+   * einmal je Folge (`ep.note`); gibt es den Dateinamen schon, mit Kurz-ID.
+   * Claudes Text bleibt, wie er ist.
+   */
+  async function writeNote(ep, docs, title, body) {
+    if (ep.note || !createNote) return;
+    const str = (v) => JSON.stringify(String(v));
+    const date = today();
+    const label = (d) => String(d.title || d.url).replace(/[[\]|\r\n]+/g, ' ').trim();
+    const sources = docs.map((d) => ({ d, path: sourceNote?.(d.id)?.replace(/\.md$/i, '') ?? null }));
+    const links = sources.filter((s) => s.path).map((s) => `  - ${str(`[[${s.path}]]`)}`);
+    const content = [
+      '---',
+      'type: folge',
+      `art: ${ep.kind}`,
+      `titel: ${str(title)}`,
+      `folge_id: ${str(ep.id)}`,
+      `erzeugt: ${date}`,
+      `minuten: ${ep.minutes}`,
+      ...(links.length ? ['quellen:', ...links] : ['quellen: []']),
+      'ingest: offen',
+      '---',
+      '',
+      `# ${title}`,
+      '',
+      `_${KINDS[ep.kind]} aus dem Lesestapel, ${date}, ${docs.length} ${docs.length === 1 ? 'Text' : 'Texte'} (Cockpit)_`,
+      '',
+      body,
+      '',
+      '## Quellen',
+      '',
+      ...sources.map(({ d, path }) => (path ? `- [[${path}|${label(d)}]]` : `- [${label(d)}](<${String(d.url).replace(/[<>]/g, encodeURIComponent)}>)`)),
+      '',
+    ].join('\n');
+    const stem = `${date}-${ep.kind}-${slugOf(title).slice(0, SLUG_CHARS).replace(/-+$/, '') || ep.kind}`;
+    const names = [`${stem}.md`, `${stem}-${ep.id.slice(0, 8)}.md`];
+    for (const [i, name] of names.entries()) {
+      try {
+        const made = await createNote({ folder: noteFolder, name, content });
+        update(ep, { note: made?.path ?? `${noteFolder}/${name}` });
+        return;
+      } catch (err) {
+        // Meist gibt es den Namen schon; dann mit Kurz-ID. Scheitert auch die, bleibt die Folge stehen, das Skript auch.
+        if (i === names.length - 1) throw new Error(`Transkript nicht im Vault: ${err.message}`);
+      }
+    }
+  }
+
   async function produce(ep) {
     const cfg = tts();
     if (!cfg) throw new EpisodeError(availability().vorlesen);
@@ -353,21 +442,19 @@ export function createEpisodes({ dir, store, tts, speech = null, voices, writer,
       }
       if (ep.kind === 'podcast') {
         const { host, guest } = voices();
-        const turns = (script.turns ?? []).filter((t) => String(t.text ?? '').trim()).map((t) => ({ text: String(t.text).trim(), voice: t.speaker === 'B' ? guest : host }));
+        const turns = (script.turns ?? []).filter((t) => String(t.text ?? '').trim()).map((t) => ({ text: String(t.text).trim(), voice: t.speaker === 'B' ? guest : host, speaker: t.speaker }));
         if (turns.length < 2) throw new EpisodeError('Claude hat kein Gespräch geliefert');
+        const title = cleanTitle(script.title, ep.title);
+        // Transkript vor dem Sprechen: Was Claude geschrieben hat, ist dann sicher.
+        const talk = turns.map((t) => `**${t.speaker === 'B' ? 'Gast' : 'Moderation'}:** ${t.text}`).join('\n\n');
+        await writeNote(ep, docs, title, `## Gespräch\n\n${talk}`);
         jobs = dialogueBatches(turns).map((inputs) => async () => ({ audio: await el.dialogue({ inputs }), paid: inputs.reduce((n, i) => n + i.text.length, 0) }));
-        update(ep, { title: cleanTitle(script.title, ep.title), chars: turns.reduce((s, t) => s + t.text.length, 0) });
+        update(ep, { title, chars: turns.reduce((s, t) => s + t.text.length, 0) });
       } else {
         const title = cleanTitle(script.title, ep.title);
-        // Die Notiz nur einmal; `captureId` macht auch einen zweiten Versuch harmlos.
-        if (!ep.note) {
-          const sources = docs.map((d) => `- [${String(d.title || d.url).replace(/[[\]]/g, '')}](${d.url})`).join('\n');
-          const date = now().toISOString().slice(0, 10);
-          const text = `_Report aus dem Lesestapel, ${date}, ${docs.length} ${docs.length === 1 ? 'Text' : 'Texte'} (Cockpit)_\n\n${String(script.note ?? '').trim()}\n\n## Quellen\n\n${sources}\n`;
-          const note = await capture({ title, text, captureId: `folge-${ep.id}` });
-          update(ep, { note: note?.path ?? null });
-        }
-        const parts = chunkText(String(script.spoken ?? ''), NARRATION_CHARS);
+        const spoken = String(script.spoken ?? '').trim();
+        await writeNote(ep, docs, title, [String(script.note ?? '').trim(), spoken && `## Sprechfassung\n\n${spoken}`].filter(Boolean).join('\n\n'));
+        const parts = chunkText(spoken, NARRATION_CHARS);
         if (!parts.length) throw new EpisodeError('Claude hat keine Sprechfassung geliefert');
         jobs = parts.map((t, i) => async () => ({ audio: await el.synthesize({ text: t, previous: parts[i - 1] ?? null, next: parts[i + 1] ?? null }), paid: t.length }));
         update(ep, { title, chars: parts.join('').length });
@@ -393,6 +480,12 @@ export function createEpisodes({ dir, store, tts, speech = null, voices, writer,
     rmSync(scriptPath(ep.id), { force: true });
     update(ep, { ...(ep.kind === 'vorlesen' ? { chars: ep.paid } : {}), status: 'fertig', frames: true, bytes: statSync(audioPath(ep.id)).size, finished_at: now().toISOString() });
     logger.info?.(`Folge „${ep.title}“ (${KINDS[ep.kind]}) fertig, ${ep.chars} Zeichen`);
+    // Die Folge bleibt fertig, auch wenn der Vermerk scheitert.
+    try {
+      await heard?.(ep.docs);
+    } catch (err) {
+      logger.warn?.(`Folge „${ep.title}“: Vermerk „gehört“ fehlgeschlagen: ${err.message}`);
+    }
   }
 
   async function next() {

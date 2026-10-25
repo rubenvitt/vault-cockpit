@@ -14,7 +14,8 @@ import { jsonReply } from './json.js';
  *   Länge und die geschätzten Zeichen, die ElevenLabs berechnet.
  * - `/lesen/folgen`: alle Folgen als Karten. Fertige mit Abspiel-Knopf
  *   (/static/lesen-folgen.js: eigener Player mit Sperrbildschirm über die
- *   Media Session; in der iOS-App spielt der native Player), entstehende mit
+ *   Media Session; in der iOS-App spielt der native Player) und dem Link
+ *   „Im Vault“ aufs Transkript (Podcast, Report), entstehende mit
  *   Schritten und Fortschritt, fehlgeschlagene mit „Fortsetzen“.
  * - `/lesen/folgen/stand`: dieselben Karten der Folgen als JSON, damit die
  *   Seite den Fortschritt ohne Neuladen zeigt.
@@ -27,8 +28,8 @@ import { jsonReply } from './json.js';
 const fmt = new Intl.NumberFormat('de-DE');
 const DESCRIPTIONS = {
   vorlesen: 'Die ganzen Texte nacheinander, eine Erzählerstimme.',
-  podcast: 'Claude schreibt ein Gespräch zweier Stimmen über die Texte.',
-  report: 'Claude schreibt einen Bericht: als Notiz in die Inbox und eine Stimme liest ihn.',
+  podcast: 'Claude schreibt ein Gespräch zweier Stimmen über die Texte; das Transkript kommt in den Vault.',
+  report: 'Claude schreibt einen Bericht: als Notiz in den Vault, und eine Stimme liest ihn.',
 };
 
 function when(iso, tz) {
@@ -236,7 +237,8 @@ export function episodeCard(ep, { ctx, resumable = false, at = Date.now() }) {
   if (ep.status === 'fertig') {
     const seconds = secondsOf(ep);
     const src = `/lesen/folgen/audio?id=${id}`;
-    const note = ep.note ? `<a href="/notiz?pfad=${encodeURIComponent(ep.note)}" class="btn quiet">Report-Notiz</a>` : '';
+    // Transkript von Podcast und Report im Vault.
+    const note = ep.note ? `<a href="/notiz?pfad=${esc(encodeURIComponent(ep.note))}" class="btn quiet">Im Vault</a>` : '';
     return `<li class="folge is-ready" data-folge="${esc(ep.id)}" data-status="fertig" data-src="${esc(src)}" data-title="${esc(ep.title)}" data-art="${esc(KINDS[ep.kind] ?? '')}" data-seconds="${seconds ?? ''}" data-bytes="${ep.bytes ?? ''}">
     <div class="folge-card">
       <button type="button" class="folge-play" data-play aria-label="Abspielen: ${esc(ep.title)}" hidden>${PLAY}${PAUSE}</button>
