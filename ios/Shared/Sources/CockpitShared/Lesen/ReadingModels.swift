@@ -825,6 +825,21 @@ public struct EpisodeRetry: Decodable, Equatable, Sendable {
     public let hint: String
 }
 
+/// Ingest der Texte einer Folge (`episodeIngest`): wie viele Texte, wie viele „Texte ingesten“
+/// noch anstößt, wie viele bereit zum Prüfen sind und der Stand in einem Satz.
+public struct EpisodeIngest: Decodable, Equatable, Sendable {
+    public let total: Int
+    public let open: Int
+    public let ready: Int
+    /// Claude ist angebunden (sonst kein Knopf).
+    public let available: Bool
+    /// „Ingest: 1 bereit zum Prüfen · 1 im Wiki“, nil, solange nichts angestoßen ist.
+    public let label: String?
+
+    /// „Texte ingesten“ geht.
+    public var canRequest: Bool { open > 0 && available }
+}
+
 /// Status einer Folge: `wartet`, `schreibt`, `spricht`, `transkript` (erst nur das Transkript,
 /// Audio auf Knopfdruck), `fertig`, `fehler`.
 public enum EpisodeStatus {
@@ -873,6 +888,8 @@ public struct Episode: Decodable, Equatable, Identifiable, Sendable {
     public let wishes: String?
     /// „Audio erzeugen“ mit Erklärung, nur bei einem fertigen Transkript.
     public let speak: EpisodeRetry?
+    /// Ingest der Texte, bei fertigen Folgen und Transkripten (nil ohne Ingest-Dienst).
+    public let ingest: EpisodeIngest?
     public let error: String?
     public let resumable: Bool
     public let retry: EpisodeRetry?
@@ -900,7 +917,7 @@ public struct Episode: Decodable, Equatable, Identifiable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, kindLabel, title, minutes, status, busy, docs, chars, createdAt, updatedAt, finishedAt, seconds, bytes, note, audio, language, style, styleLabel, topics, focus, wishes, speak, error, resumable, retry, progress
+        case id, kind, kindLabel, title, minutes, status, busy, docs, chars, createdAt, updatedAt, finishedAt, seconds, bytes, note, audio, language, style, styleLabel, topics, focus, wishes, speak, ingest, error, resumable, retry, progress
     }
 
     public init(from decoder: Decoder) throws {
@@ -928,6 +945,7 @@ public struct Episode: Decodable, Equatable, Identifiable, Sendable {
         focus = try c.decodeIfPresent(String.self, forKey: .focus)
         wishes = try c.decodeIfPresent(String.self, forKey: .wishes)
         speak = try c.decodeIfPresent(EpisodeRetry.self, forKey: .speak)
+        ingest = try c.decodeIfPresent(EpisodeIngest.self, forKey: .ingest)
         error = try c.decodeIfPresent(String.self, forKey: .error)
         resumable = try c.decodeIfPresent(Bool.self, forKey: .resumable) ?? false
         retry = try c.decodeIfPresent(EpisodeRetry.self, forKey: .retry)

@@ -894,6 +894,7 @@ html[data-read-sans] .lesen-text :is(h1, h2, h3, h4, h5, h6) { font-family: var(
 .folge-player .problem { margin: 0; }
 .folge-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1) var(--s-2); }
 .folge-actions form { display: inline; margin: 0; }
+.folge-ingest { margin: 0; }
 /* Erst nur Transkript: Dokument statt Abspielen, Knopf „Audio erzeugen“ */
 .folge-play.folge-play-doc { cursor: default; background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1.5px var(--accent-line); }
 .folge-play.folge-play-doc:hover { background: var(--accent-soft); }

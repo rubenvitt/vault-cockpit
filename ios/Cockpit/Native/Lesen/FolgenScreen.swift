@@ -151,6 +151,8 @@ struct FolgenList: View {
                     toasts.signal(.selection)
                     model.open(path: CockpitFormat.notePath(path))
                 },
+                ingest: { ingest(episode) },
+                openIngest: openIngest,
                 download: { download(episode) },
                 delete: { confirmDelete(episode) }
             )
@@ -163,6 +165,8 @@ struct FolgenList: View {
                     model.open(path: CockpitFormat.notePath(path))
                 },
                 speak: { speak(episode) },
+                ingest: { ingest(episode) },
+                openIngest: openIngest,
                 delete: { confirmDelete(episode) }
             )
         } else if episode.isFailed {
@@ -207,6 +211,16 @@ struct FolgenList: View {
     private func speak(_ episode: Episode) {
         toasts.signal(.selection)
         Task { await store.speak(episode) }
+    }
+
+    private func ingest(_ episode: Episode) {
+        toasts.signal(.selection)
+        Task { await store.ingest(episode) }
+    }
+
+    private func openIngest() {
+        toasts.signal(.selection)
+        model.open(reading: .ingest)
     }
 
     private func download(_ episode: Episode) {

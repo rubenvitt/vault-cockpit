@@ -6,6 +6,7 @@ import { readingPage } from './pages.js';
 import { WINDOWS, fitToWindow, stackItemJson } from './stack.js';
 import { EpisodeError, KINDS, LENGTHS, MAX_DOCS, BYTES_PER_SECOND, STYLES, DEFAULT_STYLE, MAX_TOPICS, MAX_FOCUS } from './folgen.js';
 import { jsonReply } from './json.js';
+import { IngestError } from './ingest.js';
 import { EPISODE_LANGUAGES, DEFAULT_EPISODE_LANGUAGE } from './languages.js';
 
 /**
@@ -20,7 +21,9 @@ import { EPISODE_LANGUAGES, DEFAULT_EPISODE_LANGUAGE } from './languages.js';
  *   Media Session; in der iOS-App spielt der native Player) und dem Link
  *   „Im Vault“ aufs Transkript (Podcast, Report), entstehende mit
  *   Schritten und Fortschritt, fehlgeschlagene mit „Fortsetzen“, reine
- *   Transkripte mit „Im Vault“ und „Audio erzeugen“.
+ *   Transkripte mit „Im Vault“ und „Audio erzeugen“. Fertige und Transkripte
+ *   bieten „Texte ingesten“: Ingest-Entwürfe für alle Texte der Folge, auch
+ *   wenn sie nicht mehr im Stapel liegen (geprüft wird unter Lesen → Ingest).
  * - `/lesen/folgen/stand`: dieselben Karten der Folgen als JSON, damit die
  *   Seite den Fortschritt ohne Neuladen zeigt.
  * - `/lesen/folgen/audio?id=…`: die MP3, mit `Range` (Safari spielt Audio
@@ -244,6 +247,42 @@ const retryOf = (resumable) =>
     ? { label: 'Fortsetzen', hint: 'Schon Gesprochenes und Claudes Skript bleiben; es kostet nur, was noch fehlt.' }
     : { label: 'Erneut versuchen', hint: 'Claudes Skript fehlt noch, dafür schreibt Claude noch einmal (über dein Abo).' };
 
+const INGEST_DONE = { bereit: 'bereit zum Prüfen', wartet: 'wird entworfen', entwirft: 'wird entworfen', uebernommen: 'im Wiki', fehler: 'mit Fehler' };
+
+/**
+ * Ingest der Texte einer Folge (`ingest`: Dienst aus src/lesen/ingest.js):
+ * wie viele es gibt, wie viele „Texte ingesten“ noch anstoßen würde (ohne
+ * Entwurf, fehlgeschlagen oder verworfen, wie `request`), wie viele bereit
+ * zum Prüfen sind, und der Stand in einem Satz. Ohne Dienst oder ohne Texte null.
+ */
+export function episodeIngest(ep, { ingest, store }) {
+  if (!ingest) return null;
+  const ids = (ep.docs ?? []).filter((id) => store.get(id));
+  if (!ids.length) return null;
+  const statuses = ingest.statusFor(ids);
+  const statusOf = (id) => (statuses instanceof Map ? statuses.get(id) : statuses?.[id]) ?? null;
+  const counts = new Map();
+  for (const id of ids) {
+    const label = INGEST_DONE[statusOf(id)];
+    if (label) counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  const open = ids.filter((id) => [null, 'fehler', 'verworfen'].includes(statusOf(id))).length;
+  const label = counts.size ? `Ingest: ${[...counts].map(([what, n]) => `${n} ${what}`).join(' · ')}` : null;
+  return { total: ids.length, open, ready: ids.filter((id) => statusOf(id) === 'bereit').length, available: Boolean(ingest.available()?.ok), label };
+}
+
+/** „Texte ingesten“ und der Stand darunter, für fertige Folgen und Transkripte. */
+function ingestParts(ep, info, ctx) {
+  if (!info) return { button: '', line: '' };
+  const what = info.total === 1 ? 'Text' : 'Texte';
+  const button =
+    info.open && info.available
+      ? `<form method="post" action="/aktion/lesen/folge/ingest" class="inline">${hidden({ csrf: ctx.write.csrf, back: '/lesen/folgen', id: ep.id })}<button type="submit" class="btn quiet">${what} ingesten<span class="sr-only">: ${esc(ep.title)}</span></button></form>`
+      : '';
+  const line = info.label ? `<p class="meta folge-ingest">${esc(info.label)}${info.ready ? ' · <a href="/lesen/ingest">Prüfen</a>' : ''}</p>` : '';
+  return { button, line };
+}
+
 /** „Audio erzeugen“ zu einem Transkript: Knopf und was es kostet. */
 const speakOf = (ep) => ({ label: 'Audio erzeugen', hint: `Aus demselben Skript, Claude schreibt nicht noch einmal: rund ${fmt.format(ep.chars ?? 0)} Zeichen bei ElevenLabs.` });
 
@@ -252,7 +291,7 @@ const speakOf = (ep) => ({ label: 'Audio erzeugen', hint: `Aus demselben Skript,
  * (`seconds`, `bytes`), bei entstehenden der Stand wie `progressOf`, bei
  * fehlgeschlagenen der Fehler und ob sie sich fortsetzen lässt.
  */
-export function episodeJson(ep, { resumable = false, at = Date.now() } = {}) {
+export function episodeJson(ep, { resumable = false, at = Date.now(), ingest = null } = {}) {
   const busy = BUSY.includes(ep.status);
   const failed = ep.status === 'fehler';
   return {
@@ -280,6 +319,8 @@ export function episodeJson(ep, { resumable = false, at = Date.now() } = {}) {
     focus: ep.focus || null,
     wishes: wishesOf(ep),
     speak: ep.status === 'transkript' ? speakOf(ep) : null,
+    /** Ingest der Texte (`episodeIngest`), nur bei fertigen Folgen und Transkripten. */
+    ingest: ['fertig', 'transkript'].includes(ep.status) ? ingest : null,
     error: failed ? (ep.error ?? 'Unbekannter Fehler') : null,
     resumable: failed && resumable,
     retry: failed ? retryOf(resumable) : null,
@@ -288,7 +329,8 @@ export function episodeJson(ep, { resumable = false, at = Date.now() } = {}) {
 }
 
 /** Eine Folge als Karte; auch für `/lesen/folgen/stand`. */
-export function episodeCard(ep, { ctx, resumable = false, at = Date.now() }) {
+export function episodeCard(ep, { ctx, resumable = false, at = Date.now(), ingest = null }) {
+  const ingestUi = ingestParts(ep, ingest, ctx);
   const remove = (label = 'Löschen') => `<form method="post" action="/aktion/lesen/folge/loeschen" class="inline">${hidden({ csrf: ctx.write.csrf, back: '/lesen/folgen', id: ep.id })}<button type="submit" class="btn quiet">${label}</button></form>`;
   const badge = `<span class="folge-art">${esc(KINDS[ep.kind] ?? ep.kind)}</span>`;
   const wishes = wishesOf(ep);
@@ -319,7 +361,8 @@ export function episodeCard(ep, { ctx, resumable = false, at = Date.now() }) {
       </div>
       <p class="problem" data-error hidden></p>
     </div>
-    <div class="folge-actions">${note}<a href="${esc(src)}" class="btn quiet" download="${esc(ep.title.replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'Folge')}.mp3">Herunterladen</a>${remove()}</div>
+    <div class="folge-actions">${note}${ingestUi.button}<a href="${esc(src)}" class="btn quiet" download="${esc(ep.title.replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'Folge')}.mp3">Herunterladen</a>${remove()}</div>
+    ${ingestUi.line}
   </li>`;
   }
 
@@ -333,9 +376,11 @@ export function episodeCard(ep, { ctx, resumable = false, at = Date.now() }) {
     <div class="folge-actions">
       ${note}
       <form method="post" action="/aktion/lesen/folge/sprechen" class="inline">${hidden({ csrf: ctx.write.csrf, back: '/lesen/folgen', id: ep.id })}<button type="submit" class="btn primary">${esc(speak.label)}</button></form>
+      ${ingestUi.button}
       ${remove()}
     </div>
     <p class="meta">${esc(speak.hint)}</p>
+    ${ingestUi.line}
   </li>`;
   }
 
@@ -363,12 +408,12 @@ export function episodeCard(ep, { ctx, resumable = false, at = Date.now() }) {
   </li>`;
 }
 
-function listPage(episodes, ctx) {
+function listPage(episodes, ctx, ingestOf) {
   const list = episodes.list();
   const head = '<p class="stapel-hoeren"><a href="/lesen/folgen/neu" class="btn primary">Neue Folge</a></p>';
   if (!list.length) return `${head}<p class="empty">Noch keine Folgen. Aus dem Stapel lassen sich Texte vorlesen, als Podcast besprechen oder zu einem Report zusammenfassen.</p>`;
   const at = Date.now();
-  return `${head}<ul class="folgen">${list.map((ep) => episodeCard(ep, { ctx, resumable: episodes.resumable(ep.id), at })).join('')}</ul>`;
+  return `${head}<ul class="folgen">${list.map((ep) => episodeCard(ep, { ctx, resumable: episodes.resumable(ep.id), at, ingest: ingestOf(ep) })).join('')}</ul>`;
 }
 
 /** `bytes=a-b` → `[start, end]` (einschließlich) in `size`, `null` = ganze Datei, `false` = nicht erfüllbar. */
@@ -419,7 +464,7 @@ const asAction = (run) => {
 };
 
 /** JSON der Folgen, auch ohne Folgen (`enabled: false`): Die App fragt, statt zu raten. */
-function episodeApi({ store, episodes }) {
+function episodeApi({ store, episodes, ingestOf }) {
   const off = { ok: true, enabled: false };
   const kinds = (missing) => Object.entries(KINDS).map(([kind, label]) => ({ kind, label, description: DESCRIPTIONS[kind], cost: kindCost(kind), missing: missing?.[kind] ?? null }));
   const styles = Object.entries(STYLES).map(([style, st]) => ({ style, label: st.label, description: st.description }));
@@ -429,7 +474,7 @@ function episodeApi({ store, episodes }) {
       if (!episodes) return jsonReply(200, { ...off, items: [], kinds: kinds(null) });
       const at = Date.now();
       const missing = episodes.availability();
-      return jsonReply(200, { ok: true, enabled: true, items: episodes.list().map((ep) => episodeJson(ep, { resumable: episodes.resumable(ep.id), at })), availability: missing, kinds: kinds(missing) });
+      return jsonReply(200, { ok: true, enabled: true, items: episodes.list().map((ep) => episodeJson(ep, { resumable: episodes.resumable(ep.id), at, ingest: ingestOf(ep) })), availability: missing, kinds: kinds(missing) });
     },
     /** Vorschau für „Neue Folge“: Texte des Zeitfensters mit Zeichen, Arten, Längen und die Zusammenfassung je Art. */
     async '/api/lesen/folgen/neu'(ctx) {
@@ -467,18 +512,19 @@ function episodeApi({ store, episodes }) {
   };
 }
 
-export function folgenRoutes({ store, episodes }) {
-  const api = episodeApi({ store, episodes });
+export function folgenRoutes({ store, episodes, ingest = null }) {
+  const ingestOf = (ep) => (['fertig', 'transkript'].includes(ep.status) ? episodeIngest(ep, { ingest, store }) : null);
+  const api = episodeApi({ store, episodes, ingestOf });
   if (!episodes) return { pages: api, actions: {} };
   return {
     pages: {
       ...api,
       async '/lesen/folgen'(ctx) {
-        return { html: readingPage(ctx, { key: 'folgen', title: 'Folgen', body: `<section>${listPage(episodes, ctx)}</section>`, scripts: [assets.lesenFolgen] }) };
+        return { html: readingPage(ctx, { key: 'folgen', title: 'Folgen', body: `<section>${listPage(episodes, ctx, ingestOf)}</section>`, scripts: [assets.lesenFolgen] }) };
       },
       async '/lesen/folgen/stand'(ctx) {
         const at = Date.now();
-        const items = episodes.list().map((ep) => ({ id: ep.id, status: ep.status, busy: BUSY.includes(ep.status), html: episodeCard(ep, { ctx, resumable: episodes.resumable(ep.id), at }) }));
+        const items = episodes.list().map((ep) => ({ id: ep.id, status: ep.status, busy: BUSY.includes(ep.status), html: episodeCard(ep, { ctx, resumable: episodes.resumable(ep.id), at, ingest: ingestOf(ep) }) }));
         return { status: 200, body: JSON.stringify({ ok: true, items }), headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } };
       },
       async '/lesen/folgen/neu'(ctx) {
@@ -516,6 +562,25 @@ export function folgenRoutes({ store, episodes }) {
         const ep = asAction(() => episodes.retry(form.get('id') ?? ''));
         ep.done?.catch(() => {});
         return { message: `Geht weiter: ${ep.title}`, redirect: '/lesen/folgen' };
+      },
+      /** Ingest-Entwürfe für alle Texte der Folge, gleich ob sie noch im Stapel liegen. */
+      async '/aktion/lesen/folge/ingest'(form) {
+        if (!ingest) throw new ActionError('Ingest ist nicht eingerichtet', 409);
+        const ep = episodes.get(form.get('id') ?? '');
+        if (!ep) throw new ActionError('Diese Folge gibt es nicht', 404);
+        const ids = (ep.docs ?? []).filter((id) => store.get(id));
+        if (!ids.length) throw new ActionError('Die Texte dieser Folge gibt es nicht mehr', 404);
+        let started;
+        try {
+          started = ingest.request(ids, { origin: 'knopf' });
+        } catch (err) {
+          if (err instanceof IngestError) throw new ActionError(err.message, err.status);
+          throw err;
+        }
+        started.done?.catch?.(() => {});
+        const n = started.queued.length;
+        if (!n) return { message: 'Für diese Texte gibt es schon Entwürfe, oder sie sind im Wiki.', redirect: '/lesen/folgen' };
+        return { message: `Ingest für ${n} ${n === 1 ? 'Text' : 'Texte'} angestoßen; prüfen unter Lesen → Ingest.`, redirect: '/lesen/folgen' };
       },
       async '/aktion/lesen/folge/loeschen'(form) {
         const ep = asAction(() => episodes.remove(form.get('id') ?? ''));

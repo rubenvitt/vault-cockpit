@@ -139,6 +139,18 @@ public final class EpisodesStore {
         return true
     }
 
+    /// „Texte ingesten“: Ingest-Entwürfe für alle Texte der Folge, auch wenn sie nicht mehr im
+    /// Stapel liegen. Geprüft wird wie sonst unter Lesen → Ingest.
+    @discardableResult
+    public func ingest(_ episode: Episode) async -> Bool {
+        guard episode.ingest?.canRequest == true, !busy.contains(episode.id) else { return false }
+        busy.insert(episode.id)
+        defer { busy.remove(episode.id) }
+        guard await actions.run(ReadingAction.episodeIngest, ["id": episode.id]) != nil else { return false }
+        await refresh()
+        return true
+    }
+
     /// „Audio erzeugen“ zu einem fertigen Transkript: aus demselben Skript, Claude schreibt nicht
     /// noch einmal.
     @discardableResult

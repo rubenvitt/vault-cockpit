@@ -613,6 +613,60 @@ test('Folgen: Ton, Themen der Texte und „erst nur Transkript“ im Formular un
     assert.deepEqual(calls.speech.map((c) => c.text), ['Zwei Texte. Beide kurz.']);
   }));
 
+test('Folgen: „Texte ingesten“ auf der Karte, auch wenn die Texte nicht mehr im Stapel liegen', () =>
+  withDir(async (dir) => {
+    const { store, a, b, episodes } = setup(dir);
+    const statuses = new Map();
+    const requests = [];
+    const ingest = {
+      available: () => ({ ok: true }),
+      statusFor: (ids) => new Map(ids.filter((id) => statuses.has(id)).map((id) => [id, statuses.get(id)])),
+      // Wie der Dienst: bereit und übernommen bleiben, der Rest wird eingereiht.
+      request: (ids) => {
+        requests.push(ids);
+        const queued = ids.filter((id) => !['bereit', 'uebernommen', 'wartet', 'entwirft'].includes(statuses.get(id)));
+        for (const id of queued) statuses.set(id, 'wartet');
+        return { queued, done: Promise.resolve() };
+      },
+      counts: () => ({ bereit: 0 }),
+    };
+    const routes = readingRoutes({ store, episodes, ingest, logger: quiet });
+    const ctx = (path) => ({ url: new URL(`https://vault.test${path}`), range: null, user: 'ruben', tz: 'Europe/Berlin', write: { csrf: 'c', back: path }, flash: null });
+    const page = (path) => routes.pages[new URL(`https://vault.test${path}`).pathname](ctx(path));
+
+    const ep = episodes.create({ kind: 'vorlesen', docIds: [a.id, b.id] });
+    await ep.done;
+    // Nach dem Hören „Fertig, weg“: nicht mehr im Stapel.
+    store.setStatus(a.id, 'archiv');
+    store.setStatus(b.id, 'archiv');
+    statuses.set(b.id, 'uebernommen');
+
+    let list = (await page('/lesen/folgen')).html;
+    assert.match(list, /action="\/aktion\/lesen\/folge\/ingest"[^]*>Texte ingesten<span class="sr-only">/);
+    assert.match(list, /Ingest: 1 im Wiki/);
+    let json = JSON.parse((await page('/api/lesen/folgen')).body).items[0].ingest;
+    assert.deepEqual(json, { total: 2, open: 1, ready: 0, available: true, label: 'Ingest: 1 im Wiki' });
+
+    const r = await routes.actions['/aktion/lesen/folge/ingest'](new URLSearchParams({ id: ep.id }), {});
+    assert.equal(r.message, 'Ingest für 1 Text angestoßen; prüfen unter Lesen → Ingest.');
+    assert.deepEqual(requests, [[a.id, b.id]], 'alle Texte der Folge, der Dienst sortiert aus');
+
+    statuses.set(a.id, 'bereit');
+    list = (await page('/lesen/folgen')).html;
+    assert.doesNotMatch(list, /folge\/ingest/, 'nichts mehr anzustoßen');
+    assert.match(list, /Ingest: 1 bereit zum Prüfen · 1 im Wiki · <a href="\/lesen\/ingest">Prüfen<\/a>/);
+    json = JSON.parse((await page('/api/lesen/folgen')).body).items[0].ingest;
+    assert.deepEqual([json.open, json.ready], [0, 1]);
+    const again = await routes.actions['/aktion/lesen/folge/ingest'](new URLSearchParams({ id: ep.id }), {});
+    assert.match(again.message, /schon Entwürfe/);
+    await assert.rejects(routes.actions['/aktion/lesen/folge/ingest'](new URLSearchParams({ id: 'weg' }), {}), /gibt es nicht/);
+
+    // Ohne Ingest-Dienst kein Knopf und kein Feld.
+    const plain = readingRoutes({ store, episodes, logger: quiet });
+    assert.doesNotMatch((await plain.pages['/lesen/folgen'](ctx('/lesen/folgen'))).html, /ingest/i);
+    assert.equal(JSON.parse((await plain.pages['/api/lesen/folgen'](ctx('/api/lesen/folgen'))).body).items[0].ingest, null);
+  }));
+
 /** Kindprozess-Attrappe für `claude -p`. */
 function fakeClaude(answer, { code = 0 } = {}) {
   const seen = {};

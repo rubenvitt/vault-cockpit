@@ -559,6 +559,29 @@ final class ReadingStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testEpisodeIngestTexts() async throws {
+        let transport = server()
+        let store = EpisodesStore(context: try context(transport), pollInterval: 0)
+        await store.load()
+        let episode = try JSONDecoder().decode(Episode.self, from: json(#"{"id":"ep-fertig-2","kind":"vorlesen","title":"Vorlesen: Stapel","status":"fertig","createdAt":"2026-10-25T09:00:00.000Z","ingest":{"total":2,"open":1,"ready":0,"available":true,"label":"Ingest: 1 im Wiki"}}"#))
+        XCTAssertEqual(episode.ingest?.label, "Ingest: 1 im Wiki")
+        XCTAssertTrue(episode.ingest?.canRequest ?? false)
+        transport.respond { request in
+            path(of: request) == "/api/lesen/folgen" ? (200, try fixture("lesen-folgen")) : (200, json(#"{"ok":true,"message":"Ingest für 1 Text angestoßen; prüfen unter Lesen → Ingest.","redirect":"/lesen/folgen"}"#))
+        }
+        let ok = await store.ingest(episode)
+        XCTAssertTrue(ok)
+        let request = try XCTUnwrap(transport.requests.first { path(of: $0) == "/aktion/lesen/folge/ingest" })
+        XCTAssertEqual(formFields(request), ["id": "ep-fertig-2"])
+
+        // Alles entworfen oder im Wiki: nichts anzustoßen.
+        let done = try JSONDecoder().decode(Episode.self, from: json(#"{"id":"x","kind":"report","status":"fertig","createdAt":"2026-10-25T09:00:00.000Z","ingest":{"total":1,"open":0,"ready":1,"available":true,"label":"Ingest: 1 bereit zum Prüfen"}}"#))
+        XCTAssertFalse(done.ingest?.canRequest ?? true)
+        let none = await store.ingest(done)
+        XCTAssertFalse(none)
+    }
+
+    @MainActor
     func testNewEpisodeWithoutEpisodes() async throws {
         let transport = server(["/api/lesen/folgen/neu": "lesen-folgen-neu-aus"])
         let store = NewEpisodeStore(context: try context(transport))

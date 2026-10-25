@@ -745,7 +745,11 @@ Die Liste zeigt jede Folge als Karte: entstehende mit Schritten (Eingereiht →
 Claude schreibt → Stimmen sprechen → Fertig, bei „erst nur Transkript“ Eingereiht →
 Claude schreibt → Transkript fertig), Fortschrittsbalken und geschätzter
 Restzeit, live über `/lesen/folgen/stand`; reine Transkripte mit „Transkript
-lesen“ und „Audio erzeugen“ (`POST /aktion/lesen/folge/sprechen`); fertige mit großem Abspiel-Knopf
+lesen“ und „Audio erzeugen“ (`POST /aktion/lesen/folge/sprechen`). Fertige
+Folgen und Transkripte bieten **Texte ingesten** (`POST /aktion/lesen/folge/ingest`):
+Ingest-Entwürfe für alle Texte der Folge, auch wenn sie nach dem Hören schon
+„Fertig, weg“ sind; darunter steht der Stand („Ingest: 1 bereit zum Prüfen · 1 im
+Wiki“), geprüft wird wie sonst unter Lesen → Ingest; fertige mit großem Abspiel-Knopf
 (`/static/lesen-folgen.js`): Stelle, ±15/30 Sekunden, Tempo, gemerkte Stelle je
 Folge, Titel und Knöpfe auf dem Sperrbildschirm über die Media Session, bei
 Podcast und Report mit „Im Vault“ aufs Transkript. In der
