@@ -66,6 +66,16 @@ extension CockpitAPI {
         try await get("api/lesen/folgen/neu", query: Self.zeitQuery(zeit))
     }
 
+    /// Ingest: bereite Entwürfe, in Arbeit, Fehler (ohne Dienst `enabled: false`).
+    public func ingestOverview() async throws -> IngestOverviewModel {
+        try await get("api/lesen/ingest")
+    }
+
+    /// Prüfansicht eines Entwurfs; ein unbekannter Text wirft `CockpitError.failed(status: 404, …)`.
+    public func ingestDoc(id: String) async throws -> IngestDocModel {
+        try await get("api/lesen/ingest/doc", query: Self.docQuery(id))
+    }
+
     /// Querverbindungen zu einer Markierung.
     public func connections(highlightID: String) async throws -> ConnectionsModel {
         try await get("api/lesen/verbindungen", query: [URLQueryItem(name: "markierung", value: highlightID)])
@@ -127,6 +137,10 @@ public enum ReadingRoute: Equatable, Hashable, Sendable {
     case add
     /// `/lesen/hoeren?zeit=` (nativer Player „Unterwegs hören“).
     case listen(zeit: Int?)
+    /// `/lesen/ingest` (Übersicht der Entwürfe).
+    case ingest
+    /// `/lesen/ingest/doc?id=…` (Prüfansicht zum Abhaken).
+    case ingestReview(id: String)
 
     public init?(webPath: String) {
         guard webPath.hasPrefix("/"), !webPath.hasPrefix("//"), let components = URLComponents(string: webPath) else { return nil }
@@ -165,6 +179,11 @@ public enum ReadingRoute: Equatable, Hashable, Sendable {
             self = .add
         case "/lesen/hoeren":
             self = .listen(zeit: value("zeit").flatMap { Int($0) })
+        case "/lesen/ingest":
+            self = .ingest
+        case "/lesen/ingest/doc":
+            guard let id = value("id") else { return nil }
+            self = .ingestReview(id: id)
         default:
             return nil
         }
@@ -201,6 +220,11 @@ public enum ReadingRoute: Equatable, Hashable, Sendable {
         case .listen(let zeit):
             components.path = "/lesen/hoeren"
             items = CockpitAPI.zeitQuery(zeit)
+        case .ingest:
+            components.path = "/lesen/ingest"
+        case .ingestReview(let id):
+            components.path = "/lesen/ingest/doc"
+            items = CockpitAPI.docQuery(id)
         }
         components.queryItems = items.isEmpty ? nil : items
         return components.string ?? components.path

@@ -183,6 +183,7 @@ final class AppModel {
         session.context.onUnauthorized = { [weak self] in self?.apiUnauthorized() }
         session.context.openURL = { [weak self] url in self?.open(url: url) }
         session.context.openPath = { [weak self] path in self?.open(path: path) }
+        session.ingest.onReview = { [weak self] id in self?.open(reading: .ingestReview(id: id)) }
         session.start()
         cockpit = session
     }
@@ -235,9 +236,12 @@ final class AppModel {
             show(.wiedersehen)
         case .episodes:
             show(.folgen)
+        case .ingest:
+            // Lädt beim Erscheinen (`IngestScreen`).
+            show(.ingest)
         case .add:
             showsAdd = true
-        case .reader, .newEpisode:
+        case .reader, .newEpisode, .ingestReview:
             if case .newEpisode(let zeit) = route { newEpisodeZeit = zeit }
             // Aus dem Lesen heraus obendrauf (zurück führt dorthin), aus anderen Reitern frisch.
             if wasReading, readingPath.last != route {

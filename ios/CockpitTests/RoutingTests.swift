@@ -62,6 +62,8 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(decide("https://vault.test/lesen/folgen/neu?zeit=15"), .reading(.newEpisode(zeit: 15)))
         XCTAssertEqual(decide("https://vault.test/lesen/hinzufuegen"), .reading(.add))
         XCTAssertEqual(decide("https://vault.test/lesen/hoeren?zeit=30"), .reading(.listen(zeit: 30)))
+        XCTAssertEqual(decide("https://vault.test/lesen/ingest"), .reading(.ingest))
+        XCTAssertEqual(decide("https://vault.test/lesen/ingest/doc?id=d1"), .reading(.ingestReview(id: "d1")))
         XCTAssertEqual(decide("https://blatt.test/lesen/stapel"), .external(URL(string: "https://blatt.test/lesen/stapel")!))
     }
 
@@ -114,6 +116,11 @@ final class RoutingTests: XCTestCase {
         model.open(path: "/lesen/markiert?thema=Technik")
         XCTAssertEqual(model.readingSection, .markiert)
         XCTAssertEqual(model.highlightQuery, HighlightQuery(topic: "Technik"))
+        model.open(path: "/lesen/ingest")
+        XCTAssertEqual(model.readingSection, .ingest)
+        XCTAssertEqual(model.readingPath, [])
+        model.open(path: "/lesen/ingest/doc?id=d4")
+        XCTAssertEqual(model.readingPath, [.ingestReview(id: "d4")], "Prüfansicht auf den Stapel des Lesens")
     }
 
     @MainActor
@@ -166,7 +173,7 @@ final class RoutingTests: XCTestCase {
     }
 
     func testReadingSections() {
-        XCTAssertEqual(LesenSection.allCases.map(\.label), ["Eingang", "Stapel", "Folgen", "Markiert", "Wiedersehen", "Wissen", "Feeds"])
+        XCTAssertEqual(LesenSection.allCases.map(\.label), ["Eingang", "Stapel", "Ingest", "Folgen", "Markiert", "Wiedersehen", "Wissen", "Feeds"])
     }
 
     func testInboxSwipe() {

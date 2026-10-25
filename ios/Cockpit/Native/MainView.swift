@@ -41,12 +41,12 @@ struct MainView: View {
             PageSheetView(model: model, sheet: sheet)
                 .environment(model)
                 .environment(session)
-                .readerServices(ReaderServices(context: session.context, buffer: session.reading))
+                .readerServices(ReaderServices(context: session.context, buffer: session.reading, ingest: session.ingest))
         }
         .environment(model)
         .environment(session)
         // Kontext und Puffer für Leseansichten, auch aus Blättern heraus.
-        .readerServices(ReaderServices(context: session.context, buffer: session.reading))
+        .readerServices(ReaderServices(context: session.context, buffer: session.reading, ingest: session.ingest))
     }
 }
 

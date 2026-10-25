@@ -55,6 +55,7 @@ Die Bestandsaufnahme der Funktionen je Bereich (Felder, Aktionen, Meldungen) ist
 | `/` Woche, `/planen` | Reiter Woche (`WeekScreen`, `PlanScreen`), Hinweis „Störung“ im Kopf |
 | `/rueckblick` | Reiter Rückblick (`ReviewScreen`) |
 | `/lesen/…` Eingang, Stapel, Folgen, Markiert, Wiedersehen, Leseansicht | Reiter Lesen (`Native/Lesen/`) |
+| `/lesen/ingest`, `/lesen/ingest/doc?id=` | Reiter Lesen → Ingest (`IngestScreen`), Prüfansicht auf dem Stapel des Lesens (`IngestReviewScreen`); Abzeichen in Stapel und Leseansicht |
 | `/wissen` | Reiter Lesen → Wissen (`WissenScreen`) |
 | `/lesen/feeds` | Reiter Lesen → Feeds (`FeedsScreen`) |
 | `/notiz?pfad=` | Blatt bzw. Stapel (`NoteScreen`) |

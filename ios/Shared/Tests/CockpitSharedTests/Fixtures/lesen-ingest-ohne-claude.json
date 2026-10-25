@@ -1,0 +1,21 @@
+{
+  "ok": true,
+  "enabled": true,
+  "available": false,
+  "reason": "Kein Token",
+  "counts": {
+    "wartet": 0,
+    "entwirft": 0,
+    "bereit": 0,
+    "fehler": 0
+  },
+  "openOnStack": 1,
+  "ready": [],
+  "busy": [],
+  "failed": [],
+  "actions": {
+    "draft": "/aktion/lesen/ingest/entwerfen",
+    "apply": "/aktion/lesen/ingest/uebernehmen",
+    "discard": "/aktion/lesen/ingest/verwerfen"
+  }
+}

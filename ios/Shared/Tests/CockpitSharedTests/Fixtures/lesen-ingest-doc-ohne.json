@@ -1,0 +1,50 @@
+{
+  "ok": true,
+  "enabled": true,
+  "available": true,
+  "ingest": {
+    "id": "011adf2b-9e03-489a-8231-bc58dc08bea3",
+    "status": null,
+    "origin": null,
+    "title": "Ohne Entwurf",
+    "docTitle": "Ohne Entwurf",
+    "url": "https://blatt.test/Ohne%20Entwurf",
+    "site": "Blatt",
+    "readingMinutes": 7,
+    "docStatus": "stapel",
+    "error": null,
+    "model": null,
+    "requestedAt": null,
+    "draftedAt": null,
+    "appliedAt": null,
+    "updatedAt": null,
+    "kernaussagen": [],
+    "kern": [],
+    "tally": {
+      "verknuepfen": 0,
+      "bestaetigung": 0,
+      "synthese": 0,
+      "frage": 0,
+      "neu": 0,
+      "relation": 0
+    },
+    "tallyLabel": "nur die Source-Page"
+  },
+  "error": null,
+  "draft": null,
+  "applied": null,
+  "view": null,
+  "links": {},
+  "groups": [],
+  "selected": [],
+  "summaryMax": 80,
+  "prev": null,
+  "next": "be81701e-cc17-4c80-a4f5-c0c63dd94db0",
+  "position": null,
+  "total": 2,
+  "actions": {
+    "draft": "/aktion/lesen/ingest/entwerfen",
+    "apply": "/aktion/lesen/ingest/uebernehmen",
+    "discard": "/aktion/lesen/ingest/verwerfen"
+  }
+}

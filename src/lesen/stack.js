@@ -193,6 +193,8 @@ export function stackRoutes({ store, vault = false, folgen = false, ingest = nul
           // `ingest`: Status des Entwurfs (`bereit`, `entwirft` …) oder null; ohne Dienst fehlt das Feld.
           items: items.map((d) => (ingest ? { ...stackItemJson(d), ingest: statusIn(statuses, d.id) } : stackItemJson(d))),
           ingest: Boolean(ingest),
+          // Claude angebunden: „Ingest entwerfen“ geht (wie der Knopf im Stapel).
+          ingestAvailable: Boolean(ingest?.available()?.ok),
           window: minutes ? { used: total, of: minutes, more: rest, fits } : null,
           vault,
           episodes: folgen,

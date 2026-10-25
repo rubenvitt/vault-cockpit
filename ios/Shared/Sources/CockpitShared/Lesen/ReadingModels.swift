@@ -191,6 +191,8 @@ public struct StackItem: Decodable, Equatable, Identifiable, Sendable {
     public let started: Bool
     /// Zeichen fürs Vorlesen (nur „Neue Folge“; 0 = schon gehört, kostet nichts).
     public let chars: Int?
+    /// Stand des Ingest-Entwurfs (`bereit`, `entwirft` …), nil ohne Entwurf oder ohne Ingest.
+    public var ingest: String?
 
     public var id: String { doc.id }
 
@@ -205,7 +207,7 @@ public struct StackItem: Decodable, Equatable, Identifiable, Sendable {
         return CockpitFormat.meta(parts)
     }
 
-    enum CodingKeys: String, CodingKey { case remaining, started, chars }
+    enum CodingKeys: String, CodingKey { case remaining, started, chars, ingest }
 
     public init(from decoder: Decoder) throws {
         doc = try ReadingDoc(from: decoder)
@@ -213,6 +215,7 @@ public struct StackItem: Decodable, Equatable, Identifiable, Sendable {
         remaining = try c.decodeIfPresent(Int.self, forKey: .remaining)
         started = try c.decodeIfPresent(Bool.self, forKey: .started) ?? doc.isStarted
         chars = try c.decodeIfPresent(Int.self, forKey: .chars)
+        ingest = try? c.decodeIfPresent(String.self, forKey: .ingest)
     }
 }
 
@@ -252,6 +255,10 @@ public struct ReadingStackModel: Decodable, Equatable, Sendable {
     /// Zeitfenster für „Unterwegs hören“ und „Folge erzeugen“.
     public let listenZeit: Int
     public let episodeZeit: Int
+    /// Ingest ist eingerichtet (dann trägt jeder Eintrag `ingest`); fehlt bei älteren Servern.
+    public let ingest: Bool?
+    /// Claude ist angebunden: „Ingest entwerfen“ geht.
+    public let ingestAvailable: Bool?
 }
 
 // MARK: Leseansicht
@@ -651,6 +658,8 @@ public struct ReadingDocModel: Decodable, Equatable, Sendable {
     public let nav: String?
     public let vault: Bool
     public var decisions: ReaderDecisions
+    /// Ingest: Stand des Entwurfs und ob „Ingest entwerfen“ geht; nil ohne Ingest-Dienst.
+    public var ingest: ReaderIngest?
 
     public func highlight(_ id: String) -> ReadingHighlight? {
         highlights.first { $0.id == id }

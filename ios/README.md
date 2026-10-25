@@ -53,6 +53,19 @@ make test      # Unit-Tests auf dem ersten verfügbaren iPhone-Simulator
   geschoben: Suche mit Bereich, „Holen“ als Phönix-Schritt oder an einem Tag, „Als Flamme“,
   Vorschläge aus den Bereichen, „Flamme einplanen“ und „In KW n“. „Holen“ und „Aus der Woche“ zeigen
   das Ergebnis sofort (`PlanStore.pending`), danach lädt die Seite neu.
+- **Ingest** (`Cockpit/Native/Lesen/IngestScreen.swift`, `IngestReviewScreen.swift`,
+  `IngestReviewScreenParts.swift`; Stores `IngestStore`, `IngestReviewStore` in `CockpitShared`):
+  Bereich „Ingest“ im Lesen mit der Zahl bereiter Entwürfe (nur, wenn der Server ihn kennt),
+  Karten „Bereit zum Abhaken“, „In Arbeit“, „Fehler“ und „Ganzen Stapel entwerfen“. Die
+  Prüfansicht liegt auf dem Stapel des Lesens: Digest, Source-Page (Titel, Summary mit Zähler,
+  Slug, Tags; Text aufklappbar mit dem Markdown-Renderer der Notiz), Vorschläge zum Abhaken je
+  Gruppe mit „alle“/„keine“ (Tipp auf die Zeile schaltet, das Symbol daneben öffnet die Seite als
+  Notiz), unten fest „Ins Wiki übernehmen (N)“, danach der nächste Entwurf. Claudes Text kommt vom
+  Server schon als Baum (`view`), die App parst kein Markdown. Stapel und Leseansicht zeigen das
+  Abzeichen („Ingest bereit“ öffnet die Prüfansicht) oder „Ingest entwerfen“; solange ein Entwurf
+  entsteht und ein Bildschirm zuschaut, fragt `IngestStore` alle 3 s nach. Ohne Netz meldet jede
+  Aktion „Keine Verbindung …“, gepuffert wird nichts. Fixtures: `COCKPIT_FIXTURES=<Ordner> node
+  --test test/lesen-ingest-web.test.js` schreibt `lesen-ingest-*.json`.
 - **Einstellungen** (`Cockpit/Native/Einstellungen/SettingsScreen.swift` und Nachbarn): je
   Abschnitt eine Zeile mit dem Stand als farbigem Punkt wie die Navigation im Web; ein Abschnitt
   ist ein Formular mit den Feldern, die `GET /api/einstellungen` beschreibt (Text, Zahl, Liste,

@@ -25,6 +25,8 @@ enum ReaderAnchor: Hashable, Sendable {
 struct ReaderServices {
     let context: CockpitContext
     let buffer: ReadingBuffer
+    /// Ingest der Anmeldung (Abzeichen „Ingest bereit“, „Ingest entwerfen“).
+    var ingest: IngestStore?
 }
 
 private struct ReaderServicesKey: EnvironmentKey {
@@ -130,7 +132,9 @@ struct ReaderScreen: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .background, let store { Task { await store.flushProgress() } }
         }
+        .onAppear { services?.ingest?.startPolling(ingestPollKey) }
         .onDisappear {
+            services?.ingest?.stopPolling(ingestPollKey)
             if let store { Task { await store.flushProgress() } }
         }
         .navigationDestination(item: $next) { target in
@@ -263,7 +267,18 @@ struct ReaderScreen: View {
                     run(command, on: selection, store)
                 }
                 .transition(barTransition)
-            } else if showsDecisions(store, model) {
+            }
+            if selection == nil || !store.canMark, showsIngest(store, model) {
+                ReaderIngestBar(
+                    status: ingestStatus(store, model),
+                    available: model.ingest?.available ?? false,
+                    isDrafting: services?.ingest?.busy.contains(docID) ?? false,
+                    review: { openIngestReview() },
+                    draft: { draftIngest() }
+                )
+                .transition(barTransition)
+            }
+            if selection == nil || !store.canMark, showsDecisions(store, model) {
                 ReaderDecisionBar(fertig: model.decisions.fertig, vault: model.vault, busy: store.busy, onFinish: {
                     decide(store) { await $0.finish() }
                 }, onVault: { fullText in
@@ -286,11 +301,79 @@ struct ReaderScreen: View {
     }
 
     private func barKey(_ store: ReaderStore, _ model: ReadingDocModel) -> String {
+        let ingest = showsIngest(store, model) ? "ingest-\(ingestStatus(store, model) ?? "-")" : ""
         switch selection {
-        case .range?: "auswahl"
-        case .mark(let id)?: "markierung-\(id)"
-        case nil: showsDecisions(store, model) ? "entscheiden" : ""
+        case .range?: return "auswahl"
+        case .mark(let id)?: return "markierung-\(id)"
+        case nil: return (showsDecisions(store, model) ? "entscheiden" : "") + ingest
         }
+    }
+
+    // MARK: Ingest
+
+    private var ingestPollKey: String { "leser-\(docID)" }
+
+    /// Stand des Ingest-Entwurfs: was der `IngestStore` neuer weiß, sonst die Leseansicht.
+    private func ingestStatus(_ store: ReaderStore, _ model: ReadingDocModel) -> String? {
+        guard let ingest = services?.ingest else { return model.ingest?.status }
+        return ingest.status(of: docID, fallback: model.ingest?.status, loadedAt: store.state.lastUpdated)
+    }
+
+    /// Am Ende angekommen: das Abzeichen des Ingests (wie `.lesen-decide` im Web), wenn es etwas
+    /// zu zeigen oder zu tun gibt.
+    private func showsIngest(_ store: ReaderStore, _ model: ReadingDocModel) -> Bool {
+        guard let ingest = model.ingest, !decisionsClosed, reachedEnd else { return false }
+        let status = ingestStatus(store, model)
+        if IngestStatus.isActive(status) || status == IngestStatus.applied { return true }
+        return ingest.available
+    }
+
+    /// Einträge im Menü „Aktionen“: Prüfen, Fehler ansehen, Stand oder „Ingest entwerfen“.
+    @ViewBuilder
+    private func ingestMenuItems(_ status: String?, available: Bool) -> some View {
+        if status == IngestStatus.ready {
+            Button {
+                openIngestReview()
+            } label: {
+                Label("Ingest prüfen", systemImage: "checklist")
+            }
+        } else if status == IngestStatus.failed {
+            Button {
+                openIngestReview()
+            } label: {
+                Label("Ingest-Fehler ansehen", systemImage: "exclamationmark.triangle")
+            }
+        } else if IngestStatus.isBusy(status) {
+            Button {} label: {
+                Label(status == IngestStatus.waiting ? "Wartet auf Claude …" : "Ingest wird entworfen …", systemImage: "hourglass")
+            }
+            .disabled(true)
+        } else if status == IngestStatus.applied {
+            Button {} label: {
+                Label("Im Wiki", systemImage: "checkmark")
+            }
+            .disabled(true)
+        } else if available {
+            Button {
+                draftIngest()
+            } label: {
+                Label("Ingest entwerfen", systemImage: "sparkles")
+            }
+            .disabled(services?.ingest?.busy.contains(docID) ?? false)
+        }
+    }
+
+    /// Prüfansicht auf den Stapel des Lesens (über die App, wie ein Link auf `/lesen/ingest/doc`).
+    private func openIngestReview() {
+        guard let services else { return }
+        services.context.toasts.signal(.selection)
+        services.context.openPath(ReadingRoute.ingestReview(id: docID).webPath)
+    }
+
+    private func draftIngest() {
+        guard let ingest = services?.ingest else { return }
+        let id = docID
+        Task { await ingest.draft(id) }
     }
 
     private var barTransition: AnyTransition {
@@ -385,6 +468,13 @@ struct ReaderScreen: View {
                 }
             } header: {
                 Text("Status: \(model.doc.status.label)")
+            }
+            if let ingest = model.ingest {
+                Section {
+                    ingestMenuItems(ingestStatus(store, model), available: ingest.available)
+                } header: {
+                    Text("Wiki")
+                }
             }
             Section {
                 if store.canMark {
