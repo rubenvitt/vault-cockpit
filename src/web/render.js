@@ -3,7 +3,7 @@ import { DEFAULT_HIDDEN_EVENTS } from '../cockpit/settings.js';
 import { esc, head, appHeader, icon } from './layout.js';
 import { backupSection, backupHint } from './backup-render.js';
 import { sessionSection, revokeForm } from './session-render.js';
-import { sectionStates, sectionNav, maskUrl, hostOf, KIND_LABELS as KIND_LABEL, SCOPE_LABELS as SCOPE_LABEL } from './settings-json.js';
+import { sectionStates, sectionNav, maskUrl, hostOf, KIND_LABELS as KIND_LABEL, SCOPE_LABELS as SCOPE_LABEL, languageOptions } from './settings-json.js';
 
 export { esc };
 
@@ -673,6 +673,9 @@ ${backupHint(backup)}
     <label><span>Moderation <span class="hint">Voice-ID</span></span><input name="episodes.host" value="${esc(stored.episodes?.host ?? '')}" placeholder="${esc(tts.voice ?? d.elevenlabsVoice ?? '')}"></label>
     <label><span>Gast <span class="hint">Voice-ID</span></span><input name="episodes.guest" value="${esc(stored.episodes?.guest ?? '')}" placeholder="${esc(d.episodeGuestVoice ?? '')}"></label>
     <label><span>Claude-Modell <span class="hint">sonnet schont das Abo</span></span><input name="episodes.model" value="${esc(stored.episodes?.model ?? '')}" placeholder="${esc(d.episodeModel ?? 'sonnet')}"></label>
+    <label><span>Sprache <span class="hint">Podcast und Report</span></span><select name="episodes.language">${languageOptions(d)
+      .map((o) => `<option value="${o.value}"${(stored.episodes?.language ?? '') === o.value ? ' selected' : ''}>${esc(o.label)}</option>`)
+      .join('')}</select></label>
   </div>
 </section>
 <section id="anzeige">

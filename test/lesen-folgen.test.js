@@ -588,7 +588,8 @@ test('Folgen: Ton, Themen der Texte und „erst nur Transkript“ im Formular un
     const api = JSON.parse((await page('/api/lesen/folgen/neu?zeit=15')).body);
     assert.deepEqual(api.topics, [{ label: 'KI', count: 2 }, { label: 'Arbeit', count: 1 }]);
     assert.deepEqual(api.styles.map((s) => s.style), ['ausgewogen', 'locker', 'kritisch', 'tiefgang']);
-    assert.deepEqual([api.defaultStyle, api.maxTopics, api.maxFocus, api.transcriptOnly], ['ausgewogen', 5, 200, true]);
+    assert.deepEqual([api.defaultStyle, api.maxTopics, api.maxFocus, api.transcriptOnly, api.language, api.languageLabel], ['ausgewogen', 5, 200, true, 'de', 'Deutsch']);
+    assert.match(neu, /auf Deutsch \(Sprache unter Einstellungen → Vorlesen → Folgen\)/);
 
     const form = new URLSearchParams([['art', 'report'], ['doc', a.id], ['laenge', '5'], ['stil', 'tiefgang'], ['thema', 'KI'], ['fokus', 'Folgen für Teams'], ['audio', '0']]);
     const r = await routes.actions['/aktion/lesen/folge/neu'](form, { sub: 'ruben' });
@@ -679,14 +680,37 @@ test('Claude-Writer: Fehler als Meldung', async () => {
   await assert.rejects(createClaudeWriter({ token: 't', run: missing, logger: quiet }).write({ system: '', prompt: '', input: '', schema: {} }), /nicht installiert/);
 });
 
-test('Einstellungen: Folgen-Stimmen, Moderation folgt der Vorlese-Stimme, Claude-Modell sonnet', async () => {
+test('Einstellungen: Folgen-Stimmen, Moderation folgt der Vorlese-Stimme, Claude-Modell sonnet, Sprache Deutsch', async () => {
   const { createSettingsStore, validateSettings } = await import('../src/cockpit/settings.js');
   const s = createSettingsStore({ logger: quiet });
-  assert.deepEqual(s.get().episodes, { host: 'JBFqnCBsd6RMkjVDRZzb', guest: 'EXAVITQu4vr4xnSDxMaL', model: 'sonnet' });
+  assert.deepEqual(s.get().episodes, { host: 'JBFqnCBsd6RMkjVDRZzb', guest: 'EXAVITQu4vr4xnSDxMaL', model: 'sonnet', language: 'de' });
   s.save({ tts: { voice: 'Erz1' }, calendars: [] });
   assert.equal(s.get().episodes.host, 'Erz1');
-  s.save({ tts: { voice: 'Erz1' }, episodes: { host: 'Mod2', guest: 'Gast3', model: 'opus' }, calendars: [] });
-  assert.deepEqual(s.get().episodes, { host: 'Mod2', guest: 'Gast3', model: 'opus' });
+  s.save({ tts: { voice: 'Erz1' }, episodes: { host: 'Mod2', guest: 'Gast3', model: 'opus', language: 'en' }, calendars: [] });
+  assert.deepEqual(s.get().episodes, { host: 'Mod2', guest: 'Gast3', model: 'opus', language: 'en' });
   assert.throws(() => validateSettings({ episodes: { guest: 'zwei Wörter' } }), /Gast/);
   assert.throws(() => validateSettings({ episodes: { model: 'claude opus' } }), /Claude-Modell/);
+  assert.throws(() => validateSettings({ episodes: { language: 'kl' } }), /Sprache: Deutsch, Englisch/);
 });
+
+test('Folgen: Sprache aus den Einstellungen geht an Claude und ins Transkript; Deutsch ohne Zusatz', () =>
+  withDir(async (dir) => {
+    let language = 'en';
+    const { a, episodes, calls } = setup(dir, { options: { language: () => language } });
+    const ep = episodes.create({ kind: 'podcast', docIds: [a.id], minutes: 5, audio: false });
+    // Später geänderte Sprache gilt nur für neue Folgen.
+    language = 'de';
+    await ep.done;
+    assert.match(calls.writes[0].system, /^Du schreibst auf Englisch/);
+    assert.match(calls.writes[0].prompt, /Sprache: Schreib Titel, Gespräch bzw\. Bericht und Sprechfassung auf Englisch/);
+    assert.match(calls.notes[0].content, /\nminuten: 5\nsprache: en\nquellen:/);
+    assert.match(calls.notes[0].content, /\n> Englisch\n/);
+    assert.equal(episodes.get(ep.id).language, 'en');
+
+    const de = episodes.create({ kind: 'report', docIds: [a.id], minutes: 5, audio: false });
+    await de.done;
+    assert.match(calls.writes[1].system, /^Du schreibst auf Deutsch/);
+    assert.doesNotMatch(calls.writes[1].prompt, /Sprache:/);
+    assert.doesNotMatch(calls.notes[1].content, /sprache:/);
+    assert.equal(episodes.language(), 'de');
+  }));

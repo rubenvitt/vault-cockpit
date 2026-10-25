@@ -262,6 +262,7 @@ final class ReadingModelTests: XCTestCase {
         XCTAssertEqual(model.topics, [EpisodeTopic(label: "Lesen", count: 2), EpisodeTopic(label: "Medien", count: 1)])
         XCTAssertEqual([model.maxTopics, model.maxFocus], [5, 200])
         XCTAssertTrue(model.transcriptOnly)
+        XCTAssertEqual(model.languageLabel, "Deutsch")
 
         let off = try decode(NewEpisodeModel.self, "lesen-folgen-neu-aus")
         XCTAssertFalse(off.enabled)
@@ -271,6 +272,7 @@ final class ReadingModelTests: XCTestCase {
         XCTAssertEqual(off.lengths, [5, 10, 20])
         XCTAssertTrue(off.styles.isEmpty)
         XCTAssertFalse(off.transcriptOnly)
+        XCTAssertNil(off.languageLabel)
     }
 
     /// Der Satz am Knopf, in Swift gerechnet, gleicht dem des Servers für jede Art.

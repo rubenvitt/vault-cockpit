@@ -170,6 +170,8 @@
   "maxTopics": 5,
   "maxFocus": 200,
   "transcriptOnly": true,
+  "language": "de",
+  "languageLabel": "Deutsch",
   "summary": {
     "main": "Vorlesen · 3 Texte · etwa 10 Min.",
     "cost": "rund 8.642 Zeichen bei ElevenLabs"

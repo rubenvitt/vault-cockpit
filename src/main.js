@@ -356,8 +356,9 @@ const episodes = createEpisodes({
   },
   sourceNote: (docId) => readingExport.notePath(docId),
   heard: (docIds) => readingExport.heard(docIds),
-  // Als Funktion: Eine geänderte Zeitzone gilt ohne Neustart.
+  // Als Funktion: Eine geänderte Zeitzone oder Sprache gilt ohne Neustart.
   tz: () => cockpitSettings.get().tz,
+  language: () => cockpitSettings.get().episodes.language,
 });
 
 // Ingest ins Mycel-Wiki: Claude entwirft (eigenes Modell unter Einstellungen →
