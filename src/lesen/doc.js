@@ -115,7 +115,7 @@ ${stack(stackDocs, doc.id)}
 <article class="lesen-reader" data-doc="${esc(doc.id)}" data-minutes="${doc.reading_minutes}">
   <header class="lesen-doc-head">
     <h1>${esc(doc.title || doc.url)}</h1>
-    <p class="meta">${meta}${meta ? ' · ' : ''}<a href="${esc(href(doc.url))}" rel="noopener noreferrer" target="_blank">Original</a></p>
+    <p class="meta">${meta}${meta ? ' · ' : ''}<a href="${esc(href(doc.url))}" rel="noopener noreferrer" target="_blank">Original</a>${doc.comments_url ? ` · <a href="${esc(href(doc.comments_url))}" rel="noopener noreferrer" target="_blank">Kommentare</a>` : ''}</p>
   </header>
   <div class="lesen-progress">
     <progress max="1" value="${doc.progress}" aria-label="Gelesen"></progress>

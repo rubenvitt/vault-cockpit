@@ -134,6 +134,8 @@ struct ReaderDocument: Equatable {
     /// „Quelle · Autor · 8 min“
     let meta: String
     let original: URL?
+    /// Diskussion zum Feed-Eintrag, nach „Original“.
+    let comments: URL?
     let blocks: [ReaderBlock]
     let level: Int
     let sans: Bool
@@ -166,7 +168,7 @@ struct ReaderTypesetter {
         let size = self.size
         let out = NSMutableAttributedString()
 
-        // Kopf: Titel, dann „Quelle · Autor · 8 min · Original“. Gehört nicht zum Lesetext.
+        // Kopf: Titel, dann „Quelle · Autor · 8 min · Original · Kommentare“. Gehört nicht zum Lesetext.
         let title = NSMutableParagraphStyle()
         title.paragraphSpacing = size * 0.45
         title.lineHeightMultiple = 1.1
@@ -182,6 +184,10 @@ struct ReaderTypesetter {
         if let original = document.original {
             if !document.meta.isEmpty { meta.append(NSAttributedString(string: " · ", attributes: [.font: metaFont, .foregroundColor: ReaderPalette.text2, .paragraphStyle: metaStyle])) }
             meta.append(NSAttributedString(string: "Original", attributes: [.font: metaFont, .link: original, .paragraphStyle: metaStyle]))
+        }
+        if let comments = document.comments {
+            if meta.length > 0 { meta.append(NSAttributedString(string: " · ", attributes: [.font: metaFont, .foregroundColor: ReaderPalette.text2, .paragraphStyle: metaStyle])) }
+            meta.append(NSAttributedString(string: "Kommentare", attributes: [.font: metaFont, .link: comments, .paragraphStyle: metaStyle]))
         }
         meta.append(NSAttributedString(string: "\n", attributes: [.font: metaFont, .paragraphStyle: metaStyle]))
         out.append(meta)

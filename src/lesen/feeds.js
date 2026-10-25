@@ -56,10 +56,35 @@ const time = (s) => {
 
 /**
  * Text des Feeds → `{ title, siteUrl, icon, entries }`, je Eintrag `{ key,
- * url, title, author, html, published }` (`html` ungesäubert). Kein Feed:
- * `ReadingError`.
+ * url, title, author, html, published, comments }` (`html` ungesäubert). Kein
+ * Feed: `ReadingError`.
  */
 export function parseFeed(body, baseUrl) {
+  const feed = parseAny(body, baseUrl);
+  return { ...feed, entries: feed.entries.map(resolveLinkPost) };
+}
+
+const REDDIT = /(?:^|\.)(?:reddit\.com|redd\.it|redditmedia\.com)$/i;
+
+/**
+ * Link-Sammler: Bei Reddit zeigt der Eintrag auf die Diskussion, der Artikel
+ * steckt im `[link]` des Inhalts. Dann wird der Artikel die Adresse und die
+ * Diskussion `comments`. Bilder, Videos und Galerien bei Reddit selbst und
+ * Textbeiträge bleiben, wie sie sind. `comments` ist nie die Adresse selbst
+ * (WordPress setzt `<comments>` auf `…/beitrag/#respond`).
+ */
+function resolveLinkPost(entry) {
+  let { url, comments } = entry;
+  if (url && REDDIT.test(hostOf(url))) {
+    const { document } = parseHTML(`<!doctype html><html><body>${entry.html ?? ''}</body></html>`);
+    const link = [...document.querySelectorAll('a[href]')].find((a) => squash(a.textContent) === '[link]');
+    const target = link && absolute(link.getAttribute('href'), url);
+    if (target && !REDDIT.test(hostOf(target))) [url, comments] = [target, url];
+  }
+  return { ...entry, url, comments: comments && comments !== url ? comments : null };
+}
+
+function parseAny(body, baseUrl) {
   const src = String(body ?? '').replace(/^\uFEFF/, '').trimStart();
   if (src.startsWith('{')) return parseJsonFeed(src, baseUrl);
   const root = new DOMParser().parseFromString(src, 'text/xml').documentElement;
@@ -83,6 +108,8 @@ export function parseFeed(body, baseUrl) {
         author: text(item, 'dc:creator', 'author'),
         html: kid(item, 'content:encoded', 'description')?.textContent ?? '',
         published: time(text(item, 'pubdate', 'dc:date')),
+        // Diskussion, etwa bei Hacker News und Lobsters.
+        comments: absolute(text(item, 'comments'), baseUrl),
       };
     }),
   };
@@ -170,6 +197,7 @@ function fromFeed(entry, site) {
   const count = words(contentText);
   return {
     url: entry.url,
+    comments_url: entry.comments ?? null,
     title: entry.title || entry.url,
     author: entry.author,
     site,
@@ -220,7 +248,7 @@ export function createFeedPoller({ store, fetchFeed = fetchFeedDefault, fetchPag
     try {
       const page = await fetchPage(entry.url);
       const full = extractArticle(page.body, page.url);
-      if (full.word_count > own.word_count) return { ...full, url: entry.url, title: entry.title || full.title };
+      if (full.word_count > own.word_count) return { ...full, url: entry.url, comments_url: own.comments_url, title: entry.title || full.title };
     } catch (err) {
       logger.warn?.(`Feeds: ${entry.url} nicht geholt, nehme den Feed-Inhalt: ${err.message}`);
     }

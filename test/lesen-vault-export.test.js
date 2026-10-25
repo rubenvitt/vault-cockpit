@@ -9,7 +9,7 @@ import { createEditor } from '../src/vault/edit.js';
 import { createSettingsStore } from '../src/cockpit/settings.js';
 import { createReadingStore } from '../src/lesen/store.js';
 import { readingRoutes } from '../src/lesen/http.js';
-import { createReadingExport, blockId, parseLinks, slugOf, DEFAULT_FOLDER, TEXT_SECTION, SECTION as SECTION_NAME } from '../src/lesen/vault-export.js';
+import { createReadingExport, noteContent, blockId, parseLinks, slugOf, DEFAULT_FOLDER, TEXT_SECTION, SECTION as SECTION_NAME } from '../src/lesen/vault-export.js';
 import { findSection } from '../src/vault/generated-section.js';
 import { sanitizeHtml } from '../src/lesen/extract.js';
 
@@ -470,4 +470,13 @@ test('blockId: verschieden auch bei Client-IDs mit gleichem Anfang', () => {
   const ids = ['mh2x3k1a-00aa', 'mh2x3k1a-00ab', 'cap-1', 'cap-2'].map(blockId);
   assert.equal(new Set(ids).size, ids.length);
   for (const id of ids) assert.match(id, /^hl-[0-9a-f]{8}$/);
+});
+
+test('Notiz: Feed-Eintrag mit Diskussion verlinkt Original und Kommentare', () => {
+  const text = noteContent(
+    { id: 'd1', url: 'https://kuehn.test/a', comments_url: 'https://news.ycombinator.com/item?id=1', title: 'Kühn', author: 'Ann', topics: [], saved_at: '2026-10-20T08:00:00Z' },
+    '',
+    { tz: 'Europe/Berlin' },
+  );
+  assert.match(text, /^\[Original\]\(<https:\/\/kuehn\.test\/a>\) · \[Kommentare\]\(<https:\/\/news\.ycombinator\.com\/item\?id=1>\) · Ann$/m);
 });
