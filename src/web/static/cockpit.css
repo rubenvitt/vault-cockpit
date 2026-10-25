@@ -685,6 +685,34 @@ a:active, a.pressed { opacity: .55; transition-duration: 0s; }
 .feed-group > summary { cursor: pointer; font-weight: 600; margin-bottom: var(--s-2); }
 .feed-opml h2 { margin-top: 0; }
 .feed-opml input[type=file] { flex: 1; min-width: 0; }
+/* Sammeln (VCP-110): Häkchen je Feed, Suche oben, Leiste unten (src/web/static/lesen-feeds.js) */
+.feed-tools { display: grid; gap: var(--s-2); }
+.feed-tools .meta { margin: 0; }
+.feed-filter { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-4); }
+.feed-filter .lesen-url { flex: 1 1 220px; }
+.feed-pick { flex: none; width: 20px; height: 20px; margin: 0; cursor: pointer; }
+.feed-pick-all { margin-bottom: var(--s-2); font-size: 14px; color: var(--text-2); }
+.feed-filter .feed-pick-all { margin: 0; }
+.feed:has(.feed-pick:checked) { background: var(--accent-soft); box-shadow: -8px 0 0 var(--accent-soft), 8px 0 0 var(--accent-soft); }
+.feed-tools [hidden], .feed-lists [hidden], .feed-bulk[hidden] { display: none !important; }
+.feed-bulk { position: sticky; z-index: 4; bottom: calc(var(--tabbar) + var(--s-3) + env(safe-area-inset-bottom)); display: grid; gap: var(--s-2); margin: 0;
+  padding: var(--s-3) var(--s-4); border: 1px solid var(--accent-line); border-radius: var(--r-lg);
+  background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); box-shadow: var(--shadow-1), 0 8px 24px rgb(0 0 0 / .08); }
+.feed-bulk-count { margin: 0; font-weight: 600; }
+.feed-bulk-fields { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
+.feed-bulk-fields .feed-field { display: flex; align-items: center; gap: var(--s-1); }
+.feed-bulk-abstand input { width: 6em; }
+.feed-bulk-ziel, .feed-bulk-neu, .feed-bulk-abstand { display: none !important; }
+.feed-bulk:has(select[name=tun] option[value=gruppe]:checked) .feed-bulk-ziel,
+.feed-bulk:has(select[name=tun] option[value=gruppe]:checked):has(select[name=ziel] option[value=neu]:checked) .feed-bulk-neu,
+.feed-bulk:has(select[name=tun] option[value=abstand]:checked) .feed-bulk-abstand { display: flex !important; }
+.feed-bulk:has(select[name=tun] option[value=entfernen]:checked) .btn.primary { background: var(--danger); border-color: var(--danger); }
+.feed-remove .feed-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-4); }
+@media (max-width: 520px) {
+  .feed-bulk-fields > * { flex: 1 1 100%; }
+  .feed-bulk-fields select, .feed-bulk-fields input:not([type=checkbox]) { flex: 1; min-width: 0; }
+  .feed-bulk .btn { min-height: 44px; }
+}
 
 /* --- Lesen: Leseansicht --- */
 /* /lesen/doc (src/lesen/doc.js): Bereiche · Stapel · Lesetext · Seitenleiste, schmaler werdend bis eine Spalte */

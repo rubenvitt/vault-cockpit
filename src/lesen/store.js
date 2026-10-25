@@ -166,6 +166,18 @@ export function createReadingStore({ path, now = () => Date.now() }) {
     db.prepare(`UPDATE ${table} SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => bindable(patch[k])), id);
   };
 
+  const inTransaction = (run) => {
+    db.exec('BEGIN');
+    try {
+      const r = run();
+      db.exec('COMMIT');
+      return r;
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
+  };
+
   const get = (id) => fromRow(db.prepare('SELECT * FROM documents WHERE id = ?').get(String(id ?? '')));
   const getHighlight = (id) => db.prepare('SELECT * FROM highlights WHERE id = ?').get(String(id ?? '')) ?? null;
   const getFeed = (id) => feedRow(db.prepare(`${FEED_SELECT} WHERE f.id = ?`).get(String(id ?? '')));
@@ -381,6 +393,21 @@ export function createReadingStore({ path, now = () => Date.now() }) {
       return getFeed(id);
     },
     deleteFeed: (id) => db.prepare('DELETE FROM feeds WHERE id = ?').run(String(id ?? '')).changes > 0,
+    /**
+     * Dieselbe Änderung für viele Feeds in einem Schritt (VCP-110), alles oder nichts.
+     * Unbekannte IDs fallen weg; liefert die geänderten Feeds.
+     */
+    updateFeeds(ids, patch) {
+      const checked = withGroup(patch);
+      const known = [...new Set(ids.map(String))].filter((id) => getFeed(id));
+      inTransaction(() => known.forEach((id) => update('feeds', id, checked, FEED_EDIT)));
+      return known.map(getFeed);
+    },
+    /** Entfernt viele Feeds auf einmal; liefert die Zahl der entfernten. */
+    deleteFeeds(ids) {
+      const del = db.prepare('DELETE FROM feeds WHERE id = ?');
+      return inTransaction(() => [...new Set(ids.map(String))].reduce((n, id) => n + del.run(id).changes, 0));
+    },
     // --- Feed-Gruppen (VCP-97) --------------------------------------------------
 
     /** Neue Gruppe ans Ende; idempotent per Name (ohne Groß/klein), `duplicate` sagt, ob es sie schon gab. */
