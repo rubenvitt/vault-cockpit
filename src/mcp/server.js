@@ -39,7 +39,10 @@ export function createVaultMcpHandler({
   verifyToken,
   captureFolder = 'inbox',
   layoutHint = null,
+  // false: vertrauliche Ordner bleiben zu, auch wenn ein Aufruf sie verlangt (Agent des Cockpits, src/lesen/einpflanzen.js).
+  allowSensitive = true,
 }) {
+  const sensitive = (v) => allowSensitive && v === true;
   return createMcpHandler((ctx) => {
     // Index oder Funktion, die den aktuellen liefert (Einstellungen → Embeddings); pro Request neu.
     const semantic = typeof semanticOrGetter === 'function' ? semanticOrGetter() : semanticOrGetter;
@@ -82,7 +85,7 @@ export function createVaultMcpHandler({
       read(async (args) => {
         const filters = {
           include: args.include_readwise ? ['core', 'readwise'] : ['core'],
-          includeSensitive: args.include_sensitive === true,
+          includeSensitive: sensitive(args.include_sensitive),
           tag: args.tag ?? null,
           folder: args.folder ?? null,
           type: args.type ?? null,
@@ -135,7 +138,7 @@ export function createVaultMcpHandler({
       },
       read(async (args) => {
         if (!semantic) return fail('Die semantische Suche ist auf dem Server nicht eingerichtet (Cockpit → Einstellungen → Embeddings).');
-        const allowed = index.filterPaths({ includeSensitive: args.include_sensitive === true });
+        const allowed = index.filterPaths({ includeSensitive: sensitive(args.include_sensitive) });
         if (!allowed.has(args.path)) return fail(`Notiz "${args.path}" wurde nicht gefunden.`);
         const limit = args.limit ?? 10;
         const linked = new Set([...index.outgoingLinks(args.path), ...index.backlinks(args.path)].map((n) => n.path));
@@ -177,7 +180,7 @@ export function createVaultMcpHandler({
         const g = await graph.around(args.path, {
           depth: args.depth ?? 1,
           similar: args.similar ?? 8,
-          includeSensitive: args.include_sensitive === true,
+          includeSensitive: sensitive(args.include_sensitive),
         });
         if (!g) return fail(`Notiz "${args.path}" wurde nicht gefunden.`);
         return ok(g);
@@ -201,7 +204,7 @@ export function createVaultMcpHandler({
       read(async (args) => {
         const note = readNote(index, args.path, {
           offset: args.offset ?? 0,
-          allowSensitive: args.allow_sensitive === true,
+          allowSensitive: sensitive(args.allow_sensitive),
         });
         if (!note) {
           return fail(

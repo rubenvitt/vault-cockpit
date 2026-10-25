@@ -170,6 +170,7 @@ function formSections(stored, d) {
           field('ingest.hour', 'Uhrzeit', { kind: 'number', hint: 'volle Stunde, 0–23', value: stored.ingest?.hour, placeholder: d.ingestHour ?? 3 }),
           field('ingest.model', 'Claude-Modell', { hint: 'sonnet schont das Abo', value: stored.ingest?.model, placeholder: d.ingestModel ?? 'sonnet' }),
           field('ingest.limit', 'Höchstens je Nacht', { kind: 'number', hint: 'Texte', value: stored.ingest?.limit, placeholder: d.ingestLimit ?? 20 }),
+          field('ingest.agent', 'Danach einpflanzen', { kind: 'select', hint: 'Agent arbeitet Übernommenes in die Seiten ein', value: choice(stored.ingest?.agent ?? null), options: onOff(d.ingestAgent ?? true) }),
         ].map((f) => ({ ...f, group: 'Ingest ins Wiki' })),
       ],
       groups: {
@@ -314,7 +315,7 @@ const FIELDS = new Set([
   'embed.url', 'embed.model',
   'tts.provider', 'tts.key', 'tts.clear', 'tts.voice', 'tts.model',
   'episodes.host', 'episodes.guest', 'episodes.model', 'episodes.language',
-  'ingest.nightly', 'ingest.hour', 'ingest.model', 'ingest.limit',
+  'ingest.nightly', 'ingest.hour', 'ingest.model', 'ingest.limit', 'ingest.agent',
   'hiddenEvents', 'session.idleDays', 'session.maxDays', 'cal.auth',
 ]);
 const CAL_FIELD = /^cal\.(\d{1,2})\.(id|name|kind|url|auth|username|password|filter|remove)$/;
@@ -355,6 +356,7 @@ export function formOfSettings(stored) {
   put('ingest.hour', stored.ingest?.hour);
   put('ingest.model', stored.ingest?.model);
   put('ingest.limit', stored.ingest?.limit);
+  put('ingest.agent', choice(stored.ingest?.agent ?? null));
   put('session.idleDays', stored.session?.idleDays);
   put('session.maxDays', stored.session?.maxDays);
   put('cal.auth', '1');

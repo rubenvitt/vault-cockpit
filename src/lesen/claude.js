@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -11,10 +11,20 @@ import { join } from 'node:path';
  * `ANTHROPIC_AUTH_TOKEN` in der Umgebung, nähme die CLI den und rechnete pro
  * Token ab; deshalb gehen beide nicht an den Kindprozess.
  *
- * Reine Textarbeit ohne Werkzeuge: `--tools ""`, `--safe-mode` (kein
+ * `write`: reine Textarbeit ohne Werkzeuge: `--tools ""`, `--safe-mode` (kein
  * CLAUDE.md, keine Hooks, Skills, Plugins, MCP), `--permission-mode dontAsk`,
  * leeres Arbeitsverzeichnis. Die Texte kommen über stdin, das Ergebnis als
  * JSON nach `--json-schema` (`structured_output`).
+ *
+ * `agent`: Claude mit Werkzeugen, aber nur denen eines MCP-Servers, den der
+ * Aufrufer stellt (Einpflanzen, src/lesen/einpflanzen.js): keine eingebauten
+ * Werkzeuge (`--tools ""`), nur dieser Server (`--strict-mcp-config`, die
+ * Konfiguration als Datei mit 0600 im leeren Arbeitsverzeichnis, damit das
+ * Token nicht in der Prozessliste steht), nur die genannten Werkzeuge
+ * (`--allowedTools`, alles andere lehnt `dontAsk` ab), keine Skills und
+ * Befehle, ein frischer Konfigurationsordner (`CLAUDE_CONFIG_DIR`) statt
+ * Einstellungen und CLAUDE.md des Nutzers. `--safe-mode` geht hier nicht: Es
+ * schaltet auch Server aus `--mcp-config` ab.
  */
 
 export class WriterError extends Error {}
@@ -30,8 +40,8 @@ const TIMEOUT_MS = 15 * 60_000;
 export function createClaudeWriter({ token = process.env.CLAUDE_CODE_OAUTH_TOKEN || null, command = 'claude', model = () => null, timeoutMs = TIMEOUT_MS, run = spawn, logger = console }) {
   const currentModel = typeof model === 'function' ? model : () => model;
 
-  function env() {
-    const out = { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: token, DISABLE_UPDATES: '1', DISABLE_AUTOUPDATER: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', DO_NOT_TRACK: '1' };
+  function env(extra = {}) {
+    const out = { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: token, DISABLE_UPDATES: '1', DISABLE_AUTOUPDATER: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', DO_NOT_TRACK: '1', ...extra };
     delete out.ANTHROPIC_API_KEY;
     delete out.ANTHROPIC_AUTH_TOKEN;
     return out;
@@ -39,16 +49,49 @@ export function createClaudeWriter({ token = process.env.CLAUDE_CODE_OAUTH_TOKEN
 
   /** `{ system, prompt, input, schema }` → Objekt nach `schema` (JSON Schema). */
   async function write({ system, prompt, input, schema }) {
-    if (!token) throw new WriterError('Kein Claude-Zugang: CLAUDE_CODE_OAUTH_TOKEN fehlt (Token aus `claude setup-token`)');
+    return invoke({ input, args: () => [...common({ system, prompt, schema }), '--tools', '', '--safe-mode', '--strict-mcp-config'] });
+  }
+
+  /**
+   * `{ system, prompt, input, schema, mcp: { name, url, token }, tools }` → Objekt nach `schema`.
+   * `tools`: Namen der Werkzeuge des Servers ohne Präfix, z. B. `vault_read`.
+   */
+  async function agent({ system, prompt, input, schema, mcp, tools }) {
+    const name = String(mcp?.name ?? 'vault');
+    if (!/^[a-z][a-z0-9_-]*$/.test(name)) throw new WriterError(`Ungültiger Name des MCP-Servers „${name}“`);
+    return invoke({
+      input,
+      env: (cwd) => ({ CLAUDE_CONFIG_DIR: join(cwd, '.claude-config') }),
+      args: (cwd) => {
+        const config = join(cwd, 'mcp.json');
+        writeFileSync(config, JSON.stringify({ mcpServers: { [name]: { type: 'http', url: mcp.url, headers: { Authorization: `Bearer ${mcp.token}` } } } }), { mode: 0o600 });
+        return [
+          ...common({ system, prompt, schema }),
+          '--tools', '',
+          '--mcp-config', config,
+          '--strict-mcp-config',
+          '--allowedTools', (tools ?? []).map((t) => `mcp__${name}__${t}`).join(','),
+          '--disable-slash-commands',
+        ];
+      },
+    });
+  }
+
+  function common({ system, prompt, schema }) {
     const m = currentModel();
-    const args = ['-p', prompt, '--output-format', 'json', '--json-schema', JSON.stringify(schema), '--system-prompt', system, '--tools', '', '--safe-mode', '--strict-mcp-config', '--permission-mode', 'dontAsk', '--no-session-persistence', ...(m ? ['--model', m] : [])];
+    return ['-p', prompt, '--output-format', 'json', '--json-schema', JSON.stringify(schema), '--system-prompt', system, '--permission-mode', 'dontAsk', '--no-session-persistence', ...(m ? ['--model', m] : [])];
+  }
+
+  async function invoke({ input, args: argsFor, env: envFor = () => ({}) }) {
+    if (!token) throw new WriterError('Kein Claude-Zugang: CLAUDE_CODE_OAUTH_TOKEN fehlt (Token aus `claude setup-token`)');
     // Leeres Verzeichnis: kein Projekt, kein CLAUDE.md in der Nähe.
     const cwd = mkdtempSync(join(tmpdir(), 'cockpit-claude-'));
     try {
+      const args = argsFor(cwd);
       const { code, stdout, stderr } = await new Promise((resolve, reject) => {
         let child;
         try {
-          child = run(command, args, { cwd, env: env(), stdio: ['pipe', 'pipe', 'pipe'] });
+          child = run(command, args, { cwd, env: env(envFor(cwd)), stdio: ['pipe', 'pipe', 'pipe'] });
         } catch (err) {
           reject(err);
           return;
@@ -94,5 +137,5 @@ export function createClaudeWriter({ token = process.env.CLAUDE_CODE_OAUTH_TOKEN
     }
   }
 
-  return { available: () => Boolean(token), write };
+  return { available: () => Boolean(token), write, agent };
 }

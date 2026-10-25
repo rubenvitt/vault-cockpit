@@ -45,13 +45,14 @@ import { ingestRoutes } from './ingest-page.js';
  * „In den Vault“ und „Im Vault ablegen“ ein (VCP-96, src/lesen/doc.js).
  * `ingest` ist der Ingest-Dienst (src/lesen/ingest.js, `createIngest`); ohne
  * gibt es keine Ingest-Oberfläche (src/lesen/ingest-page.js), nur
- * `/api/lesen/ingest` mit `enabled: false`.
+ * `/api/lesen/ingest` mit `enabled: false`. `planter` pflanzt Übernommenes ein
+ * (src/lesen/einpflanzen.js, `createPlanter`).
  *
  * `nav` ergänzt die Unternavigation (`readingNav` in src/lesen/pages.js), etwa
  * um „Ingest“ mit der Zahl der bereiten Entwürfe; src/web/http.js reicht es als
  * `ctx.nav` an die Seiten.
  */
-export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefined, capture = null, review = {}, embedCache = null, connections = null, exporter = null, speech = null, episodes = null, ingest = null, onChange = () => {}, logger = console }) {
+export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefined, capture = null, review = {}, embedCache = null, connections = null, exporter = null, speech = null, episodes = null, ingest = null, planter = null, onChange = () => {}, logger = console }) {
   const feeds = feedRoutes({ store, fetchFeed, logger });
   /** Fehler aus Abruf und Speicher als Meldung für die Seite. */
   const asAction = async (run) => {
@@ -72,7 +73,7 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
   const marked = highlightRoutes({ store, asAction, capture, onChange, logger });
   const wiedersehen = reviewRoutes({ store, capture, logger, embedCache, ...review });
   const folgen = folgenRoutes({ store, episodes, ingest });
-  const ingestUi = ingestRoutes({ store, ingest, logger });
+  const ingestUi = ingestRoutes({ store, ingest, planter, logger });
   const links = connections ? connectionRoutes({ store, embedCache, logger, ...connections }) : { pages: {}, actions: {} };
 
   return {

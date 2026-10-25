@@ -51,7 +51,7 @@ const EMPTY = {
   embed: { url: null, model: null },
   tts: { provider: null, key: null, voice: null, model: null },
   episodes: { host: null, guest: null, model: null, language: null },
-  ingest: { nightly: null, hour: null, model: null, limit: null },
+  ingest: { nightly: null, hour: null, model: null, limit: null, agent: null },
   calendars: [],
   hiddenEvents: null,
   session: { idleDays: null, maxDays: null, generation: 0 },
@@ -157,7 +157,8 @@ export function validateSettings(input) {
   if (language && !EPISODE_LANGUAGES[language]) throw new SettingsError(`Sprache: ${Object.values(EPISODE_LANGUAGES).join(', ')}`, 'episodes.language');
   const episodes = { host: voiceOf(input.episodes?.host, 'Moderation', 'episodes.host'), guest: voiceOf(input.episodes?.guest, 'Gast', 'episodes.guest'), model: claudeModel, language };
 
-  // Ingest ins Wiki (src/lesen/ingest.js): Nachtlauf, Stunde, Claude-Modell, Höchstzahl je Nacht; `null` = Standard.
+  // Ingest ins Wiki (src/lesen/ingest.js): Nachtlauf, Stunde, Claude-Modell, Höchstzahl je Nacht,
+  // Einpflanzen nach dem Übernehmen (src/lesen/einpflanzen.js); `null` = Standard.
   const whole = (v, min, max, what, field) => {
     if (v === null || v === undefined || v === '') return null;
     const n = Number(v);
@@ -171,6 +172,7 @@ export function validateSettings(input) {
     hour: whole(input.ingest?.hour, 0, 23, 'Ingest-Uhrzeit', 'ingest.hour'),
     model: ingestModel,
     limit: whole(input.ingest?.limit, 1, 100, 'Ingest-Höchstzahl je Nacht', 'ingest.limit'),
+    agent: typeof input.ingest?.agent === 'boolean' ? input.ingest.agent : null,
   };
 
   // `formIndex` (aus `fromForm`): Nummer im Formular, damit ein Fehler das richtige Feld `cal.N.…` nennt.
@@ -270,6 +272,7 @@ export function createSettingsStore({ file = null, defaults = {}, logger = conso
     ingestHour: 3,
     ingestModel: 'sonnet',
     ingestLimit: 20,
+    ingestAgent: true,
     sessionIdleDays: 30,
     sessionMaxDays: 90,
     ...defaults,
@@ -325,12 +328,14 @@ export function createSettingsStore({ file = null, defaults = {}, logger = conso
           model: stored.episodes?.model ?? d.episodeModel,
           language: stored.episodes?.language ?? d.episodeLanguage,
         },
-        // Ingest ins Wiki: Entwürfe nachts um `hour` (Zeitzone oben), höchstens `limit` Dokumente.
+        // Ingest ins Wiki: Entwürfe nachts um `hour` (Zeitzone oben), höchstens `limit` Dokumente;
+        // `agent`: nach dem Übernehmen einpflanzen.
         ingest: {
           nightly: stored.ingest?.nightly ?? d.ingestNightly,
           hour: stored.ingest?.hour ?? d.ingestHour,
           model: stored.ingest?.model ?? d.ingestModel,
           limit: stored.ingest?.limit ?? d.ingestLimit,
+          agent: stored.ingest?.agent ?? d.ingestAgent,
         },
         calendars: stored.calendars,
         hiddenEvents: stored.hiddenEvents ?? DEFAULT_HIDDEN_EVENTS,

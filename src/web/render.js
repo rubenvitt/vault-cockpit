@@ -627,7 +627,7 @@ ${backupHint(backup)}
     <label>Ordner im Vault<input name="readingNotes.folder" value="${esc(stored.readingNotes?.folder ?? '')}" placeholder="${esc(d.readingNotesFolder ?? 'raw')}"></label>
   </div>
   <h3>Ingest ins Wiki</h3>
-  <p class="meta">Claude entwirft für Texte im Stapel, was ins Mycel-Wiki kommt (Source-Page, Verknüpfungen, Vorschläge); ins Wiki kommt erst, was du unter Lesen → Ingest abhakst. Nachts entstehen Entwürfe für Stapel-Texte ohne Entwurf, über dasselbe Abo wie die Folgen (<code>CLAUDE_CODE_OAUTH_TOKEN</code>).</p>
+  <p class="meta">Claude entwirft für Texte im Stapel, was ins Mycel-Wiki kommt (Source-Page, Verknüpfungen, Vorschläge); ins Wiki kommt erst, was du unter Lesen → Ingest abhakst. Nachts entstehen Entwürfe für Stapel-Texte ohne Entwurf, über dasselbe Abo wie die Folgen (<code>CLAUDE_CODE_OAUTH_TOKEN</code>). Nach dem Übernehmen pflanzt ein Agent die Quelle ein: Er arbeitet sie in die Seiten ein, an die sie andockt, und hält Widersprüche als Spannung fest; er ergänzt nur und schreibt nur unter <code>wiki/</code>.</p>
   <div class="grid">
     <label>Ingest nachts entwerfen<select name="ingest.nightly">
       <option value=""${stored.ingest?.nightly == null ? ' selected' : ''}>Standard (${(d.ingestNightly ?? true) ? 'an' : 'aus'})</option>
@@ -637,6 +637,11 @@ ${backupHint(backup)}
     <label><span>Uhrzeit <span class="hint">volle Stunde, 0–23</span></span><input name="ingest.hour" inputmode="numeric" value="${esc(stored.ingest?.hour ?? '')}" placeholder="${esc(d.ingestHour ?? 3)}"></label>
     <label><span>Claude-Modell <span class="hint">sonnet schont das Abo</span></span><input name="ingest.model" value="${esc(stored.ingest?.model ?? '')}" placeholder="${esc(d.ingestModel ?? 'sonnet')}"></label>
     <label><span>Höchstens je Nacht <span class="hint">Texte</span></span><input name="ingest.limit" inputmode="numeric" value="${esc(stored.ingest?.limit ?? '')}" placeholder="${esc(d.ingestLimit ?? 20)}"></label>
+    <label><span>Danach einpflanzen <span class="hint">Agent arbeitet Übernommenes in die Seiten ein</span></span><select name="ingest.agent">
+      <option value=""${stored.ingest?.agent == null ? ' selected' : ''}>Standard (${(d.ingestAgent ?? true) ? 'an' : 'aus'})</option>
+      <option value="an"${stored.ingest?.agent === true ? ' selected' : ''}>an</option>
+      <option value="aus"${stored.ingest?.agent === false ? ' selected' : ''}>aus</option>
+    </select></label>
   </div>
 </section>
 <section id="embeddings">

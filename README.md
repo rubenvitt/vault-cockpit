@@ -1056,6 +1056,52 @@ verknüpft) und `extended` (ergänzte Synthesen), wie der Log-Eintrag. Hat der S
 ingestiert (`ingest: <Datum>` oder `übersprungen`, bevor Schritt 7 lief), lehnt
 Übernehmen mit 409 ab.
 
+**Einpflanzen** (`src/lesen/einpflanzen.js`): Nach dem Übernehmen startet das
+Cockpit einen Claude-Agenten, der die Quelle einarbeitet, statt dass man das von
+Hand nachholt. Sein Auftrag ist der Skill `wiki-einpflanzen`
+([`src/lesen/skills/wiki-einpflanzen/SKILL.md`](src/lesen/skills/wiki-einpflanzen/SKILL.md)):
+die Erkenntnisse in die Seiten schreiben, an die die Quelle andockt (1–3 Sätze an
+der passenden Stelle, mit Beleg `([[source-slug]])`), Bestätigungen an die
+bestätigte Aussage hängen, Widersprüche unter „## Spannungen“ festhalten (mit
+`contradicts [[ziel]]` in den `relations` der Source-Page; aufgelöst wird weiter
+von Hand per `/wiki-lint`) und neue Seiten in `wiki/index.md` eintragen. Er bekommt
+den Digest des Entwurfs und weiß, was das Übernehmen schon geschrieben hat.
+
+Der Agent ist die Claude Code CLI wie beim Entwerfen, aber mit Werkzeugen: nur
+die Vault-Werkzeuge des Cockpits, über einen eigenen MCP-Server, der nur für
+diesen Lauf an `127.0.0.1` auf einem zufälligen Port lauscht und ein Token nur für
+diesen Lauf annimmt (`--tools ""`, `--strict-mcp-config`, `--allowedTools` mit den
+Lese- und Bearbeitungswerkzeugen, eigener `CLAUDE_CONFIG_DIR`, leeres
+Arbeitsverzeichnis). Was er darf, prüft das Cockpit, nicht der Prompt: lesen wie
+über den Connector, aber nie vertrauliche Ordner (auch nicht mit
+`allow_sensitive`); schreiben nur in bestehende Seiten unter `wiki/` außer dem Log,
+höchstens 15 je Lauf; nur ergänzen (`vault_edit` nur, wenn der neue Text den alten
+unverändert enthält, im Frontmatter nur `relations` und nur so, dass alle
+bisherigen Einträge bleiben); kein Anlegen, Verschieben oder Capture. Ein Text mit
+Prompt-Injection kann so im schlimmsten Fall Unsinn anfügen, aber nichts löschen.
+Danach setzt das Cockpit `updated` der geänderten Seiten auf heute und hängt
+`## [YYYY-MM-DD] einpflanzen (cockpit) | <Titel>` mit Source-Page, eingepflanzten
+Seiten und Offenem an `wiki/log.md`. Welche Seiten sich geändert haben, weiß das
+Cockpit selbst; Claudes Bericht liefert nur die Beschreibung dazu.
+
+Der Stand steht in `applied.plant` des Ingests (`wartet`, `laeuft`, `fertig`,
+`fehler`, mit Zusammenfassung, geänderten Seiten und dem, was offen bleibt). Die
+Übersicht unter **Lesen → Ingest** zeigt ihn unter **Einpflanzen** (laufende und
+fehlgeschlagene, fertige drei Tage lang), live über `/lesen/ingest/stand` (Feld
+`plant`); die Prüfansicht eines übernommenen Textes zeigt Zusammenfassung,
+Seiten und Offenes, mit **Erneut einpflanzen** bzw. **Jetzt einpflanzen** für
+ältere Ingests (`POST /aktion/lesen/ingest/einpflanzen`). Die Meldung nach dem
+Übernehmen endet mit „Claude pflanzt es jetzt ein“. Für die App: `plant` je
+Eintrag in `/api/lesen/ingest` und `/api/lesen/ingest/doc`, dazu `planting`,
+`plantAvailable` und `actions.plant`. Immer nur ein Lauf zugleich; nach einem
+Neustart gehen wartende und angefangene wieder in die Warteschlange.
+
+Den Skill kann man auch in den Vault kopieren
+(`.claude/skills/wiki-einpflanzen/SKILL.md`) und in Claude Code von Hand aufrufen,
+`/wiki-einpflanzen [[source-slug]]`, etwa für Ingests von vor dieser Funktion.
+Obsidian Sync überträgt `.claude/` nicht; das Cockpit liest den Skill deshalb aus
+seinem eigenen Code.
+
 Verwerfen löscht nur den Entwurf, der Text bleibt im Stapel und wird nachts nicht
 noch einmal entworfen; „ohne Wiki erledigen“ setzt ihn dazu auf „weg“ mit
 Lesedatum. Ist Übernehmen angefangen, gehen weder Verwerfen noch ein neuer
@@ -1069,12 +1115,14 @@ der Stunde danach. Dann reiht er Stapel-Texte ohne Entwurf ein,
 älteste zuerst; fehlgeschlagene kommen noch einmal dran, verworfene nicht.
 
 **Einstellungen → Lesestapel → Ingest ins Wiki**: nachts entwerfen (Standard an),
-Uhrzeit (Standard 3), Claude-Modell (Standard `sonnet`, schont das Abo) und
-höchstens so viele Texte je Nacht (Standard 20). Claude läuft wie bei den Folgen
+Uhrzeit (Standard 3), Claude-Modell (Standard `sonnet`, schont das Abo, gilt auch
+fürs Einpflanzen), höchstens so viele Texte je Nacht (Standard 20) und danach
+einpflanzen (Standard an). Claude läuft wie bei den Folgen
 über die CLI mit `CLAUDE_CODE_OAUTH_TOKEN`; ohne Token ist Ingest aus.
 
-Grenzen: Supersession und Widersprüche löst das Cockpit nicht auf; sie stehen nur
-als Hinweis im Entwurf, aufgelöst wird per `/wiki-lint`. Relationen gehen nur von
+Grenzen: Supersession und Widersprüche löst das Cockpit nicht auf; sie stehen als
+Hinweis im Entwurf und nach dem Einpflanzen als Spannung auf der Seite, aufgelöst
+wird per `/wiki-lint`. Relationen gehen nur von
 der Source-Page zu schon vorhandenen Seiten. Abweichung vom Mycel-Grundsatz „raw
 nie editieren“: Die Rohquelle ist die Lesestapel-Notiz, und die pflegt das Cockpit
 weiter (Frontmatter, die generierten Bereiche „Markierungen“ und „Text“).

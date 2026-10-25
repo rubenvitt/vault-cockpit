@@ -134,13 +134,29 @@ function fakeIngest(store, { available = { ok: true } } = {}) {
 }
 
 /** Cockpit mit Lesestapel im Speicher und Ingest-Fake (oder ohne: `ingest: false`), angemeldet. */
-async function withIngest(run, { ingest: withService = true, available } = {}) {
+/** Fake des Einpflanzens (src/lesen/einpflanzen.js): setzt `applied.plant` im Fake des Dienstes. */
+function fakePlanter(ingest) {
+  const calls = [];
+  return {
+    calls,
+    available: () => ({ ok: true }),
+    request(id) {
+      calls.push(id);
+      const r = ingest.rows.get(id);
+      r.applied = { ...(r.applied ?? {}), plant: { status: 'wartet', requested_at: '2026-10-25T03:00:00.000Z' } };
+      return 'wartet';
+    },
+  };
+}
+
+async function withIngest(run, { ingest: withService = true, available, plant = false } = {}) {
   const store = createReadingStore({ path: ':memory:' });
   const ingest = withService ? fakeIngest(store, available ? { available } : {}) : null;
+  const planter = plant && ingest ? fakePlanter(ingest) : null;
   const webHttp = createWebHttp({
     cockpit: { week: async () => null },
     settings: createSettingsStore({ defaults: { tz: 'Europe/Berlin' }, logger: quiet }),
-    reading: readingRoutes({ store, ingest, logger: quiet }),
+    reading: readingRoutes({ store, ingest, planter, logger: quiet }),
     oidc: {},
     sessionSecret: SECRET,
     publicUrl: 'https://vault.test',
@@ -176,7 +192,7 @@ async function withIngest(run, { ingest: withService = true, available } = {}) {
   const html = async (path) => (await call(path)).text();
   const add = (title, status = 'stapel') => store.addDocument({ url: `https://blatt.test/${encodeURIComponent(title)}`, title, site: 'Blatt', reading_minutes: 7, status }).doc;
   try {
-    await run({ call, html, store, ingest, add });
+    await run({ call, html, store, ingest, planter, add });
   } finally {
     app.close();
   }
@@ -802,4 +818,64 @@ test('Ingest: „Synthese ergänzen“ steht bei den Synthesen, mit Öffnen-Symb
     assert.match(card, /1 Verknüpfung · 1 Synthese-Ergänzung/);
     assert.match(card, /<span class="ingest-pill is-offer">Ergänzung angeboten<\/span>/);
   });
+});
+
+test('Ingest: Einpflanzen nach dem Übernehmen in Übersicht, Prüfansicht, Live-Stand und App-JSON', async () => {
+  await withIngest(
+    async ({ call, html, add, ingest, planter }) => {
+      const busy = add('Läuft gerade');
+      const failed = add('Ging schief');
+      const done = add('Ist drin');
+      const older = add('Von früher');
+      const finished = new Date(Date.now() - 3_600_000).toISOString();
+      ingest.put(busy.id, 'uebernommen', { applied: { source: 'wiki/sources/laeuft.md', plant: { status: 'laeuft' } } });
+      ingest.put(failed.id, 'uebernommen', { applied: { source: 'wiki/sources/schief.md', plant: { status: 'fehler', error: `Usage limit ${EVIL}` } } });
+      ingest.put(done.id, 'uebernommen', {
+        applied: { source: 'wiki/sources/drin.md', plant: { status: 'fertig', finished_at: finished, summary: `**Backpressure** bekommt einen Satz ${EVIL}`, changed: [{ path: 'wiki/concepts/backpressure.md', was: 'ein Satz' }, { path: '../etc/passwd', was: 'x' }], open: ['Spannung auflösen'] } },
+      });
+      ingest.put(older.id, 'uebernommen', { applied: { source: 'wiki/sources/frueher.md' } });
+
+      const page = await html('/lesen/ingest');
+      noInline(page);
+      assert.ok(!page.includes('<script>alert'), 'Fremdtext bleibt Text');
+      const section = page.match(/<section class="ingest-planting"[^]*?<\/section>/)[0];
+      assert.match(section, /<h2 id="ingest-einpflanzen">Einpflanzen <span class="hint">3<\/span><\/h2>/);
+      assert.match(section, new RegExp(`data-ingest-watch="${busy.id}" data-ingest-plant data-ingest-status="laeuft"`));
+      assert.match(section, /Claude pflanzt die Quelle in die Seiten ein/);
+      assert.match(section, /Einpflanzen fehlgeschlagen: Usage limit &lt;script&gt;/);
+      assert.match(section, /<button type="submit" class="btn">Erneut einpflanzen<\/button>/);
+      assert.match(section, /Eingepflanzt in 1 Seite<\/span><span class="meta">backpressure<\/span>/);
+      assert.ok(!section.includes('Von früher'), 'ohne Einpflanzen nicht in der Liste');
+
+      let review = await html(`/lesen/ingest/doc?id=${done.id}`);
+      noInline(review);
+      assert.match(review, /<b>Eingepflanzt in 1 Seite<\/b>/);
+      assert.match(review, /<a href="\/notiz\?pfad=wiki%2Fconcepts%2Fbackpressure\.md" class="ingest-ref">backpressure<\/a> – ein Satz/);
+      assert.ok(!review.includes('passwd'));
+      assert.match(review, /Offen für dich:[^]*Spannung auflösen/);
+      assert.match(review, /Noch einmal einpflanzen/);
+      review = await html(`/lesen/ingest/doc?id=${busy.id}`);
+      assert.match(review, new RegExp(`data-ingest-watch="${busy.id}" data-ingest-plant data-ingest-status="laeuft" data-ingest-reload`));
+      review = await html(`/lesen/ingest/doc?id=${older.id}`);
+      assert.match(review, /<button type="submit" class="btn">Jetzt einpflanzen<\/button>/);
+
+      const csrf = csrfFrom(review);
+      const res = await call('/aktion/lesen/ingest/einpflanzen', { method: 'POST', form: { csrf, id: older.id, back: `/lesen/ingest/doc?id=${older.id}` }, accept: 'application/json' });
+      assert.equal(res.status, 200);
+      assert.match((await res.json()).message, /^Wird eingepflanzt: Von früher/);
+      assert.deepEqual(planter.calls, [older.id]);
+
+      const stand = await (await call(`/lesen/ingest/stand?ids=${busy.id},${older.id}`)).json();
+      assert.deepEqual(stand.items.map((i) => [i.status, i.plant]), [['uebernommen', 'laeuft'], ['uebernommen', 'wartet']]);
+
+      const api = keep('lesen-ingest-einpflanzen', await (await call('/api/lesen/ingest')).json());
+      assert.equal(api.plantAvailable, true);
+      assert.equal(api.actions.plant, '/aktion/lesen/ingest/einpflanzen');
+      assert.deepEqual(api.planting.map((e) => e.plant.status).sort(), ['fehler', 'fertig', 'laeuft', 'wartet']);
+      const fertig = api.planting.find((e) => e.id === done.id).plant;
+      assert.deepEqual(fertig.changed, [{ path: 'wiki/concepts/backpressure.md', title: 'backpressure', was: 'ein Satz' }]);
+      assert.equal(fertig.label, 'Eingepflanzt in 1 Seite');
+    },
+    { plant: true },
+  );
 });
