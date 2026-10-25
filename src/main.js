@@ -338,7 +338,8 @@ const cockpitActions = createCockpitActions({
 
 // Folgen aus dem Stapel (Vorlesen, Podcast, Report): ElevenLabs aus den
 // Einstellungen, Claude über die CLI mit CLAUDE_CODE_OAUTH_TOKEN; die MP3s und
-// der Stand liegen unter /data/folgen. Der Report kommt in die Vault-Inbox.
+// der Stand liegen unter /data/folgen. Podcast und Report kommen als Transkript
+// unter 30-ressourcen/audio-reports in den Vault, die Texte bekommen „gehört“.
 const episodes = createEpisodes({
   dir: process.env.FOLGEN_DIR ?? '/data/folgen',
   store: reading,
@@ -346,7 +347,10 @@ const episodes = createEpisodes({
   speech,
   voices: () => cockpitSettings.get().episodes,
   writer: createClaudeWriter({ model: () => cockpitSettings.get().episodes.model }),
-  capture: (input) => cockpitActions.capture(input),
+  createNote: (input) => editor.create(input),
+  sourceNote: (docId) => readingExport.notePath(docId),
+  heard: (docIds) => readingExport.heard(docIds),
+  tz: cockpitSettings.get().tz,
 });
 
 // Vault-Notizen ansehen und verarbeiten, über denselben Editor wie vault_edit;
