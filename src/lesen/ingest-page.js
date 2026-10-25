@@ -16,8 +16,10 @@ import { jsonReply } from './json.js';
  *   entwerfen“.
  * - `/lesen/ingest/doc?id=`: Prüfansicht. Digest (Kernaussagen, Neu für dich,
  *   Bestätigt, Widerspricht, Dockt an), die Source-Page mit änderbaren Feldern
- *   und die Vorschläge zum Abhaken, gruppiert. „Ins Wiki übernehmen“ führt zum
- *   nächsten bereiten Entwurf.
+ *   und die Vorschläge zum Abhaken, gruppiert (unter „Synthesen & Fragen“ auch
+ *   „Synthese ergänzen“: ein Abschnitt für eine bestehende Synthese, aufklappbar
+ *   unter „Was ergänzt wird“). „Ins Wiki übernehmen“ führt zum nächsten bereiten
+ *   Entwurf.
  * - `/lesen/ingest/stand?ids=a,b`: Stand als JSON für die Live-Aktualisierung
  *   (/static/lesen-ingest.js): Zähler, je Dokument Status und Abzeichen.
  * - `/api/lesen/ingest` und `/api/lesen/ingest/doc?id=`: dasselbe für die App
@@ -66,6 +68,7 @@ const RELATION = {
 
 /** Art eines Vorschlags als Wort (Kennzeichen an der Karte). */
 export function kindLabel(item) {
+  if (item.action === 'ergaenzen') return 'Synthese ergänzen';
   if (item.kind === 'synthesis') return ART[item.art] ? `Synthese · ${ART[item.art]}` : 'Synthese';
   if (item.kind === 'question') return 'Frage';
   if (item.kind === 'entity') return ENTITY[item.entity_type] ?? 'Entity';
@@ -84,7 +87,7 @@ export function kindLabel(item) {
 export const GROUPS = [
   { key: 'verknuepfen', label: 'Mit bestehenden Seiten verknüpfen', hint: 'Seiten im Wiki, mit denen die Source-Page verknüpft wird.', match: (i) => i.action === 'verknuepfen' },
   { key: 'bestaetigung', label: 'Bestätigungen', hint: 'Der Text stützt, was auf diesen Seiten steht.', match: (i) => i.kind === 'bestaetigung' },
-  { key: 'synthese', label: 'Synthesen & Fragen', hint: 'Claudes Angebote über diesen Text hinaus. Aufklappen, lesen, abhaken.', featured: true, match: (i) => i.kind === 'synthesis' || i.kind === 'question' },
+  { key: 'synthese', label: 'Synthesen & Fragen', hint: 'Claudes Angebote über diesen Text hinaus, auch Ergänzungen bestehender Synthesen. Aufklappen, lesen, abhaken.', featured: true, match: (i) => i.kind === 'synthesis' || i.kind === 'question' },
   { key: 'neu', label: 'Neue Seiten', hint: 'Personen, Werkzeuge und Konzepte, die es im Wiki noch nicht gibt.', match: (i) => i.action === 'neu' && (i.kind === 'entity' || i.kind === 'concept') },
   { key: 'relation', label: 'Relationen', hint: 'Typisierte Verweise im Frontmatter der Source-Page.', match: (i) => i.kind === 'relation' },
   { key: 'weitere', label: 'Weitere Vorschläge', hint: '', match: () => true },
@@ -102,9 +105,10 @@ export function groupItems(items) {
 
 /** Zählung eines Entwurfs: was angeboten wird, nach Art. */
 export function tally(draft) {
-  const t = { verknuepfen: 0, bestaetigung: 0, synthese: 0, frage: 0, neu: 0, relation: 0 };
+  const t = { verknuepfen: 0, bestaetigung: 0, synthese: 0, ergaenzung: 0, frage: 0, neu: 0, relation: 0 };
   for (const i of list(draft?.items)) {
     if (i.action === 'verknuepfen') t.verknuepfen += 1;
+    else if (i.action === 'ergaenzen') t.ergaenzung += 1;
     else if (i.kind === 'bestaetigung') t.bestaetigung += 1;
     else if (i.kind === 'synthesis') t.synthese += 1;
     else if (i.kind === 'question') t.frage += 1;
@@ -114,12 +118,20 @@ export function tally(draft) {
   return t;
 }
 
-/** „3 Verknüpfungen · 1 Synthese · 2 neue Seiten“; ohne Vorschläge „nur die Source-Page“. */
+/** Hinweis an der Karte, wenn Claude über den Text hinaus etwas anbietet; sonst null. */
+export function offerLabel(t) {
+  if (t.synthese) return t.synthese === 1 ? 'Synthese angeboten' : 'Synthesen angeboten';
+  if (t.ergaenzung) return t.ergaenzung === 1 ? 'Ergänzung angeboten' : 'Ergänzungen angeboten';
+  return t.frage ? 'Frage angeboten' : null;
+}
+
+/** „3 Verknüpfungen · 1 Synthese · 1 Synthese-Ergänzung · 2 neue Seiten“; ohne Vorschläge „nur die Source-Page“. */
 export function tallyLabel(t) {
   const parts = [
     t.verknuepfen && plural(t.verknuepfen, 'Verknüpfung', 'Verknüpfungen'),
     t.bestaetigung && plural(t.bestaetigung, 'Bestätigung', 'Bestätigungen'),
     t.synthese && plural(t.synthese, 'Synthese', 'Synthesen'),
+    t.ergaenzung && plural(t.ergaenzung, 'Synthese-Ergänzung', 'Synthese-Ergänzungen'),
     t.frage && plural(t.frage, 'Frage', 'Fragen'),
     t.neu && plural(t.neu, 'neue Seite', 'neue Seiten'),
     t.relation && plural(t.relation, 'Relation', 'Relationen'),
@@ -191,7 +203,7 @@ function readyCard(e, ctx) {
   const view = pageView(e);
   const t = tally(e.draft);
   const kern = list(e.draft?.digest?.kernaussagen).slice(0, 3);
-  const offered = t.synthese + t.frage;
+  const offer = offerLabel(t);
   const meta = [e.doc?.site, e.doc?.reading_minutes ? `${e.doc.reading_minutes} Min.` : null, e.origin === 'nacht' ? 'nachts entworfen' : null, when(e.drafted_at, ctx.tz)].filter(Boolean);
   return `<li class="ingest-card" data-ingest-doc="${esc(e.doc_id)}">
     <div class="ingest-card-head">
@@ -201,7 +213,7 @@ function readyCard(e, ctx) {
     ${kern.length ? `<ul class="ingest-kern is-short">${kern.map((k) => `<li>${view.inline(k)}</li>`).join('')}</ul>` : ''}
     <div class="ingest-card-foot">
       <span class="ingest-tally">${esc(tallyLabel(t))}</span>
-      ${offered ? `<span class="ingest-pill is-offer">${esc(t.synthese ? (t.synthese === 1 ? 'Synthese angeboten' : 'Synthesen angeboten') : 'Frage angeboten')}</span>` : ''}
+      ${offer ? `<span class="ingest-pill is-offer">${esc(offer)}</span>` : ''}
       <a href="${esc(ingestLink(e.doc_id))}" class="btn primary">Prüfen<span class="sr-only">: ${esc(titleOf(e))}</span></a>
     </div>
   </li>`;
@@ -422,6 +434,9 @@ function sourceBlock(draft, applied, view) {
   </section>`;
 }
 
+/** Beschriftung des aufklappbaren Texts eines Vorschlags. */
+export const bodyLabel = (item, featured) => (item.action === 'ergaenzen' ? 'Was ergänzt wird' : featured ? 'Ganzen Text lesen' : 'Text der Seite ansehen');
+
 /**
  * Ein Vorschlag zum Abhaken. Der Titel einer bestehenden Seite ist selbst der
  * eigenes Symbol „↗“ zum Öffnen neben dem `<label>` (nicht der Titel: ein Tipp
@@ -453,9 +468,9 @@ function itemRow(item, featured, view) {
   const involved = list(item.beteiligte).filter(Boolean);
   const extra = [
     involved.length ? `<p class="ingest-involved"><span class="meta">Beteiligt:</span> ${involved.map((p) => pageRef(p, view.title(p))).join(', ')}</p>` : '',
-    item.body ? `<details class="ingest-body"><summary>${featured ? 'Ganzen Text lesen' : 'Text der Seite ansehen'}</summary><div class="md ingest-md">${view.block(item.body)}</div></details>` : '',
+    item.body ? `<details class="ingest-body"><summary>${esc(bodyLabel(item, featured))}</summary><div class="md ingest-md">${view.block(item.body)}</div></details>` : '',
   ].filter(Boolean).join('');
-  const where = item.action === 'neu' && item.slug ? `<span class="ingest-path">neu: ${esc(item.slug)}</span>` : '';
+  const where = item.action === 'neu' && item.slug ? `<span class="ingest-path">neu: ${esc(item.slug)}</span>` : item.action === 'ergaenzen' && wikiPath(item.path) ? `<span class="ingest-path">ergänzt: ${esc(slugOf(item.path))}</span>` : '';
   return `<li class="ingest-item${featured ? ' is-featured' : ''}${open ? ' has-open' : ''}" data-item="${id}">
     ${open}<label class="ingest-pick">${box}<span class="ingest-pick-text"><span class="ingest-item-head">${head}${main}</span>${why}${where}</span></label>
     ${extra ? `<div class="ingest-item-more">${extra}</div>` : ''}
@@ -609,6 +624,7 @@ export function ingestJson(e) {
     kern: list(e.draft?.digest?.kernaussagen).slice(0, 3).map(treeView(e).inline),
     tally: t,
     tallyLabel: tallyLabel(t),
+    offerLabel: offerLabel(t),
   };
 }
 
@@ -701,12 +717,16 @@ export function standBack(raw) {
   return { back: url.pathname + url.search, path: url.pathname };
 }
 
-/** Meldung nach dem Übernehmen; `confirmed` (bestätigte Seiten) zählt der Dienst getrennt von `linked`, ältere Fassungen nicht. */
+/**
+ * Meldung nach dem Übernehmen; `confirmed` (bestätigte Seiten) zählt der Dienst getrennt von `linked`,
+ * `extended` die ergänzten Synthesen; ältere Fassungen kennen beides nicht.
+ */
 export function appliedMessage(title, r) {
   const pages = list(r?.written).filter((p) => p !== r.source && wikiPath(p) && p !== 'wiki/log.md');
   const linked = list(r?.linked).length;
   const confirmed = Array.isArray(r?.confirmed) ? r.confirmed.length : 0;
-  return `Im Wiki: ${title}${pages.length ? ` + ${plural(pages.length, 'Seite', 'Seiten')}` : ''}${linked ? `, ${linked} verknüpft` : ''}${confirmed ? `, ${confirmed} bestätigt` : ''}`;
+  const extended = list(r?.extended).length;
+  return `Im Wiki: ${title}${pages.length ? ` + ${plural(pages.length, 'Seite', 'Seiten')}` : ''}${linked ? `, ${linked} verknüpft` : ''}${confirmed ? `, ${confirmed} bestätigt` : ''}${extended ? `, ${plural(extended, 'Synthese', 'Synthesen')} ergänzt` : ''}`;
 }
 
 // --- Routen ------------------------------------------------------------------

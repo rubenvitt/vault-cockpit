@@ -24,11 +24,13 @@
       "verknuepfen": 0,
       "bestaetigung": 0,
       "synthese": 0,
+      "ergaenzung": 0,
       "frage": 0,
       "neu": 0,
       "relation": 0
     },
-    "tallyLabel": "nur die Source-Page"
+    "tallyLabel": "nur die Source-Page",
+    "offerLabel": null
   },
   "error": null,
   "draft": null,

@@ -1,6 +1,6 @@
 {
   "ok": true,
-  "message": "Im Wiki: Bereit + 1 Seite, 1 verknüpft",
+  "message": "Im Wiki: Bereit + 1 Seite, 1 verknüpft, 1 Synthese ergänzt",
   "link": {
     "href": "/notiz?pfad=wiki%2Fsources%2Fbereit.md",
     "label": "Source-Page öffnen"
@@ -16,6 +16,10 @@
     ],
     "linked": [
       "wiki/concepts/context-engineering.md"
+    ],
+    "confirmed": [],
+    "extended": [
+      "wiki/synthesis/gedaechtnis-und-kontext.md"
     ]
   }
 }

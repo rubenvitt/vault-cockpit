@@ -1,6 +1,6 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildIndex, openIndex } from '../src/vault/index.js';
@@ -9,7 +9,7 @@ import { createEditor } from '../src/vault/edit.js';
 import { createSettingsStore } from '../src/cockpit/settings.js';
 import { createReadingStore } from '../src/lesen/store.js';
 import { createReadingExport, blockId } from '../src/lesen/vault-export.js';
-import { createIngest, createNightlyClock, IngestError } from '../src/lesen/ingest.js';
+import { createIngest, createNightlyClock, excerptOf, IngestError } from '../src/lesen/ingest.js';
 import { hybridSearch } from '../src/semantic/search.js';
 import { parseNote } from '../src/vault/markdown.js';
 
@@ -83,7 +83,7 @@ const CLAUDE = () => ({
   neu: [
     { kind: 'entity', slug: 'robert-glaser', title: 'Robert Glaser', summary: 'Autor', entity_type: 'person', body: 'Autor.', warum: 'Autor des Texts' },
     { kind: 'concept', slug: 'elastischer-loop', title: 'Elastischer Loop', summary: 'Loop mit Checkpoints', body: 'Siehe [[backpressure]] und [[nirgends]].', warum: 'Kernbegriff', tags: ['loops'] },
-    { kind: 'synthesis', slug: 'synthese-loops', title: 'Loops im Vergleich', summary: 'Vergleich', art: 'quatsch', beteiligte: ['wiki/concepts/backpressure.md', 'wiki/x.md'], body: 'Text.', warum: 'trägt' },
+    { kind: 'synthesis', slug: 'synthese-loops', title: 'Loops im Vergleich', summary: 'Vergleich', art: 'quatsch', beteiligte: ['wiki/concepts/backpressure.md', 'wiki/x.md', 'loops-und-widerstand'], body: 'Text.', warum: 'trägt' },
     { kind: 'question', slug: 'wie-weit-strecken', title: 'Wie weit lässt sich der Loop strecken?', summary: 'Frage', body: 'Offen.', warum: 'offen' },
     { kind: 'entity', slug: 'geheimer-mensch', title: 'Geheim', summary: 'x', entity_type: 'alien', body: '', warum: 'x' },
     { kind: 'stub', slug: 'x', title: 'x', summary: 'x', body: '', warum: 'x' },
@@ -94,8 +94,11 @@ const CLAUDE = () => ({
     { type: 'mag', to: 'wiki/concepts/backpressure.md' },
     { type: 'related-to', to: 'wiki/concepts/gibt-es-nicht.md' },
   ],
+  ergaenzungen: [],
   hinweise: ['Lies auch [[unbekannt]]'],
 });
+
+const SYNTHESE = '---\ntype: synthesis\nart: querverbindung\ntitle: Loops und Widerstand\nsummary: Warum lange Agenten-Loops Widerstand brauchen\nsources:\n  - "[[mueller-agenten-loop]]"\nstatus: faded\n---\n\n# Loops und Widerstand\n\nLange Loops brauchen Widerstand. Ohne Backpressure driftet der Agent.\n\n## Quellen\n\n- [[mueller-agenten-loop]]\n';
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'ingest-vault-'));
@@ -103,6 +106,8 @@ beforeEach(() => {
   put('wiki/concepts/backpressure.md', "---\ntype: concept\ntitle: Backpressure\nsummary: Widerstand für Agent-Output\ncreated: '2026-06-23'\nupdated: '2026-06-23'\nsources:\n  - '[[glaser-the-elastic-loop]]'\ntags: [agents]\nstatus: active\nconfidence: medium\n---\n\n# Backpressure\n\nBackpressure ist Widerstand für Agenten im Loop.\n");
   put('wiki/entities/robert-glaser.md', '---\ntype: entity\nentity-type: person\ntitle: Robert Glaser\nsummary: Autor\nsources:\n  - "[[alt]]"\nstatus: faded\n---\n\n# Robert Glaser\n\nAutor von Loop-Texten.\n\n## Quellen\n\n- [[alt]]\n\n## Verwandt\n\n- [[backpressure]]\n');
   put('wiki/questions/widerstand.md', '---\ntype: question\ntitle: Hilft Widerstand?\nsummary: Frage nach Widerstand\nstatus: faded\n---\n\n# Hilft Widerstand?\n\nWiderstand für Agenten im Loop.\n');
+  put('wiki/synthesis/loops-und-widerstand.md', SYNTHESE);
+  put('wiki/sources/mueller-agenten-loop.md', '---\ntype: source\ntitle: "Müller: Agenten im Loop"\nsummary: Prüfpunkte für Agenten im Loop\nsources:\n  - raw/mueller.md\nstatus: active\n---\n\n# Agenten im Loop\n\nMüller beschreibt Prüfpunkte im Loop.\n\nBackpressure kommt nicht vor.\n');
   put('wiki/privat/geheim.md', '---\ntype: concept\ntitle: Geheim\n---\n\n# Geheim\n\nBackpressure geheim.\n');
   put('wiki/log.md', '# Log\n\n## [2026-10-01] ingest | Alt\n- Source-Page: [[alt]]\n');
   policy = compilePolicy({ exclude: ['^wiki/log\\.md$'], sensitive: { 'wiki/privat': 'privat' }, readwise: '30-ressourcen/readwise' });
@@ -140,6 +145,14 @@ test('Entwurf: Text, Markierungen und Kandidaten gehen an Claude; die Antwort wi
   assert.match(input, /1\. „Backpressure hält den elastischen Loop nützlich“ — Notiz: Kern \[\[nicht\]\] verlinken/);
   assert.match(input, /- wiki\/concepts\/backpressure\.md · concept · Backpressure — Widerstand für Agent-Output/);
   assert.doesNotMatch(input, /geheim|wiki\/log\.md/);
+  // Synthesen und Quellen gezielt, mit Auszug, in einem eigenen Block statt unter den übrigen Kandidaten.
+  const [kandidaten, fokus] = [/<wiki-kandidaten>\n([^]*?)\n<\/wiki-kandidaten>/, /<synthesen-und-quellen>\n([^]*?)\n<\/synthesen-und-quellen>/].map((re) => input.match(re)[1]);
+  assert.match(fokus, /^- wiki\/synthesis\/loops-und-widerstand\.md · synthesis · Loops und Widerstand — Warum lange Agenten-Loops Widerstand brauchen\n {2}Auszug: Lange Loops brauchen Widerstand\. Ohne Backpressure driftet der Agent\. ¶ ## Quellen ¶ - \[\[mueller-agenten-loop\]\]$/m);
+  assert.match(fokus, /^- wiki\/sources\/mueller-agenten-loop\.md · source · Müller: Agenten im Loop — Prüfpunkte für Agenten im Loop\n {2}Auszug: Müller beschreibt Prüfpunkte im Loop\. ¶ Backpressure kommt nicht vor\.$/m);
+  assert.doesNotMatch(kandidaten, /loops-und-widerstand|mueller-agenten-loop/);
+  assert.match(kandidaten, /wiki\/concepts\/backpressure\.md/);
+  assert.match(calls[0].prompt, /Synthese-Schritt/);
+  assert.ok(calls[0].schema.required.includes('ergaenzungen'));
   assert.equal(calls[0].schema.required.includes('digest'), true);
 
   const d = row.draft;
@@ -171,7 +184,7 @@ test('Entwurf: Text, Markierungen und Kandidaten gehen an Claude; die Antwort wi
   assert.equal('entity_type' in d.items.find((i) => i.id === 'v1'), false);
   const s1 = d.items.find((i) => i.id === 's1');
   assert.equal(s1.art, 'querverbindung');
-  assert.deepEqual(s1.beteiligte, ['wiki/concepts/backpressure.md']);
+  assert.deepEqual(s1.beteiligte, ['wiki/concepts/backpressure.md', 'wiki/synthesis/loops-und-widerstand.md']);
   assert.equal(d.items.find((i) => i.id === 'n2').entity_type, undefined);
   assert.equal(d.items.find((i) => i.id === 'n1').body, 'Siehe [[backpressure]] und nirgends.');
   assert.deepEqual(d.items.find((i) => i.id === 'n1').tags, ['loops']);
@@ -185,7 +198,7 @@ test('Entwurf: Text, Markierungen und Kandidaten gehen an Claude; die Antwort wi
   assert.ok(listed.draft.items.every((i) => !('body' in i) && !('warum' in i)), 'Liste ohne Body und Begründung');
   assert.equal(listed.draft.items.length, ingest.get(doc.id).draft.items.length);
   assert.deepEqual(listed.draft.digest.kernaussagen, ['Backpressure macht lange Loops möglich.']);
-  assert.deepEqual(listed.item_counts, { total: 8, default: 4, neu: 4, verknuepfen: 2, bestaetigung: 1, relation: 1 });
+  assert.deepEqual(listed.item_counts, { total: 8, default: 4, neu: 4, verknuepfen: 2, ergaenzen: 0, bestaetigung: 1, relation: 1 });
   assert.deepEqual(ingest.counts(), { wartet: 0, entwirft: 0, bereit: 1, fehler: 0 });
   assert.equal(ingest.statusFor([doc.id, 'x']).get(doc.id), 'bereit');
   // Ohne force kein zweiter Entwurf, mit force schon.
@@ -224,6 +237,7 @@ test('Übernehmen: Rohquelle, Source-Page, neue Seiten, Verknüpfungen, Log, Arc
     // Nur bestätigt ist nicht verknüpft: eigenes Feld, wie im Log.
     linked: ['wiki/concepts/backpressure.md', 'wiki/entities/robert-glaser.md'],
     confirmed: ['wiki/questions/widerstand.md'],
+    extended: [],
   });
   // Die Rohquelle bekommt im Ingest des Cockpits nie `ingest: offen`, erst das Datum (f).
   assert.doesNotMatch(read(raw), /^ingest: offen$/m);
@@ -381,7 +395,7 @@ test('Verwerfen: Entwurf weg, Text bleibt; „done“ erledigt ohne Wiki mit Les
   ingest.discard(doc.id, { done: true });
   assert.equal(store.get(doc.id).status, 'weg');
   assert.ok(store.get(doc.id).read_at);
-  assert.ok(!existsSync(join(root, 'wiki/sources')));
+  assert.deepEqual(readdirSync(join(root, 'wiki/sources')), ['mueller-agenten-loop.md'], 'keine Source-Page geschrieben');
   assert.throws(() => ingest.discard('nope'), (e) => e.status === 404);
 });
 
@@ -445,7 +459,7 @@ test('Policy: nichts in vertraulichen Ordnern, weder vorgeschlagen noch geschrie
   policy = compilePolicy({ sensitive: { 'wiki/sources': 'x' } });
   reindex();
   await assert.rejects(make().apply(doc.id, { items: ['v1'] }), (e) => e.status === 409 && /wiki\/sources/.test(e.message));
-  assert.ok(!existsSync(join(root, 'wiki/sources')));
+  assert.deepEqual(readdirSync(join(root, 'wiki/sources')), ['mueller-agenten-loop.md'], 'keine Source-Page geschrieben');
   assert.equal(ingest.get(doc.id).status, 'bereit');
 });
 
@@ -684,4 +698,146 @@ test('Nachtlauf-Takt: scheitert der Merker in der Datei, läuft er trotzdem nur 
   // An einem gewöhnlichen Tag um 3 nicht.
   t = new Date('2027-03-29T01:10:00Z'); // 03:10
   assert.equal(dst.tick(), null);
+});
+
+// --- Synthesen: gezielte Kandidaten, Prüfung, Ergänzen ---------------------------------
+
+test('Auszug: ohne Frontmatter, H1 und Kommentare, gekürzt an Absatz-, Satz- oder Wortgrenze', () => {
+  const page = (body) => `---\ntype: synthesis\ntitle: X\n---\n\n# Titel\n\n${body}`;
+  assert.equal(excerptOf(page('Erster Satz. %%geheim%%Zweiter.\n\nNoch ein   Absatz.')), 'Erster Satz. Zweiter. ¶ Noch ein Absatz.');
+  // Absatzgrenze, wenn sie weit genug hinten liegt.
+  assert.equal(excerptOf(page(`${'a '.repeat(30).trim()}.\n\n${'b '.repeat(40)}`), 80), `${'a '.repeat(30).trim()}.`);
+  // Sonst Satzgrenze.
+  assert.equal(excerptOf(page(`${'Wort '.repeat(8)}Ende. ${'mehr '.repeat(30)}`), 80), `${'Wort '.repeat(8)}Ende.`);
+  // Sonst Wortgrenze mit Auslassung.
+  const long = excerptOf(page('wort '.repeat(100)), 80);
+  assert.ok(long.length <= 80 && long.endsWith('wort…'), long);
+  assert.equal(excerptOf(null), '');
+});
+
+test('Kandidaten: je eine Suche nach Synthesen und Quellen mit Typfilter, höchstens acht je Typ mit Auszug, nichts Vertrauliches', async () => {
+  for (let n = 1; n <= 10; n += 1) put(`wiki/synthesis/loop-${n}.md`, `---\ntype: synthesis\ntitle: Loop ${n}\nsummary: Loop-Synthese ${n}\n---\n\n# Loop ${n}\n\nLoop und Backpressure, Fall ${n}. ${'Weiter im Text. '.repeat(80)}\n`);
+  put('wiki/privat/synthese.md', '---\ntype: synthesis\ntitle: Geheime Synthese\n---\n\n# Geheim\n\nLoop Backpressure geheim.\n');
+  reindex();
+  const searches = [];
+  const ingest = make({ search: (query, o) => (searches.push({ query, ...o }), hybridSearch({ index: idx, semantic: null, query, ...o })) });
+  await drafted(ingest);
+  const typed = searches.filter((s) => s.type);
+  assert.deepEqual(typed.map((s) => [s.type, s.folder]), [['synthesis', 'wiki'], ['source', 'wiki']]);
+  assert.match(typed[0].query, /^The Elastic Loop Wie weit kannst du den Loop strecken\? Backpressure hält den elastischen Loop nützlich$/);
+  const input = calls[0].input;
+  const fokus = input.match(/<synthesen-und-quellen>\n([^]*?)\n<\/synthesen-und-quellen>/)[1];
+  const lines = fokus.split('\n').filter((l) => l.startsWith('- '));
+  assert.equal(lines.filter((l) => l.includes(' · synthesis · ')).length, 8);
+  assert.equal(lines.filter((l) => l.includes(' · source · ')).length, 1);
+  const excerpts = fokus.split('\n').filter((l) => l.startsWith('  Auszug: '));
+  assert.equal(excerpts.length, 9);
+  assert.ok(excerpts.every((l) => l.length - '  Auszug: '.length <= 700));
+  assert.ok(excerpts.some((l) => /Weiter im Text\.$/.test(l)), 'an einer Satzgrenze gekürzt');
+  assert.doesNotMatch(input, /Geheime Synthese|wiki\/privat/);
+});
+
+test('Nachbearbeitung: Synthese nur mit anderer Quelle oder Synthese (höchstens zwei), Ergänzung nur an Synthese-Kandidaten (höchstens zwei)', async () => {
+  put('wiki/synthesis/zweite.md', '---\ntype: synthesis\ntitle: Zweite Synthese\nsummary: Loop zwei\n---\n\n# Zweite\n\nLoop und Backpressure, zweite Sicht.\n');
+  put('wiki/synthesis/dritte.md', '---\ntype: synthesis\ntitle: Dritte Synthese\nsummary: Loop drei\n---\n\n# Dritte\n\nLoop und Backpressure, dritte Sicht.\n');
+  put('wiki/synthesis/zettel.md', '---\ntype: synthesis\ntitle: Zettel\n---\n\n# Zettel\n\nKarteikarten.\n');
+  reindex();
+  const synth = (slug, beteiligte, art = 'vergleich') => ({ kind: 'synthesis', slug, title: slug, summary: 's', art, beteiligte, body: 'B.', warum: 'w' });
+  answer = {
+    ...CLAUDE(),
+    neu: [
+      synth('nur-konzept', ['wiki/concepts/backpressure.md']),
+      synth('nur-fremdes', ['wiki/synthesis/zettel.md', 'wiki/privat/synthese.md']),
+      synth('mit-quelle', ['wiki/concepts/backpressure.md', 'wiki/sources/mueller-agenten-loop.md'], 'widerspruch'),
+      synth('mit-synthese', ['[[loops-und-widerstand]]']),
+      synth('eine-zu-viel', ['wiki/sources/mueller-agenten-loop.md']),
+    ],
+    ergaenzungen: [
+      { path: 'wiki/concepts/backpressure.md', body: 'Kein Synthese.', warum: 'x' },
+      { path: 'wiki/synthesis/zettel.md', body: 'Kein Kandidat.', warum: 'x' },
+      { path: 'wiki/synthesis/loops-und-widerstand.md', body: '## Eigene Überschrift\n\nGlaser zeigt ![x](https://evil.example/p) Backpressure [[backpressure]] und [[nirgends]].', warum: 'Neuer Beleg' },
+      { path: '[[loops-und-widerstand]]', body: 'Doppelt.', warum: 'x' },
+      { path: 'wiki/synthesis/zweite.md', body: '', warum: 'leer' },
+      { path: 'wiki/synthesis/zweite.md', body: 'Zweite.', warum: 'y' },
+      { path: 'wiki/synthesis/dritte.md', body: 'Eine zu viel.', warum: 'z' },
+    ],
+  };
+  const { row } = await drafted();
+  assert.ok(!calls[0].input.includes('wiki/synthesis/zettel.md'), 'kein Kandidat');
+  const synths = row.draft.items.filter((i) => i.kind === 'synthesis');
+  assert.deepEqual(synths.map((i) => `${i.id} ${i.action} ${i.slug ?? i.path}`), ['s1 neu mit-quelle', 's2 neu mit-synthese', 'e1 ergaenzen wiki/synthesis/loops-und-widerstand.md', 'e2 ergaenzen wiki/synthesis/zweite.md']);
+  assert.equal(synths[0].art, 'widerspruch');
+  assert.deepEqual(synths[0].beteiligte, ['wiki/concepts/backpressure.md', 'wiki/sources/mueller-agenten-loop.md']);
+  assert.deepEqual(synths[1].beteiligte, ['wiki/synthesis/loops-und-widerstand.md']);
+  const e1 = synths[2];
+  assert.deepEqual({ ...e1, body: undefined }, { id: 'e1', kind: 'synthesis', action: 'ergaenzen', path: 'wiki/synthesis/loops-und-widerstand.md', title: 'Loops und Widerstand', body: undefined, warum: 'Neuer Beleg', default: false });
+  assert.equal(e1.body, '**Eigene Überschrift**\n\nGlaser zeigt [x](https://evil.example/p) Backpressure [[backpressure]] und nirgends.');
+  assert.equal(make().list()[0].item_counts.ergaenzen, 2);
+});
+
+test('Übernehmen: Ergänzung hängt einen Abschnitt an die Synthese, ergänzt sources und confirmed, reaktiviert; nichts doppelt', async () => {
+  answer = {
+    ...CLAUDE(),
+    ergaenzungen: [{ path: 'wiki/synthesis/loops-und-widerstand.md', body: 'Glaser stützt das: [[glaser-der-elastische-loeop|Der Loop]] braucht <b>Widerstand</b>, siehe [[elastischer-loop]] und [[backpressure]].', warum: 'Neuer Beleg' }],
+  };
+  const { ingest } = await drafted();
+  // Abgewählt: elastischer-loop (n1) wird Text; der Slug ändert sich: Selbstlinks folgen.
+  const r = await ingest.apply(doc.id, { items: ['e1'], source: { slug: 'glaser-loop' } });
+  assert.deepEqual(r.extended, ['wiki/synthesis/loops-und-widerstand.md']);
+  assert.deepEqual([r.linked, r.confirmed], [[], []]);
+  const path = 'wiki/synthesis/loops-und-widerstand.md';
+  const text = read(path);
+  assert.ok(
+    text.endsWith(`# Loops und Widerstand
+
+Lange Loops brauchen Widerstand. Ohne Backpressure driftet der Agent.
+
+## Quellen
+
+- [[mueller-agenten-loop]]
+- [[glaser-loop]]
+
+## Ergänzungen
+
+### Aus [[glaser-loop]] (2026-10-25)
+
+Glaser stützt das: [[glaser-loop|Der Loop]] braucht &lt;b>Widerstand&lt;/b>, siehe Elastischer Loop und [[backpressure]].
+`),
+    text,
+  );
+  const f = fm(path);
+  assert.deepEqual(f.sources, ['[[mueller-agenten-loop]]', '[[glaser-loop]]']);
+  assert.equal(f.updated, '2026-10-25');
+  assert.equal(f.confirmed, '2026-10-25');
+  assert.equal(f.status, 'active');
+  assert.match(read('wiki/log.md'), /- Bestätigt: —\n- Synthese ergänzt: \[\[loops-und-widerstand\]\]\n$/);
+  assert.deepEqual(ingest.get(doc.id).applied.items, { e1: path });
+
+  // Zweites Übernehmen: dasselbe Ergebnis, nichts doppelt.
+  assert.deepEqual(await ingest.apply(doc.id, { items: ['e1'] }), r);
+  assert.equal(read(path), text);
+});
+
+test('Übernehmen: Ergänzung unter eine vorhandene Überschrift „Ergänzungen“, nach einem Abbruch nicht doppelt', async () => {
+  put('wiki/synthesis/loops-und-widerstand.md', SYNTHESE.replace('## Quellen', '## Ergänzungen\n\n### Aus [[alt]] (2026-01-01)\n\nAlt.\n\n## Quellen'));
+  reindex();
+  answer = { ...CLAUDE(), ergaenzungen: [{ path: 'wiki/synthesis/loops-und-widerstand.md', body: 'Neu dazu.', warum: 'w' }] };
+  const { ingest } = await drafted();
+  const real = editor.setFrontmatter;
+  let fail = true;
+  editor.setFrontmatter = (args) => {
+    if (fail && args.path === 'wiki/synthesis/loops-und-widerstand.md') throw new Error('gleichzeitig geändert');
+    return real(args);
+  };
+  await assert.rejects(ingest.apply(doc.id, { items: ['e1', 'v1'] }), (e) => e.status === 409);
+  assert.deepEqual(ingest.get(doc.id).applied.extended, []);
+  fail = false;
+  const r = await make().apply(doc.id, { items: ['e1', 'v1'] });
+  assert.deepEqual(r.extended, ['wiki/synthesis/loops-und-widerstand.md']);
+  assert.deepEqual(r.linked, ['wiki/concepts/backpressure.md']);
+  const text = read('wiki/synthesis/loops-und-widerstand.md');
+  assert.equal(text.split('### Aus [[glaser-der-elastische-loeop]]').length - 1, 1, 'Abschnitt nur einmal');
+  assert.match(text, /## Ergänzungen\n\n### Aus \[\[alt\]\] \(2026-01-01\)\n\nAlt\.\n\n### Aus \[\[glaser-der-elastische-loeop\]\] \(2026-10-25\)\n\nNeu dazu\.\n\n## Quellen\n\n- \[\[mueller-agenten-loop\]\]\n- \[\[glaser-der-elastische-loeop\]\]\n$/);
+  assert.equal(fm('wiki/synthesis/loops-und-widerstand.md').confirmed, '2026-10-25');
+  assert.match(read('wiki/log.md'), /- Verknüpft: \[\[backpressure\]\]\n- Bestätigt: —\n- Synthese ergänzt: \[\[loops-und-widerstand\]\]\n$/);
 });

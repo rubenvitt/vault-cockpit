@@ -60,12 +60,16 @@ make test      # Unit-Tests auf dem ersten verfügbaren iPhone-Simulator
   Prüfansicht liegt auf dem Stapel des Lesens: Digest, Source-Page (Titel, Summary mit Zähler,
   Slug, Tags; Text aufklappbar mit dem Markdown-Renderer der Notiz), Vorschläge zum Abhaken je
   Gruppe mit „alle“/„keine“ (Tipp auf die Zeile schaltet, das Symbol daneben öffnet die Seite als
-  Notiz), unten fest „Ins Wiki übernehmen (N)“, danach der nächste Entwurf. Claudes Text kommt vom
-  Server schon als Baum (`view`), die App parst kein Markdown. Stapel und Leseansicht zeigen das
+  Notiz; „Synthese ergänzen“ steht bei den Synthesen mit „ergänzt: slug“ und „Was ergänzt wird“
+  zum Aufklappen; `kind`/`action` sind Text, unbekannte Werte brechen nichts), unten fest „Ins
+  Wiki übernehmen (N)“, danach der nächste Entwurf; die Meldung danach nennt auch ergänzte
+  Synthesen (`extended`). Claudes Text kommt vom Server schon als Baum (`view`), die App parst
+  kein Markdown. Stapel und Leseansicht zeigen das
   Abzeichen („Ingest bereit“ öffnet die Prüfansicht) oder „Ingest entwerfen“; solange ein Entwurf
   entsteht und ein Bildschirm zuschaut, fragt `IngestStore` alle 3 s nach. Ohne Netz meldet jede
   Aktion „Keine Verbindung …“, gepuffert wird nichts. Fixtures: `COCKPIT_FIXTURES=<Ordner> node
-  --test test/lesen-ingest-web.test.js` schreibt `lesen-ingest-*.json`.
+  --test test/lesen-ingest-web.test.js` schreibt `lesen-ingest-*.json` (neue Dokument-IDs; die
+  Tests erwarten die bisherigen, also nach dem Erzeugen nach Titel zurück abbilden).
 - **Einstellungen** (`Cockpit/Native/Einstellungen/SettingsScreen.swift` und Nachbarn): je
   Abschnitt eine Zeile mit dem Stand als farbigem Punkt wie die Navigation im Web; ein Abschnitt
   ist ein Formular mit den Feldern, die `GET /api/einstellungen` beschreibt (Text, Zahl, Liste,

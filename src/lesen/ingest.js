@@ -6,6 +6,7 @@ import { headingsOf } from '../vault/edit.js';
 import { htmlToMarkdown } from './extract.js';
 import { blockId, fullTextOf, slugOf } from './vault-export.js';
 import { breakTemplater, safeWikiMarkdown } from './wiki-markdown.js';
+import { parseNote } from '../vault/markdown.js';
 
 /**
  * Ingest ins Mycel-Wiki: Claude entwirft, der Nutzer hakt ab, erst dann
@@ -14,7 +15,12 @@ import { breakTemplater, safeWikiMarkdown } from './wiki-markdown.js';
  * **Entwerfen** (Knopf oder Nachtlauf): Volltext als Markdown, die
  * Markierungen mit Notizen (stärkstes Signal) und bis zu 25 Kandidaten aus
  * `wiki/` (hybride Suche nach Titel, Auszug und Markierungen) gehen an Claude
- * (src/lesen/claude.js). Die Antwort wird danach deterministisch geprüft:
+ * (src/lesen/claude.js). Dazu gezielt je eine Suche nach Synthesen und nach
+ * Source-Pages: Von bis zu acht je Typ sieht Claude einen Textauszug, damit es
+ * den Text gegen andere Quellen und bestehende Synthesen prüfen kann (neue
+ * Synthese nur mit mindestens einer anderen Quelle oder Synthese unter den
+ * `beteiligte`, sonst fällt sie weg; bestehende Synthesen lassen sich um einen
+ * Abschnitt ergänzen). Die Antwort wird danach deterministisch geprüft:
  * Pfade nur auf Kandidaten (beschreibbare Wiki-Seiten; Source-Pages weder zum
  * Verknüpfen noch zum Bestätigen), Slugs in kebab-case ohne Umlaute, ein
  * „neuer“ Slug, den es im Wiki schon gibt, wird zum Verknüpfen (vorgewählt nur
@@ -27,7 +33,9 @@ import { breakTemplater, safeWikiMarkdown } from './wiki-markdown.js';
  *
  * **Übernehmen** schreibt in festen Schritten, jeder für sich wiederholbar,
  * der Fortschritt steht in `applied`: Rohquelle über den Exporter (Volltext,
- * gelesen), Source-Page, gewählte neue Seiten, Verknüpfungen und Bestätigungen
+ * gelesen), Source-Page, gewählte neue Seiten, Ergänzungen bestehender
+ * Synthesen (Abschnitt „### Aus [[source]] (Datum)“ unter „Ergänzungen“),
+ * Verknüpfungen und Bestätigungen
  * an bestehenden Seiten, Eintrag in `wiki/log.md`, Frontmatter der Rohquelle,
  * Dokument archivieren. Bricht ein Schritt ab, setzt der nächste Versuch dort fort.
  * Steht in der Rohquelle schon `ingest: <Datum>` (der Skill `wiki-ingest` war
@@ -62,7 +70,11 @@ const NOT_PAGES = new Set([LOG, 'wiki/index.md']);
 const DOC_INPUT = 60_000;
 const MAX_CANDIDATES = 25;
 const MAX_QUERIES_FROM_HIGHLIGHTS = 8;
-const LIMITS = { verknuepfen: 12, neu: 8, bestaetigung: 8, relation: 10, hinweise: 10 };
+// Gezielt gesuchte Synthesen und Source-Pages: so viele je Typ mit Textauszug, so lang je Auszug, so viel insgesamt.
+const MAX_FOCUS = { synthesis: 8, source: 8 };
+const EXCERPT = 700;
+const EXCERPT_TOTAL = 12_000;
+const LIMITS = { verknuepfen: 12, neu: 8, synthese: 2, ergaenzen: 2, bestaetigung: 8, relation: 10, hinweise: 10 };
 
 const oneLine = (v, max = 200) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 /** Höchstens `max` Zeichen, an einer Wortgrenze gekürzt. */
@@ -70,6 +82,45 @@ function clip(v, max) {
   const s = oneLine(v, 10_000);
   if (s.length <= max) return s;
   return `${s.slice(0, max - 1).replace(/\s+\S*$/, '')}…`;
+}
+/**
+ * Textauszug einer Seite für Claude: Body ohne Frontmatter, H1 und Kommentare,
+ * höchstens `max` Zeichen, gekürzt an einer Absatz- oder Satzgrenze (sonst an
+ * einem Wort). Absätze bleiben als „¶“ erkennbar.
+ */
+export function excerptOf(content, max = EXCERPT) {
+  const body = parseNote(String(content ?? '')).body.replace(/%%[\s\S]*?%%/g, '').replace(/^#\s+.*$/m, '');
+  const paras = body.split(/\n\s*\n/).map((p) => p.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const text = paras.join(' ¶ ');
+  if (text.length <= max) return text;
+  const head = text.slice(0, max);
+  const para = head.lastIndexOf(' ¶ ');
+  if (para >= max * 0.5) return head.slice(0, para);
+  let sentence = -1;
+  for (const m of head.matchAll(/[.!?…]["“”»)]?(?=\s)/g)) sentence = m.index + m[0].length;
+  if (sentence >= max * 0.4) return head.slice(0, sentence);
+  return `${head.slice(0, max - 1).replace(/\s+\S*$/, '')}…`;
+}
+/** Überschriften (außerhalb von Code) als fette Zeile: Ein Abschnitt darf die Gliederung der Seite nicht brechen. */
+function demoteHeadings(md) {
+  let fence = null;
+  return String(md ?? '')
+    .split('\n')
+    .map((l) => {
+      const f = /^\s{0,3}(`{3,}|~{3,})/.exec(l);
+      if (fence) {
+        if (f && f[1][0] === fence[0] && f[1].length >= fence.length) fence = null;
+        return l;
+      }
+      if (f) {
+        fence = f[1];
+        return l;
+      }
+      const h = /^\s{0,3}#{1,6}\s+(.*?)\s*#*\s*$/.exec(l);
+      return h && h[1] ? `**${h[1]}**` : l;
+    })
+    .join('\n')
+    .trim();
 }
 const stemOf = (path) => String(path).split('/').pop().replace(/\.md$/i, '');
 const escRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -127,14 +178,16 @@ const SYSTEM = [
   'Mycel-Konventionen: Seiten liegen unter wiki/sources (eine Quelle, eine Seite), wiki/entities (Personen, Tools, Organisationen, Produkte, Projekte), wiki/concepts (Konzepte, Methoden, Muster), wiki/synthesis (Querverbindungen, Vergleiche, Widersprüche zwischen mehreren Quellen), wiki/questions (offene Fragen).',
   'Inhalte und Titel immer auf Deutsch, unabhängig von der Sprache der Quelle. Tags englisch, lowercase, kebab-case. Slugs kebab-case ohne Umlaute und Sonderzeichen; Source-Pages mit Autor- oder Quellenpräfix, z. B. glaser-the-elastic-loop. Summary ist ein Einzeiler mit höchstens 80 Zeichen.',
   'Wikilinks als [[slug]] oder [[slug|Anzeige]], nur auf Slugs der Kandidaten aus dem Wiki (Dateiname ohne .md) oder auf Seiten, die du selbst neu vorschlägst.',
-  'Compound über Completeness: lieber wenige gut verknüpfte Seiten als viele isolierte. Sei konservativ mit neuen Seiten: eine neue Entity oder ein neues Konzept nur, wenn es im Text eine tragende Rolle spielt und es im Wiki noch keine passende Seite gibt. Synthesen und Fragen nur, wenn der Text sie wirklich trägt, sonst keine.',
+  'Compound über Completeness: lieber wenige gut verknüpfte Seiten als viele isolierte. Sei konservativ mit neuen Seiten: eine neue Entity oder ein neues Konzept nur, wenn es im Text eine tragende Rolle spielt und es im Wiki noch keine passende Seite gibt. Fragen nur, wenn der Text sie wirklich trägt.',
+  'Synthesen sind die wertvollste Schicht des Wikis: Sie halten fest, was erst aus mehreren Quellen zusammen sichtbar wird. Prüfe den Text deshalb ausdrücklich gegen die Synthesen und Quellen unter den Kandidaten. Eine Synthese braucht mindestens eine andere Quelle oder Synthese, mit der der Text eine Querverbindung bildet, sich vergleichen lässt oder in Widerspruch steht; bloße Themennähe reicht nicht. Lieber eine starke Synthese als zwei schwache, und keine, wenn nichts trägt.',
+  'Seiten werden aktualisiert statt dupliziert: Trägt der Text zu einer bestehenden Synthese etwas bei, ergänze sie, statt eine neue mit ähnlichem Thema anzulegen.',
   'Widersprüche nie glätten: benenne sie, schlage eine Auflösung vor, ändere aber nichts. Erfinde nichts, was nicht im Text oder in den Kandidaten steht; Lücken offen benennen.',
   'Die Markierungen und Notizen des Lesers zeigen, was ihm wichtig war: Sie sind das stärkste Signal für Kernaussagen und Verknüpfungen.',
   'Du lieferst ausschließlich das verlangte JSON.',
 ].join('\n');
 
 const PROMPT = [
-  'Auf stdin stehen ein Text aus dem Lesestapel (<text>), die Markierungen des Lesers (<markierungen>) und Kandidaten aus dem Wiki (<wiki-kandidaten>, je Pfad, Typ, Titel und Summary). Entwirf den Ingest:',
+  'Auf stdin stehen ein Text aus dem Lesestapel (<text>), die Markierungen des Lesers (<markierungen>), Kandidaten aus dem Wiki (<wiki-kandidaten>, je Pfad, Typ, Titel und Summary) und Synthesen und Quellen aus dem Wiki mit einem Auszug ihres Texts (<synthesen-und-quellen>, ebenfalls Kandidaten). Entwirf den Ingest:',
   '- `digest.kernaussagen`: 3–5 Sätze, was der Text sagt.',
   '- `digest.neu`: 0–4 Punkte, was gegenüber dem Wiki neu ist.',
   '- `digest.bestaetigt`: Kandidaten, deren Aussage der Text bestätigt (`path` exakt wie angegeben, `claim` = die bestätigte Aussage).',
@@ -142,6 +195,8 @@ const PROMPT = [
   '- `digest.dockt_an`: Kandidaten, an die der Text anschließt und die auf die neue Source-Page verweisen sollen (`warum` in einem Satz). Nur echte Bezüge, keine bloße Themennähe.',
   '- `source`: die Source-Page. `body` ist Markdown ohne Überschrift erster Ordnung und ohne Frontmatter: eine Destillation, keine Kopie (was ist neu, was ist relevant, was widerspricht Bestehendem), mit Wikilinks auf Kandidaten und auf deine neuen Seiten. `confidence` nach Qualität der Quelle (high nur bei sauber belegten Quellen).',
   '- `neu`: neue Seiten (kind entity, concept, synthesis oder question) mit Slug, Titel, Summary, kurzem Body (Markdown, Deutsch, ohne Überschrift erster Ordnung) und `warum`. Entity mit `entity_type`, Synthese mit `art` und `beteiligte` (Pfade der Kandidaten). Fragen als Frage formuliert. Leer lassen, wenn nichts davon trägt.',
+  '- Synthese-Schritt: Gehe die Synthesen und Quellen unter <synthesen-und-quellen> einzeln durch. Bildet der Text mit einer anderen Quelle eine Querverbindung, lässt er sich mit ihr vergleichen oder widerspricht er ihr? Daraus 0–2 neue Synthesen in `neu` (kind synthesis): `art` querverbindung, vergleich oder widerspruch (bei einem erkannten Widerspruch bevorzugt eine Synthese mit art widerspruch), `beteiligte` mit mindestens einem Pfad einer anderen Quelle oder Synthese aus den Kandidaten (sonst wird sie verworfen), der Body benennt, was erst aus beiden zusammen sichtbar wird.',
+  '- `ergaenzungen`: 0–2 bestehende Synthesen (`path` exakt wie angegeben, nur Kandidaten vom Typ synthesis), zu denen der Text inhaltlich etwas beiträgt. `body` ist der neue Abschnitt: Markdown, Deutsch, ohne Überschriften, 2–6 Sätze, was diese Quelle zur Synthese beiträgt, bestätigt, verschiebt oder widerlegt, mit Wikilinks wie oben; `warum` ein Satz. Passt der Text zu einer bestehenden Synthese, ergänze sie, statt eine ähnliche neue vorzuschlagen. Leer lassen, wenn nichts trägt.',
   '- `relationen`: typisierte Beziehungen von der Source-Page zu Kandidaten (`to` = Pfad), nur wenn der Text die Beziehung trägt.',
   '- `hinweise`: was der Leser vor dem Übernehmen wissen sollte (z. B. Text sehr kurz oder hinter einer Paywall, Widerspruch zu [[slug]] – Auflösung per /wiki-lint).',
 ].join('\n');
@@ -150,7 +205,7 @@ const pathRef = { type: 'string', description: 'Pfad eines Kandidaten, exakt wie
 const SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['digest', 'source', 'neu', 'relationen', 'hinweise'],
+  required: ['digest', 'source', 'neu', 'ergaenzungen', 'relationen', 'hinweise'],
   properties: {
     digest: {
       type: 'object',
@@ -193,12 +248,16 @@ const SCHEMA = {
           summary: { type: 'string', description: 'höchstens 80 Zeichen' },
           entity_type: { type: 'string', enum: ENTITY_TYPES },
           art: { type: 'string', enum: SYNTHESIS_ART },
-          beteiligte: { type: 'array', items: pathRef },
+          beteiligte: { type: 'array', items: pathRef, description: 'bei Synthesen: mindestens eine andere Quelle oder Synthese aus den Kandidaten' },
           tags: { type: 'array', items: { type: 'string' } },
           body: { type: 'string' },
           warum: { type: 'string' },
         },
       },
+    },
+    ergaenzungen: {
+      type: 'array',
+      items: { type: 'object', additionalProperties: false, required: ['path', 'body', 'warum'], properties: { path: { ...pathRef, description: 'Pfad einer Synthese unter den Kandidaten, exakt wie angegeben' }, body: { type: 'string' }, warum: { type: 'string' } } },
     },
     relationen: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['type', 'to'], properties: { type: { type: 'string', enum: RELATION_TYPES }, to: pathRef } } },
     hinweise: { type: 'array', items: { type: 'string' } },
@@ -207,12 +266,16 @@ const SCHEMA = {
 
 const attr = (v) => oneLine(v, 300).replace(/"/g, "'");
 
-/** Eingabe für Claude: Text, Markierungen, Kandidaten. */
+/** Eingabe für Claude: Text, Markierungen, Kandidaten; Synthesen und Quellen mit Auszug in einem eigenen Block. */
 function inputFor(doc, text, highlights, candidates) {
   const marks = highlights.length
     ? highlights.map((h, i) => `${i + 1}. „${oneLine(h.quote, 1000)}“${h.note?.trim() ? ` — Notiz: ${oneLine(h.note, 1000)}` : ''}`).join('\n')
     : 'keine';
-  const cands = candidates.length ? candidates.map((c) => `- ${c.path} · ${c.type ?? '?'} · ${oneLine(c.title)}${c.summary ? ` — ${oneLine(c.summary)}` : ''}`).join('\n') : 'keine';
+  const line = (c) => `- ${c.path} · ${c.type ?? '?'} · ${oneLine(c.title)}${c.summary ? ` — ${oneLine(c.summary)}` : ''}`;
+  const plain = candidates.filter((c) => c.excerpt == null);
+  const focus = candidates.filter((c) => c.excerpt != null);
+  const cands = plain.length ? plain.map(line).join('\n') : 'keine';
+  const focused = focus.length ? focus.map((c) => `${line(c)}${c.excerpt ? `\n  Auszug: ${c.excerpt}` : ''}`).join('\n') : 'keine';
   return [
     `<text titel="${attr(doc.title || doc.url)}" quelle="${attr(doc.site)}" url="${attr(doc.url)}"${doc.author ? ` autor="${attr(doc.author)}"` : ''}>`,
     text,
@@ -225,6 +288,10 @@ function inputFor(doc, text, highlights, candidates) {
     '<wiki-kandidaten>',
     cands,
     '</wiki-kandidaten>',
+    '',
+    '<synthesen-und-quellen>',
+    focused,
+    '</synthesen-und-quellen>',
   ].join('\n');
 }
 
@@ -250,6 +317,7 @@ function itemCounts(draft) {
     default: n((i) => i.default),
     neu: n((i) => i.action === 'neu'),
     verknuepfen: n((i) => i.action === 'verknuepfen'),
+    ergaenzen: n((i) => i.action === 'ergaenzen'),
     bestaetigung: n((i) => i.kind === 'bestaetigung'),
     relation: n((i) => i.kind === 'relation'),
   };
@@ -258,7 +326,7 @@ function itemCounts(draft) {
 /**
  * - `store`: Lesestapel (src/lesen/store.js) mit der Tabelle `ingests`.
  * - `writer`: Claude (src/lesen/claude.js), `{ available(), write() }`.
- * - `search(query, { folder, limit })` → `{ results: [{ path, title, type }] }` (hybride Suche).
+ * - `search(query, { folder, type, limit })` → `{ results: [{ path, title, type }] }` (hybride Suche; `type` filtert nach Seitentyp).
  * - `index`, `editor`, `policy`, `vaultPath` wie für die übrigen Schreibwege.
  * - `exporter`: Lesestapel → Vault (src/lesen/vault-export.js), legt die Rohquelle an.
  * - `settings.get()`: `tz` und `ingest` (`nightly`, `hour`, `model`, `limit`).
@@ -310,17 +378,19 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
 
   /** Kandidaten aus `wiki/`: mehrere Anfragen, abwechselnd zusammengeführt, ohne Doppelte. */
   async function findCandidates(doc, text, highlights) {
+    const ask = async (q, opts) => {
+      try {
+        return (await search(q, { folder: 'wiki', limit: 15, ...opts }))?.results ?? [];
+      } catch (err) {
+        logger.warn?.(`Ingest: Suche „${q.slice(0, 40)}“${opts.type ? ` (${opts.type})` : ''} fehlgeschlagen: ${err.message}`);
+        return [];
+      }
+    };
     const queries = [doc.title, doc.excerpt || text.slice(0, 400), ...highlights.slice(0, MAX_QUERIES_FROM_HIGHLIGHTS).map((h) => `${h.quote} ${h.note ?? ''}`)]
       .map((q) => oneLine(q, 300))
       .filter(Boolean);
     const lists = [];
-    for (const q of queries) {
-      try {
-        lists.push((await search(q, { folder: 'wiki', limit: 15 }))?.results ?? []);
-      } catch (err) {
-        logger.warn?.(`Ingest: Suche „${q.slice(0, 40)}“ fehlgeschlagen: ${err.message}`);
-      }
-    }
+    for (const q of queries) lists.push(await ask(q, {}));
     const out = new Map();
     for (let i = 0; out.size < MAX_CANDIDATES && lists.some((l) => i < l.length); i += 1) {
       for (const l of lists) {
@@ -330,18 +400,43 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
         if (out.size >= MAX_CANDIDATES) break;
       }
     }
+
+    // Synthesen und Source-Pages gezielt (je eine Anfrage mit Typfilter), mit Auszug: Ob sie unter den
+    // gemischten Treffern sind, wäre sonst Zufall, und ohne ihren Text sieht Claude keine Querverbindung.
+    const focus = oneLine([doc.title, doc.excerpt || text.slice(0, 400), ...highlights.slice(0, 3).map((h) => h.quote)].filter(Boolean).join(' '), 600);
+    let budget = EXCERPT_TOTAL;
+    for (const type of ['synthesis', 'source']) {
+      const hits = focus ? await ask(focus, { type }) : [];
+      const isType = (c) => (type === 'source' ? c.type === 'source' || isSourcePath(c.path) : c.type === 'synthesis');
+      let n = 0;
+      // Erst die gezielten Treffer, dann was die gemischte Suche schon fand.
+      for (const path of [...hits.map((h) => h?.path), ...out.keys()]) {
+        if (n >= MAX_FOCUS[type]) break;
+        if (!path || out.get(path)?.excerpt != null || !writable(path)) continue;
+        const c = out.get(path) ?? describePage(path);
+        if (!isType(c)) continue;
+        const excerpt = budget > 0 ? excerptOf(index.getNote(path)?.content, Math.min(EXCERPT, budget)) : '';
+        budget -= excerpt.length;
+        out.set(path, { ...c, excerpt });
+        n += 1;
+      }
+    }
     return [...out.values()];
   }
 
   /**
    * Claudes Antwort → Entwurf nach Vertrag: nur bekannte Pfade, saubere Slugs,
-   * IDs je Art (v, n, s, q, b, r), `default` (Neues abgewählt), Wikilinks geprüft.
+   * IDs je Art (v, n, s, q, e, b, r), `default` (Neues abgewählt), Wikilinks geprüft.
+   * Neue Synthesen nur mit einer anderen Quelle oder Synthese unter den Kandidaten
+   * in `beteiligte`, höchstens zwei; Ergänzungen nur an Synthesen unter den
+   * Kandidaten, höchstens zwei.
    */
   function shape(out, { doc, candidates, text }) {
     const known = new Map(candidates.map((c) => [c.path, c]));
     // Nur Kandidaten: Claude darf keine anderen Seiten (vorgewählt) anfassen.
     const page = (ref) => known.get(resolvePage(ref)) ?? null;
     const isSource = (p) => p.type === 'source' || isSourcePath(p.path);
+    const isSynthesis = (p) => p.type === 'synthesis';
     const hinweise = [];
     const counters = {};
     const nextId = (prefix) => `${prefix}${(counters[prefix] = (counters[prefix] ?? 0) + 1)}`;
@@ -387,6 +482,13 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
     const newSlugs = new Set();
     for (const n of out?.neu ?? []) {
       if (!NEW_KINDS.includes(n?.kind)) continue;
+      // Eine Synthese ohne andere Quelle oder Synthese ist bloße Themennähe: weg, bevor sie irgendwo verknüpft.
+      const beteiligte = n.kind === 'synthesis' ? [...new Set((n.beteiligte ?? []).map((b) => page(b)).filter(Boolean).map((p) => p.path))] : [];
+      if (n.kind === 'synthesis' && !beteiligte.some((p) => isSource(known.get(p)) || isSynthesis(known.get(p)))) {
+        logger.info?.(`Ingest: Synthese „${oneLine(n.title, 80)}“ verworfen, keine andere Quelle oder Synthese beteiligt`);
+        continue;
+      }
+      if (n.kind === 'synthesis' && items.filter((i) => i.kind === 'synthesis' && i.action === 'neu').length >= LIMITS.synthese) continue;
       const slug = cleanSlug(n.slug, n.title);
       const folder = WIKI_FOLDERS[n.kind];
       if (!folderAllowed(folder)) {
@@ -419,12 +521,22 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
       if (n.kind === 'entity' && ENTITY_TYPES.includes(n.entity_type)) item.entity_type = n.entity_type;
       if (n.kind === 'synthesis') {
         item.art = SYNTHESIS_ART.includes(n.art) ? n.art : 'querverbindung';
-        item.beteiligte = [...new Set((n.beteiligte ?? []).map((b) => page(b)?.path).filter(Boolean))];
+        item.beteiligte = beteiligte;
       }
       const tags = cleanTags(n.tags ?? []);
       if (tags.length) item.tags = tags;
       Object.assign(item, { body: String(n.body ?? '').trim(), warum: oneLine(n.warum, 500), default: false });
       items.push(item);
+    }
+
+    // Bestehende Synthesen ergänzen: nur Kandidaten vom Typ synthesis, jede einmal.
+    for (const e of out?.ergaenzungen ?? []) {
+      const p = page(e?.path);
+      if (!p || !isSynthesis(p) || items.some((i) => i.action === 'ergaenzen' && i.path === p.path)) continue;
+      if (items.filter((i) => i.action === 'ergaenzen').length >= LIMITS.ergaenzen) break;
+      const body = String(e.body ?? '').trim();
+      if (!body) continue;
+      items.push({ id: nextId('e'), kind: 'synthesis', action: 'ergaenzen', path: p.path, title: p.title, body, warum: oneLine(e.warum, 500), default: false });
     }
 
     const bestaetigt = [];
@@ -459,6 +571,8 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
     // Entschärft schon im Entwurf (Vorschau), beim Schreiben noch einmal.
     source.body = safeWikiMarkdown(relink(source.body.replace(/^#\s+.*\n+/, ''), links, { resolve }));
     for (const i of items) if (i.action === 'neu') i.body = safeWikiMarkdown(relink(i.body.replace(/^#\s+.*\n+/, ''), links, { resolve }));
+    // Ergänzungen stehen unter einer eigenen Überschrift dritter Ordnung: eigene Überschriften darin werden fetter Text.
+    for (const i of items) if (i.action === 'ergaenzen') i.body = safeWikiMarkdown(relink(demoteHeadings(i.body), links, { resolve }));
 
     if (text.length < 1500) hinweise.unshift('Text sehr kurz – vielleicht nur ein Anriss oder hinter einer Paywall');
     for (const h of out?.hinweise ?? []) hinweise.push(relink(oneLine(h, 300), links, { resolve }));
@@ -613,6 +727,26 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
     else editor.append({ path, text: `\n## Quellen\n\n${line}` });
   }
 
+  /**
+   * Bestehende Synthese ergänzen: Abschnitt `### Aus [[slug]] (Datum)` unter
+   * „Ergänzungen“ (so gesucht wie „Quellen“; fehlt sie oder ist sie mehrdeutig, neu
+   * am Ende), danach wie beim Verknüpfen `sources`, `updated`, `confirmed`, verblasst
+   * → aktiv und die Zeile unter „Quellen“. Steht der Abschnitt schon da (zweiter
+   * Versuch nach einem Abbruch), wird er nicht noch einmal angehängt.
+   */
+  function extendSynthesis(path, slug, body) {
+    if (!writable(path)) throw new IngestError(`„${path}“ ist nicht (mehr) beschreibbar`, 409);
+    if ((index.getNote(path)?.type ?? index.getNote(path)?.frontmatter?.type) !== 'synthesis') throw new IngestError(`„${path}“ ist keine Synthese (mehr)`, 409);
+    const content = readFileSync(join(vaultPath, path), 'utf8');
+    const done = headingsOf(content).some((h) => new RegExp(`^Aus \\[\\[${escRe(slug)}(\\|[^\\]]*)?\\]\\]`).test(h.text));
+    if (!done) {
+      const section = `### Aus [[${slug}]] (${today()})\n\n${safeWikiMarkdown(String(body ?? '').trim())}`;
+      if (headingsOf(content).filter((h) => h.text === 'Ergänzungen').length === 1) editor.append({ path, heading: 'Ergänzungen', text: `\n${section}` });
+      else editor.append({ path, text: `\n## Ergänzungen\n\n${section}` });
+    }
+    linkPage(path, slug, { update: true, confirm: true });
+  }
+
   /** Eintrag in `wiki/log.md`. Steht das Log nicht im Index (Policy schließt es oft aus), direkt anhängen. */
   function appendLog(entry, slug) {
     if (policy.sensitivityOf(LOG) || policy.classify(LOG) !== 'core') throw new IngestError(`${LOG} liegt in einem vertraulichen oder importierten Ordner`, 409);
@@ -724,7 +858,8 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
    * Übernehmen. `items`: IDs aus dem Entwurf (unbekannte → 400); `source`: Änderungen
    * an Titel, Summary, Slug, Tags. Jeder Schritt steht danach in `applied`; ein
    * zweiter Aufruf nach einem Abbruch setzt fort, nach dem Erfolg liefert er das Ergebnis
-   * `{ source, raw, written, linked, confirmed }` (nur Bestätigtes steht unter `confirmed`, nicht unter `linked`).
+   * `{ source, raw, written, linked, confirmed, extended }` (nur Bestätigtes steht unter `confirmed`,
+   * nicht unter `linked`; ergänzte Synthesen unter `extended`).
    */
   async function apply(docId, { items: chosenIds = [], source: edits = {} } = {}) {
     const id = String(docId ?? '');
@@ -747,7 +882,9 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
     const done = row.applied?.steps?.includes('raw_frontmatter') ? null : ingestedAs(id);
     if (done) throw new IngestError(`${alreadyText(done)}; Übernehmen würde den Text doppelt ins Wiki bringen`, 409);
 
-    const applied = row.applied ?? { steps: [], items: {}, written: [], linked: [] };
+    const applied = row.applied ?? { steps: [], items: {}, written: [], linked: [], extended: [] };
+    // Ältere Stände kennen keine Ergänzungen.
+    applied.extended ??= [];
     const save = () => store.saveIngest(id, { applied });
     const step = async (name, run) => {
       if (applied.steps.includes(name)) return;
@@ -856,6 +993,15 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
         save();
       }
 
+      // (c2) Bestehende Synthesen ergänzen; der Abschnitt verlinkt abgewählte neue Seiten nicht.
+      for (const item of chosen.filter((i) => i.action === 'ergaenzen')) {
+        if (item.id in applied.items) continue;
+        extendSynthesis(item.path, slug, unlink(relinkSelf(item.body)));
+        if (!applied.extended.includes(item.path)) applied.extended.push(item.path);
+        applied.items[item.id] = item.path;
+        save();
+      }
+
       // (d) Verknüpfen und Bestätigen.
       const touch = new Map();
       for (const i of chosen) {
@@ -884,6 +1030,7 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
           `- Neu: ${list(applied.written.filter((p) => p !== applied.source))}`,
           `- Verknüpft: ${list(linked)}`,
           `- Bestätigt: ${list(confirmed)}`,
+          ...(applied.extended.length ? [`- Synthese ergänzt: ${list(applied.extended)}`] : []),
         ].join('\n');
         appendLog(entry, slug);
       });
@@ -899,10 +1046,10 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
         store.setStatus(id, 'archiv');
       });
 
-      const result = { source: applied.source, raw: rawPath, written: [...applied.written], linked, confirmed };
+      const result = { source: applied.source, raw: rawPath, written: [...applied.written], linked, confirmed, extended: [...applied.extended] };
       applied.result = result;
       store.saveIngest(id, { status: 'uebernommen', applied, applied_at: iso(), error: null });
-      logger.info?.(`Ingest „${source.title}“ übernommen: ${result.written.length} geschrieben, ${linked.length} verknüpft, ${confirmed.length} bestätigt`);
+      logger.info?.(`Ingest „${source.title}“ übernommen: ${result.written.length} geschrieben, ${linked.length} verknüpft, ${confirmed.length} bestätigt, ${result.extended.length} Synthesen ergänzt`);
       return result;
     } catch (err) {
       store.saveIngest(id, { applied, error: err.message });

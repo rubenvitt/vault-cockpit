@@ -743,7 +743,7 @@ steht unter **Einstellungen → Vorlesen → Stimme und Modell**. Beim Öffnen v
 [Ingest](#ingest)): In der Unternavigation steht **Ingest** zwischen Stapel und
 Folgen, mit der Zahl der bereiten Entwürfe. Die Übersicht `/lesen/ingest` zeigt
 bereite Entwürfe als Karten (Quelle, zwei bis drei Kernaussagen, „3
-Verknüpfungen · 1 Synthese · 2 neue Seiten“), darunter **In Arbeit** und
+Verknüpfungen · 1 Synthese · 1 Synthese-Ergänzung · 2 neue Seiten“), darunter **In Arbeit** und
 **Fehler** (mit „Erneut entwerfen“) und oben **Ganzen Stapel entwerfen** (für
 Texte ohne Entwurf und fehlgeschlagene, wie der Dienst; verworfene nicht). Die
 Prüfansicht `/lesen/ingest/doc?id=…` ist zum Lesen in ein, zwei Minuten gedacht:
@@ -751,13 +751,16 @@ Prüfansicht `/lesen/ingest/doc?id=…` ist zum Lesen in ein, zwei Minuten gedac
 Hinweis auf `/wiki-lint`, Dockt an), die Source-Page mit änderbarem Titel,
 Summary (Zähler bis 80), Slug und Tags samt Vorschau, dann die Vorschläge zum
 Abhaken, gruppiert: Verknüpfen, Bestätigungen, **Synthesen & Fragen** (als
-Karten, Text zum Aufklappen, standardmäßig aus), neue Seiten und Relationen. Der
+Karten, Text zum Aufklappen, standardmäßig aus; dazu „Synthese ergänzen“ mit dem
+Titel der bestehenden Synthese, Öffnen-Symbol und „Was ergänzt wird“), neue Seiten
+und Relationen. Der
 Titel einer bestehenden Seite ist selbst der Link auf sie; Wikilinks in Claudes
 Text erscheinen mit dem Titel der Seite (aus `links` des Dienstes, sonst aus
 Digest und Vorschlägen), unbekannte als lesbarer Text.
 **Ins Wiki übernehmen** (Leiste unten, mit der Zahl der gewählten Elemente; auf
 dem Handy nur der Knopf) führt zum nächsten bereiten Entwurf, die Meldung
-verlinkt die neue Source-Page und nennt Verknüpfungen und Bestätigungen getrennt.
+verlinkt die neue Source-Page und nennt Verknüpfungen, Bestätigungen und ergänzte
+Synthesen getrennt.
 Daneben **Neu entwerfen**, **Ohne Wiki erledigen** (gelesen, weg, mit
 Rückgängig) und **Entwurf verwerfen** (der Text bleibt auf dem Stapel). Ohne
 JavaScript ist alles ein Formular; mit `/static/lesen-ingest.js` gibt es
@@ -936,9 +939,16 @@ prüft und abhakt. Bis dahin bleibt der Text im Stapel.
 oder nachts: Claude bekommt den Volltext als Markdown (gekürzt auf 60 000 Zeichen),
 die Markierungen mit Notizen (das stärkste Signal) und bis zu 25 Kandidaten aus
 `wiki/` mit Pfad, Typ, Titel und `summary`, gefunden über die hybride Suche nach
-Titel, Auszug und Markierungen. Zurück kommt JSON nach Schema: Kernaussagen, was
+Titel, Auszug und Markierungen. Dazu sucht der Dienst gezielt je einmal nach
+Synthesen und nach Source-Pages (Typfilter `synthesis` bzw. `source`): Von bis zu
+acht je Typ bekommt Claude zusätzlich einen Textauszug (Body ohne Frontmatter, gut
+700 Zeichen, gekürzt an einer Absatz- oder Satzgrenze; zusammen höchstens 12 000
+Zeichen) in einem eigenen Block, damit es den Text ausdrücklich gegen andere
+Quellen und bestehende Synthesen prüfen kann (Synthese-Schritt: Querverbindung,
+Vergleich, Widerspruch). Zurück kommt JSON nach Schema: Kernaussagen, was
 neu ist, was bestätigt, widerspricht oder andockt, die Source-Page (Slug, Titel,
-Summary, Confidence, Tags, Body als Destillation mit Wikilinks) und Vorschläge.
+Summary, Confidence, Tags, Body als Destillation mit Wikilinks), Vorschläge und
+Ergänzungen bestehender Synthesen.
 Danach prüft das Cockpit deterministisch: Pfade nur auf Kandidaten, also Seiten,
 die Claude gezeigt wurden (Unbekanntes fällt weg), Source-Pages nie zum Verknüpfen
 oder Bestätigen (in deren `sources` stehen Rohquellen; Bezüge zwischen Quellen nur
@@ -946,7 +956,11 @@ als Wikilink oder Relation), Slugs kebab-case ohne Umlaute, ein „neuer“ Slug
 im Wiki schon gibt, wird zum Verknüpfen (vorgewählt nur bei einem Kandidaten), einer,
 den es sonst im Vault gibt (auch vertraulich), fällt mit Hinweis weg, Wikilinks nur
 auf Kandidaten, vorhandene Wiki-Seiten oder vorgeschlagene neue Seiten (der Rest wird
-Text), nichts in vertraulichen, ausgeschlossenen oder Readwise-Ordnern. Claudes
+Text), nichts in vertraulichen, ausgeschlossenen oder Readwise-Ordnern. Eine neue
+Synthese braucht unter `beteiligte` mindestens eine andere Quelle oder Synthese aus
+den Kandidaten (sonst fällt sie weg, bloße Themennähe trägt keine), höchstens zwei
+je Entwurf; eine Ergänzung nur an eine Synthese unter den Kandidaten, höchstens
+zwei, Überschriften in ihrem Text werden fett. Claudes
 Markdown wird entschärft (`src/lesen/wiki-markdown.js`), denn ein Text kann per
 Prompt-Injection Anweisungen enthalten: Bilder von fremden Servern (die beim Öffnen
 in Obsidian Inhalte über die Adresse verraten könnten) werden Links, rohes HTML wird
@@ -956,7 +970,7 @@ laufen nicht. Steht in der Rohquelle schon `ingest: <Datum>` oder `übersprungen
 Skill war schneller), entsteht kein Entwurf: Der Text gilt als verworfen, mit dem
 Grund als Meldung, und Claude wird nicht gefragt. Jeder Vorschlag hat eine
 feste ID: `v` verknüpfen, `n` neue Entity oder neues Konzept, `s` Synthese, `q`
-Frage, `b` Bestätigung, `r` Relation. Verknüpfen, Bestätigen und Relationen sind
+Frage, `e` bestehende Synthese ergänzen, `b` Bestätigung, `r` Relation. Verknüpfen, Bestätigen und Relationen sind
 vorausgewählt, alles Neue ist abgewählt. Der Entwurf liegt in der Tabelle `ingests`
 von `lesestapel.db` (also in der Sicherung). Es entsteht immer nur ein Entwurf
 zugleich; nach einem Neustart werden angefangene wieder eingereiht.
@@ -985,24 +999,32 @@ dann fest), und der nächste Versuch setzt dort fort, ohne etwas doppelt zu schr
    die Seite verknüpft statt überschrieben; gibt es den Namen inzwischen anderswo,
    wird die beschreibbare Wiki-Seite dieses Namens verknüpft (keine Source-Page),
    sonst fällt die neue Seite weg.
-4. **Verknüpfen und Bestätigen** an bestehenden Seiten: `[[<source-slug>]]` in
+4. **Synthesen ergänzen** (gewählt): ein Abschnitt
+   `### Aus [[<source-slug>]] (YYYY-MM-DD)` mit Claudes Text (entschärft, Links wie in
+   der Source-Page) unter „## Ergänzungen“ (gefunden wie „Quellen“; fehlt die
+   Überschrift oder gibt es sie mehrfach, kommt sie neu ans Ende), dazu wie beim
+   Verknüpfen `sources`, `updated` und `confirmed` auf heute, `faded` → `active` und
+   die Zeile unter „## Quellen“. Steht der Abschnitt schon da (zweiter Versuch), wird
+   er nicht noch einmal angehängt.
+5. **Verknüpfen und Bestätigen** an bestehenden Seiten: `[[<source-slug>]]` in
    `sources` (ohne Doppelte), `updated` bzw. `confirmed` auf heute, `status: faded`
    wird wieder `active` (Fragen `open`), und eine Zeile `- [[<source-slug>]]` unter
    „## Quellen“, gefunden wie vom Editor (jede Ebene, nicht in Code-Blöcken); fehlt
    die Überschrift oder gibt es sie mehrfach, kommt die Zeile ans Ende.
-5. **Log**: ein Eintrag `## [YYYY-MM-DD] ingest (cockpit) | <Titel>` mit Source-Page,
-   Rohquelle, Neu, Verknüpft und Bestätigt am Ende von `wiki/log.md`. Schließt die
+6. **Log**: ein Eintrag `## [YYYY-MM-DD] ingest (cockpit) | <Titel>` mit Source-Page,
+   Rohquelle, Neu, Verknüpft und Bestätigt (und, falls welche, „Synthese ergänzt“)
+   am Ende von `wiki/log.md`. Schließt die
    Policy das Log aus dem Index aus (wie in `policy.example.json`), hängt das
    Cockpit direkt an die Datei an, nie über einen Symlink hinaus (geöffnet mit
    `O_NOFOLLOW`, gelesen und geschrieben über denselben Deskriptor).
-6. **Rohquelle**: `ingest: <heute>`, `wiki_source: "[[<source-slug>]]"`,
+7. **Rohquelle**: `ingest: <heute>`, `wiki_source: "[[<source-slug>]]"`,
    `lesestatus: gelesen` ins Frontmatter.
-7. **Archiv**: Der Text ist gelesen (`archiv` mit Lesedatum).
+8. **Archiv**: Der Text ist gelesen (`archiv` mit Lesedatum).
 
 Das Ergebnis nennt `source`, `raw`, `written` (neu angelegt), `linked`
-(verknüpft) und `confirmed` (bestätigt; nur Bestätigtes zählt nicht als
-verknüpft), wie der Log-Eintrag. Hat der Skill die Rohquelle inzwischen
-ingestiert (`ingest: <Datum>` oder `übersprungen`, bevor Schritt 6 lief), lehnt
+(verknüpft), `confirmed` (bestätigt; nur Bestätigtes zählt nicht als
+verknüpft) und `extended` (ergänzte Synthesen), wie der Log-Eintrag. Hat der Skill die Rohquelle inzwischen
+ingestiert (`ingest: <Datum>` oder `übersprungen`, bevor Schritt 7 lief), lehnt
 Übernehmen mit 409 ab.
 
 Verwerfen löscht nur den Entwurf, der Text bleibt im Stapel und wird nachts nicht

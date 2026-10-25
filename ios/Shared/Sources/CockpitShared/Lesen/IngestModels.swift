@@ -30,16 +30,19 @@ public struct IngestTally: Decodable, Equatable, Sendable {
     public let verknuepfen: Int
     public let bestaetigung: Int
     public let synthese: Int
+    /// Ergänzungen bestehender Synthesen („Synthese ergänzen“).
+    public let ergaenzung: Int
     public let frage: Int
     public let neu: Int
     public let relation: Int
 
-    enum CodingKeys: String, CodingKey { case verknuepfen, bestaetigung, synthese, frage, neu, relation }
+    enum CodingKeys: String, CodingKey { case verknuepfen, bestaetigung, synthese, ergaenzung, frage, neu, relation }
 
-    public init(verknuepfen: Int = 0, bestaetigung: Int = 0, synthese: Int = 0, frage: Int = 0, neu: Int = 0, relation: Int = 0) {
+    public init(verknuepfen: Int = 0, bestaetigung: Int = 0, synthese: Int = 0, ergaenzung: Int = 0, frage: Int = 0, neu: Int = 0, relation: Int = 0) {
         self.verknuepfen = verknuepfen
         self.bestaetigung = bestaetigung
         self.synthese = synthese
+        self.ergaenzung = ergaenzung
         self.frage = frage
         self.neu = neu
         self.relation = relation
@@ -50,14 +53,16 @@ public struct IngestTally: Decodable, Equatable, Sendable {
         verknuepfen = try c.decodeIfPresent(Int.self, forKey: .verknuepfen) ?? 0
         bestaetigung = try c.decodeIfPresent(Int.self, forKey: .bestaetigung) ?? 0
         synthese = try c.decodeIfPresent(Int.self, forKey: .synthese) ?? 0
+        ergaenzung = try c.decodeIfPresent(Int.self, forKey: .ergaenzung) ?? 0
         frage = try c.decodeIfPresent(Int.self, forKey: .frage) ?? 0
         neu = try c.decodeIfPresent(Int.self, forKey: .neu) ?? 0
         relation = try c.decodeIfPresent(Int.self, forKey: .relation) ?? 0
     }
 
-    /// Hinweis an der Karte, wenn Claude über den Text hinaus etwas anbietet (`readyCard` im Web).
+    /// Hinweis an der Karte, wenn Claude über den Text hinaus etwas anbietet (`offerLabel` im Web).
     public var offerLabel: String? {
         if synthese > 0 { return synthese == 1 ? "Synthese angeboten" : "Synthesen angeboten" }
+        if ergaenzung > 0 { return ergaenzung == 1 ? "Ergänzung angeboten" : "Ergänzungen angeboten" }
         return frage > 0 ? "Frage angeboten" : nil
     }
 }
@@ -289,9 +294,10 @@ public struct IngestSourceView: Decodable, Equatable, Sendable {
 /// bestehende Seiten.
 public struct IngestItemView: Decodable, Equatable, Identifiable, Sendable {
     public let id: String
-    /// `concept`, `entity`, `source`, `synthesis`, `question`, `bestaetigung`, `relation`.
+    /// `concept`, `entity`, `source`, `synthesis`, `question`, `bestaetigung`, `relation`. Als Text,
+    /// nicht als Enum: Eine neue Art vom Server darf die Prüfansicht nicht brechen.
     public let kind: String?
-    /// `verknuepfen`, `neu` oder nil.
+    /// `verknuepfen`, `neu`, `ergaenzen` (bestehende Synthese um einen Abschnitt ergänzen) oder nil.
     public let action: String?
     /// „Konzept“, „Person“, „Synthese · Vergleich“ … (`kindLabel`).
     public let label: String
@@ -334,6 +340,22 @@ public struct IngestItemView: Decodable, Equatable, Identifiable, Sendable {
 
     /// Relationen und Bestätigungen tragen ihr Kennzeichen nicht als Pille (wie im Web).
     public var showsLabel: Bool { kind != "relation" && kind != "bestaetigung" }
+
+    /// Ergänzt eine bestehende Synthese (`open` ist dann diese Synthese).
+    public var isExtension: Bool { action == "ergaenzen" }
+
+    /// Slug der Synthese, die ergänzt wird („ergänzt: slug“ wie `ingest-path` im Web).
+    public var extendedSlug: String? {
+        guard isExtension, let path = open else { return nil }
+        let name = path.split(separator: "/").last.map(String.init) ?? path
+        return name.hasSuffix(".md") ? String(name.dropLast(3)) : name
+    }
+
+    /// Beschriftung des aufklappbaren Texts (`bodyLabel` im Web).
+    public func bodyLabel(featured: Bool) -> String {
+        if isExtension { return "Was ergänzt wird" }
+        return featured ? "Ganzen Text lesen" : "Text der Seite ansehen"
+    }
 }
 
 /// Unterbrochenes Übernehmen: Meldung und, falls schon geschrieben, die Source-Page.
@@ -478,15 +500,17 @@ public struct IngestLink: Decodable, Equatable, Sendable {
     public let label: String
 }
 
-/// Ergebnis des Übernehmens: Source-Page, Rohquelle, Neues, Verknüpftes, Bestätigtes.
+/// Ergebnis des Übernehmens: Source-Page, Rohquelle, Neues, Verknüpftes, Bestätigtes, ergänzte
+/// Synthesen (ältere Server liefern `confirmed` und `extended` nicht).
 public struct IngestApplyResult: Decodable, Equatable, Sendable {
     public let source: String?
     public let raw: String?
     public let written: [String]
     public let linked: [String]
     public let confirmed: [String]
+    public let extended: [String]
 
-    enum CodingKeys: String, CodingKey { case source, raw, written, linked, confirmed }
+    enum CodingKeys: String, CodingKey { case source, raw, written, linked, confirmed, extended }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -495,6 +519,7 @@ public struct IngestApplyResult: Decodable, Equatable, Sendable {
         written = try c.decodeIfPresent([String].self, forKey: .written) ?? []
         linked = try c.decodeIfPresent([String].self, forKey: .linked) ?? []
         confirmed = try c.decodeIfPresent([String].self, forKey: .confirmed) ?? []
+        extended = try c.decodeIfPresent([String].self, forKey: .extended) ?? []
     }
 }
 

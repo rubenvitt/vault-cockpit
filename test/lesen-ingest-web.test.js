@@ -8,7 +8,7 @@ import { createReadingStore } from '../src/lesen/store.js';
 import { readingRoutes } from '../src/lesen/http.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { appliedMessage, groupItems, kindLabel, standBack, tally, tallyLabel } from '../src/lesen/ingest-page.js';
+import { appliedMessage, groupItems, kindLabel, offerLabel, standBack, tally, tallyLabel } from '../src/lesen/ingest-page.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
 
@@ -56,6 +56,7 @@ const draftFor = (title, { evil = false } = {}) => ({
     { id: 'q1', kind: 'question', action: 'neu', slug: 'wann-vergessen', title: 'Wann sollen Agenten vergessen?', summary: 'Offene Frage', body: 'Noch offen.', warum: 'Der Text lässt es offen', default: false },
     { id: 'n1', kind: 'entity', action: 'neu', slug: 'robert-glaser', title: 'Robert Glaser', summary: 'Autor', entity_type: 'person', body: 'Schreibt über Agenten.', warum: 'Autor des Textes', default: false },
     { id: 'r1', kind: 'relation', type: 'authored-by', to: 'wiki/entities/robert-glaser.md', title: 'Robert Glaser', default: true },
+    { id: 'e1', kind: 'synthesis', action: 'ergaenzen', path: 'wiki/synthesis/gedaechtnis-und-kontext.md', title: 'Gedächtnis und Kontext', body: `Der Text **stützt** die These mit [[context-engineering]].${evil ? EVIL : ''}`, warum: 'Neuer Beleg für die Synthese', default: false },
   ],
   hinweise: ['Widerspruch zu [[rag]] – Auflösung per /wiki-lint'],
 });
@@ -118,7 +119,8 @@ function fakeIngest(store, { available = { ok: true } } = {}) {
       r.status = 'uebernommen';
       r.applied = { source: `wiki/sources/${payload.source.slug ?? 'x'}.md` };
       store.setStatus(id, 'archiv', { read: true });
-      return { source: r.applied.source, raw: 'raw/x.md', written: [r.applied.source, 'wiki/entities/robert-glaser.md', 'wiki/log.md'], linked: ['wiki/concepts/context-engineering.md'], ...api.state.applyExtra };
+      const extended = (r.draft?.items ?? []).filter((i) => i.action === 'ergaenzen' && payload.items.includes(i.id)).map((i) => i.path);
+      return { source: r.applied.source, raw: 'raw/x.md', written: [r.applied.source, 'wiki/entities/robert-glaser.md', 'wiki/log.md'], linked: ['wiki/concepts/context-engineering.md'], confirmed: [], extended, ...api.state.applyExtra };
     },
     discard(id, { done = false } = {}) {
       calls.push(['discard', id, { done }]);
@@ -188,11 +190,11 @@ test('Ingest: Gruppen und Zählung folgen dem Entwurf', () => {
   assert.deepEqual(groupItems(d.items).map((g) => [g.key, g.items.map((i) => i.id)]), [
     ['verknuepfen', ['v1']],
     ['bestaetigung', ['b1']],
-    ['synthese', ['s1', 'q1']],
+    ['synthese', ['s1', 'q1', 'e1']],
     ['neu', ['n1']],
     ['relation', ['r1']],
   ]);
-  assert.equal(tallyLabel(tally(d)), '1 Verknüpfung · 1 Bestätigung · 1 Synthese · 1 Frage · 1 neue Seite · 1 Relation');
+  assert.equal(tallyLabel(tally(d)), '1 Verknüpfung · 1 Bestätigung · 1 Synthese · 1 Synthese-Ergänzung · 1 Frage · 1 neue Seite · 1 Relation');
   assert.equal(tallyLabel(tally({ items: [] })), 'nur die Source-Page');
   assert.equal(tallyLabel(tally({ items: [d.items[0], { ...d.items[0], id: 'v2' }, d.items[4], { ...d.items[4], id: 'n2' }] })), '2 Verknüpfungen · 2 neue Seiten');
 });
@@ -260,7 +262,7 @@ test('Ingest: Übersicht mit Karten, In Arbeit, Fehler und „Ganzen Stapel entw
     assert.match(card, /<a href="\/lesen\/ingest\/doc\?id=[^"]+" class="ingest-card-title">Bereit<\/a>/);
     assert.match(card, /<li>Erste Aussage über <strong>Bereit<\/strong><\/li><li>Zweite Aussage<\/li><li>Dritte Aussage<\/li><\/ul>/);
     assert.ok(!card.includes('Vierte Aussage'), 'nur drei Kernaussagen auf der Karte');
-    assert.match(card, /1 Verknüpfung · 1 Bestätigung · 1 Synthese · 1 Frage · 1 neue Seite · 1 Relation/);
+    assert.match(card, /1 Verknüpfung · 1 Bestätigung · 1 Synthese · 1 Synthese-Ergänzung · 1 Frage · 1 neue Seite · 1 Relation/);
     assert.match(card, /Synthese angeboten/);
     assert.match(page, /<h2 id="ingest-bereit">Bereit zum Abhaken <span class="hint">1<\/span>/);
     assert.match(page, new RegExp(`<li class="ingest-row is-busy" data-ingest-doc="${b.id}" data-ingest-watch="${b.id}" data-ingest-status="entwirft">[^]*Claude entwirft`));
@@ -318,7 +320,7 @@ test('Ingest: Prüfansicht mit Digest, Source-Page, gruppierten Vorschlägen und
     // Gruppen in Vertragsreihenfolge, Häkchen nach `default`.
     assert.deepEqual([...page.matchAll(/data-ingest-group="(\w+)"/g)].map((m) => m[1]), ['verknuepfen', 'bestaetigung', 'synthese', 'neu', 'relation']);
     const boxes = Object.fromEntries([...page.matchAll(/<input type="checkbox" name="item" value="(\w+)"( checked)?>/g)].map((m) => [m[1], Boolean(m[2])]));
-    assert.deepEqual(boxes, { v1: true, b1: true, s1: false, q1: false, n1: false, r1: true });
+    assert.deepEqual(boxes, { v1: true, b1: true, s1: false, q1: false, n1: false, r1: true, e1: false });
     assert.match(page, /<section class="ingest-group is-featured" data-ingest-group="synthese"/);
     assert.match(page, /<span class="ingest-pill is-offer">Synthese · Vergleich<\/span><span class="ingest-item-title">Gedächtnis statt RAG\?<\/span>/);
     assert.match(page, /<span class="ingest-pill is-offer">Frage<\/span>/);
@@ -531,12 +533,12 @@ test('Ingest: Live-Stand und App-JSON', async () => {
     assert.equal(list.enabled, true);
     assert.equal(list.available, true);
     assert.equal(list.openOnStack, 1);
-    assert.deepEqual(list.ready.map((e) => [e.id, e.title, e.tallyLabel, e.kernaussagen.length]), [[a.id, 'Bereit', '1 Verknüpfung · 1 Bestätigung · 1 Synthese · 1 Frage · 1 neue Seite · 1 Relation', 4]]);
+    assert.deepEqual(list.ready.map((e) => [e.id, e.title, e.tallyLabel, e.kernaussagen.length]), [[a.id, 'Bereit', '1 Verknüpfung · 1 Bestätigung · 1 Synthese · 1 Synthese-Ergänzung · 1 Frage · 1 neue Seite · 1 Relation', 4]]);
     assert.deepEqual(list.busy.map((e) => [e.id, e.label]), [[b.id, 'Wartet auf den Nachtlauf']]);
     assert.equal(list.actions.apply, '/aktion/lesen/ingest/uebernehmen');
 
     const doc = await (await call(`/api/lesen/ingest/doc?id=${a.id}`)).json();
-    assert.deepEqual(doc.groups.map((g) => [g.key, g.items.map((i) => i.id)]), [['verknuepfen', ['v1']], ['bestaetigung', ['b1']], ['synthese', ['s1', 'q1']], ['neu', ['n1']], ['relation', ['r1']]]);
+    assert.deepEqual(doc.groups.map((g) => [g.key, g.items.map((i) => i.id)]), [['verknuepfen', ['v1']], ['bestaetigung', ['b1']], ['synthese', ['s1', 'q1', 'e1']], ['neu', ['n1']], ['relation', ['r1']]]);
     assert.deepEqual(doc.selected, ['v1', 'b1', 'r1']);
     assert.equal(doc.draft.source.slug, 'glaser-agenten-gedaechtnis');
     assert.equal(doc.position, 1);
@@ -719,6 +721,11 @@ test('Ingest: App-JSON trägt Claudes Texte als Baum, den Abbruch, die Verfügba
     assert.deepEqual([item('r1').relation, item('r1').open], ['verfasst von', null], 'Relation auf eine neue Seite: kein Link');
     assert.deepEqual([item('s1').label, item('s1').slug, item('s1').beteiligte], ['Synthese · Vergleich', 'gedaechtnis-vs-rag', [{ path: 'wiki/concepts/rag.md', title: 'RAG' }]]);
     assert.equal(item('s1').body[0].type, 'paragraph');
+    // Ergänzung einer bestehenden Synthese: Kennzeichen, Titel der Synthese, Öffnen, Text als Baum.
+    assert.deepEqual([item('e1').kind, item('e1').action, item('e1').label, item('e1').title, item('e1').open, item('e1').slug], ['synthesis', 'ergaenzen', 'Synthese ergänzen', 'Gedächtnis und Kontext', 'wiki/synthesis/gedaechtnis-und-kontext.md', null]);
+    assert.ok(item('e1').body[0].content.some((n) => n.type === 'wikilink' && n.path === 'wiki/concepts/context-engineering.md'));
+    assert.deepEqual(doc.groups.find((g) => g.key === 'synthese').items.map((i) => [i.id, i.label]), [['s1', 'Synthese · Vergleich'], ['q1', 'Frage'], ['e1', 'Synthese ergänzen']]);
+    assert.deepEqual([doc.ingest.tally.ergaenzung, doc.ingest.offerLabel], [1, 'Synthese angeboten']);
     assert.equal(doc.links['context-engineering'].path, 'wiki/concepts/context-engineering.md');
     assert.equal(v.halted, null);
 
@@ -743,9 +750,11 @@ test('Ingest: App-JSON trägt Claudes Texte als Baum, den Abbruch, die Verfügba
     keep('lesen-ingest-aktion-entwerfen', await post('/aktion/lesen/ingest/entwerfen', { csrf, id: ohne.id }));
     keep('lesen-ingest-aktion-stapel', await post('/aktion/lesen/ingest/entwerfen', { csrf, stapel: '1' }));
     const form = new URLSearchParams({ csrf, id: r.id, back: `/lesen/ingest/doc?id=${r.id}`, title: 'Bereit', summary: 'Kurz', slug: 'bereit', tags: 'agents, memory' });
-    for (const id of ['v1', 'b1', 'n1']) form.append('item', id);
+    for (const id of ['v1', 'b1', 'n1', 'e1']) form.append('item', id);
     const applied = keep('lesen-ingest-aktion-uebernehmen', await (await call('/aktion/lesen/ingest/uebernehmen', { method: 'POST', form, accept: 'application/json' })).json());
     assert.deepEqual([applied.link.href, applied.redirect], ['/notiz?pfad=wiki%2Fsources%2Fbereit.md', `/lesen/ingest/doc?id=${halb.id}`]);
+    assert.equal(applied.message, 'Im Wiki: Bereit + 1 Seite, 1 verknüpft, 1 Synthese ergänzt');
+    assert.deepEqual(applied.result.extended, ['wiki/synthesis/gedaechtnis-und-kontext.md']);
     const done = keep('lesen-ingest-aktion-erledigt', await post('/aktion/lesen/ingest/verwerfen', { csrf, id: halb.id, done: '1', back: `/lesen/ingest/doc?id=${halb.id}` }));
     assert.equal(done.undo.action, '/aktion/lesen/doc/status');
     ingest.state.failApply = new IngestError('Die Seite wiki/sources/hakt.md gibt es schon', 409);
@@ -761,4 +770,36 @@ test('Ingest: App-JSON trägt Claudes Texte als Baum, den Abbruch, die Verfügba
     { available: { ok: false, reason: 'Kein Token' } },
   );
   await withIngest(async ({ call }) => keep('lesen-ingest-aus', await (await call('/api/lesen/ingest')).json()), { ingest: false });
+});
+
+test('Ingest: „Synthese ergänzen“ steht bei den Synthesen, mit Öffnen-Symbol, Ziel und aufklappbarem Text; Karte und Meldung zählen es', async () => {
+  assert.equal(kindLabel({ kind: 'synthesis', action: 'ergaenzen', art: 'vergleich' }), 'Synthese ergänzen');
+  assert.deepEqual(groupItems([{ id: 'e1', kind: 'synthesis', action: 'ergaenzen' }]).map((g) => g.key), ['synthese']);
+  const only = tally({ items: [{ id: 'e1', kind: 'synthesis', action: 'ergaenzen' }, { id: 'e2', kind: 'synthesis', action: 'ergaenzen' }] });
+  assert.deepEqual([tallyLabel(only), offerLabel(only)], ['2 Synthese-Ergänzungen', 'Ergänzungen angeboten']);
+  assert.equal(offerLabel(tally({ items: [] })), null);
+  const r = { source: 'wiki/sources/a.md', written: ['wiki/sources/a.md'], linked: [], confirmed: [] };
+  assert.equal(appliedMessage('A', { ...r, extended: ['wiki/synthesis/x.md'] }), 'Im Wiki: A, 1 Synthese ergänzt');
+  assert.equal(appliedMessage('A', { ...r, linked: ['wiki/concepts/y.md'], extended: ['wiki/synthesis/x.md', 'wiki/synthesis/z.md'] }), 'Im Wiki: A, 1 verknüpft, 2 Synthesen ergänzt');
+  assert.equal(appliedMessage('A', r), 'Im Wiki: A', 'ältere Fassung ohne `extended`');
+
+  await withIngest(async ({ html, add, ingest }) => {
+    const d = add('Ergänzt');
+    const draft = draftFor('Ergänzt');
+    ingest.put(d.id, 'bereit', { draft });
+    const page = await html(`/lesen/ingest/doc?id=${d.id}`);
+    noInline(page);
+    const item = page.match(/<li class="ingest-item[^"]*" data-item="e1">[^]*?<\/li>/)[0];
+    assert.match(item, /^<li class="ingest-item is-featured has-open" data-item="e1">/);
+    assert.match(item, /<a href="\/notiz\?pfad=wiki%2Fsynthesis%2Fgedaechtnis-und-kontext\.md" class="ingest-item-open" title="Seite öffnen" aria-label="„Gedächtnis und Kontext“ öffnen">↗<\/a><label class="ingest-pick">/);
+    assert.match(item, /<span class="ingest-item-head"><span class="ingest-pill is-offer">Synthese ergänzen<\/span><span class="ingest-item-title">Gedächtnis und Kontext<\/span><\/span><span class="ingest-why">Neuer Beleg für die Synthese<\/span><span class="ingest-path">ergänzt: gedaechtnis-und-kontext<\/span>/);
+    assert.ok(!item.match(/<label[^]*<\/label>/)[0].includes('<a '), 'Link außerhalb des Labels');
+    assert.match(item, /<details class="ingest-body"><summary>Was ergänzt wird<\/summary><div class="md ingest-md"><p>Der Text <strong>stützt<\/strong> die These mit <a href="\/notiz\?pfad=wiki%2Fconcepts%2Fcontext-engineering\.md" class="wikilink"/);
+
+    // Karte: nur eine Ergänzung angeboten.
+    draft.items = draft.items.filter((i) => ['v1', 'e1'].includes(i.id));
+    const card = (await html('/lesen/ingest')).match(/<li class="ingest-card"[^]*?Prüfen/)[0];
+    assert.match(card, /1 Verknüpfung · 1 Synthese-Ergänzung/);
+    assert.match(card, /<span class="ingest-pill is-offer">Ergänzung angeboten<\/span>/);
+  });
 });

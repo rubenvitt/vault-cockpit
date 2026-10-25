@@ -57,7 +57,8 @@ final class IngestTests: XCTestCase {
         XCTAssertEqual(card.title, "Bereit")
         XCTAssertEqual(card.kern.count, 3)
         XCTAssertEqual(NoteInline.plainText(card.kern[0]), "Erste Aussage über Bereit")
-        XCTAssertEqual(card.tallyLabel, "1 Verknüpfung · 1 Bestätigung · 1 Synthese · 1 Frage · 1 neue Seite · 1 Relation")
+        XCTAssertEqual(card.tallyLabel, "1 Verknüpfung · 1 Bestätigung · 1 Synthese · 1 Synthese-Ergänzung · 1 Frage · 1 neue Seite · 1 Relation")
+        XCTAssertEqual(card.tally.ergaenzung, 1)
         XCTAssertEqual(card.tally.offerLabel, "Synthese angeboten")
         XCTAssertEqual(card.meta(timeZone: TimeZone(identifier: "Europe/Berlin")!), "Blatt · 7 Min. · nachts entworfen · 25. Okt., 03:10")
         XCTAssertEqual(model.busy.map(\.id), [busyDoc])
@@ -82,7 +83,7 @@ final class IngestTests: XCTestCase {
         XCTAssertTrue(doc.available)
         XCTAssertEqual(doc.selected, ["v1", "b1", "r1"])
         XCTAssertEqual(doc.groups.map(\.key), ["verknuepfen", "bestaetigung", "synthese", "neu", "relation"])
-        XCTAssertEqual(doc.groups.first { $0.featured }?.ids, ["s1", "q1"])
+        XCTAssertEqual(doc.groups.first { $0.featured }?.ids, ["s1", "q1", "e1"])
         XCTAssertEqual([doc.position, doc.total], [2, 2])
         XCTAssertEqual(doc.prev, halted)
         let view = try XCTUnwrap(doc.view)
@@ -111,6 +112,19 @@ final class IngestTests: XCTestCase {
         XCTAssertEqual([s1.label, s1.slug], ["Synthese · Vergleich", "gedaechtnis-vs-rag"])
         XCTAssertEqual(s1.beteiligte, [IngestPageRef(path: "wiki/concepts/rag.md", title: "RAG")])
         XCTAssertNotNil(s1.body)
+        XCTAssertFalse(s1.isExtension)
+        XCTAssertEqual(s1.bodyLabel(featured: true), "Ganzen Text lesen")
+        XCTAssertNil(s1.extendedSlug)
+        // Ergänzung einer bestehenden Synthese: Kennzeichen, Titel und Öffnen der Synthese, eigener Aufklapptext.
+        let e1 = try XCTUnwrap(view.item("e1"))
+        XCTAssertEqual([e1.kind, e1.action, e1.label, e1.title], ["synthesis", "ergaenzen", "Synthese ergänzen", "Gedächtnis und Kontext"])
+        XCTAssertEqual(e1.open, "wiki/synthesis/gedaechtnis-und-kontext.md")
+        XCTAssertNil(e1.slug)
+        XCTAssertTrue(e1.isExtension)
+        XCTAssertEqual(e1.extendedSlug, "gedaechtnis-und-kontext")
+        XCTAssertEqual(e1.bodyLabel(featured: true), "Was ergänzt wird")
+        XCTAssertFalse(e1.isDefault)
+        XCTAssertNotNil(e1.body)
 
         let halb = try CockpitAPI.decode(IngestDocModel.self, from: try fixture("lesen-ingest-doc-halb"))
         XCTAssertEqual(halb.view?.halted?.source, "wiki/sources/halb-1234.md")
@@ -131,12 +145,13 @@ final class IngestTests: XCTestCase {
 
     func testActionResponsesAndBadgesInStackAndReader() throws {
         let applied = try CockpitAPI.decode(IngestActionResponse.self, from: try fixture("lesen-ingest-aktion-uebernehmen"))
-        XCTAssertEqual(applied.message, "Im Wiki: Bereit + 1 Seite, 1 verknüpft")
+        XCTAssertEqual(applied.message, "Im Wiki: Bereit + 1 Seite, 1 verknüpft, 1 Synthese ergänzt")
         XCTAssertEqual(applied.link, IngestLink(href: "/notiz?pfad=wiki%2Fsources%2Fbereit.md", label: "Source-Page öffnen"))
         XCTAssertEqual(applied.redirect, "/lesen/ingest/doc?id=\(halted)")
         XCTAssertEqual(applied.result?.source, "wiki/sources/bereit.md")
         XCTAssertEqual(applied.result?.linked, ["wiki/concepts/context-engineering.md"])
         XCTAssertEqual(applied.result?.confirmed, [])
+        XCTAssertEqual(applied.result?.extended, ["wiki/synthesis/gedaechtnis-und-kontext.md"])
         let done = try CockpitAPI.decode(IngestActionResponse.self, from: try fixture("lesen-ingest-aktion-erledigt"))
         XCTAssertEqual(done.undo, UndoAction(action: "/aktion/lesen/doc/status", fields: ["id": halted, "status": "stapel"]))
         let drafted = try CockpitAPI.decode(IngestActionResponse.self, from: try fixture("lesen-ingest-aktion-entwerfen"))
@@ -154,6 +169,21 @@ final class IngestTests: XCTestCase {
         let reader = try CockpitAPI.decode(ReadingDocModel.self, from: try fixture("lesen-doc-ingest"))
         XCTAssertEqual(reader.ingest, ReaderIngest(status: IngestStatus.ready, available: true))
         XCTAssertNil(try CockpitAPI.decode(ReadingDocModel.self, from: try fixture("lesen-doc")).ingest)
+    }
+
+    /// Ältere Server (ohne `ergaenzung`, `extended`) und unbekannte Arten vom Server: nichts bricht.
+    func testUnknownKindsAndOlderServersDecode() throws {
+        let item = try CockpitAPI.decode(IngestItemView.self, from: json(#"{"id":"x1","kind":"etwas-neues","action":"umbauen","label":"Neu","title":"T","default":true}"#))
+        XCTAssertEqual([item.kind, item.action], ["etwas-neues", "umbauen"])
+        XCTAssertFalse(item.isExtension)
+        XCTAssertEqual(item.bodyLabel(featured: false), "Text der Seite ansehen")
+        let tally = try CockpitAPI.decode(IngestTally.self, from: json(#"{"verknuepfen":1,"frage":1}"#))
+        XCTAssertEqual(tally.ergaenzung, 0)
+        XCTAssertEqual(tally.offerLabel, "Frage angeboten")
+        XCTAssertEqual(IngestTally(ergaenzung: 2, frage: 1).offerLabel, "Ergänzungen angeboten")
+        XCTAssertEqual(IngestTally(synthese: 1, ergaenzung: 1).offerLabel, "Synthese angeboten")
+        let result = try CockpitAPI.decode(IngestApplyResult.self, from: json(#"{"source":"wiki/sources/a.md","written":[],"linked":[]}"#))
+        XCTAssertEqual([result.confirmed, result.extended], [[], []])
     }
 
     func testRoutesFormatsAndSlugs() {
@@ -193,19 +223,19 @@ final class IngestTests: XCTestCase {
         XCTAssertTrue(store.noneSelected(featured))
         store.selectAll(featured)
         XCTAssertTrue(store.allSelected(featured))
-        XCTAssertEqual(store.chosen, ["v1", "b1", "s1", "q1", "r1"])
+        XCTAssertEqual(store.chosen, ["v1", "b1", "s1", "q1", "r1", "e1"])
         store.toggle("q1")
         XCTAssertFalse(store.isSelected("q1"))
         store.toggle("gibt-es-nicht")
         XCTAssertFalse(store.isSelected("gibt-es-nicht"))
         store.selectNone(try XCTUnwrap(store.model?.groups.first { $0.key == "verknuepfen" }))
-        XCTAssertEqual(store.chosen, ["b1", "s1", "r1"])
+        XCTAssertEqual(store.chosen, ["b1", "s1", "r1", "e1"])
         XCTAssertEqual(context.toasts.haptic?.intent, .selection)
 
         // Neu laden desselben Entwurfs lässt Auswahl und Felder stehen.
         store.title = "Eigener Titel"
         await store.refresh()
-        XCTAssertEqual(store.chosen, ["b1", "s1", "r1"])
+        XCTAssertEqual(store.chosen, ["b1", "s1", "r1", "e1"])
         XCTAssertEqual(store.title, "Eigener Titel")
 
         store.summary = String(repeating: "x", count: 81)
@@ -246,7 +276,7 @@ final class IngestTests: XCTestCase {
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer vct_geheim")
 
         let toast = try XCTUnwrap(context.toasts.toasts.last)
-        XCTAssertEqual(toast.message, "Im Wiki: Bereit + 1 Seite, 1 verknüpft")
+        XCTAssertEqual(toast.message, "Im Wiki: Bereit + 1 Seite, 1 verknüpft, 1 Synthese ergänzt")
         XCTAssertEqual(toast.action?.label, "Source-Page öffnen")
         context.toasts.perform(toast.id)
         XCTAssertEqual(opened, ["/notiz?pfad=wiki%2Fsources%2Fbereit.md"])

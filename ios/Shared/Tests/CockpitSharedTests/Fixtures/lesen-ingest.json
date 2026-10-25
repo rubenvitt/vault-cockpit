@@ -66,11 +66,13 @@
         "verknuepfen": 1,
         "bestaetigung": 1,
         "synthese": 1,
+        "ergaenzung": 1,
         "frage": 1,
         "neu": 1,
         "relation": 1
       },
-      "tallyLabel": "1 Verknüpfung · 1 Bestätigung · 1 Synthese · 1 Frage · 1 neue Seite · 1 Relation"
+      "tallyLabel": "1 Verknüpfung · 1 Bestätigung · 1 Synthese · 1 Synthese-Ergänzung · 1 Frage · 1 neue Seite · 1 Relation",
+      "offerLabel": "Synthese angeboten"
     },
     {
       "id": "079f3c9f-5e4a-42a7-949c-71a3d342b7ee",
@@ -127,11 +129,13 @@
         "verknuepfen": 1,
         "bestaetigung": 1,
         "synthese": 1,
+        "ergaenzung": 1,
         "frage": 1,
         "neu": 1,
         "relation": 1
       },
-      "tallyLabel": "1 Verknüpfung · 1 Bestätigung · 1 Synthese · 1 Frage · 1 neue Seite · 1 Relation"
+      "tallyLabel": "1 Verknüpfung · 1 Bestätigung · 1 Synthese · 1 Synthese-Ergänzung · 1 Frage · 1 neue Seite · 1 Relation",
+      "offerLabel": "Synthese angeboten"
     }
   ],
   "busy": [
@@ -157,12 +161,14 @@
         "verknuepfen": 0,
         "bestaetigung": 0,
         "synthese": 0,
+        "ergaenzung": 0,
         "frage": 0,
         "neu": 0,
         "relation": 0
       },
       "tallyLabel": "nur die Source-Page",
-      "label": "Claude entwirft, seit 796 Min. (meist 1 bis 3 Minuten)"
+      "offerLabel": null,
+      "label": "Claude entwirft, seit 919 Min. (meist 1 bis 3 Minuten)"
     }
   ],
   "failed": [
@@ -188,11 +194,13 @@
         "verknuepfen": 0,
         "bestaetigung": 0,
         "synthese": 0,
+        "ergaenzung": 0,
         "frage": 0,
         "neu": 0,
         "relation": 0
       },
-      "tallyLabel": "nur die Source-Page"
+      "tallyLabel": "nur die Source-Page",
+      "offerLabel": null
     }
   ],
   "actions": {
