@@ -29,8 +29,8 @@ struct CockpitApp: App {
                     await model.cockpit?.foreground()
                 }
             }
-            .sheet(item: $model.listening) { PlayerView(minutes: $0.minutes) }
-            .sheet(item: $model.episode) { EpisodePlayerView(request: $0) }
+            // Der große Player; geschlossen spielt er weiter, als Leiste über den Reitern (`nowPlayingBar`).
+            .sheet(isPresented: $model.showsPlayer) { NowPlayingSheet(model: model) }
         }
     }
 }

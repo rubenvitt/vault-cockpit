@@ -27,6 +27,7 @@ import { evidenceRoutes } from '../lesen/synthesis-evidence.js';
 
 const staticFile = (name, enc) => readFileSync(new URL(`./static/${name}`, import.meta.url), enc);
 const UI_JS = staticFile('ui.js', 'utf8');
+const PLAYER_JS = staticFile('player.js', 'utf8');
 const CLIENT_JS = staticFile('cockpit.js', 'utf8');
 const GRAPH_JS = staticFile('graph.js', 'utf8');
 const OFFLINE_JS = staticFile('offline.js', 'utf8');
@@ -42,7 +43,7 @@ const GRAPH_LIB = staticFile('vendor/graph-lib.js', 'utf8');
 // Design-System (Tokens, Bausteine, Wochenansicht) plus die Teile der übrigen Seiten.
 const CSS = staticFile('cockpit.css', 'utf8') + GRAPH_CSS + NOTE_CSS + REVIEW_CSS + PLAN_CSS + HEALTH_CSS + OFFLINE_CSS;
 const hash = (s) => createHash('sha256').update(s).digest('base64url').slice(0, 10);
-const VERSION = { css: hash(CSS), ui: hash(UI_JS), js: hash(CLIENT_JS), graph: hash(GRAPH_JS), graphLib: hash(GRAPH_LIB), offline: hash(OFFLINE_JS), inbox: hash(INBOX_JS), lesenDoc: hash(LESEN_DOC_JS), lesenHoeren: hash(LESEN_HOEREN_JS), lesenFolgen: hash(LESEN_FOLGEN_JS), lesenLinks: hash(LESEN_LINKS_JS), lesenFeeds: hash(LESEN_FEEDS_JS), lesenIngest: hash(LESEN_INGEST_JS) };
+const VERSION = { css: hash(CSS), ui: hash(UI_JS), player: hash(PLAYER_JS), js: hash(CLIENT_JS), graph: hash(GRAPH_JS), graphLib: hash(GRAPH_LIB), offline: hash(OFFLINE_JS), inbox: hash(INBOX_JS), lesenDoc: hash(LESEN_DOC_JS), lesenHoeren: hash(LESEN_HOEREN_JS), lesenFolgen: hash(LESEN_FOLGEN_JS), lesenLinks: hash(LESEN_LINKS_JS), lesenFeeds: hash(LESEN_FEEDS_JS), lesenIngest: hash(LESEN_INGEST_JS) };
 versionAssets(VERSION);
 
 /** Web-App-Manifest: Das Cockpit startet auf dem iPhone und unter Android wie eine App. */
@@ -72,6 +73,7 @@ const MANIFEST = JSON.stringify({
 const PUBLIC = new Map([
   ['/static/cockpit.css', { type: 'text/css; charset=utf-8', body: CSS, version: VERSION.css }],
   ['/static/ui.js', { type: 'text/javascript; charset=utf-8', body: UI_JS, version: VERSION.ui }],
+  ['/static/player.js', { type: 'text/javascript; charset=utf-8', body: PLAYER_JS, version: VERSION.player }],
   ['/static/cockpit.js', { type: 'text/javascript; charset=utf-8', body: CLIENT_JS, version: VERSION.js }],
   ['/static/graph.js', { type: 'text/javascript; charset=utf-8', body: GRAPH_JS, version: VERSION.graph }],
   ['/static/vendor/graph-lib.js', { type: 'text/javascript; charset=utf-8', body: GRAPH_LIB, version: VERSION.graphLib }],
@@ -115,7 +117,7 @@ const HTML_HEADERS = {
   'content-type': 'text/html; charset=utf-8',
   'cache-control': 'no-store',
   'content-security-policy':
-    "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; media-src 'self' blob:; manifest-src 'self'; worker-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+    "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; media-src 'self' blob:; manifest-src 'self'; worker-src 'self'; frame-src 'self'; form-action 'self'; frame-ancestors 'self'; base-uri 'none'",
   'x-content-type-options': 'nosniff',
   'referrer-policy': 'same-origin',
 };
@@ -272,6 +274,11 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     // `app=1`: Login der iOS-App, endet auf `/app/angemeldet` (Universal Link) statt mit einer Sitzung.
     const app = url.searchParams.get('app') === '1' ? appAccess?.start(url) : null;
     if (url.searchParams.get('app') === '1' && !app) return send(res, 400, renderMessage('Login nicht möglich', 'Der App-Login braucht gültige Werte für state und challenge.'));
+    // Im Rahmen des Players (/static/player.js) lässt sich Pocket ID nicht öffnen: anmelden im ganzen Fenster.
+    if (!app && req.headers['sec-fetch-dest'] === 'iframe') {
+      const next = safeNext(url.searchParams.get('next'));
+      return send(res, 200, renderMessage('Neu anmelden', 'Die Anmeldung ist abgelaufen.', { link: { href: `/login?next=${encodeURIComponent(next)}`, label: 'Anmelden', top: true } }));
+    }
     const { url: target, pending } = await oidc.start();
     const value = signer.seal({ ...pending, ...(app ? { app } : { next: safeNext(url.searchParams.get('next')) }), exp: Math.floor(now() / 1000) + 600 });
     redirect(res, target, [cookie(LOGIN, value, { secure, maxAge: 600 })]);

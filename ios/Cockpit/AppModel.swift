@@ -77,8 +77,21 @@ final class AppModel {
     var notice: String?
     /// Pfad, den die App nach dem nächsten Login öffnet (dort, wo die Sitzung ablief).
     var startPath = "/"
-    var listening: ListenRequest?
-    var episode: EpisodeRequest?
+    /// Wunsch nach „Unterwegs hören“; startet den Player (`nowPlaying`) und zeigt ihn groß.
+    var listening: ListenRequest? {
+        didSet { if let listening { play(listening) } }
+    }
+    /// Wunsch nach einer Folge; startet den Player (`nowPlaying`) und zeigt ihn groß.
+    var episode: EpisodeRequest? {
+        didSet { if let episode { play(episode) } }
+    }
+    /// Was spielt oder angehalten bereitliegt. Bleibt, wenn man den großen Player schließt, und
+    /// steht als Leiste über den Reitern (`NowPlayingBar`), bis man ihn beendet (`closePlayer()`).
+    private(set) var nowPlaying: NowPlaying?
+    /// Großer Player als Blatt über allem.
+    var showsPlayer = false
+    /// Baut die Player; Tests setzen eigene ein, damit kein Ton und kein Netz anläuft.
+    @ObservationIgnored var players = PlayerFactory.live
 
     /// Gewählter Reiter.
     var tab: AppTab = .week
@@ -118,8 +131,47 @@ final class AppModel {
         if let token { startCockpit(token: token) }
         #if DEBUG
         // Player ohne Anmeldung im Simulator vorführen (`-PlayerDemo`, siehe ios/README.md).
-        if DemoListenService.isRequested { listening = ListenRequest(minutes: 15) }
+        // Im `init` läuft `didSet` nicht, deshalb ausdrücklich.
+        if DemoListenService.isRequested { play(ListenRequest(minutes: 15)) }
         #endif
+    }
+
+    // MARK: Player
+
+    /// „Unterwegs hören“: Läuft dasselbe Zeitfenster schon, nur den großen Player zeigen.
+    private func play(_ request: ListenRequest) {
+        if case .listening(let player) = nowPlaying, player.minutes == request.minutes {
+            showsPlayer = true
+            return
+        }
+        let player = players.listening(request.minutes)
+        replacePlayer(with: .listening(player))
+        Task { await player.start() }
+    }
+
+    /// Folge: Ist es dieselbe, nur den großen Player zeigen (er spielt weiter oder steht auf Pause).
+    private func play(_ request: EpisodeRequest) {
+        if case .episode(let player) = nowPlaying, player.id == request.episodeID {
+            showsPlayer = true
+            return
+        }
+        let player = players.episode(request)
+        replacePlayer(with: .episode(player))
+        Task { await player.start() }
+    }
+
+    /// Immer nur ein Player: Der alte hält an und meldet sich beim System ab.
+    private func replacePlayer(with next: NowPlaying) {
+        nowPlaying?.close()
+        nowPlaying = next
+        showsPlayer = true
+    }
+
+    /// Wiedergabe beenden (× in der Leiste, „Beenden“ im großen Player, Abmelden).
+    func closePlayer() {
+        nowPlaying?.close()
+        nowPlaying = nil
+        showsPlayer = false
     }
 
     /// Adresse eines Pfads auf dem Server, z. B. `/lesen`.
@@ -375,6 +427,7 @@ final class AppModel {
         // Gespeicherte Stände gehören zum Konto. Der Puffer der Schnelleingabe bleibt und geht nach dem nächsten Login raus.
         cockpit?.stop()
         cockpit = nil
+        closePlayer()
         SnapshotStore.applicationSupport().removeAll()
         tab = .week
         weekPath = []

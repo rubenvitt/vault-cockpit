@@ -97,6 +97,19 @@ make test      # Unit-Tests auf dem ersten verfügbaren iPhone-Simulator
 - **Haptik**: Die Stores melden Auswahl, Erfolg und Fehler (`ToastCenter.signal`), `MainView` gibt
   das passende `sensoryFeedback`.
 
+## Läuft gerade: Player über den Reitern
+
+Beide Player gehören der App, nicht ihrem Blatt (`AppModel.nowPlaying`, `Cockpit/NowPlaying.swift`).
+„Unterwegs hören“ oder „Abspielen“ an einer Folge startet ihn und zeigt ihn groß
+(`AppModel.showsPlayer`). „Fertig“ oder Wischen schließt nur das Blatt: Es spielt weiter, im
+Hintergrund wie bisher (Hintergrundmodus `audio`) und in der App als Leiste über der Tableiste jedes
+Reiters (`NowPlayingBar`, `safeAreaInset`): Titel, bei Folgen Stelle und Fortschritt, Abspielen/Pause,
+Tippen öffnet wieder den großen Player, × beendet. „Beenden“ im großen Player und Abmelden halten
+ebenso an. Es läuft immer nur einer: Eine Folge löst das Hören ab und umgekehrt (der alte hält an
+und meldet sich beim System ab). Derselbe Wunsch noch einmal (gleiche Folge, gleiches Zeitfenster)
+zeigt nur den großen Player, statt neu anzufangen. Tests: `NowPlayingTests`, mit
+`AppModel.PlayerFactory.silent` ohne Netz und Ton.
+
 ## Player „Unterwegs hören“ (VCP-94)
 
 `speechSynthesis` in der PWA stoppt beim Sperren des Bildschirms, der native Player nicht
@@ -197,7 +210,7 @@ let saved = try await api.saveToReadingList(url: link, title: title)  // saved.m
 
 Tests (`CockpitTests`): API-Client und Einlösen über einen `URLProtocol`-Mock, Keychain über
 `KeychainBackend` gemockt, dazu PKCE (Testvektor aus RFC 7636), Callback-Prüfung, Cookie-Umwandlung,
-Navigationsregeln (`RoutingTests`: Links, Reiter, Blatt mit Seiten). `ShareTests`: Inhaltserkennung, PDF-Upload (Body, Query, Header)
+Navigationsregeln (`RoutingTests`: Links, Reiter, Blatt mit Seiten), Player über den Reitern (`NowPlayingTests`). `ShareTests`: Inhaltserkennung, PDF-Upload (Body, Query, Header)
 und Offline-Puffer in einem temporären Verzeichnis.
 
 ## Share Extension „Zum Lesestapel“ (VCP-93)

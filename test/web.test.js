@@ -156,9 +156,9 @@ async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSu
   await new Promise((res) => app.once('listening', res));
   const base = `http://127.0.0.1:${app.address().port}`;
   const jar = {};
-  const call = async (path, { method = 'GET', cookies = true, form = null, origin = null, accept = null } = {}) => {
+  const call = async (path, { method = 'GET', cookies = true, form = null, origin = null, accept = null, headers: extra = {} } = {}) => {
     const cookie = cookies ? Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ') : '';
-    const headers = { 'x-forwarded-host': 'vault.test', ...(cookie ? { cookie } : {}), ...(origin ? { origin } : {}), ...(accept ? { accept } : {}) };
+    const headers = { 'x-forwarded-host': 'vault.test', ...(cookie ? { cookie } : {}), ...(origin ? { origin } : {}), ...(accept ? { accept } : {}), ...extra };
     if (form) headers['content-type'] = 'application/x-www-form-urlencoded';
     const res = await fetch(base + path, { method, redirect: 'manual', headers, body: form ? new URLSearchParams(form).toString() : undefined });
     for (const c of res.headers.getSetCookie()) {
@@ -272,6 +272,25 @@ test('Login: kein offener Redirect über next', async () => {
       assert.equal((await login(next)).headers.get('location'), '/');
     });
   }
+});
+
+test('Login aus dem Rahmen des Players: Link zur Anmeldung im ganzen Fenster statt Pocket ID im Rahmen', async () => {
+  await withServer(async ({ call }) => {
+    const res = await call('/login?next=%2Flesen%2Fstapel', { headers: { 'sec-fetch-dest': 'iframe' } });
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('location'), null, 'keine Weiterleitung zu Pocket ID');
+    assert.match(await res.text(), /<a href="\/login\?next=%2Flesen%2Fstapel" class="btn primary" target="_top">Anmelden<\/a>/);
+    assert.equal((await call('/login?next=%2F%2Fevil.test', { headers: { 'sec-fetch-dest': 'iframe' } }).then((r) => r.text())).match(/href="([^"]+)" class="btn primary"/)[1], '/login?next=%2F');
+    assert.equal((await call('/login')).status, 303, 'sonst wie bisher zu Pocket ID');
+  });
+});
+
+test('CSP: Seiten lassen sich nur vom Cockpit selbst einrahmen (Player beim Seitenwechsel)', async () => {
+  await withServer(async ({ call }) => {
+    const csp = (await call('/login', { headers: { 'sec-fetch-dest': 'iframe' } })).headers.get('content-security-policy');
+    assert.match(csp, /frame-src 'self'/);
+    assert.match(csp, /frame-ancestors 'self'/);
+  });
 });
 
 test('Login: Abbruch bei Pocket ID zeigt eine Meldung', async () => {

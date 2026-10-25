@@ -1,8 +1,10 @@
-// Folgen (src/lesen/folgen-page.js): eigener Player statt des eingebetteten
-// <audio controls>. Ein Audio-Element für die ganze Seite, großer Knopf je
-// Folge, Stelle, ±Sekunden und Tempo. Über die Media Session stehen Titel und
-// Knöpfe auf dem Sperrbildschirm, im Kontrollzentrum und an Kopfhörern. Die
-// Stelle je Folge bleibt im Browser, beim nächsten Abspielen geht es dort weiter.
+// Folgen (src/lesen/folgen-page.js): großer Knopf je Folge, Stelle, ±Sekunden
+// und Tempo statt des eingebetteten <audio controls>. Abgespielt wird im Player
+// des Cockpits (/static/player.js, `window.cockpitPlayer`): Er läuft beim Wechsel
+// auf andere Seiten weiter, steht als Leiste unten und über die Media Session auf
+// dem Sperrbildschirm, im Kontrollzentrum und an Kopfhörern. Die Karten zeigen
+// nur seinen Stand. Die Stelle je Folge bleibt im Browser, beim nächsten
+// Abspielen geht es dort weiter.
 //
 // In der iOS-App schickt der Knopf nur `{type:'folge', id, titel, art}` an die
 // App; dort spielt der native Player (Sperrbildschirm, AirPlay, Hintergrund).
@@ -62,77 +64,50 @@
   const list = document.querySelector('.folgen');
   if (!list) return;
   const app = window.webkit?.messageHandlers?.cockpit;
+  const engine = window.cockpitPlayer;
   const toast = (text) => window.cockpit?.toast?.(text);
-
-  const SKIP_BACK = 15;
-  const SKIP_FORWARD = 30;
-  const RATE = 'folgen-tempo';
   const SPOT = 'folgen-stelle:';
-
-  const store = {
-    get(key) {
-      try {
-        return localStorage.getItem(key);
-      } catch {
-        return null;
-      }
-    },
-    set(key, value) {
-      try {
-        if (value === null) localStorage.removeItem(key);
-        else localStorage.setItem(key, value);
-      } catch {
-        /* privater Modus: ohne Merken */
-      }
-    },
-  };
-
-  function clock(seconds) {
-    const t = Math.max(0, Math.floor(seconds || 0));
-    const h = Math.floor(t / 3600);
-    const m = Math.floor((t % 3600) / 60);
-    const s = String(t % 60).padStart(2, '0');
-    return h ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
-  }
+  const clock = (seconds) => engine?.clock(seconds) ?? '';
 
   // MARK: Player
 
-  const audio = app ? null : new Audio();
-  if (audio) audio.preload = 'metadata';
-  let current = null;
-  let rate = Number(store.get(RATE)) || 1;
-  let lastSaved = 0;
-
   const part = (li, name) => li.querySelector(`[data-${name}]`);
+  const meta = (li) => ({ id: li.dataset.folge, src: li.dataset.src, title: li.dataset.title, art: li.dataset.art, seconds: Number(li.dataset.seconds) || 0 });
+  const isCurrent = (li, s) => s.folge?.id === li.dataset.folge;
+
+  function spotOf(li) {
+    try {
+      return Number(localStorage.getItem(SPOT + li.dataset.folge)) || 0;
+    } catch {
+      return 0;
+    }
+  }
 
   function bind(li) {
     const play = part(li, 'play');
-    if (!play) return;
+    if (!play || (!app && !engine)) return;
     li.querySelector('.folge-nojs')?.remove();
     play.hidden = false;
     play.addEventListener('click', () => toggle(li));
     if (app) return;
     const seek = part(li, 'seek');
     seek.addEventListener('input', () => {
-      if (current !== li) {
-        // Noch nicht geladen: die gewählte Stelle übernimmt `load` nach den Metadaten.
-        store.set(SPOT + li.dataset.folge, seek.value);
-        load(li);
-      }
-      if (Number.isFinite(audio.duration)) audio.currentTime = Number(seek.value);
+      engine.seekFolge(meta(li), Number(seek.value));
       showTime(li, Number(seek.value));
     });
-    for (const b of li.querySelectorAll('[data-skip]')) b.addEventListener('click', () => skip(Number(b.dataset.skip)));
+    for (const b of li.querySelectorAll('[data-skip]')) b.addEventListener('click', () => isCurrent(li, engine.state()) && engine.skip(Number(b.dataset.skip)));
     const select = part(li, 'rate');
-    if ([...select.options].some((o) => Number(o.value) === rate)) select.value = String(rate);
-    select.addEventListener('change', () => setRate(Number(select.value) || 1));
+    const rate = String(engine.state().rates.folge);
+    if (select.value !== rate && [...select.options].some((o) => o.value === rate)) select.value = rate;
+    select.addEventListener('change', () => engine.setRate('folge', Number(select.value) || 1));
     // Gemerkte Stelle schon vor dem Abspielen zeigen.
-    const spot = Number(store.get(SPOT + li.dataset.folge));
+    const spot = spotOf(li);
     if (spot > 0) {
       part(li, 'player').hidden = false;
       seek.value = String(spot);
       showTime(li, spot);
     }
+    show(engine.state());
   }
 
   function toggle(li) {
@@ -141,56 +116,7 @@
       app.postMessage({ type: 'folge', id: li.dataset.folge, titel: li.dataset.title, art: li.dataset.art, dauer: Number(li.dataset.seconds) || 0, groesse: Number(li.dataset.bytes) || 0 });
       return;
     }
-    if (current !== li) load(li);
-    if (audio.paused) start();
-    else audio.pause();
-  }
-
-  function start() {
-    // Ohne Tipp (Sperrbildschirm nach Neuladen) verweigert Safari; der nächste Tipp klappt.
-    // Ladefehler meldet das `error`-Ereignis des Elements auf Deutsch.
-    audio.play().catch(() => {});
-  }
-
-  function load(li) {
-    if (current) {
-      remember(true);
-      current.classList.remove('is-current', 'is-playing');
-      setPressed(current, false);
-    }
-    current = li;
-    li.classList.add('is-current');
-    part(li, 'player').hidden = false;
-    part(li, 'error').hidden = true;
-    audio.src = li.dataset.src;
-    audio.playbackRate = rate;
-    const spot = Number(store.get(SPOT + li.dataset.folge));
-    if (spot > 0) audio.addEventListener('loadedmetadata', () => (audio.currentTime = Math.min(spot, Math.max(0, audio.duration - 1))), { once: true });
-    if ('mediaSession' in navigator && 'MediaMetadata' in window) {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: li.dataset.title,
-        artist: `Cockpit · ${li.dataset.art || 'Folge'}`,
-        album: 'Folgen aus dem Lesestapel',
-        artwork: [
-          { src: '/static/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
-          { src: '/static/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
-        ],
-      });
-    }
-  }
-
-  function skip(by) {
-    if (!current) return;
-    const end = Number.isFinite(audio.duration) ? audio.duration : Infinity;
-    audio.currentTime = Math.min(end, Math.max(0, audio.currentTime + by));
-  }
-
-  function setRate(value) {
-    rate = value;
-    store.set(RATE, String(value));
-    if (audio) audio.playbackRate = value;
-    for (const s of list.querySelectorAll('[data-rate]')) s.value = String(value);
-    position();
+    engine.playFolge(meta(li));
   }
 
   function setPressed(li, playing) {
@@ -204,114 +130,36 @@
     part(li, 'pos').textContent = clock(at);
   }
 
-  function fail(text) {
-    if (!current) return;
-    const box = part(current, 'error');
-    box.textContent = text;
-    box.hidden = false;
-  }
-
-  /** Stelle merken, höchstens alle 5 Sekunden; am Ende vergessen. */
-  function remember(force = false) {
-    if (!current) return;
-    const now = Date.now();
-    if (!force && now - lastSaved < 5000) return;
-    lastSaved = now;
-    const key = SPOT + current.dataset.folge;
-    const near = Number.isFinite(audio.duration) && audio.duration - audio.currentTime < 5;
-    store.set(key, audio.currentTime > 3 && !near ? String(Math.floor(audio.currentTime)) : null);
-  }
-
-  /** Länge: die des Browsers, mindestens die vom Server (feste Bitrate), falls der Browser sich verschätzt. */
-  function length() {
-    const known = Number(current?.dataset.seconds) || 0;
-    return Math.max(Number.isFinite(audio.duration) ? audio.duration : 0, known);
-  }
-
-  function position() {
-    const session = navigator.mediaSession;
-    if (!audio || !session?.setPositionState || !Number.isFinite(audio.duration)) return;
-    try {
-      session.setPositionState({ duration: audio.duration, playbackRate: audio.playbackRate, position: Math.min(audio.currentTime, audio.duration) });
-    } catch {
-      /* ältere Browser */
-    }
-  }
-
-  if (audio) {
-    audio.addEventListener('play', () => {
-      current?.classList.add('is-playing');
-      if (current) setPressed(current, true);
-      if (navigator.mediaSession) navigator.mediaSession.playbackState = 'playing';
-    });
-    audio.addEventListener('pause', () => {
-      current?.classList.remove('is-playing');
-      if (current) setPressed(current, false);
-      if (navigator.mediaSession) navigator.mediaSession.playbackState = 'paused';
-      remember(true);
-    });
-    audio.addEventListener('loadedmetadata', () => {
-      if (!current) return;
-      const seek = part(current, 'seek');
-      seek.max = String(Math.floor(length()));
-      part(current, 'dur').textContent = clock(length());
-      position();
-    });
-    audio.addEventListener('timeupdate', () => {
-      if (!current) return;
-      const seek = part(current, 'seek');
-      if (document.activeElement !== seek) seek.value = String(Math.floor(audio.currentTime));
-      showTime(current, audio.currentTime);
-      remember();
-    });
-    audio.addEventListener('seeked', position);
-    audio.addEventListener('ratechange', position);
-    audio.addEventListener('ended', () => {
-      store.set(SPOT + current?.dataset.folge, null);
-      if (current) {
-        part(current, 'seek').value = '0';
-        showTime(current, 0);
-      }
-    });
-    audio.addEventListener('error', () => {
-      current?.classList.remove('is-playing');
-      if (current) setPressed(current, false);
-      const code = audio.error?.code;
-      fail(code === 4 ? 'Die MP3 ließ sich nicht laden. Seite neu laden und noch einmal versuchen.' : `Abspielen ging nicht (Fehler ${code ?? '?'}).`);
-    });
-    // Vor dem Schließen der Seite die Stelle sichern.
-    addEventListener('pagehide', () => remember(true));
-
-    const session = navigator.mediaSession;
-    if (session) {
-      const on = (action, handler) => {
-        try {
-          session.setActionHandler(action, handler);
-        } catch {
-          /* Aktion unbekannt */
-        }
-      };
-      on('play', () => current && start());
-      on('pause', () => audio.pause());
-      on('stop', () => audio.pause());
-      on('seekbackward', (d) => skip(-(d?.seekOffset || SKIP_BACK)));
-      on('seekforward', (d) => skip(d?.seekOffset || SKIP_FORWARD));
-      on('seekto', (d) => {
-        if (!current || !Number.isFinite(d?.seekTime)) return;
-        if (d.fastSeek && 'fastSeek' in audio) audio.fastSeek(d.seekTime);
-        else audio.currentTime = d.seekTime;
-      });
-      // Ohne vorige/nächste Folge zeigt iOS sonst Spulen statt ±Sekunden.
-      on('previoustrack', null);
-      on('nexttrack', null);
+  /** Karten nach dem Stand des Players: laufende Folge mit Stelle, Länge und Fehler. */
+  function show(s) {
+    for (const li of list.querySelectorAll('.folge[data-src]')) {
+      const current = isCurrent(li, s);
+      const playing = current && s.playing;
+      li.classList.toggle('is-current', current);
+      li.classList.toggle('is-playing', playing);
+      setPressed(li, playing);
+      const rate = part(li, 'rate');
+      const want = String(s.rates.folge);
+      if (rate && rate.value !== want && [...rate.options].some((o) => o.value === want)) rate.value = want;
+      if (!current) continue;
+      const f = s.folge;
+      part(li, 'player').hidden = false;
+      const seek = part(li, 'seek');
+      seek.max = String(Math.floor(f.duration));
+      if (document.activeElement !== seek) seek.value = String(Math.floor(f.position));
+      showTime(li, f.position);
+      if (f.duration) part(li, 'dur').textContent = clock(f.duration);
+      const box = part(li, 'error');
+      box.textContent = f.error ?? '';
+      box.hidden = !f.error;
     }
   }
 
   // Leertaste: Abspielen/Pause der laufenden Folge, solange kein Feld den Fokus hat.
   document.addEventListener('keydown', (e) => {
-    if (e.key !== ' ' || !current || !audio || e.target.closest?.('input, select, textarea, button, a')) return;
+    if (e.key !== ' ' || !engine || app || !engine.state().folge || e.target.closest?.('input, select, textarea, button, a')) return;
     e.preventDefault();
-    toggle(current);
+    engine.toggle();
   });
 
   // MARK: Stand der entstehenden Folgen
@@ -347,6 +195,7 @@
   }
 
   for (const li of list.querySelectorAll('.folge')) bind(li);
+  if (engine && !app) engine.on(show);
   poll();
   document.addEventListener('visibilitychange', () => !document.hidden && list.querySelector('.folge.is-busy') && refresh());
 })();

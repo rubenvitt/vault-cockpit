@@ -2,18 +2,14 @@ import AVKit
 import SwiftUI
 
 /// Nativer Player für eine fertige Folge. Öffnet sich mit „Abspielen“ unter Lesen → Folgen
-/// (`AppModel.episode`), spielt gleich los und läuft bei gesperrtem Bildschirm weiter.
+/// (`AppModel.episode`), spielt gleich los und läuft bei gesperrtem Bildschirm weiter. Den Player
+/// hält `AppModel.nowPlaying`: „Fertig“ schließt nur das Blatt, die Folge läuft unter den Reitern
+/// als Leiste weiter. „Beenden“ hält an.
 struct EpisodePlayerView: View {
-    @State private var player: EpisodePlayer
+    @Bindable var player: EpisodePlayer
+    /// Wiedergabe beenden (`AppModel.closePlayer`).
+    let stop: @MainActor () -> Void
     @Environment(\.dismiss) private var dismiss
-
-    init(request: AppModel.EpisodeRequest) {
-        _player = State(initialValue: EpisodePlayer.live(id: request.episodeID, title: request.title, kind: request.kind, seconds: request.seconds, bytes: request.bytes))
-    }
-
-    init(player: EpisodePlayer) {
-        _player = State(initialValue: player)
-    }
 
     var body: some View {
         NavigationStack {
@@ -63,13 +59,16 @@ struct EpisodePlayerView: View {
             .navigationTitle("Folge")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                Button("Fertig") { dismiss() }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Beenden", role: .destructive) { stop() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Fertig") { dismiss() }
+                }
             }
         }
         // Akzent wie im Web-Cockpit (--accent).
         .tint(Color(red: 0.76, green: 0.25, blue: 0.05))
-        .task { await player.start() }
-        .onDisappear { player.close() }
     }
 
     private var cover: some View {
@@ -142,6 +141,6 @@ private struct RoutePicker: UIViewRepresentable {
 
 #if DEBUG
 #Preview {
-    EpisodePlayerView(player: EpisodePlayer(id: "demo", title: "Podcast: Vom Lesen und 3 weitere", kind: "Podcast", api: nil, defaults: .standard))
+    EpisodePlayerView(player: EpisodePlayer(id: "demo", title: "Podcast: Vom Lesen und 3 weitere", kind: "Podcast", api: nil, defaults: .standard), stop: {})
 }
 #endif

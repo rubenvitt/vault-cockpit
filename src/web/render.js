@@ -704,10 +704,11 @@ ${backup ? backupSection(backup, token) : ''}
 </html>`;
 }
 
+/** `link.top`: Der Link öffnet im ganzen Fenster, etwa die Anmeldung aus dem Rahmen des Players. */
 export function renderMessage(title, text, { link = null } = {}) {
   return `<!doctype html>
 <html lang="de">
 ${head(title)}
-<body class="page-message"><main class="message"><a href="/" class="brand" aria-label="Cockpit">${icon('flame', 'brand-mark')}<span class="brand-name">Cockpit</span></a><h1>${esc(title)}</h1><p>${esc(text)}</p>${link ? `<p><a href="${esc(link.href)}" class="btn primary">${esc(link.label)}</a></p>` : ''}</main></body>
+<body class="page-message"><main class="message"><a href="/" class="brand" aria-label="Cockpit">${icon('flame', 'brand-mark')}<span class="brand-name">Cockpit</span></a><h1>${esc(title)}</h1><p>${esc(text)}</p>${link ? `<p><a href="${esc(link.href)}" class="btn primary"${link.top ? ' target="_top"' : ''}>${esc(link.label)}</a></p>` : ''}</main></body>
 </html>`;
 }

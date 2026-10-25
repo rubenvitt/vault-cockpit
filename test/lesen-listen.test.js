@@ -93,12 +93,16 @@ test('Hören: Seite listet das Zeitfenster ohne JavaScript, Text als JSON, Link 
   assert.match((await page('/lesen/stapel')).html, /href="\/lesen\/hoeren\?zeit=15"/);
 });
 
-/** /static/lesen-hoeren.js auf der gerenderten Seite ausführen; `window` sind die Browser-Fähigkeiten. */
+/**
+ * /static/player.js und /static/lesen-hoeren.js auf der gerenderten Seite ausführen, wie im
+ * Browser in dieser Reihenfolge; `window` sind die Browser-Fähigkeiten.
+ */
 async function runPlayerScript(window, { speech = null, globals = () => ({}) } = {}) {
   const { page } = setup({ speech });
   const { document } = parseHTML((await page('/lesen/hoeren?zeit=30')).html);
-  const context = { window, document, location: { search: '?zeit=30' }, URLSearchParams, Element: document.defaultView.Element, localStorage: { getItem: () => null, setItem() {} }, navigator: {}, fetch: () => new Promise(() => {}), ...globals(page) };
-  vm.runInNewContext(readFileSync(new URL('../src/web/static/lesen-hoeren.js', import.meta.url), 'utf8'), context);
+  window.addEventListener ??= () => {};
+  const context = vm.createContext({ window, document, location: { search: '?zeit=30' }, URLSearchParams, Element: document.defaultView.Element, localStorage: { getItem: () => null, setItem() {} }, navigator: {}, fetch: () => new Promise(() => {}), setTimeout, clearTimeout, ...globals(page) });
+  for (const file of ['player.js', 'lesen-hoeren.js']) vm.runInContext(readFileSync(new URL(`../src/web/static/${file}`, import.meta.url), 'utf8'), context);
   return document.querySelector('.hoeren-player');
 }
 
@@ -160,7 +164,6 @@ test('Hören: mit Stimme vom Server spielt jeder Satz als Audio, fällt sie aus,
   const blobs = [];
   const URL = { createObjectURL: (b) => (blobs.push(b), `blob:${blobs.length}`), revokeObjectURL() {} };
   const spoken = [];
-  const toasts = [];
   const speechSynthesis = { getVoices: () => [], speak: (u) => spoken.push(u.text), cancel() {} };
   class SpeechSynthesisUtterance {
     constructor(text) {
@@ -168,8 +171,9 @@ test('Hören: mit Stimme vom Server spielt jeder Satz als Audio, fällt sie aus,
     }
   }
   const tick = () => new Promise((r) => setTimeout(r, 5));
+  const window = { speechSynthesis, cockpit: { toast() {}, send() {}, csrf: () => 'c' } };
   const player = await runPlayerScript(
-    { speechSynthesis, cockpit: { toast: (m) => toasts.push(m), send() {}, csrf: () => 'c' } },
+    window,
     { speech, globals: (page) => ({ fetch: fetchFrom(page), Audio: FakeAudio, URL, SpeechSynthesisUtterance, setTimeout }) },
   );
   await tick();
@@ -189,6 +193,8 @@ test('Hören: mit Stimme vom Server spielt jeder Satz als Audio, fällt sie aus,
   FakeAudio.last.on.ended();
   await tick();
   assert.deepEqual(spoken, ['Ein zweiter Absatz.'], 'Gerätestimme übernimmt den Satz');
-  assert.deepEqual(toasts, ['ElevenLabs: Kontingent aufgebraucht. Die Gerätestimme liest weiter.']);
+  // Die Meldung steht in der Leiste des Players, die auch auf anderen Seiten bleibt.
+  assert.equal(window.cockpitPlayer.state().message.text, 'ElevenLabs: Kontingent aufgebraucht. Die Gerätestimme liest weiter.');
+  assert.equal(player.ownerDocument.querySelector('.player-msg [data-part=msg-text]').textContent, 'ElevenLabs: Kontingent aufgebraucht. Die Gerätestimme liest weiter.');
   assert.equal(played.length, 2);
 });
