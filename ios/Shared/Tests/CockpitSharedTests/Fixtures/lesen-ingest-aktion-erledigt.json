@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "message": "Erledigt, ohne Wiki: Halb",
+  "undo": {
+    "action": "/aktion/lesen/doc/status",
+    "fields": {
+      "id": "be81701e-cc17-4c80-a4f5-c0c63dd94db0",
+      "status": "stapel"
+    }
+  },
+  "redirect": "/lesen/ingest"
+}

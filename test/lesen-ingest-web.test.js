@@ -6,10 +6,18 @@ import { createCookieSigner } from '../src/web/session.js';
 import { createSettingsStore } from '../src/cockpit/settings.js';
 import { createReadingStore } from '../src/lesen/store.js';
 import { readingRoutes } from '../src/lesen/http.js';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { appliedMessage, groupItems, kindLabel, standBack, tally, tallyLabel } from '../src/lesen/ingest-page.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
+
+/** Mit `COCKPIT_FIXTURES=<Ordner>` schreiben die Tests ihre Antworten als Fixtures für die App (`lesen-ingest-*.json`). */
+const keep = (name, body) => {
+  const dir = process.env.COCKPIT_FIXTURES;
+  if (dir) writeFileSync(join(dir, `${name}.json`), `${JSON.stringify(body, null, 2)}\n`);
+  return body;
+};
 const SECRET = 'x'.repeat(40);
 
 /** Wie der echte Dienst: Fehler mit `status` und deutscher Meldung. */
@@ -668,4 +676,89 @@ test('Ingest: vom Dienst verworfener Entwurf (schon im Wiki) nennt den Grund sta
     assert.match(page, /<p class="notice">Schon im Wiki \(ingest: 2026-10-20\) – kein Entwurf<\/p>/);
     assert.ok(!page.includes('>Ingest entwerfen<'));
   });
+});
+
+test('Ingest: App-JSON trägt Claudes Texte als Baum, den Abbruch, die Verfügbarkeit und Texte ohne Entwurf', async () => {
+  await withIngest(async ({ html, call, add, ingest }) => {
+    const r = add('Bereit');
+    const b = add('Läuft');
+    const f = add('Kaputt');
+    const halb = add('Halb');
+    const ohne = add('Ohne Entwurf');
+    const draft = draftFor('Bereit');
+    draft.digest.neu = ['Ergänzt [[claude-code]] und [[gibt-es-nicht-im-wiki]]'];
+    ingest.put(r.id, 'bereit', { draft, drafted_at: '2026-10-25T02:10:00Z' });
+    ingest.put(b.id, 'entwirft', { origin: 'knopf' });
+    ingest.put(f.id, 'fehler', { error: 'Claude hat nicht geantwortet' });
+    ingest.put(halb.id, 'bereit', {
+      draft: draftFor('Halb'),
+      error: '"wiki/concepts/rag.md" wurde gerade anderweitig geändert.',
+      applied: { steps: ['raw', 'source'], items: {}, written: ['wiki/sources/halb-1234.md'], linked: [], raw: 'raw/halb.md', slug: 'halb-1234', source: 'wiki/sources/halb-1234.md' },
+    });
+
+    const list = keep('lesen-ingest', await (await call('/api/lesen/ingest')).json());
+    const card = list.ready.find((e) => e.id === r.id);
+    assert.equal(card.kern.length, 3, 'drei Kernaussagen als Baum für die Karte');
+    assert.deepEqual(card.kern[0], [{ type: 'text', text: 'Erste Aussage über ' }, { type: 'bold', children: [{ type: 'text', text: 'Bereit' }] }]);
+    assert.deepEqual(list.failed.map((e) => [e.id, e.error]), [[f.id, 'Claude hat nicht geantwortet']]);
+
+    const doc = keep('lesen-ingest-doc', await (await call(`/api/lesen/ingest/doc?id=${r.id}`)).json());
+    assert.equal(doc.available, true);
+    assert.equal(doc.error, null);
+    const v = doc.view;
+    // Wikilinks: bekannte Seite als Link mit Titel, unbekannte als lesbarer Text.
+    assert.deepEqual(v.neu[0].map((n) => [n.type, n.text, n.path ?? null]), [['text', 'Ergänzt ', null], ['wikilink', 'Claude Code', 'wiki/entities/claude-code.md'], ['text', ' und gibt es nicht im wiki', null]]);
+    assert.deepEqual(v.widerspricht.map((c) => [c.path, c.title, c.vorschlag?.[0]?.text]), [['wiki/concepts/rag.md', 'RAG', 'Als Gegenposition aufnehmen']]);
+    assert.equal(v.source.slug, 'glaser-agenten-gedaechtnis');
+    assert.equal(v.source.confidenceLabel, 'mittel');
+    assert.equal(v.source.locked, false);
+    assert.equal(v.source.body[0].type, 'heading');
+    assert.ok(v.source.body.some((blk) => blk.type === 'paragraph' && blk.content.some((n) => n.type === 'wikilink' && n.path === 'wiki/concepts/context-engineering.md')));
+    const item = (id) => v.items.find((i) => i.id === id);
+    assert.deepEqual([item('v1').label, item('v1').title, item('v1').open], ['Konzept', 'Context Engineering', 'wiki/concepts/context-engineering.md']);
+    assert.deepEqual([item('r1').relation, item('r1').open], ['verfasst von', null], 'Relation auf eine neue Seite: kein Link');
+    assert.deepEqual([item('s1').label, item('s1').slug, item('s1').beteiligte], ['Synthese · Vergleich', 'gedaechtnis-vs-rag', [{ path: 'wiki/concepts/rag.md', title: 'RAG' }]]);
+    assert.equal(item('s1').body[0].type, 'paragraph');
+    assert.equal(doc.links['context-engineering'].path, 'wiki/concepts/context-engineering.md');
+    assert.equal(v.halted, null);
+
+    const halted = keep('lesen-ingest-doc-halb', await (await call(`/api/lesen/ingest/doc?id=${halb.id}`)).json());
+    assert.deepEqual(halted.view.halted, { message: '"wiki/concepts/rag.md" wurde gerade anderweitig geändert.', source: 'wiki/sources/halb-1234.md' });
+    assert.deepEqual([halted.view.source.slug, halted.view.source.locked, halted.view.source.slugLocked], ['halb-1234', true, true]);
+    assert.equal(halted.ingest.error, null, 'bereit bleibt bereit; der Abbruch steht unter `error` und `view.halted`');
+
+    const busy = keep('lesen-ingest-doc-wartet', await (await call(`/api/lesen/ingest/doc?id=${b.id}`)).json());
+    assert.deepEqual([busy.ingest.status, busy.view], ['entwirft', null]);
+    const none = keep('lesen-ingest-doc-ohne', await (await call(`/api/lesen/ingest/doc?id=${ohne.id}`)).json());
+    assert.deepEqual([none.ingest.status, none.ingest.title, none.view, none.groups], [null, 'Ohne Entwurf', null, []]);
+    assert.equal((await call('/api/lesen/ingest/doc?id=gibt-es-nicht')).status, 404);
+
+    const stapel = keep('lesen-stapel-ingest', await fetchJson(html, '/api/lesen/stapel'));
+    assert.equal(stapel.ingestAvailable, true);
+    keep('lesen-doc-ingest', await fetchJson(html, `/api/lesen/doc?id=${r.id}`));
+
+    // Aktionen, wie die App sie schickt (Geräte-Token braucht kein CSRF; hier die Sitzung mit CSRF).
+    const csrf = csrfFrom(await html(`/lesen/ingest/doc?id=${r.id}`));
+    const post = async (path, form) => (await call(path, { method: 'POST', form, accept: 'application/json' })).json();
+    keep('lesen-ingest-aktion-entwerfen', await post('/aktion/lesen/ingest/entwerfen', { csrf, id: ohne.id }));
+    keep('lesen-ingest-aktion-stapel', await post('/aktion/lesen/ingest/entwerfen', { csrf, stapel: '1' }));
+    const form = new URLSearchParams({ csrf, id: r.id, back: `/lesen/ingest/doc?id=${r.id}`, title: 'Bereit', summary: 'Kurz', slug: 'bereit', tags: 'agents, memory' });
+    for (const id of ['v1', 'b1', 'n1']) form.append('item', id);
+    const applied = keep('lesen-ingest-aktion-uebernehmen', await (await call('/aktion/lesen/ingest/uebernehmen', { method: 'POST', form, accept: 'application/json' })).json());
+    assert.deepEqual([applied.link.href, applied.redirect], ['/notiz?pfad=wiki%2Fsources%2Fbereit.md', `/lesen/ingest/doc?id=${halb.id}`]);
+    const done = keep('lesen-ingest-aktion-erledigt', await post('/aktion/lesen/ingest/verwerfen', { csrf, id: halb.id, done: '1', back: `/lesen/ingest/doc?id=${halb.id}` }));
+    assert.equal(done.undo.action, '/aktion/lesen/doc/status');
+    ingest.state.failApply = new IngestError('Die Seite wiki/sources/hakt.md gibt es schon', 409);
+    ingest.put(halb.id, 'bereit', { draft: draftFor('Halb') });
+    keep('lesen-ingest-aktion-fehler', await post('/aktion/lesen/ingest/uebernehmen', { csrf, id: halb.id }));
+  });
+  await withIngest(
+    async ({ call, add }) => {
+      add('Ohne Claude');
+      const off = keep('lesen-ingest-ohne-claude', await (await call('/api/lesen/ingest')).json());
+      assert.deepEqual([off.available, off.reason], [false, 'Kein Token']);
+    },
+    { available: { ok: false, reason: 'Kein Token' } },
+  );
+  await withIngest(async ({ call }) => keep('lesen-ingest-aus', await (await call('/api/lesen/ingest')).json()), { ingest: false });
 });

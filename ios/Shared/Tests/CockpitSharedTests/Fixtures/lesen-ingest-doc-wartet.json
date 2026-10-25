@@ -1,0 +1,50 @@
+{
+  "ok": true,
+  "enabled": true,
+  "available": true,
+  "ingest": {
+    "id": "cc058468-93ce-468d-b9d5-8de646abe167",
+    "status": "entwirft",
+    "origin": "knopf",
+    "title": "Läuft",
+    "docTitle": "Läuft",
+    "url": "https://blatt.test/L%C3%A4uft",
+    "site": "Blatt",
+    "readingMinutes": 7,
+    "docStatus": "stapel",
+    "error": null,
+    "model": "sonnet",
+    "requestedAt": "2026-10-25T03:02:00.000Z",
+    "draftedAt": null,
+    "appliedAt": null,
+    "updatedAt": "2026-10-25T03:03:00.000Z",
+    "kernaussagen": [],
+    "kern": [],
+    "tally": {
+      "verknuepfen": 0,
+      "bestaetigung": 0,
+      "synthese": 0,
+      "frage": 0,
+      "neu": 0,
+      "relation": 0
+    },
+    "tallyLabel": "nur die Source-Page"
+  },
+  "error": null,
+  "draft": null,
+  "applied": null,
+  "view": null,
+  "links": {},
+  "groups": [],
+  "selected": [],
+  "summaryMax": 80,
+  "prev": null,
+  "next": "be81701e-cc17-4c80-a4f5-c0c63dd94db0",
+  "position": null,
+  "total": 2,
+  "actions": {
+    "draft": "/aktion/lesen/ingest/entwerfen",
+    "apply": "/aktion/lesen/ingest/uebernehmen",
+    "discard": "/aktion/lesen/ingest/verwerfen"
+  }
+}

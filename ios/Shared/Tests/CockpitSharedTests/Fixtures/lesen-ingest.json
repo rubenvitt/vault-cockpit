@@ -1,0 +1,203 @@
+{
+  "ok": true,
+  "enabled": true,
+  "available": true,
+  "reason": null,
+  "counts": {
+    "wartet": 0,
+    "entwirft": 1,
+    "bereit": 2,
+    "fehler": 1
+  },
+  "openOnStack": 2,
+  "ready": [
+    {
+      "id": "be81701e-cc17-4c80-a4f5-c0c63dd94db0",
+      "status": "bereit",
+      "origin": "nacht",
+      "title": "Halb",
+      "docTitle": "Halb",
+      "url": "https://blatt.test/Halb",
+      "site": "Blatt",
+      "readingMinutes": 7,
+      "docStatus": "stapel",
+      "error": null,
+      "model": "sonnet",
+      "requestedAt": "2026-10-25T03:06:00.000Z",
+      "draftedAt": null,
+      "appliedAt": null,
+      "updatedAt": "2026-10-25T03:07:00.000Z",
+      "kernaussagen": [
+        "Erste Aussage über **Halb**",
+        "Zweite Aussage",
+        "Dritte Aussage",
+        "Vierte Aussage, nur in der Prüfansicht"
+      ],
+      "kern": [
+        [
+          {
+            "type": "text",
+            "text": "Erste Aussage über "
+          },
+          {
+            "type": "bold",
+            "children": [
+              {
+                "type": "text",
+                "text": "Halb"
+              }
+            ]
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "text": "Zweite Aussage"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "text": "Dritte Aussage"
+          }
+        ]
+      ],
+      "tally": {
+        "verknuepfen": 1,
+        "bestaetigung": 1,
+        "synthese": 1,
+        "frage": 1,
+        "neu": 1,
+        "relation": 1
+      },
+      "tallyLabel": "1 Verknüpfung · 1 Bestätigung · 1 Synthese · 1 Frage · 1 neue Seite · 1 Relation"
+    },
+    {
+      "id": "079f3c9f-5e4a-42a7-949c-71a3d342b7ee",
+      "status": "bereit",
+      "origin": "nacht",
+      "title": "Bereit",
+      "docTitle": "Bereit",
+      "url": "https://blatt.test/Bereit",
+      "site": "Blatt",
+      "readingMinutes": 7,
+      "docStatus": "stapel",
+      "error": null,
+      "model": "sonnet",
+      "requestedAt": "2026-10-25T03:00:00.000Z",
+      "draftedAt": "2026-10-25T02:10:00Z",
+      "appliedAt": null,
+      "updatedAt": "2026-10-25T03:01:00.000Z",
+      "kernaussagen": [
+        "Erste Aussage über **Bereit**",
+        "Zweite Aussage",
+        "Dritte Aussage",
+        "Vierte Aussage, nur in der Prüfansicht"
+      ],
+      "kern": [
+        [
+          {
+            "type": "text",
+            "text": "Erste Aussage über "
+          },
+          {
+            "type": "bold",
+            "children": [
+              {
+                "type": "text",
+                "text": "Bereit"
+              }
+            ]
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "text": "Zweite Aussage"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "text": "Dritte Aussage"
+          }
+        ]
+      ],
+      "tally": {
+        "verknuepfen": 1,
+        "bestaetigung": 1,
+        "synthese": 1,
+        "frage": 1,
+        "neu": 1,
+        "relation": 1
+      },
+      "tallyLabel": "1 Verknüpfung · 1 Bestätigung · 1 Synthese · 1 Frage · 1 neue Seite · 1 Relation"
+    }
+  ],
+  "busy": [
+    {
+      "id": "cc058468-93ce-468d-b9d5-8de646abe167",
+      "status": "entwirft",
+      "origin": "knopf",
+      "title": "Läuft",
+      "docTitle": "Läuft",
+      "url": "https://blatt.test/L%C3%A4uft",
+      "site": "Blatt",
+      "readingMinutes": 7,
+      "docStatus": "stapel",
+      "error": null,
+      "model": "sonnet",
+      "requestedAt": "2026-10-25T03:02:00.000Z",
+      "draftedAt": null,
+      "appliedAt": null,
+      "updatedAt": "2026-10-25T03:03:00.000Z",
+      "kernaussagen": [],
+      "kern": [],
+      "tally": {
+        "verknuepfen": 0,
+        "bestaetigung": 0,
+        "synthese": 0,
+        "frage": 0,
+        "neu": 0,
+        "relation": 0
+      },
+      "tallyLabel": "nur die Source-Page",
+      "label": "Claude entwirft, seit 796 Min. (meist 1 bis 3 Minuten)"
+    }
+  ],
+  "failed": [
+    {
+      "id": "83bd8f90-6467-4119-8548-850000ede5dd",
+      "status": "fehler",
+      "origin": "nacht",
+      "title": "Kaputt",
+      "docTitle": "Kaputt",
+      "url": "https://blatt.test/Kaputt",
+      "site": "Blatt",
+      "readingMinutes": 7,
+      "docStatus": "stapel",
+      "error": "Claude hat nicht geantwortet",
+      "model": "sonnet",
+      "requestedAt": "2026-10-25T03:04:00.000Z",
+      "draftedAt": null,
+      "appliedAt": null,
+      "updatedAt": "2026-10-25T03:05:00.000Z",
+      "kernaussagen": [],
+      "kern": [],
+      "tally": {
+        "verknuepfen": 0,
+        "bestaetigung": 0,
+        "synthese": 0,
+        "frage": 0,
+        "neu": 0,
+        "relation": 0
+      },
+      "tallyLabel": "nur die Source-Page"
+    }
+  ],
+  "actions": {
+    "draft": "/aktion/lesen/ingest/entwerfen",
+    "apply": "/aktion/lesen/ingest/uebernehmen",
+    "discard": "/aktion/lesen/ingest/verwerfen"
+  }
+}

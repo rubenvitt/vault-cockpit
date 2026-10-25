@@ -1,9 +1,10 @@
 import CockpitShared
 import SwiftUI
 
-/// Bereiche der Unternavigation des Lesens (`SUB` in src/lesen/pages.js), alle nativ.
+/// Bereiche der Unternavigation des Lesens (`SUB` in src/lesen/pages.js), alle nativ. „Ingest“
+/// steht wie im Web zwischen Stapel und Folgen, nur wenn der Server ihn eingerichtet hat.
 enum LesenSection: String, CaseIterable, Hashable, Identifiable {
-    case eingang, stapel, folgen, markiert, wiedersehen, wissen, feeds
+    case eingang, stapel, ingest, folgen, markiert, wiedersehen, wissen, feeds
 
     var id: String { rawValue }
 
@@ -11,6 +12,7 @@ enum LesenSection: String, CaseIterable, Hashable, Identifiable {
         switch self {
         case .eingang: "Eingang"
         case .stapel: "Stapel"
+        case .ingest: "Ingest"
         case .folgen: "Folgen"
         case .markiert: "Markiert"
         case .wiedersehen: "Wiedersehen"
@@ -67,6 +69,10 @@ struct LesenScreen: View {
         .sheet(isPresented: $model.showsAdd) {
             HinzufuegenSheet(model: model, store: session.inbox, toasts: session.toasts)
         }
+        // Zahl bereiter Entwürfe in der Unternavigation (und ob es den Ingest gibt).
+        .task {
+            if session.ingest.model == nil { await session.ingest.load() }
+        }
     }
 
     // MARK: Bereiche
@@ -77,7 +83,9 @@ struct LesenScreen: View {
         case .eingang:
             EingangScreen(model: model, store: session.inbox, toasts: session.toasts)
         case .stapel:
-            StapelScreen(model: model, store: session.stack, toasts: session.toasts)
+            StapelScreen(model: model, store: session.stack, ingest: session.ingest, toasts: session.toasts)
+        case .ingest:
+            IngestScreen(model: model, store: session.ingest, toasts: session.toasts)
         case .folgen:
             FolgenScreen()
         case .markiert:
@@ -106,10 +114,15 @@ struct LesenScreen: View {
             ReaderScreen(docID: id, anchor: ReaderAnchor(highlight: highlight, resume: resume))
         case .newEpisode:
             NeueFolgeScreen()
+        case .ingestReview(let id):
+            IngestReviewScreen(docID: id)
+                .id(id)
+        case .ingest:
+            IngestScreen(model: model, store: session.ingest, toasts: session.toasts)
         case .inbox:
             EingangScreen(model: model, store: session.inbox, toasts: session.toasts)
         case .stack:
-            StapelScreen(model: model, store: session.stack, toasts: session.toasts)
+            StapelScreen(model: model, store: session.stack, ingest: session.ingest, toasts: session.toasts)
         case .highlights:
             MarkiertScreen()
         case .review(let week):
@@ -123,8 +136,9 @@ struct LesenScreen: View {
     }
 }
 
-/// Unternavigation „Eingang · Stapel · Folgen · Markiert · Wiedersehen · Wissen · Feeds“
-/// (`.subnav` im Web). Eingang und Stapel zeigen, was dort liegt, sobald es geladen ist.
+/// Unternavigation „Eingang · Stapel · Ingest · Folgen · Markiert · Wiedersehen · Wissen · Feeds“
+/// (`.subnav` im Web). Eingang und Stapel zeigen, was dort liegt, Ingest die bereiten Entwürfe,
+/// sobald es geladen ist; ohne Ingest-Dienst fehlt der Eintrag.
 @MainActor
 struct LesenSubnav: View {
     let model: AppModel
@@ -133,7 +147,7 @@ struct LesenSubnav: View {
     var body: some View {
         ScrollViewReader { proxy in
             LesenChipScroller("Lesen") {
-                ForEach(LesenSection.allCases) { section in
+                ForEach(sections) { section in
                     item(section)
                         .id(section)
                 }
@@ -162,11 +176,18 @@ struct LesenSubnav: View {
         }
     }
 
-    /// Eingang: was noch zu sichten ist; Stapel: was darauf liegt (mit dem gewählten Filter).
+    /// Ingest nur, wenn der Server ihn kennt (vor dem ersten Laden noch nicht).
+    private var sections: [LesenSection] {
+        LesenSection.allCases.filter { $0 != .ingest || session.ingest.isEnabled == true || model.readingSection == .ingest }
+    }
+
+    /// Eingang: was noch zu sichten ist; Stapel: was darauf liegt (mit dem gewählten Filter);
+    /// Ingest: bereite Entwürfe (ohne bereite keine Zahl, wie im Web).
     private func count(_ section: LesenSection) -> Int? {
         switch section {
         case .eingang: session.inbox.model?.left
         case .stapel: session.stack.model?.count
+        case .ingest: session.ingest.readyCount.flatMap { $0 > 0 ? $0 : nil }
         default: nil
         }
     }

@@ -769,7 +769,12 @@ entwerfen**, die Leseansicht hat **Ingest prüfen** bzw. **Ingest entwerfen**.
 Was Claude schreibt, gilt als Fremdtext: maskiert, Markdown nur über den
 Vorschau-Renderer des Cockpits. Für die App: `/api/lesen/ingest` und
 `/api/lesen/ingest/doc?id=…` (ohne Dienst `enabled: false`), `ingest` je Eintrag
-in `/api/lesen/stapel` und in `/api/lesen/doc`.
+in `/api/lesen/stapel` (dazu `ingestAvailable`) und in `/api/lesen/doc`. Claudes
+Texte kommen dort zusätzlich als Baum wie in `/api/notiz` (`kern` je Karte, `view`
+in der Prüfansicht: Digest, Source-Page mit Sperren, Vorschläge mit Titel,
+Kennzeichen und `open` nur für bestehende Seiten, `halted` beim Abbruch), dazu
+`error` (roh, auch der Abbruch), `available` und `links`; für einen Text ohne
+Entwurf ist `ingest.status` null.
 
 **Wiedersehen** (`/lesen/wiedersehen`, VCP-74) holt Markierungen nach einem
 einfachen Leitner-Schema zurück: Box 1 bis 5 mit 1, 3, 7, 21 und 60 Tagen

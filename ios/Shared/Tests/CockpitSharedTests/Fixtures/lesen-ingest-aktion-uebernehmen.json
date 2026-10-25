@@ -1,0 +1,21 @@
+{
+  "ok": true,
+  "message": "Im Wiki: Bereit + 1 Seite, 1 verknüpft",
+  "link": {
+    "href": "/notiz?pfad=wiki%2Fsources%2Fbereit.md",
+    "label": "Source-Page öffnen"
+  },
+  "redirect": "/lesen/ingest/doc?id=be81701e-cc17-4c80-a4f5-c0c63dd94db0",
+  "result": {
+    "source": "wiki/sources/bereit.md",
+    "raw": "raw/x.md",
+    "written": [
+      "wiki/sources/bereit.md",
+      "wiki/entities/robert-glaser.md",
+      "wiki/log.md"
+    ],
+    "linked": [
+      "wiki/concepts/context-engineering.md"
+    ]
+  }
+}

@@ -1,0 +1,124 @@
+{
+  "ok": true,
+  "doc": {
+    "id": "079f3c9f-5e4a-42a7-949c-71a3d342b7ee",
+    "url": "https://blatt.test/Bereit",
+    "canonicalUrl": null,
+    "commentsUrl": null,
+    "title": "Bereit",
+    "author": null,
+    "site": "Blatt",
+    "kind": "artikel",
+    "kindLabel": "Artikel",
+    "origin": "formular",
+    "excerpt": null,
+    "wordCount": 0,
+    "readingMinutes": 7,
+    "status": "stapel",
+    "previousStatus": null,
+    "progress": 0,
+    "scrollAnchor": 0,
+    "topics": [],
+    "savedAt": "2026-10-25T16:19:43.970Z",
+    "statusChangedAt": "2026-10-25T16:19:43.970Z",
+    "readAt": null,
+    "archivedAt": null,
+    "updatedAt": "2026-10-25T16:19:43.970Z",
+    "rest": "noch 7 min",
+    "remaining": 7
+  },
+  "hasText": false,
+  "length": 0,
+  "anchor": 0,
+  "weiter": 0,
+  "blocks": [
+    {
+      "kind": "paragraph",
+      "start": 0,
+      "end": 43,
+      "runs": [
+        {
+          "text": "Für diesen Artikel gibt es keinen Lesetext.",
+          "start": 0
+        }
+      ]
+    }
+  ],
+  "highlights": [],
+  "ranges": [],
+  "counts": {
+    "eingang": 0,
+    "stapel": 5,
+    "archiv": 0,
+    "abgelegt": 0,
+    "weg": 0
+  },
+  "stack": [
+    {
+      "id": "011adf2b-9e03-489a-8231-bc58dc08bea3",
+      "title": "Ohne Entwurf",
+      "url": "https://blatt.test/Ohne%20Entwurf",
+      "site": "Blatt",
+      "progress": 0,
+      "readingMinutes": 7,
+      "rest": "noch 7 min",
+      "started": false,
+      "current": false
+    },
+    {
+      "id": "be81701e-cc17-4c80-a4f5-c0c63dd94db0",
+      "title": "Halb",
+      "url": "https://blatt.test/Halb",
+      "site": "Blatt",
+      "progress": 0,
+      "readingMinutes": 7,
+      "rest": "noch 7 min",
+      "started": false,
+      "current": false
+    },
+    {
+      "id": "83bd8f90-6467-4119-8548-850000ede5dd",
+      "title": "Kaputt",
+      "url": "https://blatt.test/Kaputt",
+      "site": "Blatt",
+      "progress": 0,
+      "readingMinutes": 7,
+      "rest": "noch 7 min",
+      "started": false,
+      "current": false
+    },
+    {
+      "id": "cc058468-93ce-468d-b9d5-8de646abe167",
+      "title": "Läuft",
+      "url": "https://blatt.test/L%C3%A4uft",
+      "site": "Blatt",
+      "progress": 0,
+      "readingMinutes": 7,
+      "rest": "noch 7 min",
+      "started": false,
+      "current": false
+    },
+    {
+      "id": "079f3c9f-5e4a-42a7-949c-71a3d342b7ee",
+      "title": "Bereit",
+      "url": "https://blatt.test/Bereit",
+      "site": "Blatt",
+      "progress": 0,
+      "readingMinutes": 7,
+      "rest": "noch 7 min",
+      "started": false,
+      "current": true
+    }
+  ],
+  "nav": "stapel",
+  "vault": false,
+  "decisions": {
+    "fertig": true,
+    "vault": false,
+    "zurueck": false
+  },
+  "ingest": {
+    "status": "bereit",
+    "available": true
+  }
+}

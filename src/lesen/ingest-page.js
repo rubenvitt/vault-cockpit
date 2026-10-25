@@ -1,7 +1,7 @@
 import { ActionError } from '../cockpit/actions.js';
 import { esc, assets } from '../web/layout.js';
 import { hidden } from '../web/render.js';
-import { renderMarkdown, inlineMd } from '../web/markdown-render.js';
+import { renderMarkdown, inlineMd, parseMarkdown, parseInline } from '../web/markdown-render.js';
 import { readingPage } from './pages.js';
 import { ReadingError } from './store.js';
 import { jsonReply } from './json.js';
@@ -21,7 +21,9 @@ import { jsonReply } from './json.js';
  * - `/lesen/ingest/stand?ids=a,b`: Stand als JSON für die Live-Aktualisierung
  *   (/static/lesen-ingest.js): Zähler, je Dokument Status und Abzeichen.
  * - `/api/lesen/ingest` und `/api/lesen/ingest/doc?id=`: dasselbe für die App
- *   (ohne Dienst mit `enabled: false`).
+ *   (ohne Dienst mit `enabled: false`). Claudes Texte kommen dort zusätzlich als
+ *   Baum (`view`, wie `/api/notiz`: `parseInline`/`parseMarkdown`, Wikilinks wie
+ *   in der Prüfansicht umgeschrieben), damit die App nichts selbst parsen muss.
  *
  * Alles, was Claude schreibt, ist Fremdtext: Titel und Pfade nur maskiert,
  * Fließtext über `inlineMd`, Seitentexte über `renderMarkdown` (beide maskieren
@@ -338,6 +340,17 @@ function rewriteLinks(src, known, { block = false } = {}) {
  * bekannte Seiten werden Links mit Titel, alle anderen lesbarer Text.
  */
 function pageView(e) {
+  const { known, links } = linksOf(e);
+  return {
+    known,
+    inline: (s) => inlineMd(rewriteLinks(String(s ?? ''), known), links),
+    block: (s) => renderMarkdown(rewriteLinks(String(s ?? ''), known, { block: true }), { links }),
+    title: (path) => known.get(slugOf(path).toLowerCase())?.title ?? null,
+  };
+}
+
+/** Bekannte Seiten eines Entwurfs und der Auflöser dazu: nur bestehende Wiki-Seiten werden Links. */
+function linksOf(e) {
   const known = knownPages(e);
   const paths = new Set([...known.values()].map((p) => p.path).filter(Boolean));
   const links = {
@@ -345,10 +358,19 @@ function pageView(e) {
     markdownLink: () => null,
     image: () => null,
   };
+  return { known, links };
+}
+
+/**
+ * Wie `pageView`, aber als Baum für die App (`NoteInline`/`NoteBlock` dort):
+ * `inline` für Sätze, `block` für Seitentexte (Checkboxen nur zur Anzeige).
+ */
+function treeView(e) {
+  const { known, links } = linksOf(e);
   return {
     known,
-    inline: (s) => inlineMd(rewriteLinks(String(s ?? ''), known), links),
-    block: (s) => renderMarkdown(rewriteLinks(String(s ?? ''), known, { block: true }), { links }),
+    inline: (s) => parseInline(rewriteLinks(String(s ?? ''), known), links),
+    block: (s) => parseMarkdown(rewriteLinks(String(s ?? ''), known, { block: true }), { links, checkboxes: false }),
     title: (path) => known.get(slugOf(path).toLowerCase())?.title ?? null,
   };
 }
@@ -583,8 +605,80 @@ export function ingestJson(e) {
     appliedAt: e.applied_at ?? null,
     updatedAt: e.updated_at ?? null,
     kernaussagen: list(e.draft?.digest?.kernaussagen),
+    // Die ersten drei als Baum (Wikilinks als Titel), für die Karten der App.
+    kern: list(e.draft?.digest?.kernaussagen).slice(0, 3).map(treeView(e).inline),
     tally: t,
     tallyLabel: tallyLabel(t),
+  };
+}
+
+/** Seite im Wiki als `{ path, title }`; `path` nur für echte Wiki-Pfade (sonst kein Link). */
+const refJson = (path, title) => ({ path: wikiPath(path) ? path : null, title: title || readable(slugOf(path)) || 'Seite' });
+
+/** Unterbrochenes Übernehmen wie `haltedBlock`: Meldung und, falls schon geschrieben, die Source-Page. */
+function haltedJson(e) {
+  const a = e?.applied;
+  if (!e?.error || !a || (!list(a.steps).length && !a.source)) return null;
+  const written = list(a.steps).includes('source') && wikiPath(a.source);
+  return { message: e.error, source: written ? a.source : null };
+}
+
+/** Ein Vorschlag für die App, wie `itemRow`: Titel, Kennzeichen, Texte als Baum, `open` nur für bestehende Seiten. */
+function itemJson(item, t) {
+  const target = item.path ?? item.to;
+  const exists = item.action !== 'neu' && wikiPath(target) && t.known.get(slugOf(target).toLowerCase())?.path === target;
+  return {
+    id: item.id,
+    kind: item.kind ?? null,
+    action: item.action ?? null,
+    label: kindLabel(item),
+    title: item.title || item.slug || readable(slugOf(target)) || 'Vorschlag',
+    default: item.default === true,
+    open: exists ? target : null,
+    slug: item.action === 'neu' ? (item.slug ?? null) : null,
+    relation: item.kind === 'relation' ? (RELATION[item.type] ?? item.type ?? 'Relation') : null,
+    claim: item.claim ? t.inline(item.claim) : null,
+    summary: item.summary ? t.inline(item.summary) : null,
+    warum: item.warum ? t.inline(item.warum) : null,
+    body: item.body ? t.block(item.body) : null,
+    beteiligte: list(item.beteiligte).filter((p) => typeof p === 'string' && p).map((p) => refJson(p, t.title(p))),
+  };
+}
+
+/**
+ * Prüfansicht als Baum für die App: Digest, Hinweise, Source-Page (mit dem Slug
+ * eines unterbrochenen Übernehmens und den Sperren wie `sourceBlock`), Vorschläge
+ * und der Abbruch. Fremdtext bleibt Text, die App setzt ihn nur.
+ */
+function appView(e) {
+  const draft = e?.draft;
+  if (!draft) return null;
+  const d = draft.digest ?? {};
+  const t = treeView(e);
+  const applied = e.applied;
+  const s = { ...(draft.source ?? {}), ...(applied?.slug ? { slug: applied.slug } : {}) };
+  return {
+    kernaussagen: list(d.kernaussagen).map(t.inline),
+    neu: list(d.neu).map(t.inline),
+    bestaetigt: list(d.bestaetigt).map((b) => ({ ...refJson(b.path, b.title), claim: t.inline(b.claim) })),
+    widerspricht: list(d.widerspricht).map((c) => ({ ...refJson(c.path, c.title), claim: t.inline(c.claim), vorschlag: c.vorschlag ? t.inline(c.vorschlag) : null })),
+    docktAn: list(d.dockt_an).map((x) => ({ ...refJson(x.path, x.title), warum: x.warum ? t.inline(x.warum) : null })),
+    hinweise: list(draft.hinweise).map(t.inline),
+    source: {
+      title: String(s.title ?? ''),
+      summary: String(s.summary ?? ''),
+      slug: String(s.slug ?? ''),
+      tags: list(s.tags).map(String),
+      confidence: s.confidence ?? null,
+      confidenceLabel: s.confidence ? (CONFIDENCE[s.confidence] ?? s.confidence) : null,
+      path: s.slug ? `wiki/sources/${s.slug}.md` : null,
+      body: s.body ? t.block(s.body) : null,
+      // Wie die `readonly` der Prüfansicht: Felder fest, sobald die Seite steht; der Slug ab dem ersten Schreiben.
+      locked: list(applied?.steps).includes('source'),
+      slugLocked: Boolean(applied?.slug),
+    },
+    items: list(draft.items).filter((i) => i && typeof i.id === 'string').map((i) => itemJson(i, t)),
+    halted: haltedJson(e),
   };
 }
 
@@ -641,18 +735,29 @@ export function ingestRoutes({ store, ingest = null, logger = console }) {
         actions: ACTIONS,
       });
     },
+    /**
+     * Ein Entwurf; für einen Text ohne Entwurf `ingest.status: null` (die App
+     * bietet dann „Ingest entwerfen“ an), für unbekannte Texte 404. `error` ist
+     * der rohe Fehler des Eintrags (auch der Abbruch beim Übernehmen und der
+     * Grund eines vom Dienst verworfenen), `view` der Entwurf als Baum.
+     */
     async '/api/lesen/ingest/doc'(ctx) {
       if (!ingest) return jsonReply(200, off);
       const id = ctx.url.searchParams.get('id') ?? '';
-      const e = ingest.get(id);
+      const doc = store.get(id);
+      const e = ingest.get(id) ?? (doc ? { doc_id: id, status: null, doc: { id, title: doc.title, url: doc.url, site: doc.site, reading_minutes: doc.reading_minutes, status: doc.status } } : null);
       if (!e) return jsonReply(404, { error: 'not_found', message: 'Für diesen Text gibt es keinen Entwurf.' });
       const nav = neighbours(ingest, id);
       return jsonReply(200, {
         ok: true,
         enabled: true,
+        available: Boolean(ingest.available()?.ok),
         ingest: ingestJson(e),
+        error: e.error ?? null,
         draft: e.draft ?? null,
         applied: e.applied ?? null,
+        view: appView(e),
+        links: Object.fromEntries(knownPages(e)),
         groups: groupItems(e.draft?.items).map((g) => ({ key: g.key, label: g.label, hint: g.hint, featured: Boolean(g.featured), items: g.items.map((i) => ({ id: i.id, label: kindLabel(i), default: i.default === true })) })),
         selected: list(e.draft?.items).filter((i) => i?.default === true).map((i) => i.id),
         summaryMax: SUMMARY_MAX,
