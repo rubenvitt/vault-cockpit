@@ -5,8 +5,8 @@ import { PassThrough } from 'node:stream';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createEpisodes, chunkText, dialogueBatches, stripId3, audioFrames, EpisodeError } from '../src/lesen/folgen.js';
-import { parseRange, progressOf, clock, newSummary } from '../src/lesen/folgen-page.js';
+import { createEpisodes, chunkText, dialogueBatches, stripId3, audioFrames, EpisodeError, DEFAULT_NOTE_FOLDER } from '../src/lesen/folgen.js';
+import { parseRange, progressOf, clock, newSummary, episodeCard } from '../src/lesen/folgen-page.js';
 import { createClaudeWriter, WriterError } from '../src/lesen/claude.js';
 import { createReadingStore } from '../src/lesen/store.js';
 import { readingRoutes } from '../src/lesen/http.js';
@@ -76,16 +76,22 @@ test('Folgen: fertige ältere Folge wird beim Start bereinigt', () =>
     assert.equal(readFileSync(join(dir, 'f1.mp3')).length, 2 * 417);
   }));
 
-/** Stapel mit zwei Texten, falsches ElevenLabs, falscher Claude, falsche Inbox. */
-function setup(dir, { tts = TTS, writer = null, failDialogue = () => false, before = () => {} } = {}) {
+/**
+ * Stapel mit zwei Texten, falsches ElevenLabs, falscher Claude, falscher Vault:
+ * Nur „Vom Lesen“ hat eine Lesestapel-Notiz. `taken`: Pfade, die es im Vault
+ * schon gibt; `options` ersetzt Optionen von `createEpisodes`.
+ */
+function setup(dir, { tts = TTS, writer = null, failDialogue = () => false, failSpeech = () => false, before = () => {}, taken = [], options = {} } = {}) {
   const store = createReadingStore({ path: ':memory:' });
   const a = store.addDocument({ url: 'https://blatt.test/a', title: 'Vom Lesen', site: 'blatt.test', status: 'stapel', reading_minutes: 3, content_html: '<p>Erster Satz hier. Zweiter Satz dort.</p>' }).doc;
   const b = store.addDocument({ url: 'https://blatt.test/b', title: 'Vom Hören', status: 'stapel', reading_minutes: 2, content_html: '<p>Hören geht auch.</p>' }).doc;
-  const calls = { speech: [], dialogue: [], writes: [], notes: [] };
+  const calls = { speech: [], dialogue: [], writes: [], notes: [], heard: [] };
+  const files = new Set(taken);
   const provider = (cfg) => ({
     name: 'ElevenLabs',
     id: `el\n${cfg.voice}`,
     synthesize: async (input) => {
+      if (failSpeech(calls.speech.length)) throw new Error('ElevenLabs nicht erreichbar (ETIMEDOUT)');
       calls.speech.push({ ...input, cfg });
       return Buffer.from(`[${input.text}]`);
     },
@@ -113,13 +119,22 @@ function setup(dir, { tts = TTS, writer = null, failDialogue = () => false, befo
     speech,
     voices: () => ({ host: 'Host', guest: 'Gast' }),
     writer: fakeWriter,
-    capture: async (input) => {
-      calls.notes.push(input);
-      return { kind: 'note', path: 'inbox/Report Woche.md' };
+    // Wie der Vault-Editor: wirft, wenn es die Datei schon gibt.
+    createNote: async ({ folder, name, content }) => {
+      const path = `${folder}/${name}`;
+      if (files.has(path)) throw new Error(`In „${folder}“ gibt es schon eine Notiz „${name}“`);
+      files.add(path);
+      calls.notes.push({ folder, name, content });
+      return { path, changed: true };
+    },
+    sourceNote: (id) => (id === a.id ? '30-ressourcen/lesestapel/vom-lesen.md' : null),
+    heard: async (ids) => {
+      calls.heard.push(ids);
     },
     provider,
     logger: quiet,
     now: () => new Date('2026-10-23T10:00:00Z'),
+    ...options,
   });
   return { store, a, b, episodes, calls, speech, setTts: (v) => (current = v) };
 }
@@ -139,6 +154,9 @@ test('Folgen: Vorlesen spricht die ganzen Texte mit der Erzählerstimme, eine MP
     assert.equal(done.total, 5);
     assert.equal(done.bytes, readFileSync(episodes.audioPath(ep.id)).length);
     assert.equal(episodes.list()[0].id, ep.id);
+    assert.deepEqual(calls.heard, [[a.id, b.id]], 'Vermerk „gehört“');
+    assert.equal(calls.notes.length, 0, 'Vorlesen ohne Notiz');
+    assert.equal(done.note, undefined);
   }));
 
 test('Folgen: Vorlesen bezahlt nur, was nicht schon gestreamt oder offline geladen wurde', () =>
@@ -177,21 +195,109 @@ test('Folgen: Podcast mit zwei Stimmen über Text-to-Dialogue, Texte gehen an Cl
     assert.deepEqual(calls.dialogue, [[{ text: 'Willkommen.', voice: 'Host' }, { text: 'Danke.', voice: 'Gast' }]]);
     assert.equal(String(readFileSync(episodes.audioPath(ep.id))), 'Host:Willkommen.|Gast:Danke.');
     assert.equal(calls.speech.length, 0);
+
+    // Transkript im Vault, neben den Audio-Reports.
+    assert.equal(calls.notes.length, 1);
+    assert.equal(calls.notes[0].folder, DEFAULT_NOTE_FOLDER);
+    assert.equal(calls.notes[0].name, '2026-10-23-podcast-lesen-und-hoeren.md');
+    assert.equal(done.note, '30-ressourcen/audio-reports/2026-10-23-podcast-lesen-und-hoeren.md');
+    assert.equal(
+      calls.notes[0].content,
+      [
+        '---',
+        'type: folge',
+        'art: podcast',
+        'titel: "Lesen und Hören"',
+        `folge_id: "${ep.id}"`,
+        'erzeugt: 2026-10-23',
+        'minuten: 5',
+        'quellen:',
+        '  - "[[30-ressourcen/lesestapel/vom-lesen]]"',
+        'ingest: offen',
+        '---',
+        '',
+        '# Lesen und Hören',
+        '',
+        '_Podcast aus dem Lesestapel, 2026-10-23, 2 Texte (Cockpit)_',
+        '',
+        '## Gespräch',
+        '',
+        '**Moderation:** Willkommen.',
+        '',
+        '**Gast:** Danke.',
+        '',
+        '## Quellen',
+        '',
+        '- [[30-ressourcen/lesestapel/vom-lesen|Vom Lesen]]',
+        '- [Vom Hören](<https://blatt.test/b>)',
+        '',
+      ].join('\n'),
+    );
+    assert.deepEqual(calls.heard, [[a.id, b.id]]);
+
+    const ctx = { tz: 'Europe/Berlin', write: { csrf: 'c' } };
+    assert.match(episodeCard(done, { ctx }), /<a href="\/notiz\?pfad=30-ressourcen%2Faudio-reports%2F2026-10-23-podcast-lesen-und-hoeren\.md" class="btn quiet">Im Vault<\/a>/);
   }));
 
-test('Folgen: Report als Notiz in die Inbox, eine Stimme liest die Sprechfassung', () =>
+test('Folgen: Report als Notiz im Vault mit Sprechfassung, eine Stimme liest sie; zweiter Versuch legt nichts doppelt an', () =>
   withDir(async (dir) => {
-    const { a, episodes, calls } = setup(dir);
+    // Das Sprechen scheitert beim ersten Versuch, die Notiz ist da schon angelegt.
+    let failures = 1;
+    const { a, episodes, calls } = setup(dir, { failSpeech: () => failures-- > 0 });
     const ep = episodes.create({ kind: 'report', docIds: [a.id], minutes: 10 });
     await ep.done;
+    assert.equal(episodes.get(ep.id).status, 'fehler');
+    assert.equal(calls.notes.length, 1, 'Notiz vor dem Sprechen');
+    assert.equal(calls.heard.length, 0, 'nicht fertig, nicht gehört');
+
+    await episodes.retry(ep.id).done;
     const done = episodes.get(ep.id);
     assert.equal(done.status, 'fertig', done.error);
     assert.equal(done.title, 'Report Woche', 'ohne Pfadtrenner');
-    assert.equal(done.note, 'inbox/Report Woche.md');
-    assert.equal(calls.notes[0].title, 'Report Woche');
-    assert.equal(calls.notes[0].captureId, `folge-${ep.id}`);
-    assert.match(calls.notes[0].text, /^_Report aus dem Lesestapel, 2026-10-23, 1 Text \(Cockpit\)_\n\n## Überblick\n\nZwei Texte\.\n\n## Quellen\n\n- \[Vom Lesen\]\(https:\/\/blatt\.test\/a\)\n$/);
+    assert.equal(calls.notes.length, 1, 'keine zweite Notiz');
+    assert.equal(done.note, '30-ressourcen/audio-reports/2026-10-23-report-report-woche.md');
+    const { content } = calls.notes[0];
+    assert.match(content, /^---\ntype: folge\nart: report\ntitel: "Report Woche"\nfolge_id: "[0-9a-f-]+"\nerzeugt: 2026-10-23\nminuten: 10\nquellen:\n {2}- "\[\[30-ressourcen\/lesestapel\/vom-lesen\]\]"\ningest: offen\n---\n/);
+    assert.match(
+      content,
+      /\n---\n\n# Report Woche\n\n_Report aus dem Lesestapel, 2026-10-23, 1 Text \(Cockpit\)_\n\n## Überblick\n\nZwei Texte\.\n\n## Sprechfassung\n\nZwei Texte\. Beide kurz\.\n\n## Quellen\n\n- \[\[30-ressourcen\/lesestapel\/vom-lesen\|Vom Lesen\]\]\n$/,
+    );
     assert.deepEqual(calls.speech.map((c) => [c.text, c.cfg.voice]), [['Zwei Texte. Beide kurz.', 'Erz']]);
+    assert.deepEqual(calls.heard, [[a.id]]);
+  }));
+
+test('Folgen: Dateiname schon vergeben → mit Kurz-ID; Datum in der Zeitzone; Quellen ohne Lesestapel-Notiz nur als Link', () =>
+  withDir(async (dir) => {
+    const taken = ['30-ressourcen/audio-reports/2026-10-24-report-report-woche.md'];
+    const { b, episodes, calls } = setup(dir, { taken, options: { tz: 'Pacific/Kiritimati' } });
+    const ep = episodes.create({ kind: 'report', docIds: [b.id], minutes: 5 });
+    await ep.done;
+    const done = episodes.get(ep.id);
+    assert.equal(done.status, 'fertig', done.error);
+    assert.equal(done.note, `30-ressourcen/audio-reports/2026-10-24-report-report-woche-${ep.id.slice(0, 8)}.md`);
+    assert.match(calls.notes[0].content, /\nerzeugt: 2026-10-24\n/);
+    assert.match(calls.notes[0].content, /\nquellen: \[\]\n/);
+    assert.match(calls.notes[0].content, /## Quellen\n\n- \[Vom Hören\]\(<https:\/\/blatt\.test\/b>\)\n$/);
+  }));
+
+test('Folgen: ohne Vault-Optionen keine Notiz; scheitert der Vermerk „gehört“, bleibt die Folge fertig', () =>
+  withDir(async (dir) => {
+    const plain = setup(dir, { options: { createNote: undefined, sourceNote: undefined, heard: undefined } });
+    const ep = plain.episodes.create({ kind: 'report', docIds: [plain.a.id], minutes: 5 });
+    await ep.done;
+    assert.equal(plain.episodes.get(ep.id).status, 'fertig', plain.episodes.get(ep.id).error);
+    assert.equal(plain.episodes.get(ep.id).note, undefined);
+    assert.equal(plain.calls.notes.length, 0);
+
+    const warnings = [];
+    const heard = () => {
+      throw new Error('Index weg');
+    };
+    const failing = setup(join(dir, 'b'), { options: { heard, logger: { ...quiet, warn: (m) => warnings.push(m) } } });
+    const ep2 = failing.episodes.create({ kind: 'podcast', docIds: [failing.a.id], minutes: 5 });
+    await ep2.done;
+    assert.equal(failing.episodes.get(ep2.id).status, 'fertig');
+    assert.match(warnings.join('\n'), /gehört.*Index weg/);
   }));
 
 test('Folgen: ohne Stimme oder Claude nicht anlegbar, Fehler bleibt stehen, Löschen', () =>
@@ -238,6 +344,7 @@ test('Folgen: nach einem Fehler geht es weiter, ohne Claude oder Gesprochenes no
     assert.match(failed.error, /ETIMEDOUT/);
     assert.equal(failed.done, 1);
     assert.equal(failed.total, 3);
+    assert.equal(calls.notes.length, 1, 'Transkript schon vor dem Sprechen im Vault');
     assert.ok(episodes.resumable(ep.id), 'Skript liegt bereit');
     assert.ok(existsSync(join(dir, `${ep.id}.mp3.part`)), 'Gesprochenes bleibt');
 
@@ -247,6 +354,7 @@ test('Folgen: nach einem Fehler geht es weiter, ohne Claude oder Gesprochenes no
     const done = episodes.get(ep.id);
     assert.equal(done.status, 'fertig', done.error);
     assert.equal(writes.length, 1, 'Claude nur einmal');
+    assert.equal(calls.notes.length, 1, 'Transkript nur einmal');
     assert.equal(calls.dialogue.length, 3, 'jeder Abschnitt genau einmal');
     const audio = String(readFileSync(episodes.audioPath(ep.id)));
     assert.equal(audio, calls.dialogue.map((inputs) => inputs.map((i) => `${i.voice}:${i.text}`).join('|')).join(''), 'Reihenfolge bleibt');
@@ -279,6 +387,7 @@ test('Folgen: nach einem Neustart läuft weiter, was ohne Claude geht; sonst ble
     assert.equal(episodes.get('x2').status, 'fertig', episodes.get('x2').error);
     assert.equal(episodes.get('x2').title, 'Gerettet');
     assert.equal(calls.writes.length, 0, 'Claude wird nicht gefragt');
+    assert.match(calls.notes[0]?.content ?? '', /# Gerettet\n[\s\S]*\*\*Moderation:\*\* Hallo\.\n\n\*\*Gast:\*\* Hi\./, 'Transkript aus dem geretteten Skript');
     assert.equal(String(readFileSync(episodes.audioPath('x2'))), 'Host:Hallo.|Gast:Hi.');
   }));
 
