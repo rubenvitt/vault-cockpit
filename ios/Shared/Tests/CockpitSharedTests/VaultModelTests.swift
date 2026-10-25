@@ -379,7 +379,7 @@ final class VaultModelTests: XCTestCase {
         XCTAssertTrue(blog.groupToStack)
         let atom = try XCTUnwrap(feeds.ungrouped.first)
         XCTAssertEqual(atom.state, .paused)
-        XCTAssertEqual(atom.settings, FeedSettings(paused: true, toStack: true, filter: "swift, ios", intervalMinutes: 5, groupId: nil))
+        XCTAssertEqual(atom.settings, FeedSettings(paused: true, toStack: true, filter: "swift, ios", intervalMinutes: 5, groupId: nil, url: "https://atom.test/feed.xml"))
         XCTAssertEqual(feeds.limits.maxOpmlBytes, 2_097_152)
         XCTAssertEqual(feeds.opml, "/api/lesen/feeds.opml")
         XCTAssertEqual(feeds.allFeeds.count, 3)

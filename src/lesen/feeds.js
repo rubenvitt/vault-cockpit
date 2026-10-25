@@ -197,6 +197,18 @@ export async function discoverFeed(input, { fetchFeed = fetchFeedDefault } = {})
   }
 }
 
+/**
+ * Nach einem Wechsel der Adresse wie beim ersten Abruf: Von den Einträgen des
+ * neuen Feeds, die noch nicht bekannt sind, kommen nur die neuesten fünf in
+ * den Eingang, der Rest gilt als bekannt.
+ */
+export function rememberBacklog(store, feedId, entries) {
+  const known = store.knownEntries(feedId);
+  const fresh = entries.filter((e) => e.key && !known.has(e.key));
+  if (fresh.every((e) => e.published)) fresh.sort((a, b) => b.published - a.published);
+  for (const entry of fresh.slice(FIRST_FETCH)) store.rememberEntry(feedId, entry.key, null);
+}
+
 const words = (s) => (s.match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu) ?? []).length;
 
 /** Felder für `addDocument` aus dem Inhalt im Feed (gesäubert). */

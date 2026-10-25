@@ -87,7 +87,7 @@ public struct ReadingFeed: Decodable, Equatable, Identifiable, Sendable {
 
     /// Einstellungen zum Bearbeiten, vorbelegt mit dem gespeicherten Stand.
     public var settings: FeedSettings {
-        FeedSettings(paused: paused, toStack: toStack, filter: keywordFilter ?? "", intervalMinutes: intervalMinutes, groupId: groupId)
+        FeedSettings(paused: paused, toStack: toStack, filter: keywordFilter ?? "", intervalMinutes: intervalMinutes, groupId: groupId, url: url)
     }
 }
 
@@ -214,17 +214,23 @@ public struct FeedSettings: Equatable, Sendable {
     public var intervalMinutes: Int
     /// nil = ohne Gruppe.
     public var groupId: String?
+    /// Adresse des Feeds (oder einer Website, die auf ihn verweist); der Server prüft eine neue
+    /// wie beim Abonnieren. Leer = unverändert.
+    public var url: String
 
-    public init(paused: Bool = false, toStack: Bool = false, filter: String = "", intervalMinutes: Int = 30, groupId: String? = nil) {
+    public init(paused: Bool = false, toStack: Bool = false, filter: String = "", intervalMinutes: Int = 30, groupId: String? = nil, url: String = "") {
         self.paused = paused
         self.toStack = toStack
         self.filter = filter
         self.intervalMinutes = intervalMinutes
         self.groupId = groupId
+        self.url = url
     }
 
     func fields(id: String) -> [String: String] {
         var fields = ["id": id, "filter": filter.trimmingCharacters(in: .whitespacesAndNewlines), "intervall": String(intervalMinutes), "gruppe": groupId ?? ""]
+        let url = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !url.isEmpty { fields["url"] = url }
         if paused { fields["pausiert"] = "1" }
         if toStack { fields["stapel"] = "1" }
         return fields

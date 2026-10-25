@@ -2,8 +2,8 @@ import CockpitShared
 import SwiftUI
 import UIKit
 
-/// „Einstellungen“ eines Feeds (`details.feed-edit` im Web) als Blatt: Pausiert, Direkt auf den
-/// Stapel, Stichwort-Filter, Abstand in Minuten (5–1440), Gruppe; „Speichern“ oben rechts und
+/// „Einstellungen“ eines Feeds (`details.feed-edit` im Web) als Blatt: Adresse, Pausiert, Direkt
+/// auf den Stapel, Stichwort-Filter, Abstand in Minuten (5–1440), Gruppe; „Speichern“ oben rechts und
 /// „Feed entfernen“ mit Rückfrage. Mit ungespeicherten Änderungen schließt Wischen das Blatt nicht.
 @MainActor
 struct FeedsScreenFeedSheet: View {
@@ -20,7 +20,7 @@ struct FeedsScreenFeedSheet: View {
     @State private var confirmsRemove = false
     @FocusState private var focus: Field?
 
-    enum Field: Hashable { case filter, interval }
+    enum Field: Hashable { case url, filter, interval }
 
     init(store: FeedsStore, feed: ReadingFeed, toasts: ToastCenter, remove: @escaping (ReadingFeed) -> Void) {
         self.store = store
@@ -52,17 +52,36 @@ struct FeedsScreenFeedSheet: View {
     private var edited: FeedSettings {
         var next = settings
         next.filter = settings.filter.trimmingCharacters(in: .whitespacesAndNewlines)
+        next.url = settings.url.trimmingCharacters(in: .whitespacesAndNewlines)
         next.intervalMinutes = minutes ?? feed.intervalMinutes
         return next
     }
 
     private var isDirty: Bool { edited != feed.settings }
 
+    /// Leer ginge nicht: Dann bliebe die alte Adresse, obwohl man sie gelöscht hat.
+    private var urlValid: Bool { !edited.url.isEmpty }
+
     var body: some View {
         NavigationStack {
             Form {
                 Section {
                     FeedsScreenFeedHead(feed: feed)
+                }
+                Section {
+                    TextField("https://…", text: $settings.url)
+                        .keyboardType(.URL)
+                        .textContentType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .submitLabel(.done)
+                        .focused($focus, equals: .url)
+                        .accessibilityLabel("Adresse")
+                } header: {
+                    Text("Adresse")
+                } footer: {
+                    Text("Feed oder Website; wird beim Speichern geprüft.")
+                        .foregroundStyle(urlValid ? Theme.text3 : Theme.danger)
                 }
                 Section {
                     Toggle(isOn: $settings.paused) {
@@ -154,7 +173,7 @@ struct FeedsScreenFeedSheet: View {
                     } else {
                         Button("Speichern", action: save)
                             .fontWeight(.semibold)
-                            .disabled(!isDirty || !intervalValid)
+                            .disabled(!isDirty || !intervalValid || !urlValid)
                     }
                 }
             }
@@ -201,7 +220,7 @@ struct FeedsScreenFeedSheet: View {
     static let presets = [5, 10, 15, 30, 45, 60, 120, 180, 360, 720, 1440]
 
     private func save() {
-        guard isDirty, intervalValid, !busy else { return }
+        guard isDirty, intervalValid, urlValid, !busy else { return }
         focus = nil
         let next = edited
         Task {

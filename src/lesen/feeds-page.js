@@ -6,7 +6,7 @@ import { maskSecrets } from '../health/mask.js';
 import { FetchError } from './fetch.js';
 import { ReadingError } from './store.js';
 import { readingPage } from './pages.js';
-import { discoverFeed, fetchFeedDefault, DEFAULT_INTERVAL } from './feeds.js';
+import { discoverFeed, fetchFeedDefault, rememberBacklog, DEFAULT_INTERVAL } from './feeds.js';
 import { parseOpml, toOpml } from './opml.js';
 import { jsonReply } from './json.js';
 
@@ -151,6 +151,7 @@ function feedItem(f, ctx, groups) {
     <span class="meta feed-status">${esc(status(f, ctx.tz))}</span>
     <details class="feed-edit"><summary>Einstellungen</summary>
       <form method="post" action="/aktion/lesen/feed/aendern" class="feed-form">${token}
+        <label class="feed-field"><span>Adresse <span class="hint">Feed oder Website, wird beim Speichern geprüft</span></span><input name="url" type="url" value="${esc(f.url)}" required autocomplete="off" spellcheck="false" inputmode="url"></label>
         <label class="feed-check"><input type="checkbox" name="pausiert" value="1"${f.paused ? ' checked' : ''}> Pausiert</label>
         <label class="feed-check"><input type="checkbox" name="stapel" value="1"${f.to_stack ? ' checked' : ''}> Direkt auf den Stapel</label>
         <label class="feed-field"><span>Stichwort-Filter <span class="hint">durch Komma getrennt, leer = alles</span></span><input name="filter" value="${esc(f.keyword_filter ?? '')}" autocomplete="off"></label>
@@ -302,6 +303,20 @@ export function feedRoutes({ store, fetchFeed = fetchFeedDefault, logger = conso
     if (!group) throw new ActionError('Diese Gruppe gibt es nicht mehr', 404);
     return group;
   };
+  /**
+   * Neue Adresse aus den Einstellungen (fehlt sie oder ist sie gleich: `{}`):
+   * geprüft wie beim Abonnieren, eine Website führt zu ihrem Feed. Danach gilt
+   * der Feed als frisch (gleich wieder dran, ohne Fehler und ohne ETag); was
+   * er schon kennt, bleibt bekannt, vom Neuen kommen höchstens fünf.
+   */
+  const newAddress = async (feed, input) => {
+    if (!input || input === feed.url) return {};
+    const { url, feed: parsed } = await asAction(() => discoverFeed(input, { fetchFeed }));
+    if (url === feed.url) return {};
+    if (store.listFeeds().some((f) => f.url === url)) throw new ActionError('Diesen Feed gibt es schon');
+    rememberBacklog(store, feed.id, parsed.entries);
+    return { url, etag: null, last_modified: null, last_error: null, error_count: 0, next_fetch_at: null, ...(parsed.siteUrl ? { site_url: parsed.siteUrl } : {}) };
+  };
   const opml = async () => ({
     body: toOpml(store.listFeeds(), { groups: store.listGroups() }),
     headers: { 'content-type': 'text/x-opml; charset=utf-8', 'content-disposition': 'attachment; filename="feeds.opml"', 'cache-control': 'no-store' },
@@ -328,7 +343,9 @@ export function feedRoutes({ store, fetchFeed = fetchFeedDefault, logger = conso
       async '/aktion/lesen/feed/aendern'(form) {
         const feed = feedOf(form);
         const minutes = Number(form.get('intervall'));
+        const moved = await newAddress(feed, (form.get('url') ?? '').trim());
         const f = await asAction(() => store.updateFeed(feed.id, {
+          ...moved,
           ...(form.has('gruppe') ? { group_id: form.get('gruppe') } : {}),
           paused: form.get('pausiert') === '1',
           to_stack: form.get('stapel') === '1',
