@@ -25,7 +25,8 @@ import { jsonReply } from './json.js';
  *
  * Alles, was Claude schreibt, ist Fremdtext: Titel und Pfade nur maskiert,
  * Fließtext über `inlineMd`, Seitentexte über `renderMarkdown` (beide maskieren
- * und lassen kein HTML durch).
+ * und lassen kein HTML durch). Wikilinks darin werden vorher umgeschrieben
+ * (`pageView`): auf bekannte Wiki-Seiten ein Link mit Titel, sonst lesbarer Text.
  */
 
 export const INGEST = '/lesen/ingest';
@@ -46,7 +47,6 @@ const noteLink = (p) => `/notiz?pfad=${encodeURIComponent(p)}`;
 const docLink = (id) => `/lesen/doc?id=${encodeURIComponent(id)}`;
 const httpUrl = (u) => (/^https?:\/\//i.test(u ?? '') ? u : null);
 const slugOf = (p) => String(p ?? '').split('/').pop().replace(/\.md$/i, '');
-const text = (s) => inlineMd(String(s ?? ''));
 const list = (a) => (Array.isArray(a) ? a : []);
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 /** `statusFor` liefert eine Map; ein schlichtes Objekt geht auch. */
@@ -175,14 +175,18 @@ export function ingestBadge(id, status, { ctx, title = '', available = true, rea
 
 // --- Übersicht ---------------------------------------------------------------
 
-/** Wie viele Texte des Stapels noch keinen Entwurf haben (für „Ganzen Stapel entwerfen“). */
+/**
+ * Wie viele Texte „Ganzen Stapel entwerfen“ anstößt: wie `requestStack` des
+ * Dienstes die ohne Entwurf und die fehlgeschlagenen; verworfene nicht.
+ */
 function openOnStack(store, ingest) {
   const docs = store.list({ status: 'stapel', limit: -1 });
   const st = ingest.statusFor(docs.map((d) => d.id));
-  return docs.filter((d) => [null, 'verworfen'].includes(statusIn(st, d.id))).length;
+  return docs.filter((d) => [null, 'fehler'].includes(statusIn(st, d.id))).length;
 }
 
 function readyCard(e, ctx) {
+  const view = pageView(e);
   const t = tally(e.draft);
   const kern = list(e.draft?.digest?.kernaussagen).slice(0, 3);
   const offered = t.synthese + t.frage;
@@ -192,7 +196,7 @@ function readyCard(e, ctx) {
       <span class="meta">${esc(meta.join(' · '))}</span>
       <a href="${esc(ingestLink(e.doc_id))}" class="ingest-card-title">${esc(titleOf(e))}</a>
     </div>
-    ${kern.length ? `<ul class="ingest-kern is-short">${kern.map((k) => `<li>${text(k)}</li>`).join('')}</ul>` : ''}
+    ${kern.length ? `<ul class="ingest-kern is-short">${kern.map((k) => `<li>${view.inline(k)}</li>`).join('')}</ul>` : ''}
     <div class="ingest-card-foot">
       <span class="ingest-tally">${esc(tallyLabel(t))}</span>
       ${offered ? `<span class="ingest-pill is-offer">${esc(t.synthese ? (t.synthese === 1 ? 'Synthese angeboten' : 'Synthesen angeboten') : 'Frage angeboten')}</span>` : ''}
@@ -230,7 +234,7 @@ function overview({ store, ingest }, ctx) {
   const at = Date.now();
 
   const stackForm = av.ok && open
-    ? `<form method="post" action="${ENTWERFEN}" class="act ingest-stapel">${hidden({ csrf: ctx.write.csrf, back: INGEST, stapel: '1' })}<button type="submit" class="btn">Ganzen Stapel entwerfen</button><span class="meta">${esc(open === 1 ? 'Ein Text auf dem Stapel hat noch keinen Entwurf.' : `${open} Texte auf dem Stapel haben noch keinen Entwurf.`)} Claude entwirft einen nach dem anderen.</span></form>`
+    ? `<form method="post" action="${ENTWERFEN}" class="act ingest-stapel">${hidden({ csrf: ctx.write.csrf, back: INGEST, stapel: '1' })}<button type="submit" class="btn">Ganzen Stapel entwerfen</button><span class="meta">${esc(open === 1 ? 'Ein Text auf dem Stapel hat noch keinen fertigen Entwurf.' : `${open} Texte auf dem Stapel haben noch keinen fertigen Entwurf.`)} Claude entwirft einen nach dem anderen.</span></form>`
     : '';
   const intro = `<div class="ingest-intro">${av.ok ? '' : unavailable(av)}${stackForm}</div>`;
 
@@ -255,10 +259,102 @@ function overview({ store, ingest }, ctx) {
 
 // --- Prüfansicht -------------------------------------------------------------
 
-/** Link auf eine Wiki-Seite, sonst nur der Titel. */
-const pageRef = (path, title) => (wikiPath(path) ? `<a href="${esc(noteLink(path))}" class="ingest-ref">${esc(title || slugOf(path))}</a>` : `<span class="ingest-ref">${esc(title || slugOf(path) || 'Seite')}</span>`);
+/** Slug als Wörter, wenn kein Titel bekannt ist: `local-first-software` → „local first software“. */
+const readable = (slug) => String(slug ?? '').replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
 
-function digestBlock(draft) {
+/** Link auf eine Wiki-Seite, sonst nur der Titel. */
+const pageRef = (path, title) => (wikiPath(path) ? `<a href="${esc(noteLink(path))}" class="ingest-ref">${esc(title || readable(slugOf(path)))}</a>` : `<span class="ingest-ref">${esc(title || readable(slugOf(path)) || 'Seite')}</span>`);
+
+/**
+ * Seiten, die ein Entwurf kennt, nach Slug (klein geschrieben): `{ path, title }`,
+ * `path` nur für bestehende Wiki-Seiten. Vorrang hat `links` des Dienstes
+ * (`{ slug: { path, title } }`, falls er es liefert), dann Vorschläge und Digest,
+ * die neuen Seiten (ohne Pfad) und die Source-Page selbst.
+ */
+function knownPages(e) {
+  const draft = e?.draft ?? {};
+  const d = draft.digest ?? {};
+  const known = new Map();
+  const put = (slug, path, title) => {
+    const key = String(slug ?? '').trim().replace(/\.md$/i, '').toLowerCase();
+    if (!key) return;
+    const was = known.get(key) ?? { path: null, title: null };
+    known.set(key, { path: was.path ?? (wikiPath(path) ? path : null), title: was.title ?? (title ? String(title) : null) });
+  };
+  const links = e?.links;
+  if (links && typeof links === 'object') for (const [slug, v] of links instanceof Map ? links : Object.entries(links)) put(slug, v?.path, v?.title);
+  const newSlugs = new Set(list(draft.items).filter((i) => i?.action === 'neu' && i.slug).map((i) => String(i.slug).toLowerCase()));
+  for (const x of [...list(draft.items), ...list(d.bestaetigt), ...list(d.widerspricht), ...list(d.dockt_an)]) {
+    if (!x) continue;
+    if (x.action === 'neu') put(x.slug, null, x.title);
+    else {
+      const path = x.path ?? x.to;
+      // Eine Relation auf eine Seite, die erst mit diesem Entwurf entsteht, ist noch kein Link.
+      if (typeof path === 'string' && !newSlugs.has(slugOf(path).toLowerCase())) put(slugOf(path), path, x.title);
+    }
+  }
+  for (const i of list(draft.items)) for (const p of list(i?.beteiligte)) if (typeof p === 'string') put(slugOf(p), p, null);
+  put(draft.source?.slug, null, draft.source?.title);
+  return known;
+}
+
+/** `[[Ziel#Abschnitt|Anzeige]]` außerhalb von Code: bekannte Seite → `[[pfad|Titel]]`, sonst lesbarer Text. */
+function rewriteLinks(src, known, { block = false } = {}) {
+  // In Tabellenzeilen trennt `\|` die Anzeige ab, ein bloßes `|` die Spalten.
+  const one = (sep) => (all, bang, inner) => {
+    const [targetPart, ...aliasParts] = inner.split('|');
+    const alias = aliasParts.join('|').trim();
+    const [base, ...anchor] = targetPart.split('#');
+    const key = base.trim().replace(/\\$/, '').replace(/\.md$/i, '').toLowerCase();
+    const page = known.get(key) ?? known.get(key.split('/').pop());
+    const label = (alias || page?.title || readable(key.split('/').pop()) || inner).replace(/[[\]|\n]/g, ' ').trim();
+    if (!page?.path) return label;
+    const at = anchor.length ? `#${anchor.join('#').replace(/\\$/, '')}` : '';
+    return `[[${page.path.replace(/\.md$/, '')}${at}${sep}${label}]]`;
+  };
+  const inline = (line) => {
+    const sep = block && /^\s*\|/.test(line) ? '\\|' : '|';
+    return line.split(/(`[^`\n]*`)/).map((part, i) => (i % 2 ? part : part.replace(/(!?)\[\[([^[\]\n]+)\]\]/g, one(sep)))).join('');
+  };
+  if (!block) return inline(src);
+  let fence = null;
+  return src.split('\n').map((line) => {
+    const m = /^\s{0,3}(`{3,}|~{3,})/.exec(line);
+    if (fence) {
+      if (m && m[1][0] === fence[0] && m[1].length >= fence.length) fence = null;
+      return line;
+    }
+    if (m) {
+      fence = m[1];
+      return line;
+    }
+    return inline(line);
+  }).join('\n');
+}
+
+/**
+ * Darstellung von Claudes Text für einen Entwurf: `inline` für Sätze, `block`
+ * für Seitentexte, `title(path)` für Pfade ohne eigenen Titel. Wikilinks auf
+ * bekannte Seiten werden Links mit Titel, alle anderen lesbarer Text.
+ */
+function pageView(e) {
+  const known = knownPages(e);
+  const paths = new Set([...known.values()].map((p) => p.path).filter(Boolean));
+  const links = {
+    wikilink: (target) => (paths.has(`${target}.md`) ? { kind: 'note', path: `${target}.md` } : null),
+    markdownLink: () => null,
+    image: () => null,
+  };
+  return {
+    known,
+    inline: (s) => inlineMd(rewriteLinks(String(s ?? ''), known), links),
+    block: (s) => renderMarkdown(rewriteLinks(String(s ?? ''), known, { block: true }), { links }),
+    title: (path) => known.get(slugOf(path).toLowerCase())?.title ?? null,
+  };
+}
+
+function digestBlock(draft, view) {
+  const text = view.inline;
   const d = draft?.digest ?? {};
   const kern = list(d.kernaussagen);
   const neu = list(d.neu);
@@ -285,7 +381,7 @@ function digestBlock(draft) {
  * die Source-Page schon im Wiki, wirken Änderungen an ihren Feldern nicht mehr,
  * der Slug ist ab dem ersten Schreiben fest; dann sind die Felder schreibgeschützt.
  */
-function sourceBlock(draft, applied = null) {
+function sourceBlock(draft, applied, view) {
   const s = { ...(draft?.source ?? {}), ...(applied?.slug ? { slug: applied.slug } : {}) };
   const written = list(applied?.steps).includes('source');
   const lock = (on) => (on ? ' readonly' : '');
@@ -300,55 +396,48 @@ function sourceBlock(draft, applied = null) {
       <label class="ingest-field"><span>Slug</span><input type="text" name="slug" value="${esc(s.slug ?? '')}" pattern="[a-z0-9]+(-[a-z0-9]+)*" spellcheck="false" autocapitalize="off" autocomplete="off" title="Kleinbuchstaben, Ziffern und Bindestriche"${lock(Boolean(applied?.slug))}></label>
       <label class="ingest-field"><span>Tags</span><input type="text" name="tags" value="${esc(tags)}" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="englisch, mit Komma"${lock(written)}></label>
     </div>
-    ${s.body ? `<details class="ingest-body"><summary>Text der Source-Page ansehen</summary><div class="md ingest-md">${renderMarkdown(s.body)}</div></details>` : ''}
+    ${s.body ? `<details class="ingest-body"><summary>Text der Source-Page ansehen</summary><div class="md ingest-md">${view.block(s.body)}</div></details>` : ''}
   </section>`;
 }
 
-/** Ein Vorschlag zum Abhaken; Aufklappbares steht neben dem `<label>`, sonst schaltete jeder Tipp darauf das Häkchen um. */
-function itemRow(item, featured, titles = new Map()) {
+/**
+ * Ein Vorschlag zum Abhaken. Der Titel einer bestehenden Seite ist selbst der
+ * Link auf sie; Aufklappbares steht neben dem `<label>`, sonst schaltete jeder
+ * Tipp darauf das Häkchen um.
+ */
+function itemRow(item, featured, view) {
   const id = esc(item.id);
   const box = `<input type="checkbox" name="item" value="${id}"${item.default === true ? ' checked' : ''}>`;
   const pill = `<span class="ingest-pill${featured ? ' is-offer' : ''}">${esc(kindLabel(item))}</span>`;
-  const why = item.warum ? `<span class="ingest-why">${text(item.warum)}</span>` : '';
+  const why = item.warum ? `<span class="ingest-why">${view.inline(item.warum)}</span>` : '';
+  const target = item.path ?? item.to;
+  // Nur bestehende Seiten verlinken: nicht, was neu angelegt wird, auch nicht als Ziel einer Relation.
+  const exists = item.action !== 'neu' && wikiPath(target) && view.known.get(slugOf(target).toLowerCase())?.path === target;
+  const name = (label) => (exists ? `<a href="${esc(noteLink(target))}" class="ingest-item-link">${esc(label)}</a>` : esc(label));
   let main;
   if (item.kind === 'relation') {
     const type = RELATION[item.type] ?? item.type ?? 'Relation';
-    main = `<span class="ingest-item-title"><span class="ingest-rel" title="${esc(item.type ?? '')}">${esc(type)}</span> ${esc(item.title || slugOf(item.to))}</span>`;
+    main = `<span class="ingest-item-title"><span class="ingest-rel" title="${esc(item.type ?? '')}">${esc(type)}</span> ${name(item.title || readable(slugOf(item.to)))}</span>`;
   } else if (item.kind === 'bestaetigung') {
-    main = `<span class="ingest-item-title">${esc(item.title || slugOf(item.path))}</span>${item.claim ? `<span class="ingest-claim">${text(item.claim)}</span>` : ''}`;
+    main = `<span class="ingest-item-title">${name(item.title || readable(slugOf(item.path)))}</span>${item.claim ? `<span class="ingest-claim">${view.inline(item.claim)}</span>` : ''}`;
   } else {
-    main = `<span class="ingest-item-title">${esc(item.title || item.slug || slugOf(item.path))}</span>${item.summary ? `<span class="ingest-summary">${text(item.summary)}</span>` : ''}`;
+    main = `<span class="ingest-item-title">${name(item.title || item.slug || readable(slugOf(item.path)))}</span>${item.summary ? `<span class="ingest-summary">${view.inline(item.summary)}</span>` : ''}`;
   }
   const head = item.kind === 'relation' || item.kind === 'bestaetigung' ? '' : pill;
-  const target = item.path ?? item.to;
-  const open = wikiPath(target) && item.action !== 'neu' ? `<a href="${esc(noteLink(target))}" class="ingest-open">Seite ansehen<span class="sr-only">: ${esc(item.title || slugOf(target))}</span></a>` : '';
   const involved = list(item.beteiligte).filter(Boolean);
   const extra = [
-    involved.length ? `<p class="ingest-involved"><span class="meta">Beteiligt:</span> ${involved.map((p) => pageRef(p, titles.get(p))).join(', ')}</p>` : '',
-    item.body ? `<details class="ingest-body"><summary>${featured ? 'Ganzen Text lesen' : 'Text der Seite ansehen'}</summary><div class="md ingest-md">${renderMarkdown(item.body)}</div></details>` : '',
-    open,
+    involved.length ? `<p class="ingest-involved"><span class="meta">Beteiligt:</span> ${involved.map((p) => pageRef(p, view.title(p))).join(', ')}</p>` : '',
+    item.body ? `<details class="ingest-body"><summary>${featured ? 'Ganzen Text lesen' : 'Text der Seite ansehen'}</summary><div class="md ingest-md">${view.block(item.body)}</div></details>` : '',
   ].filter(Boolean).join('');
   const where = item.action === 'neu' && item.slug ? `<span class="ingest-path">neu: ${esc(item.slug)}</span>` : '';
   return `<li class="ingest-item${featured ? ' is-featured' : ''}" data-item="${id}">
-    <label class="ingest-pick">${box}<span class="ingest-pick-text">${head}${main}${why}${where}</span></label>
+    <label class="ingest-pick">${box}<span class="ingest-pick-text"><span class="ingest-item-head">${head}${main}</span>${why}${where}</span></label>
     ${extra ? `<div class="ingest-item-more">${extra}</div>` : ''}
   </li>`;
 }
 
-/** Titel bekannter Wiki-Seiten aus dem Entwurf (Vorschläge und Digest), für Pfade ohne eigenen Titel wie `beteiligte`. */
-function pageTitles(draft) {
-  const d = draft?.digest ?? {};
-  const titles = new Map();
-  for (const x of [...list(draft?.items), ...list(d.bestaetigt), ...list(d.widerspricht), ...list(d.dockt_an)]) {
-    const path = x?.path ?? x?.to;
-    if (typeof path === 'string' && x.title && !titles.has(path)) titles.set(path, String(x.title));
-  }
-  return titles;
-}
-
-function itemGroups(draft) {
+function itemGroups(draft, view) {
   const groups = groupItems(draft?.items);
-  const titles = pageTitles(draft);
   if (!groups.length) return '<section class="ingest-group"><p class="empty">Claude schlägt nichts über die Source-Page hinaus vor.</p></section>';
   return groups
     .map(
@@ -358,7 +447,7 @@ function itemGroups(draft) {
       <span class="ingest-all" data-ingest-all hidden><button type="button" class="chip quiet" data-select="all">alle</button><button type="button" class="chip quiet" data-select="none">keine</button></span>
     </div>
     ${g.hint ? `<p class="meta ingest-group-hint">${esc(g.hint)}</p>` : ''}
-    <ul class="ingest-items">${g.items.map((i) => itemRow(i, g.featured, titles)).join('')}</ul>
+    <ul class="ingest-items">${g.items.map((i) => itemRow(i, g.featured, view)).join('')}</ul>
   </section>`,
     )
     .join('');
@@ -422,13 +511,14 @@ function reviewForm(e, ctx, nav) {
   const draft = e.draft ?? {};
   const chosen = list(draft.items).filter((i) => i?.default === true).length;
   const back = ingestLink(e.doc_id);
+  const view = pageView(e);
   return `<form method="post" action="${UEBERNEHMEN}" class="ingest-form" data-ingest-form>
     ${hidden({ csrf: ctx.write.csrf, back, id: e.doc_id })}
     <button type="submit" class="ingest-guard" disabled hidden aria-hidden="true" tabindex="-1"></button>
     ${haltedBlock(e)}
-    ${digestBlock(draft)}
-    ${sourceBlock(draft, e.applied)}
-    ${itemGroups(draft)}
+    ${digestBlock(draft, view)}
+    ${sourceBlock(draft, e.applied, view)}
+    ${itemGroups(draft, view)}
     <div class="ingest-weitere">
       <button type="submit" class="btn quiet" formaction="${ENTWERFEN}" formnovalidate name="force" value="1" data-confirm="Claude entwirft neu, der jetzige Entwurf geht verloren.">Neu entwerfen</button>
       <button type="submit" class="btn quiet" formaction="${VERWERFEN}" formnovalidate name="done" value="1" data-ingest-done>Ohne Wiki erledigen <kbd>E</kbd></button>
@@ -493,6 +583,31 @@ export function ingestJson(e) {
 }
 
 const ACTIONS = { draft: ENTWERFEN, apply: UEBERNEHMEN, discard: VERWERFEN };
+
+/**
+ * Rücksprung der ausgetauschten Abzeichen: eine Seite unter `/lesen/` samt
+ * Query (die Leseansicht braucht ihr `?id=`), sonst der Stapel.
+ */
+export function standBack(raw) {
+  const fallback = { back: '/lesen/stapel', path: '/lesen/stapel' };
+  if (typeof raw !== 'string' || !raw.startsWith('/lesen/') || raw.length > 500) return fallback;
+  let url;
+  try {
+    url = new URL(raw, 'http://cockpit.invalid');
+  } catch {
+    return fallback;
+  }
+  if (url.origin !== 'http://cockpit.invalid' || !/^\/lesen\/[\w/-]*$/.test(url.pathname)) return fallback;
+  return { back: url.pathname + url.search, path: url.pathname };
+}
+
+/** Meldung nach dem Übernehmen; `confirmed` (bestätigte Seiten) zählt der Dienst getrennt von `linked`, ältere Fassungen nicht. */
+export function appliedMessage(title, r) {
+  const pages = list(r?.written).filter((p) => p !== r.source && wikiPath(p) && p !== 'wiki/log.md');
+  const linked = list(r?.linked).length;
+  const confirmed = Array.isArray(r?.confirmed) ? r.confirmed.length : 0;
+  return `Im Wiki: ${title}${pages.length ? ` + ${plural(pages.length, 'Seite', 'Seiten')}` : ''}${linked ? `, ${linked} verknüpft` : ''}${confirmed ? `, ${confirmed} bestätigt` : ''}`;
+}
 
 // --- Routen ------------------------------------------------------------------
 
@@ -578,11 +693,10 @@ export function ingestRoutes({ store, ingest = null, logger = console }) {
       /** Stand für /static/lesen-ingest.js: Zähler und je Dokument (`ids`, sonst alle offenen) Status und Abzeichen. */
       async [STAND](ctx) {
         const ids = (ctx.url.searchParams.get('ids') ?? '').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 500);
-        const back = ctx.url.searchParams.get('back');
-        const safeBack = typeof back === 'string' && /^\/lesen\/[\w/-]*$/.test(back) ? back : '/lesen/stapel';
+        const { back: safeBack, path } = standBack(ctx.url.searchParams.get('back'));
         const available = Boolean(ingest.available()?.ok);
         // Die Leseansicht nennt das fertige Abzeichen „Ingest prüfen“ (src/lesen/doc.js); der Austausch soll es nicht umbenennen.
-        const ready = safeBack === '/lesen/doc' ? 'Ingest prüfen' : 'Ingest bereit';
+        const ready = path === '/lesen/doc' ? 'Ingest prüfen' : 'Ingest bereit';
         let items;
         if (ids.length) {
           const st = ingest.statusFor(ids);
@@ -629,10 +743,7 @@ export function ingestRoutes({ store, ingest = null, logger = console }) {
         if (form.has('tags')) source.tags = [...new Set(String(form.get('tags')).split(/[,\n]/).map((t) => t.trim().toLowerCase().replace(/^#/, '')).filter(Boolean))];
         const order = readyIds();
         const r = await run(() => ingest.apply(id, { items, source }));
-        const pages = list(r?.written).filter((p) => p !== r.source && wikiPath(p) && p !== 'wiki/log.md');
-        const linked = list(r?.linked).length;
-        const title = source.title ?? titleOf(e);
-        const message = `Im Wiki: ${title}${pages.length ? ` + ${plural(pages.length, 'Seite', 'Seiten')}` : ''}${linked ? `, ${linked} verknüpft` : ''}`;
+        const message = appliedMessage(source.title ?? titleOf(e), r);
         logger.info?.(`Ingest übernommen: ${id} → ${r?.source ?? '?'}`);
         return { message, link: wikiPath(r?.source) ? { href: noteLink(r.source), label: 'Source-Page öffnen' } : null, redirect: nextAfter(order, id), result: r ?? null };
       },

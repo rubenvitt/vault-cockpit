@@ -51,7 +51,8 @@
     const els = watched();
     if (!els.length) return schedule();
     const ids = [...new Set(els.map((el) => el.dataset.ingestWatch))];
-    const q = new URLSearchParams({ ids: ids.join(','), back: location.pathname });
+    // Mit Query: Die Leseansicht braucht ihr `?id=`, sonst führte „Ingest entwerfen“ ins Leere.
+    const q = new URLSearchParams({ ids: ids.join(','), back: location.pathname + location.search });
     let data = null;
     try {
       const res = await fetch(`${STAND}?${q}`, { headers: { accept: 'application/json' }, credentials: 'same-origin', cache: 'no-store', redirect: 'manual' });

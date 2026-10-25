@@ -741,15 +741,20 @@ steht unter **Einstellungen → Vorlesen → Stimme und Modell**. Beim Öffnen v
 Folgen, mit der Zahl der bereiten Entwürfe. Die Übersicht `/lesen/ingest` zeigt
 bereite Entwürfe als Karten (Quelle, zwei bis drei Kernaussagen, „3
 Verknüpfungen · 1 Synthese · 2 neue Seiten“), darunter **In Arbeit** und
-**Fehler** (mit „Erneut entwerfen“) und oben **Ganzen Stapel entwerfen**. Die
+**Fehler** (mit „Erneut entwerfen“) und oben **Ganzen Stapel entwerfen** (für
+Texte ohne Entwurf und fehlgeschlagene, wie der Dienst; verworfene nicht). Die
 Prüfansicht `/lesen/ingest/doc?id=…` ist zum Lesen in ein, zwei Minuten gedacht:
 **Das Wichtigste** (Kernaussagen, Neu für dich, Bestätigt, Widerspricht mit dem
 Hinweis auf `/wiki-lint`, Dockt an), die Source-Page mit änderbarem Titel,
 Summary (Zähler bis 80), Slug und Tags samt Vorschau, dann die Vorschläge zum
 Abhaken, gruppiert: Verknüpfen, Bestätigungen, **Synthesen & Fragen** (als
-Karten, Text zum Aufklappen, standardmäßig aus), neue Seiten und Relationen.
-**Ins Wiki übernehmen** (Leiste unten, mit der Zahl der gewählten Elemente) führt
-zum nächsten bereiten Entwurf, die Meldung verlinkt die neue Source-Page.
+Karten, Text zum Aufklappen, standardmäßig aus), neue Seiten und Relationen. Der
+Titel einer bestehenden Seite ist selbst der Link auf sie; Wikilinks in Claudes
+Text erscheinen mit dem Titel der Seite (aus `links` des Dienstes, sonst aus
+Digest und Vorschlägen), unbekannte als lesbarer Text.
+**Ins Wiki übernehmen** (Leiste unten, mit der Zahl der gewählten Elemente; auf
+dem Handy nur der Knopf) führt zum nächsten bereiten Entwurf, die Meldung
+verlinkt die neue Source-Page und nennt Verknüpfungen und Bestätigungen getrennt.
 Daneben **Neu entwerfen**, **Ohne Wiki erledigen** (gelesen, weg, mit
 Rückgängig) und **Entwurf verwerfen** (der Text bleibt auf dem Stapel). Ohne
 JavaScript ist alles ein Formular; mit `/static/lesen-ingest.js` gibt es

@@ -6,7 +6,8 @@ import { createCookieSigner } from '../src/web/session.js';
 import { createSettingsStore } from '../src/cockpit/settings.js';
 import { createReadingStore } from '../src/lesen/store.js';
 import { readingRoutes } from '../src/lesen/http.js';
-import { groupItems, kindLabel, tally, tallyLabel } from '../src/lesen/ingest-page.js';
+import { readFileSync } from 'node:fs';
+import { appliedMessage, groupItems, kindLabel, standBack, tally, tallyLabel } from '../src/lesen/ingest-page.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
 const SECRET = 'x'.repeat(40);
@@ -64,7 +65,7 @@ function fakeIngest(store, { available = { ok: true } } = {}) {
   const api = {
     calls,
     rows,
-    state: { available, failApply: null },
+    state: { available, failApply: null, applyExtra: {} },
     put(docId, status, extra = {}) {
       rows.set(docId, { doc_id: docId, status, origin: 'nacht', draft: null, error: null, applied: null, requested_at: stamp(), drafted_at: null, applied_at: null, updated_at: stamp(), model: 'sonnet', ...extra });
     },
@@ -78,9 +79,10 @@ function fakeIngest(store, { available = { ok: true } } = {}) {
       }
       return ids.length;
     },
+    // Wie der Dienst: ohne Entwurf oder fehlgeschlagen; verworfene nicht.
     requestStack({ origin = 'knopf' } = {}) {
       calls.push(['requestStack', { origin }]);
-      const ids = store.list({ status: 'stapel', limit: -1 }).map((d) => d.id).filter((id) => !rows.has(id) || rows.get(id).status === 'verworfen');
+      const ids = store.list({ status: 'stapel', limit: -1 }).map((d) => d.id).filter((id) => !rows.has(id) || rows.get(id).status === 'fehler');
       for (const id of ids) api.put(id, 'wartet', { origin });
       return ids.length;
     },
@@ -108,7 +110,7 @@ function fakeIngest(store, { available = { ok: true } } = {}) {
       r.status = 'uebernommen';
       r.applied = { source: `wiki/sources/${payload.source.slug ?? 'x'}.md` };
       store.setStatus(id, 'archiv', { read: true });
-      return { source: r.applied.source, raw: 'raw/x.md', written: [r.applied.source, 'wiki/entities/robert-glaser.md', 'wiki/log.md'], linked: ['wiki/concepts/context-engineering.md'] };
+      return { source: r.applied.source, raw: 'raw/x.md', written: [r.applied.source, 'wiki/entities/robert-glaser.md', 'wiki/log.md'], linked: ['wiki/concepts/context-engineering.md'], ...api.state.applyExtra };
     },
     discard(id, { done = false } = {}) {
       calls.push(['discard', id, { done }]);
@@ -235,7 +237,7 @@ test('Ingest: Übersicht mit Karten, In Arbeit, Fehler und „Ganzen Stapel entw
     let page = await html('/lesen/ingest');
     assert.match(page, /Nichts zum Abhaken/);
     assert.match(page, /<form method="post" action="\/aktion\/lesen\/ingest\/entwerfen" class="act ingest-stapel">[^]*name="stapel" value="1"[^]*Ganzen Stapel entwerfen/);
-    assert.match(page, /Ein Text auf dem Stapel hat noch keinen Entwurf/);
+    assert.match(page, /Ein Text auf dem Stapel hat noch keinen fertigen Entwurf/);
     noInline(page);
 
     const r = add('Bereit');
@@ -257,7 +259,7 @@ test('Ingest: Übersicht mit Karten, In Arbeit, Fehler und „Ganzen Stapel entw
     assert.match(page, /<h2 id="ingest-fehler">Fehler/);
     assert.match(page, /<p class="problem">Claude hat nicht geantwortet &lt;b&gt;!&lt;\/b&gt;<\/p>/);
     assert.match(page, new RegExp(`name="id" value="${f.id}"><input type="hidden" name="force" value="1"><button type="submit" class="btn">Erneut entwerfen`));
-    assert.match(page, /Ein Text auf dem Stapel hat noch keinen Entwurf/, 'nur „Erst einer“ hat keinen');
+    assert.match(page, /2 Texte auf dem Stapel haben noch keinen fertigen Entwurf/, '„Erst einer“ und der fehlgeschlagene');
     assert.match(page, /<script src="\/static\/lesen-ingest\.js\?v=[^"]+" defer><\/script>/);
     noInline(page);
   });
@@ -549,5 +551,105 @@ test('Ingest: Prüfansicht ohne bereiten Entwurf zeigt den Stand, unbekannte Tex
     const js = await call('/static/lesen-ingest.js');
     assert.equal(js.status, 200);
     assert.match(js.headers.get('content-type'), /javascript/);
+  });
+});
+
+test('Ingest: „Ganzen Stapel entwerfen“ zählt wie der Dienst – ohne Entwurf und fehlgeschlagen, nicht verworfen', async () => {
+  await withIngest(async ({ html, call, add, ingest }) => {
+    add('Ohne');
+    const f = add('Fehlgeschlagen');
+    const v = add('Verworfen');
+    const w = add('Auch verworfen');
+    const r = add('Bereit');
+    ingest.put(f.id, 'fehler', { error: 'x' });
+    ingest.put(v.id, 'verworfen');
+    ingest.put(w.id, 'verworfen');
+    ingest.put(r.id, 'bereit', { draft: draftFor('Bereit') });
+    assert.match(await html('/lesen/ingest'), /2 Texte auf dem Stapel haben noch keinen fertigen Entwurf\./);
+    assert.equal((await (await call('/api/lesen/ingest')).json()).openOnStack, 2);
+    const csrf = csrfFrom(await html('/lesen/ingest'));
+    const res = await call('/aktion/lesen/ingest/entwerfen', { method: 'POST', form: { csrf, stapel: '1' }, accept: 'application/json' });
+    assert.equal((await res.json()).count, 2, 'der Knopf verspricht, was der Dienst anstößt');
+    assert.equal(ingest.rows.get(v.id).status, 'verworfen');
+  });
+});
+
+test('Ingest: Prüfansicht verlinkt Titel bestehender Seiten statt „Seite ansehen“, Neues bleibt Text', async () => {
+  await withIngest(async ({ html, add, ingest }) => {
+    const d = add('Kompakt');
+    const draft = draftFor('Kompakt');
+    draft.items.push({ id: 'r2', kind: 'relation', type: 'related-to', to: 'wiki/concepts/rag.md', title: 'RAG', default: true });
+    ingest.put(d.id, 'bereit', { draft });
+    const page = await html(`/lesen/ingest/doc?id=${d.id}`);
+    assert.ok(!/>Seite ansehen/.test(page), 'kein eigener Link je Karte');
+    assert.ok(!page.includes('ingest-open'));
+    const item = (id) => page.match(new RegExp(`<li class="ingest-item[^"]*" data-item="${id}">[^]*?</li>`))[0];
+    assert.match(item('v1'), /<span class="ingest-item-head"><span class="ingest-pill">Konzept<\/span><span class="ingest-item-title"><a href="\/notiz\?pfad=wiki%2Fconcepts%2Fcontext-engineering\.md" class="ingest-item-link">Context Engineering<\/a><\/span><\/span><span class="ingest-why">Kernthema<\/span>/);
+    assert.match(item('b1'), /<span class="ingest-item-title"><a href="\/notiz\?pfad=wiki%2Fconcepts%2Fcontext-engineering\.md" class="ingest-item-link">Context Engineering<\/a><\/span><span class="ingest-claim">Kontext ist knapp<\/span>/);
+    assert.match(item('r2'), /verwandt mit<\/span> <a href="\/notiz\?pfad=wiki%2Fconcepts%2Frag\.md" class="ingest-item-link">RAG<\/a>/);
+    // Robert Glaser entsteht erst mit diesem Entwurf: weder als neue Seite noch als Ziel der Relation ein Link.
+    assert.ok(!item('n1').includes('<a '), 'neue Seite ohne Link');
+    assert.match(item('r1'), /verfasst von<\/span> Robert Glaser<\/span>/);
+    // Der Titel steht im <label>, die Häkchen bleiben dort.
+    assert.match(item('v1'), /<label class="ingest-pick"><input type="checkbox" name="item" value="v1" checked>/);
+  });
+});
+
+test('Ingest: Wikilinks in Digest, Hinweisen und Vorschau werden Links mit Titel, Unbekanntes lesbarer Text', async () => {
+  await withIngest(async ({ html, add, ingest }) => {
+    const d = add('Verweise');
+    const draft = draftFor('Verweise');
+    draft.digest.neu = ['Ergänzt [[claude-code]] und [[gibt-es-nicht-im-wiki]]', 'Code bleibt: `[[rag]]`'];
+    draft.source.body = 'Siehe [[context-engineering]], [[rag|Retrieval]] und [[gedaechtnis-vs-rag]].\n\n```\n[[rag]]\n```\n\n| Seite | Rolle |\n|---|---|\n| [[rag]] | Gegenpol |';
+    // `links` des Dienstes hat Vorrang: hier mit eigenem Titel für claude-code.
+    ingest.put(d.id, 'bereit', { draft, links: { 'claude-code': { path: 'wiki/entities/claude-code.md', title: 'Claude Code (CLI)' } } });
+    const page = await html(`/lesen/ingest/doc?id=${d.id}`);
+    const re = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const link = (path, label) => `<a href="${re(`/notiz?pfad=${encodeURIComponent(path)}`)}" class="wikilink" title="${re(path)}">${re(label)}</a>`;
+    // Hinweis des Dienstes: `Widerspruch zu [[rag]]`
+    assert.match(page, new RegExp(`<ul class="ingest-hinweise"><li>Widerspruch zu ${link('wiki/concepts/rag.md', 'RAG')} – Auflösung per /wiki-lint</li>`));
+    assert.match(page, new RegExp(`<li>Ergänzt ${link('wiki/entities/claude-code.md', 'Claude Code (CLI)')} und gibt es nicht im wiki</li>`));
+    assert.match(page, /<li>Code bleibt: <code>\[\[rag\]\]<\/code><\/li>/);
+    assert.match(page, new RegExp(link('wiki/concepts/context-engineering.md', 'Context Engineering')));
+    assert.match(page, new RegExp(link('wiki/concepts/rag.md', 'Retrieval')), 'eigene Anzeige bleibt');
+    assert.match(page, /und Gedächtnis statt RAG\?\.<\/p>/, 'neue Seite: ihr Titel als Text');
+    assert.ok(!page.includes('(fehlt)'), 'nichts als fehlend markiert');
+    assert.ok(!/\[\[/.test(page.replace(/<code[^>]*>[^]*?<\/code>/g, '')), 'keine rohen Wikilinks außerhalb von Code');
+    assert.match(page, /<pre><code[^>]*>\[\[rag\]\]/, 'im Codeblock unverändert');
+    assert.match(page, new RegExp(`<td>${link('wiki/concepts/rag.md', 'RAG')}</td>\\s*<td>Gegenpol</td>`), 'in Tabellen bleibt die Spalte heil');
+  });
+});
+
+test('Ingest: Live-Stand gibt den Abzeichen die Rücksprung-Adresse samt Query', async () => {
+  assert.deepEqual(standBack('/lesen/doc?id=abc'), { back: '/lesen/doc?id=abc', path: '/lesen/doc' });
+  assert.deepEqual(standBack('/lesen/stapel'), { back: '/lesen/stapel', path: '/lesen/stapel' });
+  for (const bad of ['//evil.test/lesen/x', 'https://evil.test/lesen/doc', '/notiz?pfad=x', '/lesen/../aktion', null]) assert.equal(standBack(bad).back, '/lesen/stapel', String(bad));
+  await withIngest(async ({ call, add, ingest }) => {
+    const a = add('Ohne');
+    const b = add('Bereit');
+    ingest.put(b.id, 'bereit', { draft: draftFor('Bereit') });
+    const back = `/lesen/doc?id=${a.id}`;
+    const s = await (await call(`/lesen/ingest/stand?ids=${a.id},${b.id}&back=${encodeURIComponent(back)}`)).json();
+    assert.match(s.items[0].badge, new RegExp(`<input type="hidden" name="back" value="/lesen/doc\\?id=${a.id}">`));
+    assert.match(s.items[1].badge, />Ingest prüfen</, 'Leseansicht erkannt, auch mit Query');
+  });
+  // Die Seite schickt ihre ganze Adresse mit.
+  const js = readFileSync(new URL('../src/web/static/lesen-ingest.js', import.meta.url), 'utf8');
+  assert.match(js, /back: location\.pathname \+ location\.search/);
+});
+
+test('Ingest: Meldung nach dem Übernehmen zählt Bestätigungen getrennt, wenn der Dienst sie liefert', async () => {
+  const r = { source: 'wiki/sources/a.md', written: ['wiki/sources/a.md', 'wiki/concepts/neu.md', 'wiki/log.md'], linked: ['wiki/concepts/x.md', 'wiki/concepts/y.md'] };
+  assert.equal(appliedMessage('A', r), 'Im Wiki: A + 1 Seite, 2 verknüpft', 'ältere Fassung ohne `confirmed`: wie bisher');
+  assert.equal(appliedMessage('A', { ...r, linked: ['wiki/concepts/x.md'], confirmed: ['wiki/concepts/y.md', 'wiki/concepts/z.md'] }), 'Im Wiki: A + 1 Seite, 1 verknüpft, 2 bestätigt');
+  assert.equal(appliedMessage('A', { ...r, linked: [], confirmed: ['wiki/concepts/y.md'] }), 'Im Wiki: A + 1 Seite, 1 bestätigt');
+  assert.equal(appliedMessage('A', { ...r, confirmed: [] }), 'Im Wiki: A + 1 Seite, 2 verknüpft');
+  await withIngest(async ({ html, call, add, ingest }) => {
+    const a = add('Bestätigt');
+    ingest.put(a.id, 'bereit', { draft: draftFor('Bestätigt') });
+    ingest.state.applyExtra = { linked: [], confirmed: ['wiki/concepts/context-engineering.md'] };
+    const csrf = csrfFrom(await html(`/lesen/ingest/doc?id=${a.id}`));
+    const res = await call('/aktion/lesen/ingest/uebernehmen', { method: 'POST', form: { csrf, id: a.id, back: `/lesen/ingest/doc?id=${a.id}` }, accept: 'application/json' });
+    assert.equal((await res.json()).message, 'Im Wiki: Bestätigt + 1 Seite, 1 bestätigt');
   });
 });
