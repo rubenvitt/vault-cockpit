@@ -1,0 +1,70 @@
+{
+  "checkedAt": "2026-10-25T08:30:00.000Z",
+  "failing": [
+    {
+      "id": "calendars",
+      "name": "Kalender"
+    }
+  ],
+  "services": [
+    {
+      "id": "sync",
+      "name": "Sync",
+      "state": "ok",
+      "summary": "läuft",
+      "lastOkAt": "2026-10-25T08:00:00.000Z",
+      "lastErrorAt": null,
+      "lastError": null,
+      "facts": [
+        {
+          "label": "Letzter Lauf",
+          "at": "2026-10-25T08:00:00.000Z"
+        },
+        {
+          "label": "Dateien",
+          "value": "1234"
+        }
+      ]
+    },
+    {
+      "id": "calendars",
+      "name": "Kalender",
+      "state": "error",
+      "summary": "1 von 2 nicht erreichbar",
+      "lastOkAt": "2026-10-25T07:00:00.000Z",
+      "lastErrorAt": "2026-10-25T07:30:00.000Z",
+      "lastError": "Arbeit: 401 Unauthorized",
+      "facts": [],
+      "items": [
+        {
+          "id": "c1",
+          "name": "Privat",
+          "state": "ok",
+          "summary": "12 Termine",
+          "lastOkAt": "2026-10-25T07:00:00.000Z",
+          "lastErrorAt": null,
+          "lastError": null
+        },
+        {
+          "id": "c2",
+          "name": "Arbeit",
+          "state": "error",
+          "summary": null,
+          "lastOkAt": null,
+          "lastErrorAt": "2026-10-25T07:30:00.000Z",
+          "lastError": "401 Unauthorized"
+        }
+      ]
+    },
+    {
+      "id": "mail",
+      "name": "Mail-Abruf",
+      "state": "off",
+      "summary": "nicht eingerichtet",
+      "lastOkAt": null,
+      "lastErrorAt": null,
+      "lastError": null,
+      "facts": []
+    }
+  ]
+}

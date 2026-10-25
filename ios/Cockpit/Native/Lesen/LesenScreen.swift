@@ -1,8 +1,7 @@
 import CockpitShared
 import SwiftUI
 
-/// Bereiche der Unternavigation des Lesens (`SUB` in src/lesen/pages.js). Wissen und Feeds sind
-/// noch Web-Seiten und gehen als Blatt auf.
+/// Bereiche der Unternavigation des Lesens (`SUB` in src/lesen/pages.js), alle nativ.
 enum LesenSection: String, CaseIterable, Hashable, Identifiable {
     case eingang, stapel, folgen, markiert, wiedersehen, wissen, feeds
 
@@ -17,15 +16,6 @@ enum LesenSection: String, CaseIterable, Hashable, Identifiable {
         case .wiedersehen: "Wiedersehen"
         case .wissen: "Wissen"
         case .feeds: "Feeds"
-        }
-    }
-
-    /// Web-Seite, solange der Bereich nicht nativ ist; nil = nativ.
-    var webPath: String? {
-        switch self {
-        case .wissen: "/wissen"
-        case .feeds: "/lesen/feeds"
-        default: nil
         }
     }
 }
@@ -96,9 +86,12 @@ struct LesenScreen: View {
             // Neu, wenn ein Link eine andere Woche verlangt (Rückblick „wiedersehen“).
             WiedersehenScreen(week: model.reviewWeek)
                 .id(model.reviewWeek ?? "")
-        case .wissen, .feeds:
-            // Kommt nicht vor: Die Unternavigation öffnet beide als Blatt.
-            EingangScreen(model: model, store: session.inbox, toasts: session.toasts)
+        case .wissen:
+            // Neu, wenn ein Link eine Frage oder einen Filter mitbringt (`/wissen?q=…`).
+            WissenScreen(query: model.wissenQuery)
+                .id(model.wissenQuery)
+        case .feeds:
+            FeedsScreen()
         }
     }
 
@@ -157,40 +150,15 @@ struct LesenSubnav: View {
         }
     }
 
-    @ViewBuilder
     private func item(_ section: LesenSection) -> some View {
-        if section.webPath != nil {
-            // Web-Seite als Blatt; das Zeichen sagt, dass sie (noch) nicht nativ ist.
-            Button {
-                session.toasts.signal(.selection)
-                if let path = section.webPath { model.webSheet = AppModel.WebPage(path: path) }
-            } label: {
-                HStack(spacing: 4) {
-                    Text(section.label)
-                    Image(systemName: "arrow.up.right")
-                        .font(.caption2.weight(.semibold))
-                        .accessibilityHidden(true)
-                }
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(Theme.text2)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .frame(minHeight: 34)
-                .background(Theme.surface, in: Capsule())
-                .overlay { Capsule().strokeBorder(Theme.line) }
-                .contentShape(Capsule())
-            }
-            .buttonStyle(.plain)
-            .accessibilityHint("Öffnet die Web-Seite")
-        } else {
-            LesenChip(label: section.label, count: count(section), selected: model.readingSection == section) {
-                guard model.readingSection != section || !model.readingPath.isEmpty else { return }
-                session.toasts.signal(.selection)
-                model.readingPath = []
-                // Wie der Link der Unternavigation im Web: Wiedersehen zeigt die laufende Woche.
-                if section == .wiedersehen { model.reviewWeek = nil }
-                model.readingSection = section
-            }
+        LesenChip(label: section.label, count: count(section), selected: model.readingSection == section) {
+            guard model.readingSection != section || !model.readingPath.isEmpty else { return }
+            session.toasts.signal(.selection)
+            model.readingPath = []
+            // Wie der Link der Unternavigation im Web: Wiedersehen zeigt die laufende Woche.
+            if section == .wiedersehen { model.reviewWeek = nil }
+            if section == .wissen { model.wissenQuery = WissenQuery() }
+            model.readingSection = section
         }
     }
 

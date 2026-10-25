@@ -1,0 +1,5 @@
+{
+  "error": "invalid",
+  "message": "Unbekannte Zeitzone „Mars/Olympus“ (z. B. Europe/Berlin)",
+  "field": "tz"
+}

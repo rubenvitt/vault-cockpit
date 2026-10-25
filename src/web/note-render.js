@@ -1,13 +1,12 @@
 import { esc, formHead, flashToast, obsidianLink } from './render.js';
-import { renderMarkdown, inlineMd } from './markdown-render.js';
+import { parseMarkdown, renderBlocks, inlineMd } from './markdown-render.js';
 import { head, appHeader } from './layout.js';
 import { synthesisHead, SYNTHESIS } from './synthesis-render.js';
 import { evidenceBox } from '../lesen/synthesis-evidence.js';
+import { fmText, fmPlain, visibleFrontmatter } from './note-json.js';
 
 const noteHref = (path) => `/notiz?pfad=${encodeURIComponent(path)}`;
 const graphHref = (path) => `/graph?pfad=${encodeURIComponent(path)}`;
-const fmText = (v) => (Array.isArray(v) ? v.join(', ') : typeof v === 'object' && v ? JSON.stringify(v) : String(v ?? ''));
-const plain = (s) => s.replace(/!?\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, t, l) => l ?? t);
 
 /**
  * Frontmatter kompakt: eine Zeile mit den ersten Feldern, aufgeklappt alle.
@@ -16,7 +15,7 @@ const plain = (s) => s.replace(/!?\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, t, l) 
 function frontmatter(fm, links) {
   if (!fm.length) return '';
   const short = fm.slice(0, 3).map(([k, v]) => {
-    const t = plain(fmText(v));
+    const t = fmPlain(v);
     return `${esc(k)}: ${esc(t.length > 40 ? `${t.slice(0, 39)}…` : t)}`;
   });
   const more = fm.length > 3 ? ` <span class="hint">+${fm.length - 3}</span>` : '';
@@ -84,8 +83,10 @@ export function renderNote(note, { user = null, write = null, back = '/', flash 
     ? (n, line, done) =>
         `${formHead(ctx, '/aktion/notiz/checkbox', { pfad: note.path, n, line: line.trim(), erledigt: done ? '0' : '1' }).replace('class="act"', 'class="act box-form"')}<button type="submit" class="box${done ? ' on' : ''}" aria-pressed="${done}" aria-label="${done ? 'Wieder öffnen' : 'Abhaken'}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg></button></form>`
     : null;
-  const fm = Object.entries(note.frontmatter ?? {}).filter(([k]) => k !== 'tags' && k !== 'tag');
-  const md = renderMarkdown(note.body, { checkbox, links: note.links ?? null });
+  const fm = visibleFrontmatter(note);
+  // Ein Baum für Text und Thesen der Synthese, derselbe wie in `/api/notiz`.
+  const blocks = parseMarkdown(note.body, { links: note.links ?? null });
+  const md = renderBlocks(blocks, { checkbox });
   const panel = write
     ? `<aside class="note-actions">
     ${suggestSection(suggestions, note, ctx)}
@@ -125,7 +126,7 @@ ${appHeader({ user })}
   <div class="note-main">
   <article class="note-preview">
     ${note.tags.length ? `<p class="tags">${note.tags.map((t) => `<span class="tag">#${esc(t)}</span>`).join(' ')}</p>` : ''}
-    ${note.frontmatter?.type === SYNTHESIS ? synthesisHead(note, md, { ctx, zunder }) : ''}
+    ${note.frontmatter?.type === SYNTHESIS ? synthesisHead(note, blocks, { ctx, zunder }) : ''}
     ${frontmatter(fm, note.links ?? null)}
     <div class="md">${md || '<p class="empty">Die Notiz ist leer.</p>'}</div>
   </article>

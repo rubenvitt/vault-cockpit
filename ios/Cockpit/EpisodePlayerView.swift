@@ -1,8 +1,8 @@
 import AVKit
 import SwiftUI
 
-/// Nativer Player für eine fertige Folge. Öffnet sich, wenn `/lesen/folgen` in der App „Abspielen“
-/// meldet (`BridgeMessage.episode`), spielt gleich los und läuft bei gesperrtem Bildschirm weiter.
+/// Nativer Player für eine fertige Folge. Öffnet sich mit „Abspielen“ unter Lesen → Folgen
+/// (`AppModel.episode`), spielt gleich los und läuft bei gesperrtem Bildschirm weiter.
 struct EpisodePlayerView: View {
     @State private var player: EpisodePlayer
     @Environment(\.dismiss) private var dismiss

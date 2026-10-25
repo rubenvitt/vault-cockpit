@@ -1,0 +1,108 @@
+{
+  "query": "Hund",
+  "results": [
+    {
+      "path": "wiki/Treffer 1.md",
+      "title": "Treffer 1",
+      "snippet": "… Hund …",
+      "streams": [
+        "text",
+        "semantic"
+      ]
+    },
+    {
+      "path": "wiki/Treffer 2.md",
+      "title": "Treffer 2",
+      "snippet": null,
+      "streams": [
+        "text"
+      ]
+    },
+    {
+      "path": "wiki/Treffer 3.md",
+      "title": "Treffer 3",
+      "snippet": "… Hund …",
+      "streams": [
+        "text"
+      ]
+    },
+    {
+      "path": "wiki/Treffer 4.md",
+      "title": "Treffer 4",
+      "snippet": null,
+      "streams": [
+        "text",
+        "semantic"
+      ]
+    },
+    {
+      "path": "wiki/Treffer 5.md",
+      "title": "Treffer 5",
+      "snippet": "… Hund …",
+      "streams": [
+        "text"
+      ]
+    },
+    {
+      "path": "wiki/Treffer 6.md",
+      "title": "Treffer 6",
+      "snippet": null,
+      "streams": [
+        "text"
+      ]
+    },
+    {
+      "path": "wiki/Treffer 7.md",
+      "title": "Treffer 7",
+      "snippet": "… Hund …",
+      "streams": [
+        "text",
+        "semantic"
+      ]
+    },
+    {
+      "path": "wiki/Treffer 8.md",
+      "title": "Treffer 8",
+      "snippet": null,
+      "streams": [
+        "text"
+      ]
+    },
+    {
+      "path": "wiki/Treffer 9.md",
+      "title": "Treffer 9",
+      "snippet": "… Hund …",
+      "streams": [
+        "text"
+      ]
+    },
+    {
+      "path": "wiki/Treffer 10.md",
+      "title": "Treffer 10",
+      "snippet": null,
+      "streams": [
+        "text",
+        "semantic"
+      ]
+    },
+    {
+      "path": "wiki/Treffer 11.md",
+      "title": "Treffer 11",
+      "snippet": "… Hund …",
+      "streams": [
+        "text"
+      ]
+    },
+    {
+      "path": "wiki/Treffer 12.md",
+      "title": "Treffer 12",
+      "snippet": null,
+      "streams": [
+        "text"
+      ]
+    }
+  ],
+  "total": 12,
+  "degraded": "Bedeutungssuche gerade nicht verfügbar, nur Volltext",
+  "notes": true
+}

@@ -1,0 +1,122 @@
+{
+  "groups": [
+    {
+      "id": "6cf023d8-de27-4a92-812d-38a019c5e395",
+      "name": "Kultur",
+      "position": 0,
+      "paused": false,
+      "toStack": false,
+      "flags": null,
+      "inbox": 1,
+      "canMoveUp": false,
+      "canMoveDown": true,
+      "feeds": [
+        {
+          "id": "b508a2dd-6f44-4feb-8c61-3d57a6ef52ea",
+          "url": "https://kultur.test/rss",
+          "host": "kultur.test",
+          "siteUrl": "https://kultur.test/",
+          "title": "Feuilleton",
+          "icon": "data:image/png;base64,iVBORw0KGgo=",
+          "letter": "F",
+          "paused": false,
+          "toStack": false,
+          "keywordFilter": null,
+          "intervalMinutes": 60,
+          "groupId": "6cf023d8-de27-4a92-812d-38a019c5e395",
+          "groupPaused": false,
+          "groupToStack": false,
+          "lastFetchAt": "2026-10-25T11:09:00.695Z",
+          "nextFetchAt": null,
+          "errorCount": 0,
+          "lastError": null,
+          "state": "ok",
+          "status": "abgerufen 25.10. 12:09 · vor 3 min",
+          "meta": "kultur.test · alle 60 min"
+        }
+      ]
+    },
+    {
+      "id": "4100a9cc-97ef-46ba-92ef-95bcb79cdb1b",
+      "name": "Technik",
+      "position": 1,
+      "paused": false,
+      "toStack": true,
+      "flags": "direkt auf den Stapel",
+      "inbox": 0,
+      "canMoveUp": true,
+      "canMoveDown": false,
+      "feeds": [
+        {
+          "id": "42249d48-fb89-4489-96d2-bb29822b0580",
+          "url": "https://blog.test/feed",
+          "host": "blog.test",
+          "siteUrl": null,
+          "title": "Blog",
+          "icon": null,
+          "letter": "B",
+          "paused": false,
+          "toStack": false,
+          "keywordFilter": null,
+          "intervalMinutes": 30,
+          "groupId": "4100a9cc-97ef-46ba-92ef-95bcb79cdb1b",
+          "groupPaused": false,
+          "groupToStack": true,
+          "lastFetchAt": "2026-10-25T11:07:00.694Z",
+          "nextFetchAt": null,
+          "errorCount": 2,
+          "lastError": "HTTP 500 bei https://blog.test/…",
+          "state": "error",
+          "status": "Fehler (2×): HTTP 500 bei https://blog.test/…",
+          "meta": "blog.test · alle 30 min · direkt auf den Stapel (Gruppe)"
+        }
+      ]
+    }
+  ],
+  "ungrouped": [
+    {
+      "id": "0cb08cc3-3685-4bba-ab02-93908033c4b1",
+      "url": "https://atom.test/feed.xml",
+      "host": "atom.test",
+      "siteUrl": "https://atom.test/",
+      "title": "Atom-Seite",
+      "icon": null,
+      "letter": "A",
+      "paused": true,
+      "toStack": true,
+      "keywordFilter": "swift, ios",
+      "intervalMinutes": 5,
+      "groupId": null,
+      "groupPaused": false,
+      "groupToStack": false,
+      "lastFetchAt": null,
+      "nextFetchAt": null,
+      "errorCount": 0,
+      "lastError": null,
+      "state": "paused",
+      "status": "pausiert",
+      "meta": "atom.test · alle 5 min · direkt auf den Stapel · nur „swift, ios“"
+    }
+  ],
+  "total": 3,
+  "limits": {
+    "minInterval": 5,
+    "maxInterval": 1440,
+    "defaultInterval": 30,
+    "maxOpmlBytes": 2097152
+  },
+  "opml": "/api/lesen/feeds.opml",
+  "bulk": {
+    "action": "/aktion/lesen/feeds/auswahl",
+    "actions": [
+      "gruppe",
+      "pausieren",
+      "fortsetzen",
+      "stapel-an",
+      "stapel-aus",
+      "abstand",
+      "entfernen"
+    ],
+    "newGroup": "neu"
+  }
+}

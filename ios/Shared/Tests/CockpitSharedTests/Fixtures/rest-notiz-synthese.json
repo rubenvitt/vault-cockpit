@@ -1,0 +1,241 @@
+{
+  "path": "wiki/synthesis/Selbstkontrolle.md",
+  "title": "Selbstkontrolle",
+  "folder": "wiki/synthesis",
+  "tags": [],
+  "inInbox": false,
+  "type": "synthesis",
+  "obsidian": "obsidian://open?vault=Vault&file=wiki%2Fsynthesis%2FSelbstkontrolle",
+  "frontmatter": [
+    {
+      "key": "type",
+      "text": "synthesis",
+      "content": [
+        {
+          "type": "text",
+          "text": "synthesis"
+        }
+      ]
+    },
+    {
+      "key": "summary",
+      "text": "Willenskraft ist kein Muskel, sagt Hund",
+      "content": [
+        {
+          "type": "text",
+          "text": "Willenskraft ist kein Muskel, sagt "
+        },
+        {
+          "type": "wikilink",
+          "target": "Hund",
+          "heading": null,
+          "alias": null,
+          "embed": false,
+          "path": "wiki/Hund.md",
+          "self": false,
+          "anchor": null,
+          "status": "note",
+          "text": "Hund"
+        }
+      ]
+    },
+    {
+      "key": "art",
+      "text": "Brücke",
+      "content": [
+        {
+          "type": "text",
+          "text": "Brücke"
+        }
+      ]
+    },
+    {
+      "key": "status",
+      "text": "entwurf",
+      "content": [
+        {
+          "type": "text",
+          "text": "entwurf"
+        }
+      ]
+    },
+    {
+      "key": "confidence",
+      "text": "mittel",
+      "content": [
+        {
+          "type": "text",
+          "text": "mittel"
+        }
+      ]
+    },
+    {
+      "key": "updated",
+      "text": "2026-10-20",
+      "content": [
+        {
+          "type": "text",
+          "text": "2026-10-20"
+        }
+      ]
+    }
+  ],
+  "synthesis": {
+    "summary": [
+      {
+        "type": "text",
+        "text": "Willenskraft ist kein Muskel, sagt "
+      },
+      {
+        "type": "wikilink",
+        "target": "Hund",
+        "heading": null,
+        "alias": null,
+        "embed": false,
+        "path": "wiki/Hund.md",
+        "self": false,
+        "anchor": null,
+        "status": "note",
+        "text": "Hund"
+      }
+    ],
+    "art": "Brücke",
+    "status": "entwurf",
+    "confidence": "mittel",
+    "theses": [
+      {
+        "id": "h-erschöpfung-ist-umstritten",
+        "text": "Erschöpfung ist umstritten"
+      },
+      {
+        "id": "h-gewohnheiten-schlagen-willenskraft",
+        "text": "Gewohnheiten schlagen Willenskraft"
+      },
+      {
+        "id": "h-offene-punkte",
+        "text": "Offene Punkte"
+      }
+    ],
+    "openPoints": [
+      "Quelle zu Ego-Depletion prüfen",
+      "Gegenposition suchen"
+    ],
+    "toZunder": true
+  },
+  "evidence": [
+    {
+      "id": "hl-1",
+      "text": "Gewohnheiten tragen weiter als Vorsätze.",
+      "title": "Vom Wollen",
+      "score": 0.812,
+      "docId": "doc-7",
+      "href": "/lesen/doc?id=doc-7#h-hl-1"
+    }
+  ],
+  "blocks": [
+    {
+      "type": "heading",
+      "level": 1,
+      "id": "h-selbstkontrolle",
+      "content": [
+        {
+          "type": "text",
+          "text": "Selbstkontrolle"
+        }
+      ]
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "id": "h-erschöpfung-ist-umstritten",
+      "content": [
+        {
+          "type": "text",
+          "text": "Erschöpfung ist umstritten"
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "text": "Text [TODO: Quelle zu Ego-Depletion prüfen]"
+        }
+      ]
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "id": "h-gewohnheiten-schlagen-willenskraft",
+      "content": [
+        {
+          "type": "text",
+          "text": "Gewohnheiten schlagen Willenskraft"
+        }
+      ]
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "id": "h-offene-punkte",
+      "content": [
+        {
+          "type": "text",
+          "text": "Offene Punkte"
+        }
+      ]
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "items": [
+        {
+          "depth": 0,
+          "task": {
+            "done": false,
+            "n": 0,
+            "line": "- [ ] Gegenposition suchen"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Gegenposition suchen"
+            }
+          ]
+        },
+        {
+          "depth": 0,
+          "task": {
+            "done": true,
+            "n": 1,
+            "line": "- [x] Erledigtes"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Erledigtes"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "related": {
+    "backlinks": [],
+    "similar": [],
+    "source": null,
+    "problem": "Ohne Embeddings (Einstellungen → Embeddings) ähnlich nach Volltext"
+  },
+  "suggestions": null,
+  "targets": [
+    "00-inbox",
+    "40-archiv",
+    "wiki"
+  ],
+  "archive": "40-archiv",
+  "can": {
+    "write": true,
+    "graph": true
+  }
+}

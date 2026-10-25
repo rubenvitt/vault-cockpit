@@ -1,0 +1,52 @@
+{
+  "ok": true,
+  "message": "Suche-Token „Raycast“ angelegt. Jetzt kopieren, er wird nicht noch einmal angezeigt.",
+  "token": {
+    "token": "vct_beispiel_nur_einmal_sichtbar",
+    "id": "e03fed7c-2e41-441c-961b-6cae7542ccc9",
+    "name": "Raycast",
+    "scope": "search",
+    "scopeLabel": "Suche",
+    "createdAt": "2026-10-25T08:30:00.000Z"
+  },
+  "tokens": [
+    {
+      "id": "3a846810-b765-48ed-bd31-1e1175819c2a",
+      "name": "Rubens iPhone",
+      "scope": "app",
+      "scopeLabel": "App",
+      "createdAt": "2026-10-25T08:30:00.000Z",
+      "current": true
+    },
+    {
+      "id": "e03fed7c-2e41-441c-961b-6cae7542ccc9",
+      "name": "Raycast",
+      "scope": "search",
+      "scopeLabel": "Suche",
+      "createdAt": "2026-10-25T08:30:00.000Z",
+      "current": false
+    }
+  ],
+  "scopes": [
+    {
+      "value": "search",
+      "label": "Suche",
+      "text": "GET /api/search (ohne vertrauliche Ordner)"
+    },
+    {
+      "value": "capture",
+      "label": "Capture",
+      "text": "/capture und /funke, nur neue Notizen und Zunder-Aufgaben"
+    },
+    {
+      "value": "lesestapel",
+      "label": "Lesestapel",
+      "text": "/lesestapel/speichern, nur Artikel und PDFs in den Eingang"
+    },
+    {
+      "value": "app",
+      "label": "App",
+      "text": "Geräte-Token der iOS-App: /api/…, Aktionen und alles, was Lesestapel darf"
+    }
+  ]
+}

@@ -28,19 +28,22 @@ make test      # Unit-Tests auf dem ersten verfügbaren iPhone-Simulator
   ist der Universal Link `https://<Host>/app/angemeldet` (`callback: .https(host:path:)`, ab
   iOS 17.4). Dafür stehen `applinks:` und `webcredentials:` des Hosts in den Entitlements, und der
   Server liefert `/.well-known/apple-app-site-association` (siehe README im Repo, „iOS-App: Login
-  und App-API“). Danach `POST /api/app/einloesen`: das Cookie mit allen Attributen in
-  `WKWebsiteDataStore.default().httpCookieStore`, der Geräte-Token in die geteilte Keychain-Gruppe.
-  Gerätename: „iPhone · iPhone17,1 · 23.10.2026“ (`UIDevice.name` ist nur „iPhone“).
-- **Rahmen** (`Cockpit/Native/MainView.swift`, docs/ios-nativ.md): nach dem Login Reiter Woche
-  (nativ), Lesen (Web), Rückblick (nativ) und Einstellungen (Web). Die
-  nativen Bildschirme nehmen die Stores aus `CockpitShared` (`CockpitSession`: API mit dem
-  Geräte-Token, Zwischenspeicher, Meldungen); 401 von der API startet den nativen Login wie ein
-  abgelaufenes Cookie. Links im WKWebView auf `/`, `/rueckblick` und `/planen` wechseln den Reiter
-  (`NavigationDecision.native`), Notiz und Suche aus nativen Bildschirmen öffnen als Web-Blatt.
-  Die Leiste unten der Web-Seiten blendet ein Nutzerskript aus (die App hat ihre eigene).
+  und App-API“). Danach `POST /api/app/einloesen`: der Geräte-Token kommt in die geteilte
+  Keychain-Gruppe (das Sitzungs-Cookie der Antwort braucht die App nicht mehr). Gerätename: „iPhone · iPhone17,1 · 23.10.2026“ (`UIDevice.name` ist nur „iPhone“).
+- **Rahmen** (`Cockpit/Native/MainView.swift`, `AppModel.swift`, docs/ios-nativ.md): nach dem Login
+  Reiter Woche, Lesen, Rückblick und Einstellungen, alle nativ; es gibt keinen WKWebView mehr. Die
+  Bildschirme nehmen die Stores aus `CockpitShared` (`CockpitSession`: API mit dem Geräte-Token,
+  Zwischenspeicher, Meldungen); 401 von der API startet den nativen Login und kehrt danach zum
+  Reiter zurück. Links aus nativen Inhalten (Notiz, Leseansicht, `redirect` einer Aktion) gehen
+  über `NavigationDecision` (`Cockpit/Native/Links.swift`): `/`, `/rueckblick`, `/planen` wechseln
+  den Reiter, Seiten des Lesens (auch Wissen und Feeds) den Bereich im Reiter Lesen,
+  `/einstellungen#abschnitt` öffnet den Abschnitt; Notiz, Graph, Suche und Zustand kommen als
+  Blatt mit eigenem Stapel (`AppModel.pageSheet`, Links darin legen die nächste Seite obendrauf).
+  Fremde Hosts öffnen sich im `SFSafariViewController`, `mailto:` und `obsidian://` im System.
 - **Woche** (`Cockpit/Native/WeekScreen.swift` und Nachbarn): zeigt sofort den gespeicherten
   Stand („Stand von …“), Abhaken ändert die Zeile vor der Antwort des Servers, Menü ⋯ als Blatt,
-  Schnelleingabe unten mit Vorschau und Puffer ohne Netz, Meldungen mit „Rückgängig“ und Haptik.
+  Schnelleingabe unten mit Vorschau und Puffer ohne Netz, Meldungen mit „Rückgängig“ und Haptik;
+  die Lupe oben links öffnet die Suche im Vault (im Web „Suche“ in der Navigation).
   Farben aus den Tokens von cockpit.css (`Theme.swift`, hell und dunkel).
 - **Rückblick** (`Cockpit/Native/ReviewScreen.swift`): Kennzahlen, je Lebensbereich die Balken
   erledigt/geplant und Flammen-Zeit (wachsen beim Erscheinen herein), offen Gebliebenes zum
@@ -50,38 +53,38 @@ make test      # Unit-Tests auf dem ersten verfügbaren iPhone-Simulator
   geschoben: Suche mit Bereich, „Holen“ als Phönix-Schritt oder an einem Tag, „Als Flamme“,
   Vorschläge aus den Bereichen, „Flamme einplanen“ und „In KW n“. „Holen“ und „Aus der Woche“ zeigen
   das Ergebnis sofort (`PlanStore.pending`), danach lädt die Seite neu.
-- **Web-Hülle** (`WebShell.swift`): ein WKWebView je Web-Reiter bzw. Blatt, randlos (die Seite nutzt `viewport-fit=cover` und
-  `env(safe-area-inset-*)`), Ziehen zum Neuladen, Zurück-Geste. Fremde Hosts öffnen sich in
-  `SFSafariViewController`, `mailto:` usw. im System. Datei-Upload zeigt WebKit selbst an; Antworten
-  mit `Content-Disposition: attachment` (OPML, Wochenexport `.md`) werden geladen und ins
-  Teilen-Blatt gegeben. Navigation auf `/login` (Sitzung abgelaufen) startet den nativen Login und
-  danach `next`. Service Worker laufen in einem WKWebView nur für App-Bound Domains:
-  `WKAppBoundDomains` in der Info.plist, `limitsNavigationsToAppBoundDomains = true`.
-- **Abmelden**: „Abmelden“ im Cockpit (`POST /logout`) geht normal zum Server; die Weiterleitung
-  danach auf `/login` meldet nativ ab statt neu an. Dasselbe macht das native Menü (mit zwei Fingern
-  lange drücken). Nativ abmelden heißt: `POST /api/app/abmelden` widerruft den Geräte-Token auf dem
-  Server, dann werden Cookies, alle Website-Daten (auch Service Worker und Offline-Puffer) und der
-  Token in der Keychain gelöscht. Ohne Netz wird lokal trotzdem gelöscht, und der Login-Bildschirm
-  sagt, dass man den Token unter Einstellungen → API-Tokens widerrufen soll. Das Sitzungs-Cookie
-  ist signiert und ohne Zustand auf dem Server: `POST /logout` löscht es nur im Client, eine Kopie
-  gilt bis zum Ablauf oder bis „Überall abmelden“.
-- **Brücke** `cockpit` (`window.webkit.messageHandlers.cockpit`): `/lesen/hoeren` schickt
-  `{type: 'hoeren', zeit}`; die App öffnet den nativen Player `PlayerView(minutes:)` (unten).
-  `/lesen/folgen` schickt `{type: 'folge', id, titel, art}`; die App öffnet `EpisodePlayerView`
-  (Folgen, unten). Jede Seite (`/static/ui.js`) schickt `{type: 'haptik', art}` mit `auswahl`
-  (Reiter, Menü), `leicht`, `erfolg` (abgehakt) oder `fehler`; die App gibt das passende
-  Haptik-Signal.
-  Nachrichten nimmt die App nur vom Hauptframe des eigenen Hosts an.
-- **Rückmeldung beim Tippen** (`/static/ui.js`, `cockpit.css`): Der getippte Link bleibt gedrückt,
-  der Reiter unten wechselt sofort, unter der Statusleiste wächst eine Ladeleiste, und dauert es
-  länger als 0,3 s, tritt der alte Inhalt zurück. Seitenwechsel blenden über (Cross-Document View
-  Transitions, ab iOS 18.2). Bis die erste Seite malt, zeigt der WKWebView den Hintergrund des
-  Cockpits statt Weiß.
+- **Einstellungen** (`Cockpit/Native/Einstellungen/SettingsScreen.swift` und Nachbarn): je
+  Abschnitt eine Zeile mit dem Stand als farbigem Punkt wie die Navigation im Web; ein Abschnitt
+  ist ein Formular mit den Feldern, die `GET /api/einstellungen` beschreibt (Text, Zahl, Liste,
+  Auswahl, Geheimnis), Untergruppen aufklappbar. „Speichern“ schickt nur diesen Abschnitt;
+  Geheimnisse kommen nie zurück (leer = unverändert, Häkchen „eigenen … löschen“), abgelehnte
+  Felder zeigen die Meldung des Servers darunter. Kalender als Liste mit dem Ergebnis der Prüfung,
+  Bearbeiten und „Neuer Kalender“ im Blatt (Art, Adresse, Mit Anmeldung, Benutzer, Passwort, Nur
+  diese Kalender), Wischen entfernt. Anmeldung mit „Überall abmelden“ (Browser-Sitzungen; der
+  Geräte-Token bleibt). **API-Tokens**: Liste, „Widerrufen“ mit Rückfrage (der eigene Token meldet
+  die App ab), „Neuer Token“ mit Recht, Klartext nur einmal mit „Kopieren“. **Kurzbefehle**: lädt
+  die `.shortcut`-Datei mit dem Geräte-Token und gibt sie ins Teilen-Blatt. **Sicherung**: welche
+  Dateien dazugehören, „Sicherung erstellen“ (Passphrase zweimal, die Datei geht ins Teilen-Blatt),
+  „Wiederherstellen“ aus einer `.json`-Datei mit „Vorhandenes ersetzen“; danach startet das
+  Cockpit neu.
+- **Zustand** (`Cockpit/Native/Einstellungen/HealthScreen.swift`): je Dienst Pille, Zusammenfassung,
+  Angaben, „Letzter Erfolg“, Fehlerkasten (rot, solange er gilt, sonst grau) und Unterliste;
+  „Neu prüfen“ lädt neu, der Server prüft Zunder und Kalender dabei frisch. Meldet ein Dienst einen
+  Fehler, zeigt der Kopf der Woche den roten Hinweis „Störung“ (`alert` in `/api/woche`), ein Tipp
+  öffnet den Zustand.
+- **Abmelden** (Einstellungen → Diese App, mit Rückfrage): `POST /api/app/abmelden` widerruft den
+  Geräte-Token auf dem Server, dann werden Website-Daten früherer Versionen mit Web-Hülle (Cookies,
+  Service Worker, Offline-Puffer), die gespeicherten Stände und der Token in der Keychain
+  gelöscht. Ohne Netz wird lokal trotzdem gelöscht, und der Login-Bildschirm sagt, dass man den
+  Token unter Einstellungen → API-Tokens widerrufen soll.
+- **Haptik**: Die Stores melden Auswahl, Erfolg und Fehler (`ToastCenter.signal`), `MainView` gibt
+  das passende `sensoryFeedback`.
 
 ## Player „Unterwegs hören“ (VCP-94)
 
 `speechSynthesis` in der PWA stoppt beim Sperren des Bildschirms, der native Player nicht
-(Hintergrundmodus `audio`). Er öffnet sich über die Brücke und spielt gleich los.
+(Hintergrundmodus `audio`). Er öffnet sich mit „Unterwegs hören“ im Stapel (oder einem Link auf
+`/lesen/hoeren`) und spielt gleich los.
 
 - **Ablauf** wie `src/web/static/lesen-hoeren.js`: Wiedergabeliste aus `GET /api/app/stapel`
   (5/15/30/60 Min., Start mit `zeit` der Seite), je Text `GET /api/app/text`, satzweise ab dem
@@ -177,7 +180,7 @@ let saved = try await api.saveToReadingList(url: link, title: title)  // saved.m
 
 Tests (`CockpitTests`): API-Client und Einlösen über einen `URLProtocol`-Mock, Keychain über
 `KeychainBackend` gemockt, dazu PKCE (Testvektor aus RFC 7636), Callback-Prüfung, Cookie-Umwandlung,
-Navigationsregeln und Brücke. `ShareTests`: Inhaltserkennung, PDF-Upload (Body, Query, Header)
+Navigationsregeln (`RoutingTests`: Links, Reiter, Blatt mit Seiten). `ShareTests`: Inhaltserkennung, PDF-Upload (Body, Query, Header)
 und Offline-Puffer in einem temporären Verzeichnis.
 
 ## Share Extension „Zum Lesestapel“ (VCP-93)
@@ -226,7 +229,8 @@ Schema nicht.
 2. Server lokal mit `PUBLIC_URL=http://localhost:3000` starten.
 3. App in Xcode auf einem Simulator starten. Mit Signieren (Team eingetragen) gibt es die
    Keychain-Gruppe; der Simulator-Build aus `make build` hat keine Entitlements, dort scheitert das
-   Speichern des Tokens (wird geloggt, die Web-Hülle läuft über das Cookie trotzdem).
+   Speichern des Tokens (wird geloggt; die Bildschirme laufen mit dem Token aus der Antwort trotzdem,
+   Share Extension und Player nicht).
 
 Nur mit signiertem Build auf dem Gerät (oder einem signierten Simulator-Build) prüfbar: der
 Universal-Link-Callback gegen den echten Server (Apple holt die AASA über sein CDN, das dauert nach
@@ -236,10 +240,8 @@ Antwort 404). iOS meldet das wie „Abbrechen“; kommt es in unter einer Sekund
 `false`), zeigt die App „Anmeldung konnte nicht starten …“ mit „Erneut versuchen“ und loggt
 Fehler-Domain, Code und Host (Kategorie `login`).
 
-Im Simulator geprüft (iOS 27, ohne Signieren, Testseite auf `localhost:3000`): `localhost` gilt
-als App-Bound Domain, `navigator.serviceWorker` ist da, ein Service Worker registriert sich und
-wird aktiv, die Brücke `cockpit` ist sichtbar, `/login` öffnet das Login-Blatt. Offline-Lesen
-(VCP-80) mit dem echten Cockpit ist noch nicht auf dem Gerät geprüft.
+Ohne Netz zeigt jeder Bildschirm den zuletzt gespeicherten Stand („Offline, Stand von …“);
+Schreibendes aus Schnelleingabe und Leseansicht wartet in deren Puffern.
 
 ## TestFlight
 
@@ -295,7 +297,7 @@ Den ersten Build einer Version prüft Apple (meist unter einem Tag), weitere Bui
 
 | Ordner | Inhalt |
 | --- | --- |
-| `Cockpit/` | App-Target: SwiftUI, Web-Hülle (VCP-92), Login, Player (VCP-94, `Cockpit/Player/`), native Bildschirme (`Cockpit/Native/`) |
+| `Cockpit/` | App-Target: SwiftUI, Login, Player (VCP-94, `Cockpit/Player/`), native Bildschirme (`Cockpit/Native/`, je Bereich ein Ordner: `Lesen/`, `Notiz/`, `Suche/`, `Feeds/`, `Einstellungen/`) |
 | `Shared/` | Lokales Swift Package `CockpitShared`: Konfiguration, Keychain, API-Client. Alles, was App und Extension teilen |
 | `CockpitTests/` | Unit-Tests (laufen in der App als Host) |
 | `ShareExtension/` | Share Extension „Zum Lesestapel“ (VCP-93) |

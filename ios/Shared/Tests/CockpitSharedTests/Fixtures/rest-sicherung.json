@@ -1,0 +1,34 @@
+{
+  "empty": false,
+  "files": [
+    {
+      "name": "cockpit-settings.json",
+      "label": "Einstellungen (Kalender, Zunder, Mail, Embeddings, Anzeige)",
+      "present": false
+    },
+    {
+      "name": "api-tokens.json",
+      "label": "API-Tokens (nur ihre Hashes)",
+      "present": true
+    },
+    {
+      "name": "capture-state.json",
+      "label": "Merkzettel von Capture und Zunder-Brücke",
+      "present": false
+    },
+    {
+      "name": "session-secret",
+      "label": "Secret für das Sitzungs-Cookie",
+      "present": false
+    },
+    {
+      "name": "lesestapel.db",
+      "label": "Lesestapel (Artikel, Markierungen, Feeds)",
+      "present": false
+    }
+  ],
+  "minPassphrase": 12,
+  "needsReplace": true,
+  "intro": "Index und Vektoren baut das Cockpit nach einem Verlust von /data selbst neu, diese Dateien nicht. Die Sicherung enthält sie mit einer Passphrase verschlüsselt (scrypt und AES-256-GCM); ohne die Passphrase lässt sie sich nicht öffnen, auch nicht vom Cockpit. Einfacher ist ein Backup des Volumes auf dem Host.",
+  "restore": "Ersetzt Einstellungen, API-Tokens und Merkzettel durch den Stand der Sicherung. Danach startet das Cockpit neu; weil das Sitzungs-Secret mit zurückkommt, meldet man sich anschließend neu an."
+}

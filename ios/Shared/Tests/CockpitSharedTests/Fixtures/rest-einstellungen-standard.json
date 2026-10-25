@@ -1,0 +1,563 @@
+{
+  "sections": [
+    {
+      "id": "kalender",
+      "title": "Kalender",
+      "state": {
+        "text": "keine",
+        "tone": "off"
+      },
+      "intro": "Termine aus iCal-Abos (z. B. Outlook, Google) und CalDAV (z. B. Fastmail, iCloud) erscheinen in der Woche.",
+      "fields": [
+        {
+          "name": "hiddenEvents",
+          "label": "Ausgeblendete Termine",
+          "hint": "Titel, durch Komma getrennt; leer = alle zeigen",
+          "kind": "list",
+          "value": "Blockiert",
+          "placeholder": "",
+          "group": null,
+          "collapsed": false
+        }
+      ],
+      "groups": {}
+    },
+    {
+      "id": "zunder",
+      "title": "Zunder",
+      "state": {
+        "text": "aus der Umgebung (https://zunder.env)",
+        "tone": "ok"
+      },
+      "intro": "Eigener Zugang statt dem aus der Umgebung. Leer lassen, um den aus der Umgebung zu nutzen.",
+      "fields": [
+        {
+          "name": "zunder.url",
+          "label": "Adresse",
+          "hint": null,
+          "kind": "text",
+          "value": "",
+          "placeholder": "https://zunder.env",
+          "group": null,
+          "collapsed": false
+        },
+        {
+          "name": "zunder.token",
+          "label": "API-Token",
+          "hint": "zt_…",
+          "kind": "secret",
+          "value": "",
+          "placeholder": "",
+          "group": null,
+          "collapsed": false,
+          "set": false,
+          "clear": null,
+          "clearLabel": null
+        }
+      ],
+      "groups": {}
+    },
+    {
+      "id": "bruecke",
+      "title": "Zunder-Brücke",
+      "state": {
+        "text": "an",
+        "tone": "ok"
+      },
+      "intro": "Offene Checkboxen mit dem Tag werden Zunder-Aufgaben, Abhaken gleicht sich in beide Richtungen ab.",
+      "fields": [
+        {
+          "name": "bridge.enabled",
+          "label": "Brücke",
+          "hint": null,
+          "kind": "select",
+          "value": "",
+          "placeholder": "",
+          "options": [
+            {
+              "value": "",
+              "label": "Standard (an)"
+            },
+            {
+              "value": "an",
+              "label": "an"
+            },
+            {
+              "value": "aus",
+              "label": "aus"
+            }
+          ],
+          "group": null,
+          "collapsed": false
+        },
+        {
+          "name": "bridge.tag",
+          "label": "Tag",
+          "hint": "ohne #",
+          "kind": "text",
+          "value": "",
+          "placeholder": "zunder",
+          "group": null,
+          "collapsed": false
+        }
+      ],
+      "groups": {}
+    },
+    {
+      "id": "feuer-notiz",
+      "title": "Feuer-Notiz",
+      "state": {
+        "text": "an",
+        "tone": "ok"
+      },
+      "intro": "Trägt die Flammen der Woche mit den in Zunder gemessenen Minuten in den Abschnitt „Flammen“ der Feuer-Notiz ein, nach jedem Stopp und im Reindex-Intervall. Geschrieben wird nur zwischen den Markern cockpit:flammen.",
+      "fields": [
+        {
+          "name": "flameNote.enabled",
+          "label": "Flammen eintragen",
+          "hint": null,
+          "kind": "select",
+          "value": "",
+          "placeholder": "",
+          "options": [
+            {
+              "value": "",
+              "label": "Standard (an)"
+            },
+            {
+              "value": "an",
+              "label": "an"
+            },
+            {
+              "value": "aus",
+              "label": "aus"
+            }
+          ],
+          "group": null,
+          "collapsed": false
+        }
+      ],
+      "groups": {}
+    },
+    {
+      "id": "mail",
+      "title": "Mail",
+      "state": {
+        "text": "nicht eingerichtet",
+        "tone": "off"
+      },
+      "intro": "Holt Mails aus einem Fastmail-Ordner ab und macht Notizen daraus, mit ! im Betreff Zunder-Aufgaben.",
+      "fields": [
+        {
+          "name": "mail.token",
+          "label": "Fastmail-API-Token",
+          "hint": "nur Mail",
+          "kind": "secret",
+          "value": "",
+          "placeholder": "",
+          "group": null,
+          "collapsed": false,
+          "set": false,
+          "clear": null,
+          "clearLabel": null
+        },
+        {
+          "name": "mail.senders",
+          "label": "Freigegebene Absender",
+          "hint": "mit Komma",
+          "kind": "list",
+          "value": "",
+          "placeholder": "r@example.dev, @example.dev",
+          "group": null,
+          "collapsed": false
+        },
+        {
+          "name": "mail.mailbox",
+          "label": "Ordner zum Abholen",
+          "hint": null,
+          "kind": "text",
+          "value": "",
+          "placeholder": "Vault",
+          "group": "Ordner und Abstand",
+          "collapsed": true
+        },
+        {
+          "name": "mail.doneMailbox",
+          "label": "Ablage danach",
+          "hint": null,
+          "kind": "text",
+          "value": "",
+          "placeholder": "Archive",
+          "group": "Ordner und Abstand",
+          "collapsed": true
+        },
+        {
+          "name": "mail.pollMinutes",
+          "label": "Abstand in Minuten",
+          "hint": null,
+          "kind": "number",
+          "value": "",
+          "placeholder": "5",
+          "group": "Ordner und Abstand",
+          "collapsed": true
+        }
+      ],
+      "groups": {}
+    },
+    {
+      "id": "lesestapel",
+      "title": "Lesestapel",
+      "state": null,
+      "intro": "Gelesene Texte mit Markierungen kommen als Notiz in diesen Ordner, jede Markierung mit Block-ID zum Verlinken. Das Cockpit schreibt danach nur den Bereich „Markierungen“ neu; in vertraulichen und Readwise-Ordnern legt es nichts an.",
+      "fields": [
+        {
+          "name": "readingNotes.folder",
+          "label": "Ordner im Vault",
+          "hint": null,
+          "kind": "text",
+          "value": "",
+          "placeholder": "30-ressourcen/lesestapel",
+          "group": null,
+          "collapsed": false
+        }
+      ],
+      "groups": {}
+    },
+    {
+      "id": "embeddings",
+      "title": "Embeddings",
+      "state": {
+        "text": "aus, nur Volltextsuche",
+        "tone": "off"
+      },
+      "intro": "Ollama-Server für die semantische Suche und ähnliche Notizen. Fehlt das Modell, lädt das Cockpit es selbst. Ein neues Modell bettet den Vault neu ein.",
+      "fields": [
+        {
+          "name": "embed.url",
+          "label": "Adresse",
+          "hint": null,
+          "kind": "text",
+          "value": "",
+          "placeholder": "http://ollama:11434",
+          "group": null,
+          "collapsed": false
+        },
+        {
+          "name": "embed.model",
+          "label": "Modell",
+          "hint": null,
+          "kind": "text",
+          "value": "",
+          "placeholder": "bge-m3",
+          "group": null,
+          "collapsed": false
+        }
+      ],
+      "groups": {}
+    },
+    {
+      "id": "vorlesen",
+      "title": "Vorlesen",
+      "state": {
+        "text": "ElevenLabs, Key aus der Umgebung",
+        "tone": "ok"
+      },
+      "intro": "Wer bei „Unterwegs hören“ vorliest, im Browser und in der iOS-App. Mit ElevenLabs holt der Server jeden Satz als Audio, der Key bleibt auf dem Server. Jeder Satz kostet Zeichen-Kontingent; schon Gehörtes liegt im Cache und kostet nichts mehr. Fällt ElevenLabs aus, liest das Gerät weiter.",
+      "fields": [
+        {
+          "name": "tts.provider",
+          "label": "Anbieter",
+          "hint": null,
+          "kind": "select",
+          "value": "",
+          "placeholder": "",
+          "options": [
+            {
+              "value": "",
+              "label": "Standard (ElevenLabs)"
+            },
+            {
+              "value": "geraet",
+              "label": "Gerät"
+            },
+            {
+              "value": "elevenlabs",
+              "label": "ElevenLabs"
+            }
+          ],
+          "group": null,
+          "collapsed": false
+        },
+        {
+          "name": "tts.key",
+          "label": "ElevenLabs-API-Key",
+          "hint": "nur Text to Speech",
+          "kind": "secret",
+          "value": "",
+          "placeholder": "aus der Umgebung",
+          "group": null,
+          "collapsed": false,
+          "set": false,
+          "clear": null,
+          "clearLabel": null
+        },
+        {
+          "name": "tts.voice",
+          "label": "Stimme",
+          "hint": "Voice-ID",
+          "kind": "text",
+          "value": "",
+          "placeholder": "JBFqnCBsd6RMkjVDRZzb",
+          "group": "Stimme und Modell",
+          "collapsed": true
+        },
+        {
+          "name": "tts.model",
+          "label": "Modell",
+          "hint": "eleven_flash_v2_5 kostet die Hälfte",
+          "kind": "text",
+          "value": "",
+          "placeholder": "eleven_multilingual_v2",
+          "group": "Stimme und Modell",
+          "collapsed": true
+        },
+        {
+          "name": "episodes.host",
+          "label": "Moderation",
+          "hint": "Voice-ID",
+          "kind": "text",
+          "value": "",
+          "placeholder": "JBFqnCBsd6RMkjVDRZzb",
+          "group": "Folgen",
+          "collapsed": false
+        },
+        {
+          "name": "episodes.guest",
+          "label": "Gast",
+          "hint": "Voice-ID",
+          "kind": "text",
+          "value": "",
+          "placeholder": "EXAVITQu4vr4xnSDxMaL",
+          "group": "Folgen",
+          "collapsed": false
+        },
+        {
+          "name": "episodes.model",
+          "label": "Claude-Modell",
+          "hint": "sonnet schont das Abo",
+          "kind": "text",
+          "value": "",
+          "placeholder": "sonnet",
+          "group": "Folgen",
+          "collapsed": false
+        }
+      ],
+      "groups": {
+        "Folgen": "Podcast und Report aus dem Stapel (Lesen → Folgen). Claude schreibt sie über die Claude Code CLI mit deinem Abo; den Token aus claude setup-token bekommt das Deployment als CLAUDE_CODE_OAUTH_TOKEN. Ohne eigene Stimme moderiert die Stimme vom Vorlesen."
+      }
+    },
+    {
+      "id": "anzeige",
+      "title": "Anzeige",
+      "state": null,
+      "intro": null,
+      "fields": [
+        {
+          "name": "tz",
+          "label": "Zeitzone",
+          "hint": null,
+          "kind": "text",
+          "value": "",
+          "placeholder": "Europe/Berlin",
+          "group": null,
+          "collapsed": false
+        },
+        {
+          "name": "vaultName",
+          "label": "Vault-Name in Obsidian",
+          "hint": "für Links",
+          "kind": "text",
+          "value": "",
+          "placeholder": "",
+          "group": null,
+          "collapsed": false
+        },
+        {
+          "name": "inboxFolder",
+          "label": "Inbox-Ordner im Vault",
+          "hint": null,
+          "kind": "text",
+          "value": "",
+          "placeholder": "inbox",
+          "group": null,
+          "collapsed": false
+        }
+      ],
+      "groups": {}
+    },
+    {
+      "id": "anmeldung",
+      "title": "Anmeldung",
+      "state": null,
+      "intro": "Jede Nutzung verlängert die Anmeldung. Sie endet erst nach einer Pause ohne Nutzung oder spätestens nach der Obergrenze; dann folgt wieder der Login bei Pocket ID.",
+      "fields": [
+        {
+          "name": "session.idleDays",
+          "label": "Abmelden nach",
+          "hint": "Tagen ohne Nutzung",
+          "kind": "number",
+          "value": "",
+          "placeholder": "30",
+          "group": null,
+          "collapsed": false
+        },
+        {
+          "name": "session.maxDays",
+          "label": "Spätestens neu anmelden",
+          "hint": "nach Tagen",
+          "kind": "number",
+          "value": "",
+          "placeholder": "90",
+          "group": null,
+          "collapsed": false
+        }
+      ],
+      "groups": {}
+    },
+    {
+      "id": "tokens",
+      "title": "API-Tokens",
+      "state": null,
+      "intro": "Für Kurzbefehle, Raycast und Funke. Jeder Token hat genau ein Recht; den Klartext zeigt das Cockpit nur einmal direkt nach dem Anlegen.",
+      "fields": [],
+      "groups": {}
+    },
+    {
+      "id": "kurzbefehle",
+      "title": "Kurzbefehle",
+      "state": null,
+      "intro": "Auf dem iPhone antippen und importieren. Beim Import fragt iOS nach einem Token: „Zum Lesestapel“ braucht das Recht „Lesestapel“, die übrigen das Recht „Capture“ (noch keiner angelegt, siehe API-Tokens).",
+      "fields": [],
+      "groups": {}
+    },
+    {
+      "id": "sicherung",
+      "title": "Sicherung",
+      "state": null,
+      "intro": "Index und Vektoren baut das Cockpit nach einem Verlust von /data selbst neu, diese Dateien nicht. Die Sicherung enthält sie mit einer Passphrase verschlüsselt (scrypt und AES-256-GCM); ohne die Passphrase lässt sie sich nicht öffnen, auch nicht vom Cockpit. Einfacher ist ein Backup des Volumes auf dem Host.",
+      "fields": [],
+      "groups": {}
+    }
+  ],
+  "calendars": {
+    "items": [],
+    "next": 0,
+    "max": 20,
+    "kinds": [
+      {
+        "value": "ical",
+        "label": "iCal-Abo"
+      },
+      {
+        "value": "caldav",
+        "label": "CalDAV"
+      }
+    ]
+  },
+  "signOutEverywhere": {
+    "action": "/api/einstellungen/abmelden",
+    "label": "Überall abmelden",
+    "text": "Beendet die Anmeldung im Browser auf allen Geräten. Geräte-Tokens der App bleiben gültig, bis sie unter API-Tokens widerrufen werden."
+  },
+  "tokens": [
+    {
+      "id": "606df0e0-d507-4708-89fe-51a7c6ea3120",
+      "name": "Rubens iPhone",
+      "scope": "app",
+      "scopeLabel": "App",
+      "createdAt": "2026-10-25T08:30:00.000Z",
+      "current": true
+    }
+  ],
+  "scopes": [
+    {
+      "value": "search",
+      "label": "Suche",
+      "text": "GET /api/search (ohne vertrauliche Ordner)"
+    },
+    {
+      "value": "capture",
+      "label": "Capture",
+      "text": "/capture und /funke, nur neue Notizen und Zunder-Aufgaben"
+    },
+    {
+      "value": "lesestapel",
+      "label": "Lesestapel",
+      "text": "/lesestapel/speichern, nur Artikel und PDFs in den Eingang"
+    },
+    {
+      "value": "app",
+      "label": "App",
+      "text": "Geräte-Token der iOS-App: /api/…, Aktionen und alles, was Lesestapel darf"
+    }
+  ],
+  "shortcuts": [
+    {
+      "slug": "notiz",
+      "title": "Notiz ins Cockpit",
+      "text": "Text aus dem Teilen-Menü oder abgefragt. Mit ! vorne wird es eine Aufgabe in der Zunder-Inbox.",
+      "file": "/kurzbefehle/notiz.shortcut",
+      "filename": "Notiz ins Cockpit.shortcut"
+    },
+    {
+      "slug": "sprachmemo",
+      "title": "Sprachmemo ins Cockpit",
+      "text": "Nimmt auf, transkribiert auf dem iPhone und legt den Text als Notiz ab.",
+      "file": "/kurzbefehle/sprachmemo.shortcut",
+      "filename": "Sprachmemo ins Cockpit.shortcut"
+    },
+    {
+      "slug": "lesestapel",
+      "title": "Zum Lesestapel",
+      "text": "Aus Safari teilen: Der Artikel landet im Eingang des Lesestapels. Braucht einen Token mit dem Recht „Lesestapel“.",
+      "file": "/kurzbefehle/lesestapel.shortcut",
+      "filename": "Zum Lesestapel.shortcut"
+    }
+  ],
+  "captureEnabled": false,
+  "backup": {
+    "empty": false,
+    "files": [
+      {
+        "name": "cockpit-settings.json",
+        "label": "Einstellungen (Kalender, Zunder, Mail, Embeddings, Anzeige)",
+        "present": true
+      },
+      {
+        "name": "api-tokens.json",
+        "label": "API-Tokens (nur ihre Hashes)",
+        "present": true
+      },
+      {
+        "name": "capture-state.json",
+        "label": "Merkzettel von Capture und Zunder-Brücke",
+        "present": false
+      },
+      {
+        "name": "session-secret",
+        "label": "Secret für das Sitzungs-Cookie",
+        "present": false
+      },
+      {
+        "name": "lesestapel.db",
+        "label": "Lesestapel (Artikel, Markierungen, Feeds)",
+        "present": false
+      }
+    ],
+    "minPassphrase": 12,
+    "needsReplace": true,
+    "intro": "Index und Vektoren baut das Cockpit nach einem Verlust von /data selbst neu, diese Dateien nicht. Die Sicherung enthält sie mit einer Passphrase verschlüsselt (scrypt und AES-256-GCM); ohne die Passphrase lässt sie sich nicht öffnen, auch nicht vom Cockpit. Einfacher ist ein Backup des Volumes auf dem Host.",
+    "restore": "Ersetzt Einstellungen, API-Tokens und Merkzettel durch den Stand der Sicherung. Danach startet das Cockpit neu; weil das Sitzungs-Secret mit zurückkommt, meldet man sich anschließend neu an."
+  },
+  "secretHint": "Leere Geheimnisfelder behalten den gespeicherten Wert."
+}

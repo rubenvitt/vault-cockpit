@@ -1,0 +1,14 @@
+{
+  "ok": true,
+  "message": "2 Dateien aus der Sicherung vom 25.10.2026, 09:30 zurückgeschrieben: cockpit-settings.json, api-tokens.json. Das Cockpit startet jetzt neu und liest sie ein.",
+  "title": "Sicherung wiederhergestellt",
+  "createdAt": "2026-10-25T08:30:00.000Z",
+  "files": [
+    "cockpit-settings.json",
+    "api-tokens.json"
+  ],
+  "skipped": [],
+  "restart": true,
+  "relogin": false,
+  "tokensReplaced": true
+}

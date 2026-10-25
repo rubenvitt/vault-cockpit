@@ -97,17 +97,59 @@ function svg(graph) {
   return `<svg class="graph" viewBox="0 0 ${W} ${H}" role="img" aria-label="Graph um ${esc(graph.nodes.find((n) => n.id === graph.center)?.label ?? '')}">${lines}${nodes}</svg>`;
 }
 
-function lists(graph, tz, ctx = {}) {
+/**
+ * Die Listen unter dem Graphen, aus Knoten und Kanten um die Mitte: Links
+ * von hier (`outgoing`) und hierher (`incoming`), ähnlich, aber nicht
+ * verlinkt (`similar`, mit `score`), Aufgaben aus Zunder-Links der Notiz und
+ * ihrer Nachbarn (`tasks`, `from` ist die Notiz, aus der der Link stammt) und
+ * Termine einer Tagesnotiz (`events`, nach Beginn). Auch für `/api/graph`.
+ */
+export function graphLists(graph) {
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
   const c = graph.center;
   const neighbour = (e) => byId.get(e.from === c ? e.to : e.from);
   const touching = (kind) => graph.edges.filter((e) => e.kind === kind && (e.from === c || e.to === c));
+  return {
+    outgoing: touching('link').filter((e) => e.from === c).map(neighbour),
+    incoming: touching('link').filter((e) => e.to === c).map(neighbour),
+    similar: touching('semantic').map((e) => ({ n: neighbour(e), score: e.score })),
+    tasks: graph.edges.filter((e) => e.kind === 'task').map((e) => ({ n: byId.get(e.to), from: byId.get(e.from) })),
+    events: touching('event').map(neighbour).sort((a, b) => a.start.localeCompare(b.start)),
+  };
+}
 
-  const outgoing = touching('link').filter((e) => e.from === c).map(neighbour);
-  const incoming = touching('link').filter((e) => e.to === c).map(neighbour);
-  const similar = touching('semantic').map((e) => ({ n: neighbour(e), score: e.score }));
-  const tasks = graph.edges.filter((e) => e.kind === 'task').map((e) => ({ n: byId.get(e.to), from: byId.get(e.from) }));
-  const events = touching('event').map(neighbour).sort((a, b) => a.start.localeCompare(b.start));
+/**
+ * Graph als JSON für `/api/graph`: Knoten, Kanten und Probleme wie von
+ * `graph.around`, dazu was die Seite darüber und darunter zeigt: Titel der
+ * Mitte (`label`, `path`), Link nach Obsidian und die Listen von `graphLists`
+ * (Termine mit ISO-Zeiten, die Uhrzeit formatiert die App). `can.link` sagt,
+ * ob „Verlinken“ (`/aktion/verlinken`) angeboten wird, `can.notes`, ob es
+ * Notizseiten gibt.
+ */
+export function graphJson(graph, { vaultName = null, link = false, notes = false } = {}) {
+  const center = graph.nodes.find((n) => n.id === graph.center);
+  const l = graphLists(graph);
+  const note = (n) => ({ path: n.path, label: n.label, type: n.type ?? null });
+  return {
+    ...graph,
+    path: center?.path ?? null,
+    label: center?.label ?? null,
+    obsidian: center?.path ? obsidianLink(center.path, vaultName) : null,
+    lists: {
+      outgoing: l.outgoing.map(note),
+      incoming: l.incoming.map(note),
+      similar: l.similar.map(({ n, score }) => ({ ...note(n), score: score ?? null })),
+      tasks: l.tasks.map(({ n, from }) => ({ id: n.taskId ?? null, label: n.label, url: n.url ?? null, status: n.status ?? null, ref: n.ref ?? null, from: from.id === graph.center ? null : from.label })),
+      events: l.events.map((e) => ({ label: e.label, start: e.start, end: e.end ?? null, allDay: Boolean(e.allDay), calendar: e.calendar ?? null })),
+    },
+    can: { link: Boolean(link && center?.path), notes: Boolean(notes) },
+  };
+}
+
+function lists(graph, tz, ctx = {}) {
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+  const c = graph.center;
+  const { outgoing, incoming, similar, tasks, events } = graphLists(graph);
 
   const noteLi = (n, extra = '') => `<li><a href="${esc(graphHref(n.path))}">${esc(n.label)}</a>${extra}<span class="meta">${esc(n.path)}</span></li>`;
   const block = (title, items, empty) => `<div><h3>${title}</h3>${items.length ? `<ul>${items.join('')}</ul>` : `<p class="empty">${empty}</p>`}</div>`;

@@ -1,0 +1,187 @@
+{
+  "center": "note:2026-10-25.md",
+  "nodes": [
+    {
+      "id": "note:2026-10-25.md",
+      "kind": "note",
+      "path": "2026-10-25.md",
+      "level": 0,
+      "label": "2026-10-25",
+      "type": null,
+      "sensitivity": null
+    },
+    {
+      "id": "note:wiki/Training.md",
+      "kind": "note",
+      "path": "wiki/Training.md",
+      "level": 1,
+      "label": "Training",
+      "type": null,
+      "sensitivity": null
+    },
+    {
+      "id": "note:00-inbox/Idee.md",
+      "kind": "note",
+      "path": "00-inbox/Idee.md",
+      "level": 1,
+      "label": "Idee",
+      "type": null,
+      "sensitivity": null
+    },
+    {
+      "id": "note:wiki/synthesis/Gewohnheit.md",
+      "kind": "note",
+      "path": "wiki/synthesis/Gewohnheit.md",
+      "level": 1,
+      "label": "Gewohnheit",
+      "type": "synthesis",
+      "sensitivity": null
+    },
+    {
+      "id": "task:t1",
+      "kind": "task",
+      "taskId": "t1",
+      "label": "Leine kaufen",
+      "url": "https://zunder.test/#/aufgabe/t1",
+      "status": "in_progress",
+      "ref": "HUN-3",
+      "level": 1
+    },
+    {
+      "id": "task:t2",
+      "kind": "task",
+      "taskId": "t2",
+      "label": "Tierarzt",
+      "url": "https://zunder.test/#/aufgabe/t2",
+      "status": "open",
+      "ref": null,
+      "level": 2
+    },
+    {
+      "id": "event:1",
+      "kind": "event",
+      "label": "Hundeschule",
+      "start": "2026-10-25T09:00:00.000Z",
+      "end": "2026-10-25T10:00:00.000Z",
+      "allDay": false,
+      "calendar": "Privat",
+      "level": 1
+    },
+    {
+      "id": "event:2",
+      "kind": "event",
+      "label": "Urlaub",
+      "start": "2026-10-24T22:00:00.000Z",
+      "end": "2026-10-25T22:00:00.000Z",
+      "allDay": true,
+      "calendar": null,
+      "level": 1
+    }
+  ],
+  "edges": [
+    {
+      "from": "note:2026-10-25.md",
+      "to": "note:wiki/Training.md",
+      "kind": "link"
+    },
+    {
+      "from": "note:00-inbox/Idee.md",
+      "to": "note:2026-10-25.md",
+      "kind": "link"
+    },
+    {
+      "from": "note:2026-10-25.md",
+      "to": "note:wiki/synthesis/Gewohnheit.md",
+      "kind": "semantic",
+      "score": 0.734
+    },
+    {
+      "from": "note:2026-10-25.md",
+      "to": "task:t1",
+      "kind": "task"
+    },
+    {
+      "from": "note:wiki/Training.md",
+      "to": "task:t2",
+      "kind": "task"
+    },
+    {
+      "from": "note:2026-10-25.md",
+      "to": "event:1",
+      "kind": "event"
+    },
+    {
+      "from": "note:2026-10-25.md",
+      "to": "event:2",
+      "kind": "event"
+    }
+  ],
+  "problems": [
+    "Zunder: 1 Aufgabe(n) nicht abrufbar, Status aus der Notiz"
+  ],
+  "path": "2026-10-25.md",
+  "label": "2026-10-25",
+  "obsidian": "obsidian://open?vault=Vault&file=2026-10-25",
+  "lists": {
+    "outgoing": [
+      {
+        "path": "wiki/Training.md",
+        "label": "Training",
+        "type": null
+      }
+    ],
+    "incoming": [
+      {
+        "path": "00-inbox/Idee.md",
+        "label": "Idee",
+        "type": null
+      }
+    ],
+    "similar": [
+      {
+        "path": "wiki/synthesis/Gewohnheit.md",
+        "label": "Gewohnheit",
+        "type": "synthesis",
+        "score": 0.734
+      }
+    ],
+    "tasks": [
+      {
+        "id": "t1",
+        "label": "Leine kaufen",
+        "url": "https://zunder.test/#/aufgabe/t1",
+        "status": "in_progress",
+        "ref": "HUN-3",
+        "from": null
+      },
+      {
+        "id": "t2",
+        "label": "Tierarzt",
+        "url": "https://zunder.test/#/aufgabe/t2",
+        "status": "open",
+        "ref": null,
+        "from": "Training"
+      }
+    ],
+    "events": [
+      {
+        "label": "Urlaub",
+        "start": "2026-10-24T22:00:00.000Z",
+        "end": "2026-10-25T22:00:00.000Z",
+        "allDay": true,
+        "calendar": null
+      },
+      {
+        "label": "Hundeschule",
+        "start": "2026-10-25T09:00:00.000Z",
+        "end": "2026-10-25T10:00:00.000Z",
+        "allDay": false,
+        "calendar": "Privat"
+      }
+    ]
+  },
+  "can": {
+    "link": true,
+    "notes": true
+  }
+}

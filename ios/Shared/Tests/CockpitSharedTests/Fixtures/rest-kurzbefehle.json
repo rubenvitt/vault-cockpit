@@ -1,0 +1,27 @@
+{
+  "shortcuts": [
+    {
+      "slug": "notiz",
+      "title": "Notiz ins Cockpit",
+      "text": "Text aus dem Teilen-Menü oder abgefragt. Mit ! vorne wird es eine Aufgabe in der Zunder-Inbox.",
+      "file": "/kurzbefehle/notiz.shortcut",
+      "filename": "Notiz ins Cockpit.shortcut"
+    },
+    {
+      "slug": "sprachmemo",
+      "title": "Sprachmemo ins Cockpit",
+      "text": "Nimmt auf, transkribiert auf dem iPhone und legt den Text als Notiz ab.",
+      "file": "/kurzbefehle/sprachmemo.shortcut",
+      "filename": "Sprachmemo ins Cockpit.shortcut"
+    },
+    {
+      "slug": "lesestapel",
+      "title": "Zum Lesestapel",
+      "text": "Aus Safari teilen: Der Artikel landet im Eingang des Lesestapels. Braucht einen Token mit dem Recht „Lesestapel“.",
+      "file": "/kurzbefehle/lesestapel.shortcut",
+      "filename": "Zum Lesestapel.shortcut"
+    }
+  ],
+  "captureEnabled": false,
+  "intro": "Auf dem iPhone antippen und importieren. Beim Import fragt iOS nach einem Token: „Zum Lesestapel“ braucht das Recht „Lesestapel“, die übrigen das Recht „Capture“ (noch keiner angelegt, siehe API-Tokens)."
+}

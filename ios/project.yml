@@ -19,7 +19,7 @@ settings:
     # Hier statt im xcconfig, weil dort `//` einen Kommentar beginnt.
     # Debug-Überschreibung: Config/Local.xcconfig (siehe Local.xcconfig.example).
     COCKPIT_SERVER_URL: https://vault.rubeen.dev
-    # Host von COCKPIT_SERVER_URL für Associated Domains und App-Bound Domains (xcconfig kann ihn nicht ableiten).
+    # Host von COCKPIT_SERVER_URL für Associated Domains (xcconfig kann ihn nicht ableiten).
     COCKPIT_SERVER_HOST: vault.rubeen.dev
 
 packages:
@@ -61,8 +61,6 @@ targets:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        # Service Worker im WKWebView nur für App-Bound Domains (WebShell.swift).
-        WKAppBoundDomains: [$(COCKPIT_SERVER_HOST)]
         # Nur für einen lokalen Entwicklungsserver per http (Debug-Überschreibung).
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
