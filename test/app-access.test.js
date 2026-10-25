@@ -437,3 +437,24 @@ test('Geräte-Token: JSON und Aktionen des Cockpits ohne Cookie und CSRF, Seiten
     assert.equal((await call('/einstellungen', { bearer: app, jar: {} })).status, 303);
   });
 });
+
+test('Geräte-Token hat Vorrang vor einem mitgeschickten Sitzungs-Cookie (kein CSRF für die App)', async () => {
+  await withServer(async ({ base, appLogin, redeem, store }) => {
+    const { verifier, challenge } = pkce();
+    const back = await appLogin({ challenge });
+    const out = await (await redeem({ code: back.searchParams.get('code'), verifier, device: 'Rubens iPhone' })).json();
+    const { doc } = store.addDocument({ url: 'https://blatt.test/k', title: 'Mit Keks', status: 'eingang', reading_minutes: 3 });
+    const post = (headers) =>
+      fetch(`${base}/aktion/lesen/sortieren`, {
+        method: 'POST',
+        headers: { 'x-forwarded-host': 'vault.test', accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded', cookie: `${out.cookie.name}=${out.cookie.value}`, ...headers },
+        body: new URLSearchParams({ id: doc.id, ziel: 'stapel' }),
+      });
+    // Nur mit Cookie und ohne CSRF: abgelehnt wie bisher.
+    assert.equal((await post({})).status, 403);
+    // Cookie und Geräte-Token: der Token gilt, ohne CSRF.
+    const ok = await post({ authorization: `Bearer ${out.token.token}` });
+    assert.equal(ok.status, 200);
+    assert.equal(store.get(doc.id).status, 'stapel');
+  });
+});

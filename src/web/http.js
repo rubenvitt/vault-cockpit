@@ -904,7 +904,9 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       }
       const cookieSession = sessionOf(req);
       if (cookieSession) sessions.renew(res, cookieSession);
-      const session = cookieSession ?? appSessionOf(req, path);
+      // Schickt die App ihren Geräte-Token, gilt er, auch wenn ein Cookie mitkommt: Sonst
+      // verlangten die Aktionen ein CSRF-Token, das die App nicht hat.
+      const session = appSessionOf(req, path) ?? cookieSession;
       if (path === '/einstellungen') {
         if (!session) return redirect(res, '/login?next=%2Feinstellungen');
         if (method === 'POST') return saveSettings(req, res, session);
