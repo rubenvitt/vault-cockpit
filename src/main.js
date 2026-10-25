@@ -33,6 +33,7 @@ import { createSynthesisEvidence } from './lesen/synthesis-evidence.js';
 import { createSpeech, createSpeechCache } from './lesen/tts.js';
 import { createClaudeWriter } from './lesen/claude.js';
 import { createEpisodes } from './lesen/folgen.js';
+import { createIngest, createNightlyClock } from './lesen/ingest.js';
 import { createOidcLogin } from './web/oidc.js';
 import { createWebHttp } from './web/http.js';
 import { APP_TEAM_ID, APP_BUNDLE_ID } from './web/app-access.js';
@@ -349,6 +350,24 @@ const episodes = createEpisodes({
   capture: (input) => cockpitActions.capture(input),
 });
 
+// Ingest ins Mycel-Wiki: Claude entwirft (eigenes Modell unter Einstellungen →
+// Lesestapel), der Nutzer hakt unter Lesen → Ingest ab, erst dann schreibt das
+// Cockpit über den Editor. Nachts entstehen Entwürfe für den Stapel: alle 10
+// Minuten nachsehen, ob die eingestellte Stunde da ist; der letzte Tag liegt unter /data.
+const ingest = createIngest({
+  store: reading,
+  writer: createClaudeWriter({ model: () => cockpitSettings.get().ingest.model }),
+  search: (query, opts) => hybridSearch({ index, semantic: currentSemantic, query, ...opts }),
+  index,
+  exporter: readingExport,
+  editor,
+  policy: POLICY,
+  settings: cockpitSettings,
+  vaultPath: VAULT_PATH,
+});
+const ingestClock = createNightlyClock({ ingest, settings: cockpitSettings, file: join(dirname(COCKPIT_SETTINGS_FILE), 'ingest-nacht.txt') });
+setInterval(() => ingestClock.tick(), 10 * 60_000).unref();
+
 // Vault-Notizen ansehen und verarbeiten, über denselben Editor wie vault_edit;
 // Bilder aus dem Vault und ähnliche Notizen für die Vorschau.
 const noteDesk = createNoteDesk({ index, editor, policy: POLICY, settings: cockpitSettings, vaultPath: VAULT_PATH, semantic: currentSemantic });
@@ -384,6 +403,8 @@ const webHttp = process.env.WEB_CLIENT_ID
         connections: { index, semantic: currentSemantic, policy: POLICY, exporter: readingExport },
         // „In den Vault“ und „Im Vault ablegen“ (VCP-96) schreiben die Lesestapel-Notiz sofort.
         exporter: readingExport,
+        // Ingest ins Wiki: Entwürfe prüfen, abhaken, übernehmen.
+        ingest,
         onChange: (id) => readingExport.changed(id),
       }),
       oidc: createOidcLogin({
@@ -477,6 +498,8 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`  Semantik    : ${e ? `${e.model} über ${e.url}` : 'aus (Einstellungen → Embeddings)'}`);
   const t = cockpitSettings.get().tts;
   console.log(`  Folgen      : ${process.env.CLAUDE_CODE_OAUTH_TOKEN ? 'Vorlesen, Podcast und Report' : 'nur Vorlesen (Podcast und Report brauchen CLAUDE_CODE_OAUTH_TOKEN)'}`);
+  const ig = cockpitSettings.get().ingest;
+  console.log(`  Ingest      : ${ingest.available().ok ? `Entwürfe per Knopf${ig.nightly ? `, nachts um ${ig.hour} Uhr (höchstens ${ig.limit})` : ''}, Modell ${ig.model}` : 'aus (braucht CLAUDE_CODE_OAUTH_TOKEN)'}`);
   console.log(`  Vorlesen    : ${t ? `ElevenLabs (${t.model}, Stimme ${t.voice})` : 'Gerätestimme (Einstellungen → Vorlesen)'}`);
   console.log(`  Cockpit     : ${webHttp ? `${PUBLIC_URL}/ (${cockpitSettings.get().calendars.length} Kalender, Einstellungen unter /einstellungen)` : 'aus (WEB_CLIENT_ID)'}`);
 });

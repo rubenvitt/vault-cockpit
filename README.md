@@ -846,6 +846,82 @@ und auf `/zustand` steht der Fehler beim Feed. Icons werden einmal geholt und al
 lädt. Unten auf der Seite: OPML importieren (Datei aus einem anderen Reader,
 Ordner werden flach übernommen) und exportieren.
 
+#### Ingest ins Wiki
+
+Texte aus dem Stapel kommen auf Wunsch ins Mycel-Wiki (`wiki/`), nach den
+Konventionen der Skills `wiki` und `wiki-ingest`. Nichts landet ohne Bestätigung
+im Wiki: Claude schreibt nur einen **Entwurf**, den man unter **Lesen → Ingest**
+prüft und abhakt. Bis dahin bleibt der Text im Stapel.
+
+**Entwerfen** (`src/lesen/ingest.js`), per Knopf je Text, für den ganzen Stapel
+oder nachts: Claude bekommt den Volltext als Markdown (gekürzt auf 60 000 Zeichen),
+die Markierungen mit Notizen (das stärkste Signal) und bis zu 25 Kandidaten aus
+`wiki/` mit Pfad, Typ, Titel und `summary`, gefunden über die hybride Suche nach
+Titel, Auszug und Markierungen. Zurück kommt JSON nach Schema: Kernaussagen, was
+neu ist, was bestätigt, widerspricht oder andockt, die Source-Page (Slug, Titel,
+Summary, Confidence, Tags, Body als Destillation mit Wikilinks) und Vorschläge.
+Danach prüft das Cockpit deterministisch: Pfade nur auf vorhandene, beschreibbare
+Wiki-Seiten (Unbekanntes fällt weg), Slugs kebab-case ohne Umlaute, ein „neuer“
+Slug, den es schon gibt, wird zum Verknüpfen, Wikilinks nur auf Kandidaten,
+vorhandene Wiki-Seiten oder vorgeschlagene neue Seiten (der Rest wird Text), nichts
+in vertraulichen, ausgeschlossenen oder Readwise-Ordnern. Jeder Vorschlag hat eine
+feste ID: `v` verknüpfen, `n` neue Entity oder neues Konzept, `s` Synthese, `q`
+Frage, `b` Bestätigung, `r` Relation. Verknüpfen, Bestätigen und Relationen sind
+vorausgewählt, alles Neue ist abgewählt. Der Entwurf liegt in der Tabelle `ingests`
+von `lesestapel.db` (also in der Sicherung). Es entsteht immer nur ein Entwurf
+zugleich; nach einem Neustart werden angefangene wieder eingereiht.
+
+**Übernehmen** schreibt in festen Schritten über den Editor, jeder für sich
+wiederholbar; der Fortschritt steht in der Datenbank. Bricht ein Schritt ab
+(etwa weil der Sync eine Seite gleichzeitig ändert), bleibt der Entwurf bereit,
+und der nächste Versuch setzt dort fort, ohne etwas doppelt zu schreiben:
+
+1. **Rohquelle**: die Lesestapel-Notiz über den Exporter, mit Volltext und
+   `lesestatus: gelesen` (wie „In den Vault“ mit Volltext).
+2. **Source-Page** `wiki/sources/<slug>.md` (gibt es den Slug schon, mit
+   angehängter Kurz-ID): `type: source`, `title`, `summary`, `created`, `updated`,
+   `sources` (Pfad der Rohquelle), `url`, `tags`, `status: active`, `confidence`
+   und `relations` aus den gewählten Relationen (`"uses [[ziel]]"`). Im Body die
+   Destillation, unter „## Markiert“ jede Markierung mit Link auf ihren Block in der
+   Rohquelle (`[[<rohquelle>#^hl-…]]`), unter „## Verknüpft“ gewählte Seiten, auf die
+   der Body noch nicht verweist, unter „## Quelle“ Rohquelle und Original. Links auf
+   abgewählte neue Seiten werden Text.
+3. **Neue Seiten** (gewählt) in `wiki/entities/`, `wiki/concepts/`,
+   `wiki/synthesis/` oder `wiki/questions/`, mit `sources: ["[[<source-slug>]]"]`,
+   `entity-type` bzw. `art` und „## Quellen“. Ist der Pfad inzwischen belegt, wird
+   die Seite verknüpft statt überschrieben.
+4. **Verknüpfen und Bestätigen** an bestehenden Seiten: `[[<source-slug>]]` in
+   `sources` (ohne Doppelte), `updated` bzw. `confirmed` auf heute, `status: faded`
+   wird wieder `active` (Fragen `open`), und eine Zeile `- [[<source-slug>]]` unter
+   „## Quellen“ (fehlt die Überschrift, kommt sie ans Ende).
+5. **Log**: ein Eintrag `## [YYYY-MM-DD] ingest (cockpit) | <Titel>` mit Source-Page,
+   Rohquelle, Neu, Verknüpft und Bestätigt am Ende von `wiki/log.md`. Schließt die
+   Policy das Log aus dem Index aus (wie in `policy.example.json`), hängt das
+   Cockpit direkt an die Datei an, nie über einen Symlink hinaus.
+6. **Rohquelle**: `ingest: <heute>`, `wiki_source: "[[<source-slug>]]"`,
+   `lesestatus: gelesen` ins Frontmatter.
+7. **Archiv**: Der Text ist gelesen (`archiv` mit Lesedatum).
+
+Verwerfen löscht nur den Entwurf, der Text bleibt im Stapel und wird nachts nicht
+noch einmal entworfen; „ohne Wiki erledigen“ setzt ihn dazu auf „weg“ mit
+Lesedatum.
+
+**Nachtlauf**: Alle 10 Minuten sieht der Dienst nach, ob es in der Zeitzone der
+Einstellungen die eingestellte Stunde ist und der Lauf heute noch fehlt (der Tag
+steht in `/data/ingest-nacht.txt`). Dann reiht er Stapel-Texte ohne Entwurf ein,
+älteste zuerst; fehlgeschlagene kommen noch einmal dran, verworfene nicht.
+
+**Einstellungen → Lesestapel → Ingest ins Wiki**: nachts entwerfen (Standard an),
+Uhrzeit (Standard 3), Claude-Modell (Standard `sonnet`, schont das Abo) und
+höchstens so viele Texte je Nacht (Standard 20). Claude läuft wie bei den Folgen
+über die CLI mit `CLAUDE_CODE_OAUTH_TOKEN`; ohne Token ist Ingest aus.
+
+Grenzen: Supersession und Widersprüche löst das Cockpit nicht auf; sie stehen nur
+als Hinweis im Entwurf, aufgelöst wird per `/wiki-lint`. Relationen gehen nur von
+der Source-Page zu schon vorhandenen Seiten. Abweichung vom Mycel-Grundsatz „raw
+nie editieren“: Die Rohquelle ist die Lesestapel-Notiz, und die pflegt das Cockpit
+weiter (Frontmatter, die generierten Bereiche „Markierungen“ und „Text“).
+
 #### Von außen speichern
 
 Artikel kommen über dieselben Wege wie Notizen in den Eingang (VCP-69):
