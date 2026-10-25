@@ -825,11 +825,13 @@ public struct EpisodeRetry: Decodable, Equatable, Sendable {
     public let hint: String
 }
 
-/// Status einer Folge: `wartet`, `schreibt`, `spricht`, `fertig`, `fehler`.
+/// Status einer Folge: `wartet`, `schreibt`, `spricht`, `transkript` (erst nur das Transkript,
+/// Audio auf Knopfdruck), `fertig`, `fehler`.
 public enum EpisodeStatus {
     public static let waiting = "wartet"
     public static let writing = "schreibt"
     public static let speaking = "spricht"
+    public static let transcript = "transkript"
     public static let done = "fertig"
     public static let failed = "fehler"
 }
@@ -855,8 +857,20 @@ public struct Episode: Decodable, Equatable, Identifiable, Sendable {
     /// Dauer der fertigen MP3 in Sekunden.
     public let seconds: Int?
     public let bytes: Int?
-    /// Vault-Pfad der Report-Notiz.
+    /// Vault-Pfad des Transkripts (Podcast, Report).
     public let note: String?
+    /// false: erst nur das Transkript, Audio auf Knopfdruck (`speak`).
+    public let audio: Bool
+    /// Ton (`kritisch` …) und sein Name, nil beim Vorlesen.
+    public let style: String?
+    public let styleLabel: String?
+    /// Schwerpunkt: Themen der Texte und eigener Wunsch.
+    public let topics: [String]
+    public let focus: String?
+    /// Ton und Schwerpunkt in einer Zeile („Kritisch · Schwerpunkt: KI“), nil ohne Wünsche.
+    public let wishes: String?
+    /// „Audio erzeugen“ mit Erklärung, nur bei einem fertigen Transkript.
+    public let speak: EpisodeRetry?
     public let error: String?
     public let resumable: Bool
     public let retry: EpisodeRetry?
@@ -864,6 +878,8 @@ public struct Episode: Decodable, Equatable, Identifiable, Sendable {
 
     public var isDone: Bool { status == EpisodeStatus.done }
     public var isFailed: Bool { status == EpisodeStatus.failed }
+    /// Erst nur das Transkript ist fertig; Audio entsteht auf Knopfdruck.
+    public var isTranscript: Bool { status == EpisodeStatus.transcript }
 
     /// Dauer wie im Web: `5:12`, `1:02:05`; sonst „10 Min.“ oder leer.
     public var durationLabel: String {
@@ -882,7 +898,7 @@ public struct Episode: Decodable, Equatable, Identifiable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, kindLabel, title, minutes, status, busy, docs, chars, createdAt, updatedAt, finishedAt, seconds, bytes, note, error, resumable, retry, progress
+        case id, kind, kindLabel, title, minutes, status, busy, docs, chars, createdAt, updatedAt, finishedAt, seconds, bytes, note, audio, style, styleLabel, topics, focus, wishes, speak, error, resumable, retry, progress
     }
 
     public init(from decoder: Decoder) throws {
@@ -902,6 +918,13 @@ public struct Episode: Decodable, Equatable, Identifiable, Sendable {
         seconds = try c.decodeIfPresent(Int.self, forKey: .seconds)
         bytes = try c.decodeIfPresent(Int.self, forKey: .bytes)
         note = try c.decodeIfPresent(String.self, forKey: .note)
+        audio = try c.decodeIfPresent(Bool.self, forKey: .audio) ?? true
+        style = try c.decodeIfPresent(String.self, forKey: .style)
+        styleLabel = try c.decodeIfPresent(String.self, forKey: .styleLabel)
+        topics = try c.decodeIfPresent([String].self, forKey: .topics) ?? []
+        focus = try c.decodeIfPresent(String.self, forKey: .focus)
+        wishes = try c.decodeIfPresent(String.self, forKey: .wishes)
+        speak = try c.decodeIfPresent(EpisodeRetry.self, forKey: .speak)
         error = try c.decodeIfPresent(String.self, forKey: .error)
         resumable = try c.decodeIfPresent(Bool.self, forKey: .resumable) ?? false
         retry = try c.decodeIfPresent(EpisodeRetry.self, forKey: .retry)
@@ -937,6 +960,23 @@ public struct EpisodeKindInfo: Decodable, Equatable, Hashable, Identifiable, Sen
 
     public var id: String { kind }
     public var isAvailable: Bool { missing == nil }
+}
+
+/// Ton von Podcast und Report (`STYLES` in src/lesen/folgen.js).
+public struct EpisodeStyleInfo: Decodable, Equatable, Hashable, Identifiable, Sendable {
+    public let style: String
+    public let label: String
+    public let description: String
+
+    public var id: String { style }
+}
+
+/// Thema der Texte für den Schwerpunkt, mit der Zahl der Texte dazu.
+public struct EpisodeTopic: Decodable, Equatable, Hashable, Identifiable, Sendable {
+    public let label: String
+    public let count: Int
+
+    public var id: String { label }
 }
 
 /// `GET /api/lesen/folgen`; ohne Folgen `enabled: false`.
@@ -988,11 +1028,19 @@ public struct NewEpisodeModel: Decodable, Equatable, Sendable {
     public let defaultLength: Int
     public let maxDocs: Int
     public let spokenCharsPerMinute: Int
+    /// Podcast und Report: Ton (leer = Server kennt keinen), Themen der Texte, Grenzen und ob
+    /// „erst nur Transkript“ geht.
+    public let styles: [EpisodeStyleInfo]
+    public let defaultStyle: String?
+    public let topics: [EpisodeTopic]
+    public let maxTopics: Int
+    public let maxFocus: Int
+    public let transcriptOnly: Bool
     public let summary: EpisodeSummary?
     public let summaries: [String: EpisodeSummary]
 
     enum CodingKeys: String, CodingKey {
-        case enabled, zeit, windows, docs, chars, availability, kinds, defaultKind, lengths, defaultLength, maxDocs, spokenCharsPerMinute, summary, summaries
+        case enabled, zeit, windows, docs, chars, availability, kinds, defaultKind, lengths, defaultLength, maxDocs, spokenCharsPerMinute, styles, defaultStyle, topics, maxTopics, maxFocus, transcriptOnly, summary, summaries
     }
 
     public init(from decoder: Decoder) throws {
@@ -1009,6 +1057,12 @@ public struct NewEpisodeModel: Decodable, Equatable, Sendable {
         defaultLength = try c.decodeIfPresent(Int.self, forKey: .defaultLength) ?? 10
         maxDocs = try c.decodeIfPresent(Int.self, forKey: .maxDocs) ?? 20
         spokenCharsPerMinute = try c.decodeIfPresent(Int.self, forKey: .spokenCharsPerMinute) ?? 900
+        styles = try c.decodeIfPresent([EpisodeStyleInfo].self, forKey: .styles) ?? []
+        defaultStyle = try c.decodeIfPresent(String.self, forKey: .defaultStyle)
+        topics = try c.decodeIfPresent([EpisodeTopic].self, forKey: .topics) ?? []
+        maxTopics = try c.decodeIfPresent(Int.self, forKey: .maxTopics) ?? 5
+        maxFocus = try c.decodeIfPresent(Int.self, forKey: .maxFocus) ?? 200
+        transcriptOnly = try c.decodeIfPresent(Bool.self, forKey: .transcriptOnly) ?? false
         summary = try c.decodeIfPresent(EpisodeSummary.self, forKey: .summary)
         summaries = try c.decodeIfPresent([String: EpisodeSummary].self, forKey: .summaries) ?? [:]
     }

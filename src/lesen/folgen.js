@@ -32,6 +32,12 @@ import { localDate } from '../cockpit/week.js';
  * das sind die Texte selbst. Ist eine Folge fertig (jede Art), bekommen ihre
  * Texte über `heard` den Vermerk „gehört“.
  *
+ * Podcast und Report lassen sich einstellen: `style` (Ton, `STYLES`),
+ * `topics` und `focus` (Schwerpunkt: Themen der Texte bzw. eigener Satz) gehen
+ * in Claudes Auftrag. Mit `audio: false` entsteht erst nur das Transkript
+ * (Status `transkript`, kostet bei ElevenLabs nichts); `speak` macht später
+ * aus Claudes gesichertem Skript das Audio, ohne Claude noch einmal zu fragen.
+ *
  * Claude läuft über die CLI mit dem Abo (src/lesen/claude.js). Die Folgen
  * liegen unter `dir` (`folgen.json`, je Folge `<id>.mp3`), es läuft immer nur
  * eine. Nichts Bezahltes geht verloren: Claudes Skript liegt als
@@ -45,6 +51,18 @@ import { localDate } from '../cockpit/week.js';
 export const KINDS = { vorlesen: 'Vorlesen', podcast: 'Podcast', report: 'Report' };
 /** Länge von Podcast und Report in Minuten. */
 export const LENGTHS = [5, 10, 20];
+/** Ton von Podcast und Report: Name, Erklärung für die Auswahl und die Zeile für Claude (keine beim Standard). */
+export const STYLES = {
+  ausgewogen: { label: 'Ausgewogen', description: 'Einordnen, erklären, Querverbindungen', prompt: null },
+  locker: { label: 'Locker', description: 'Unterhaltsam, mit Beispielen aus dem Alltag', prompt: 'Ton: locker und unterhaltsam, mit Beispielen aus dem Alltag, ohne flapsig zu werden oder Inhalt zu verlieren.' },
+  kritisch: { label: 'Kritisch', description: 'Argumente prüfen, Lücken und Widersprüche benennen', prompt: 'Ton: kritisch. Prüf die Argumente der Texte, benenn Schwächen, Lücken und Widersprüche und was dagegen spricht.' },
+  tiefgang: { label: 'Tiefgang', description: 'Weniger Punkte, dafür gründlich erklärt', prompt: 'Ton: in die Tiefe. Lieber weniger Punkte gründlich: Begriffe, Hintergründe und Zusammenhänge genau erklärt.' },
+};
+export const DEFAULT_STYLE = 'ausgewogen';
+/** Schwerpunkt: höchstens so viele Themen und so viele Zeichen eigener Text. */
+export const MAX_TOPICS = 5;
+export const MAX_FOCUS = 200;
+const TOPIC_CHARS = 60;
 // Gesprochenes Deutsch: rund 150 Wörter zu 6 Zeichen in der Minute.
 export const CHARS_PER_MINUTE = 900;
 export const MAX_DOCS = 20;
@@ -59,7 +77,7 @@ const TOTAL_INPUT = 300_000;
 export const DEFAULT_NOTE_FOLDER = '30-ressourcen/audio-reports';
 // Länge des Titels im Dateinamen.
 const SLUG_CHARS = 60;
-const STATES = { wartet: 'wartet', schreibt: 'Claude schreibt', spricht: 'wird gesprochen', fertig: 'fertig', fehler: 'Fehler' };
+const STATES = { wartet: 'wartet', schreibt: 'Claude schreibt', spricht: 'wird gesprochen', transkript: 'Transkript fertig', fertig: 'fertig', fehler: 'Fehler' };
 /** `mp3_44100_128` (src/lesen/tts.js) hat eine feste Bitrate: 16 000 Bytes je Sekunde. */
 export const BYTES_PER_SECOND = 16_000;
 
@@ -220,9 +238,23 @@ function sourceInput(docs) {
     .join('\n\n');
 }
 
+/**
+ * Wünsche zu Ton und Schwerpunkt als Zeilen für Claudes Auftrag; ohne Wünsche
+ * keine. Der Schwerpunkt ist ein Wunsch, kein Ersatz: Was die Texte dazu nicht
+ * hergeben, soll Claude sagen statt erfinden.
+ */
+function wishes({ style, topics = [], focus = '' } = {}) {
+  const lines = [];
+  const tone = STYLES[style]?.prompt;
+  if (tone) lines.push(tone);
+  const parts = [...(topics.length ? [`Themen: ${topics.join(', ')}`] : []), ...(focus ? [`Wunsch: ${focus}`] : [])];
+  if (parts.length) lines.push(`Schwerpunkt (${parts.join('; ')}). Leg das Gewicht darauf, was die Texte dazu sagen; den Rest nur knapp, soweit er dafür wichtig ist. Geben die Texte dazu wenig her, sag das.`);
+  return lines;
+}
+
 const SYSTEM = 'Du schreibst auf Deutsch für einen Menschen, der seinen Lesestapel unterwegs hört. Du arbeitest nur mit den Texten, die du bekommst, erfindest nichts dazu und sagst, wenn die Texte etwas offenlassen. Du lieferst ausschließlich das verlangte JSON.';
 
-function podcastJob(docs, minutes) {
+function podcastJob(docs, minutes, options) {
   const chars = minutes * CHARS_PER_MINUTE;
   return {
     system: SYSTEM,
@@ -232,6 +264,7 @@ function podcastJob(docs, minutes) {
       'Nenn jeden Text beim Titel, wenn er drankommt. Arbeite Querverbindungen zwischen den Texten heraus. Zum Schluss zwei oder drei Gedanken zum Mitnehmen.',
       'Gesprochene Sprache: kurze Sätze, keine Aufzählungen, kein Markdown, keine Links. Wechselt euch oft ab, kein Zug länger als etwa 600 Zeichen.',
       'Erlaubt sind sparsam Regieanweisungen in eckigen Klammern auf Englisch, z. B. [laughs], [thoughtful], [curious]; sonst nichts in Klammern.',
+      ...wishes(options),
     ].join('\n'),
     schema: {
       type: 'object',
@@ -249,7 +282,7 @@ function podcastJob(docs, minutes) {
   };
 }
 
-function reportJob(docs, minutes) {
+function reportJob(docs, minutes, options) {
   const chars = minutes * CHARS_PER_MINUTE;
   return {
     system: SYSTEM,
@@ -257,6 +290,7 @@ function reportJob(docs, minutes) {
       'Schreib einen Report über die Texte auf stdin, in zwei Fassungen.',
       '`note`: Markdown für eine Notiz im Obsidian-Vault mit den Abschnitten „## Überblick“, „## Kernaussagen“ (je Text eine Unterüberschrift mit dem Titel und die Quelle als Link), „## Querverbindungen“ und „## Offene Fragen“. Keine Überschrift erster Ordnung.',
       `\`spoken\`: dieselben Inhalte als Fließtext zum Vorlesen, etwa ${minutes} Minuten, also rund ${chars} Zeichen. Gesprochene Sprache, kurze Sätze, kein Markdown, keine Links, Titel der Texte ausgesprochen.`,
+      ...wishes(options),
     ].join('\n'),
     schema: {
       type: 'object',
@@ -270,6 +304,22 @@ function reportJob(docs, minutes) {
     },
   };
 }
+
+/** Themen des Schwerpunkts: getrimmt, ohne Doppelte und Zeilenumbrüche, höchstens `MAX_TOPICS`. */
+export function cleanTopics(list) {
+  const seen = new Set();
+  const out = [];
+  for (const raw of [].concat(list ?? [])) {
+    const t = String(raw ?? '').replace(/\s+/g, ' ').trim().slice(0, TOPIC_CHARS);
+    if (!t || seen.has(t.toLowerCase())) continue;
+    seen.add(t.toLowerCase());
+    out.push(t);
+  }
+  return out.slice(0, MAX_TOPICS);
+}
+
+/** Eigener Schwerpunkt in einer Zeile, höchstens `MAX_FOCUS` Zeichen. */
+export const cleanFocus = (text) => String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_FOCUS);
 
 const cleanTitle = (t, fallback) => String(t ?? '').replace(/[\\/\r\n]+/g, ' ').replace(/\.\.+/g, '.').replace(/^[!>#\s]+/, '').trim().slice(0, 100) || fallback;
 
@@ -355,6 +405,12 @@ export function createEpisodes({
     return { vorlesen: missingVoice, podcast: missingVoice ?? missingClaude, report: missingVoice ?? missingClaude };
   }
 
+  /** Was fehlt, um `kind` anzulegen: Erst nur das Transkript braucht keine Stimme, nur Claude. */
+  function missingFor(kind, audio = true) {
+    if (audio || kind === 'vorlesen') return availability()[kind];
+    return writer?.available() ? null : availability()[kind];
+  }
+
   function docsOf(ids) {
     const unique = [...new Set(ids)].slice(0, MAX_DOCS);
     const docs = unique.map((id) => store.get(id)).filter((d) => d && plain(d));
@@ -363,7 +419,8 @@ export function createEpisodes({
   }
 
   /** Zeichen, die ElevenLabs berechnet: beim Vorlesen nur, was nicht schon im Cache liegt; bei Podcast und Report geschätzt. */
-  function estimate({ kind, docs, minutes }) {
+  function estimate({ kind, docs, minutes, audio = true }) {
+    if (kind !== 'vorlesen' && !audio) return 0;
     if (kind === 'vorlesen') return docs.flatMap((d) => narration(d, tts()?.model ?? '')).reduce((sum, p) => sum + (speech?.cached(p) ? 0 : p.text.length), 0);
     return minutes * CHARS_PER_MINUTE;
   }
@@ -381,6 +438,15 @@ export function createEpisodes({
    * wie geliefert. Scheitert das Anlegen ganz, nur eine Warnung: `ep.note` bleibt
    * leer, die Folge läuft weiter.
    */
+  /** Ton und Schwerpunkt in einem Satz fürs Transkript, ohne Wünsche leer. */
+  const wished = (ep) =>
+    [
+      ep.style && ep.style !== DEFAULT_STYLE ? `Ton: ${STYLES[ep.style]?.label ?? ep.style}` : null,
+      ep.topics?.length || ep.focus ? `Schwerpunkt: ${[...(ep.topics ?? []), ...(ep.focus ? [ep.focus] : [])].join(', ')}` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+
   async function writeNote(ep, docs, title, body) {
     if (ep.note || !createNote) return;
     const str = (v) => JSON.stringify(String(v));
@@ -396,6 +462,9 @@ export function createEpisodes({
       `folge_id: ${str(ep.id)}`,
       `erzeugt: ${date}`,
       `minuten: ${ep.minutes}`,
+      ...(ep.style && ep.style !== DEFAULT_STYLE ? [`stil: ${ep.style}`] : []),
+      ...(ep.topics?.length ? ['themen:', ...ep.topics.map((t) => `  - ${str(breakTemplater(t))}`)] : []),
+      ...(ep.focus ? [`schwerpunkt: ${str(breakTemplater(ep.focus))}`] : []),
       ...(links.length ? ['quellen:', ...links] : ['quellen: []']),
       'ingest: offen',
       '---',
@@ -404,6 +473,7 @@ export function createEpisodes({
       '',
       `_${KINDS[ep.kind]} aus dem Lesestapel, ${date}, ${docs.length} ${docs.length === 1 ? 'Text' : 'Texte'} (Cockpit)_`,
       '',
+      ...(wished(ep) ? [`> ${safeWikiMarkdown(wished(ep))}`, ''] : []),
       safeWikiMarkdown(body),
       '',
       '## Quellen',
@@ -430,9 +500,12 @@ export function createEpisodes({
   }
 
   async function produce(ep) {
+    // Erst nur das Transkript braucht keine Stimme; sonst fehlt sie schon vor Claude.
+    const speaks = ep.audio !== false;
     const cfg = tts();
-    if (!cfg) throw new EpisodeError(availability().vorlesen);
-    const el = provider(cfg);
+    if (!cfg && speaks) throw new EpisodeError(availability().vorlesen);
+    let el = null;
+    const voice = () => (el ??= provider(cfg));
     const docs = ep.docs.map((id) => store.get(id)).filter(Boolean);
     if (!docs.length) throw new EpisodeError('Die Texte gibt es nicht mehr');
 
@@ -450,7 +523,8 @@ export function createEpisodes({
       let script = loadScript(ep.id);
       if (!script) {
         update(ep, { status: 'schreibt', writing_at: now().toISOString() });
-        script = await writer.write({ ...(ep.kind === 'podcast' ? podcastJob(docs, ep.minutes) : reportJob(docs, ep.minutes)), input: sourceInput(docs) });
+        const options = { style: ep.style, topics: ep.topics, focus: ep.focus };
+        script = await writer.write({ ...(ep.kind === 'podcast' ? podcastJob(docs, ep.minutes, options) : reportJob(docs, ep.minutes, options)), input: sourceInput(docs) });
         saveScript(ep.id, script);
       }
       if (ep.kind === 'podcast') {
@@ -461,7 +535,7 @@ export function createEpisodes({
         // Transkript vor dem Sprechen: Was Claude geschrieben hat, ist dann sicher.
         const talk = turns.map((t) => `**${t.speaker === 'B' ? 'Gast' : 'Moderation'}:** ${t.text}`).join('\n\n');
         await writeNote(ep, docs, title, `## Gespräch\n\n${talk}`);
-        jobs = dialogueBatches(turns).map((inputs) => async () => ({ audio: await el.dialogue({ inputs }), paid: inputs.reduce((n, i) => n + i.text.length, 0) }));
+        jobs = dialogueBatches(turns).map((inputs) => async () => ({ audio: await voice().dialogue({ inputs }), paid: inputs.reduce((n, i) => n + i.text.length, 0) }));
         update(ep, { title, chars: turns.reduce((s, t) => s + t.text.length, 0) });
       } else {
         const title = cleanTitle(script.title, ep.title);
@@ -469,8 +543,14 @@ export function createEpisodes({
         await writeNote(ep, docs, title, [String(script.note ?? '').trim(), spoken && `## Sprechfassung\n\n${spoken}`].filter(Boolean).join('\n\n'));
         const parts = chunkText(spoken, NARRATION_CHARS);
         if (!parts.length) throw new EpisodeError('Claude hat keine Sprechfassung geliefert');
-        jobs = parts.map((t, i) => async () => ({ audio: await el.synthesize({ text: t, previous: parts[i - 1] ?? null, next: parts[i + 1] ?? null }), paid: t.length }));
+        jobs = parts.map((t, i) => async () => ({ audio: await voice().synthesize({ text: t, previous: parts[i - 1] ?? null, next: parts[i + 1] ?? null }), paid: t.length }));
         update(ep, { title, chars: parts.join('').length });
+      }
+      if (!speaks) {
+        // Skript bleibt für `speak`; gehört ist noch nichts.
+        update(ep, { status: 'transkript', transcript_at: now().toISOString() });
+        logger.info?.(`Folge „${ep.title}“ (${KINDS[ep.kind]}): Transkript fertig, Audio auf Knopfdruck`);
+        return;
       }
     }
 
@@ -555,6 +635,7 @@ export function createEpisodes({
     KINDS,
     STATES,
     availability,
+    missingFor,
     list: () => [...episodes].reverse(),
     get: find,
     /** Nach einem Fehler: setzt fort, ohne Claude noch einmal zu fragen, wenn das Skript schon da ist. */
@@ -564,18 +645,26 @@ export function createEpisodes({
     },
     audioPath: (id) => (find(id)?.status === 'fertig' && existsSync(audioPath(id)) ? audioPath(id) : null),
     /** Zeichen und Texte vor dem Anstoßen, für die Auswahlseite. */
-    preview({ kind, docIds, minutes = 10 }) {
+    preview({ kind, docIds, minutes = 10, audio = true }) {
       const docs = docsOf(docIds);
-      return { docs, chars: estimate({ kind, docs, minutes }) };
+      return { docs, chars: estimate({ kind, docs, minutes, audio }) };
     },
 
-    /** Legt eine Folge an und reiht sie ein; liefert sie sofort. `done` wartet auf das Ende (Tests). */
-    create({ kind, docIds, minutes = 10 }) {
+    /**
+     * Legt eine Folge an und reiht sie ein; liefert sie sofort. `done` wartet
+     * auf das Ende (Tests). Podcast und Report nehmen `style`, `topics`,
+     * `focus` und `audio` (false = erst nur das Transkript); Vorlesen nicht.
+     */
+    create({ kind, docIds, minutes = 10, audio = true, style = DEFAULT_STYLE, topics = [], focus = '' }) {
       if (!KINDS[kind]) throw new EpisodeError(`Unbekannte Art „${kind}“`);
-      const missing = availability()[kind];
+      const writes = kind !== 'vorlesen';
+      const speaks = !writes || audio !== false;
+      const missing = missingFor(kind, speaks);
       if (missing) throw new EpisodeError(missing, 409);
-      const m = kind === 'vorlesen' ? null : Number(minutes);
+      const m = writes ? Number(minutes) : null;
       if (m !== null && !LENGTHS.includes(m)) throw new EpisodeError(`Länge: ${LENGTHS.join(', ')} Minuten`);
+      const tone = writes ? style || DEFAULT_STYLE : null;
+      if (tone && !STYLES[tone]) throw new EpisodeError(`Ton: ${Object.values(STYLES).map((s) => s.label).join(', ')}`);
       const docs = docsOf(docIds);
       const first = docs[0].title || docs[0].url;
       const at = now().toISOString();
@@ -586,7 +675,8 @@ export function createEpisodes({
         title: docs.length === 1 ? `${KINDS[kind]}: ${first}` : `${KINDS[kind]}: ${first} und ${docs.length - 1} weitere`,
         docs: docs.map((d) => d.id),
         status: 'wartet',
-        chars: estimate({ kind, docs, minutes: m }),
+        chars: estimate({ kind, docs, minutes: m, audio: speaks }),
+        ...(writes ? { audio: speaks, style: tone, topics: cleanTopics(topics), focus: cleanFocus(focus) } : {}),
         created_at: at,
         updated_at: at,
       };
@@ -606,9 +696,24 @@ export function createEpisodes({
       const ep = find(id);
       if (!ep) throw new EpisodeError('Diese Folge gibt es nicht', 404);
       if (ep.status !== 'fehler') throw new EpisodeError('Nur eine fehlgeschlagene Folge lässt sich fortsetzen', 409);
-      const missing = availability()[ep.kind];
+      const missing = missingFor(ep.kind, ep.audio !== false);
       if (missing) throw new EpisodeError(missing, 409);
       update(ep, { status: 'wartet', error: null });
+      queue.push(ep.id);
+      return Object.assign({ ...ep }, { done: next() });
+    },
+
+    /**
+     * Audio zu einem fertigen Transkript: aus Claudes gesichertem Skript, Claude
+     * schreibt nicht noch einmal. `done` wie bei `create`.
+     */
+    speak(id) {
+      const ep = find(id);
+      if (!ep) throw new EpisodeError('Diese Folge gibt es nicht', 404);
+      if (ep.status !== 'transkript') throw new EpisodeError('Audio gibt es nur zu einem fertigen Transkript', 409);
+      const missing = availability().vorlesen ?? (existsSync(scriptPath(ep.id)) ? null : availability()[ep.kind]);
+      if (missing) throw new EpisodeError(missing, 409);
+      update(ep, { status: 'wartet', audio: true, error: null });
       queue.push(ep.id);
       return Object.assign({ ...ep }, { done: next() });
     },

@@ -38,7 +38,7 @@ struct FolgenDoneCard: View {
                     Button {
                         openNote(note)
                     } label: {
-                        Label("Report-Notiz", systemImage: "doc.text")
+                        Label(episode.kind == "report" ? "Report-Notiz" : "Transkript", systemImage: "doc.text")
                     }
                     .buttonStyle(LesenQuietButtonStyle())
                 }
@@ -67,6 +67,77 @@ struct FolgenDoneCard: View {
         .cardStyle()
         .opacity(isBusy ? 0.5 : 1)
         .disabled(isBusy)
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// Erst nur das Transkript (`.folge.is-transcript`): „Transkript lesen“ (die Notiz im Vault),
+/// „Audio erzeugen“ mit dem, was es bei ElevenLabs kostet, und „Löschen“.
+struct FolgenTranscriptCard: View {
+    let episode: Episode
+    let isBusy: Bool
+    let openNote: (String) -> Void
+    let speak: () -> Void
+    let delete: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "doc.text")
+                    .font(.title3)
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 48, height: 48)
+                    .background(Theme.accentSoft, in: Circle())
+                    .accessibilityHidden(true)
+                FolgenHead(episode: episode, meta: CockpitFormat.meta(["Transkript", FolgenFormat.meta(episode, withChars: false)]))
+            }
+            FolgenActions {
+                if let note = episode.note, !note.isEmpty {
+                    Button {
+                        openNote(note)
+                    } label: {
+                        Label("Transkript lesen", systemImage: "doc.text")
+                    }
+                    .buttonStyle(LesenQuietButtonStyle())
+                }
+                Button(action: speak) {
+                    HStack(spacing: 6) {
+                        if isBusy {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(Theme.onAccent)
+                        } else {
+                            Image(systemName: "waveform")
+                                .accessibilityHidden(true)
+                        }
+                        Text(episode.speak?.label ?? "Audio erzeugen")
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .frame(minHeight: 26)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.accent)
+                .accessibilityHint(episode.speak?.hint ?? "")
+                Button(role: .destructive, action: delete) {
+                    Label("Löschen", systemImage: "trash")
+                }
+                .buttonStyle(LesenQuietButtonStyle())
+            }
+            .disabled(isBusy)
+            if episode.note?.isEmpty ?? true {
+                Text("Das Transkript ließ sich nicht im Vault anlegen; das Skript liegt im Cockpit.")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.text3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let hint = episode.speak?.hint {
+                Text(hint)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.text3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .cardStyle()
         .accessibilityElement(children: .contain)
     }
 }
@@ -187,6 +258,13 @@ struct FolgenHead: View {
                 Text(meta)
                     .font(.footnote)
                     .foregroundStyle(Theme.text3)
+            }
+            // Ton und Schwerpunkt, wenn gewählt.
+            if let wishes = episode.wishes {
+                Text(wishes)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.text3)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

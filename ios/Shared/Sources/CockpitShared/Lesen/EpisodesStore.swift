@@ -2,7 +2,8 @@ import Foundation
 import Observation
 
 /// Folgen: Liste, Stand der entstehenden (alle 3 s, solange eine entsteht und die App vorne
-/// ist), Löschen, Fortsetzen und die Meldung „Fertig: …“, wenn eine fertig wird.
+/// ist), Löschen, Fortsetzen, „Audio erzeugen“ zu einem Transkript und die Meldung „Fertig: …“
+/// bzw. „Transkript fertig: …“, wenn eine fertig wird.
 @MainActor
 @Observable
 public final class EpisodesStore {
@@ -44,7 +45,7 @@ public final class EpisodesStore {
         let busyBefore = Set(remote.model?.items.filter(\.busy).map(\.id) ?? [])
         await remote.refresh()
         if let items = remote.model?.items {
-            for episode in items where busyBefore.contains(episode.id) && episode.isDone {
+            for episode in items where busyBefore.contains(episode.id) && (episode.isDone || episode.isTranscript) {
                 announce(episode)
             }
         }
@@ -53,7 +54,9 @@ public final class EpisodesStore {
 
     private func announce(_ episode: Episode) {
         context.toasts.signal(.success)
-        if let play = onPlay {
+        if episode.isTranscript {
+            context.toasts.show("Transkript fertig: \(episode.title)")
+        } else if let play = onPlay {
             context.toasts.show("Fertig: \(episode.title)", action: Toast.Action(label: "Abspielen") { play(episode) })
         } else {
             context.toasts.show("Fertig: \(episode.title)")
@@ -135,10 +138,23 @@ public final class EpisodesStore {
         await refresh()
         return true
     }
+
+    /// „Audio erzeugen“ zu einem fertigen Transkript: aus demselben Skript, Claude schreibt nicht
+    /// noch einmal.
+    @discardableResult
+    public func speak(_ episode: Episode) async -> Bool {
+        guard episode.isTranscript, !busy.contains(episode.id) else { return false }
+        busy.insert(episode.id)
+        defer { busy.remove(episode.id) }
+        guard await actions.run(ReadingAction.episodeSpeak, ["id": episode.id]) != nil else { return false }
+        await refresh()
+        return true
+    }
 }
 
-/// „Neue Folge“ in drei Schritten: Texte des Zeitfensters (alle vorausgewählt), Art (Vorlesen,
-/// Podcast, Report) und Länge (Podcast, Report). Der Satz am Knopf rechnet bei jeder Änderung
+/// „Neue Folge“ in Schritten: Texte des Zeitfensters (alle vorausgewählt), Art (Vorlesen,
+/// Podcast, Report), bei Podcast und Report Länge, Ton, Schwerpunkt (Themen der Texte, eigener
+/// Wunsch) und ob gleich das Audio entsteht oder erst nur das Transkript. Der Satz am Knopf rechnet bei jeder Änderung
 /// neu wie `newSummary` (src/lesen/folgen-page.js). Abgeschickt wird höchstens einmal: Doppelt
 /// abgeschickt würde zwei Folgen bezahlen.
 @MainActor
@@ -152,6 +168,14 @@ public final class NewEpisodeStore {
     public private(set) var kind: String?
     /// Länge in Minuten (Podcast, Report).
     public private(set) var length = 10
+    /// Ton (Podcast, Report), nil = der Server kennt keinen.
+    public private(set) var style: String?
+    /// Themen des Schwerpunkts (höchstens `maxTopics`).
+    public private(set) var topics: Set<String> = []
+    /// Eigener Schwerpunkt (höchstens `maxFocus` Zeichen).
+    public private(set) var focus = ""
+    /// false: erst nur das Transkript, Audio später auf Knopfdruck.
+    public private(set) var audio = true
     public private(set) var isSubmitting = false
     /// Abgeschickt: kein zweites Mal.
     public private(set) var didSubmit = false
@@ -201,6 +225,16 @@ public final class NewEpisodeStore {
         }
         if kind == nil || !isAvailable(kind!) { kind = model.defaultKind }
         if !model.lengths.contains(length) { length = model.defaultLength }
+        if style == nil || !model.styles.contains(where: { $0.style == style }) {
+            let fallback = model.styles.first?.style
+            if let key = model.defaultStyle, model.styles.contains(where: { $0.style == key }) {
+                style = key
+            } else {
+                style = fallback
+            }
+        }
+        topics.formIntersection(model.topics.map(\.label))
+        if !model.transcriptOnly { audio = true }
     }
 
     // MARK: Auswahl
@@ -228,6 +262,48 @@ public final class NewEpisodeStore {
         context.toasts.signal(.selection)
     }
 
+    public func select(style: String) {
+        guard model?.styles.contains(where: { $0.style == style }) == true else { return }
+        self.style = style
+        context.toasts.signal(.selection)
+    }
+
+    /// Thema an oder ab; mehr als `maxTopics` gehen nicht.
+    public func toggle(topic: String) {
+        guard let model, model.topics.contains(where: { $0.label == topic }) else { return }
+        if topics.contains(topic) {
+            topics.remove(topic)
+        } else {
+            guard topics.count < model.maxTopics else { return }
+            topics.insert(topic)
+        }
+        context.toasts.signal(.selection)
+    }
+
+    /// Ein weiteres Thema geht noch (sonst sind die übrigen gesperrt).
+    public var canAddTopic: Bool { topics.count < (model?.maxTopics ?? 5) }
+
+    public func set(focus: String) {
+        self.focus = String(focus.prefix(model?.maxFocus ?? 200))
+    }
+
+    /// Gleich mit Audio oder erst nur das Transkript (nur, wenn der Server das kann).
+    public func select(audio: Bool) {
+        guard audio || model?.transcriptOnly == true else { return }
+        self.audio = audio
+        context.toasts.signal(.selection)
+    }
+
+    /// Erklärung zum gewählten Ton.
+    public var styleHint: String? {
+        model?.styles.first { $0.style == style }?.description
+    }
+
+    /// Themen in der Reihenfolge der Liste (häufigste zuerst).
+    public var selectedTopics: [String] {
+        model?.topics.map(\.label).filter { topics.contains($0) } ?? []
+    }
+
     /// Gewählte Texte in der Reihenfolge der Liste.
     public var selectedDocs: [StackItem] {
         model?.docs.filter { selection.contains($0.id) } ?? []
@@ -246,7 +322,7 @@ public final class NewEpisodeStore {
         guard let model else { return EpisodeSummary(main: "", cost: "") }
         guard let kind else { return model.summary ?? EpisodeSummary(main: "Folgen brauchen ElevenLabs", cost: "Einstellungen → Vorlesen") }
         let label = model.kinds.first { $0.kind == kind }?.label
-        return Self.summary(kind: kind, label: label, texts: selection.count, chars: selectedChars, minutes: length, charsPerMinute: model.spokenCharsPerMinute)
+        return Self.summary(kind: kind, label: label, texts: selection.count, chars: selectedChars, minutes: length, charsPerMinute: model.spokenCharsPerMinute, audio: !usesLength || audio)
     }
 
     /// Abschicken geht mit einer Art, mindestens einem und höchstens `maxDocs` Texten, einmal.
@@ -263,7 +339,14 @@ public final class NewEpisodeStore {
         guard canSubmit, let kind else { return false }
         isSubmitting = true
         defer { isSubmitting = false }
-        let pairs = [("art", kind)] + selectedDocs.map { ("doc", $0.id) } + [("laenge", String(length))]
+        var pairs: [(String, String)] = [("art", kind)] + selectedDocs.map { ("doc", $0.id) } + [("laenge", String(length))]
+        if usesLength {
+            if let style { pairs.append(("stil", style)) }
+            pairs += selectedTopics.map { ("thema", $0) }
+            let wish = focus.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !wish.isEmpty { pairs.append(("fokus", wish)) }
+            if model?.transcriptOnly == true { pairs.append(("audio", audio ? "1" : "0")) }
+        }
         do {
             let response = try await context.api.action(ReadingAction.episodeNew, pairs: pairs, as: ReadingActionResponse.self)
             didSubmit = true
@@ -280,13 +363,16 @@ public final class NewEpisodeStore {
     // MARK: Rechnen wie newSummary
 
     /// `newSummary` aus src/lesen/folgen-page.js (und lesen-folgen.js beim Umschalten).
-    nonisolated public static func summary(kind: String, label: String? = nil, texts: Int, chars: Int, minutes: Int, charsPerMinute: Int = 900) -> EpisodeSummary {
+    nonisolated public static func summary(kind: String, label: String? = nil, texts: Int, chars: Int, minutes: Int, charsPerMinute: Int = 900, audio: Bool = true) -> EpisodeSummary {
         guard texts > 0 else { return EpisodeSummary(main: "Bitte mindestens einen Text wählen", cost: "") }
         let n = "\(texts) \(texts == 1 ? "Text" : "Texte")"
         let name = label ?? kindLabels[kind] ?? kind
         if kind == "vorlesen" {
             let spoken = max(1, Int((Double(chars) / Double(max(1, charsPerMinute))).rounded()))
             return EpisodeSummary(main: "\(name) · \(n) · etwa \(spoken) Min.", cost: chars > 0 ? "rund \(grouped(chars)) Zeichen bei ElevenLabs" : "Schon alles gehört, kostet nichts")
+        }
+        if !audio {
+            return EpisodeSummary(main: "\(name) · \(n) · \(minutes) Min. · erst Transkript", cost: "Nur dein Claude-Abo; Audio später auf Knopfdruck")
         }
         return EpisodeSummary(main: "\(name) · \(n) · \(minutes) Min.", cost: "rund \(grouped(minutes * charsPerMinute)) Zeichen bei ElevenLabs, dazu dein Claude-Abo")
     }

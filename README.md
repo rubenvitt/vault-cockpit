@@ -686,6 +686,22 @@ des Zeitfensters zum Abhaken, die Art und die geschätzten Zeichen bei ElevenLab
   Kernaussagen je Text, Querverbindungen und offenen Fragen, dazu eine
   Sprechfassung; eine Stimme liest sie.
 
+Podcast und Report lassen sich weiter einstellen:
+
+- **Ton**: Ausgewogen (Standard), Locker, Kritisch (Argumente prüfen, Lücken und
+  Widersprüche benennen) oder Tiefgang (weniger Punkte, gründlich erklärt).
+- **Schwerpunkt** (optional): bis zu fünf Themen der gewählten Texte (häufigste
+  zuerst) und/oder ein eigener Wunsch in einer Zeile (höchstens 200 Zeichen).
+  Claude legt das Gewicht darauf und sagt, wenn die Texte dazu wenig hergeben.
+- **Gleich mit Audio?** Mit „Erst nur Transkript“ schreibt Claude nur das Skript
+  und legt das Transkript im Vault an; bei ElevenLabs kostet das nichts (es geht
+  sogar ohne ElevenLabs-Key). Die Karte zeigt dann „Transkript lesen“ und
+  **Audio erzeugen**: Das spricht dasselbe gesicherte Skript, Claude schreibt nicht
+  noch einmal.
+
+Ton und Schwerpunkt stehen im Transkript als `stil`, `themen` und `schwerpunkt`
+im Frontmatter und als Zitatzeile unter dem Titel (nur, wenn gewählt).
+
 Podcast und Report landen als Transkript im Vault, unter
 `30-ressourcen/audio-reports/` neben den übrigen Audio-Reports, als
 `JJJJ-MM-TT-<art>-<titel>.md` (gibt es den Namen schon, mit Kurz-ID dahinter).
@@ -719,8 +735,10 @@ fertig war, muss Claude noch einmal schreiben, das entscheidet man selbst
 („Erneut versuchen“).
 
 Die Liste zeigt jede Folge als Karte: entstehende mit Schritten (Eingereiht →
-Claude schreibt → Stimmen sprechen → Fertig), Fortschrittsbalken und geschätzter
-Restzeit, live über `/lesen/folgen/stand`; fertige mit großem Abspiel-Knopf
+Claude schreibt → Stimmen sprechen → Fertig, bei „erst nur Transkript“ Eingereiht →
+Claude schreibt → Transkript fertig), Fortschrittsbalken und geschätzter
+Restzeit, live über `/lesen/folgen/stand`; reine Transkripte mit „Transkript
+lesen“ und „Audio erzeugen“ (`POST /aktion/lesen/folge/sprechen`); fertige mit großem Abspiel-Knopf
 (`/static/lesen-folgen.js`): Stelle, ±15/30 Sekunden, Tempo, gemerkte Stelle je
 Folge, Titel und Knöpfe auf dem Sperrbildschirm über die Media Session, bei
 Podcast und Report mit „Im Vault“ aufs Transkript. In der

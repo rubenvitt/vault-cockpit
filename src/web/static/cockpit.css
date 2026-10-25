@@ -894,6 +894,10 @@ html[data-read-sans] .lesen-text :is(h1, h2, h3, h4, h5, h6) { font-family: var(
 .folge-player .problem { margin: 0; }
 .folge-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1) var(--s-2); }
 .folge-actions form { display: inline; margin: 0; }
+/* Erst nur Transkript: Dokument statt Abspielen, Knopf „Audio erzeugen“ */
+.folge-play.folge-play-doc { cursor: default; background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1.5px var(--accent-line); }
+.folge-play.folge-play-doc:hover { background: var(--accent-soft); }
+.folge-play.folge-play-doc svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .folge > .problem, .folge > .meta { margin: 0; }
 
 /* Entstehend: Schritte als Leiste, darunter Fortschritt */
@@ -915,7 +919,7 @@ html[data-read-sans] .lesen-text :is(h1, h2, h3, h4, h5, h6) { font-family: var(
 .folge-wait { display: block; position: relative; height: 8px; border-radius: var(--r-full); overflow: hidden; background: var(--line); }
 .folge-wait::after { content: ''; position: absolute; inset: 0 auto 0 0; width: 35%; border-radius: inherit; background: var(--accent); animation: folge-wait 1.6s var(--ease) infinite; }
 @keyframes folge-wait { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
-/* Neue Folge (/lesen/folgen/neu): drei Schritte, Auswahlkarten, Leiste mit Zusammenfassung am Knopf */
+/* Neue Folge (/lesen/folgen/neu): Schritte, Auswahlkarten, Leiste mit Zusammenfassung am Knopf */
 .folge-neu { display: grid; gap: var(--s-4); margin: 0; }
 .folge-schritt { display: grid; gap: var(--s-4); }
 .folge-schritt-kopf { display: flex; align-items: flex-start; gap: var(--s-3); }
@@ -959,7 +963,24 @@ html[data-read-sans] .lesen-text :is(h1, h2, h3, h4, h5, h6) { font-family: var(
 .folge-segmente span { display: block; padding: 8px 18px; border-radius: var(--r-full); font-weight: 600; color: var(--text-2); transition: background .15s var(--ease), color .15s var(--ease); }
 .folge-segmente input:checked + span { background: var(--surface); color: var(--accent); box-shadow: var(--shadow-1), 0 1px 3px rgb(0 0 0 / .08); }
 .folge-segmente input:focus-visible + span { box-shadow: var(--ring); }
-.folge-neu:has(input[name=art][value=vorlesen]:checked) .folge-laenge { display: none; }
+.folge-neu:has(input[name=art][value=vorlesen]:checked) .folge-laenge,
+.folge-neu:has(input[name=art][value=vorlesen]:checked) .folge-claude { display: none; }
+/* Ton und Schwerpunkt: Pillen zum Wählen (Ton: eine, Themen: mehrere), eigener Wunsch als Zeile */
+.folge-feld { display: grid; gap: var(--s-2); }
+.folge-feld h3 { margin: 0; font-size: var(--t-base); }
+.folge-feld h3 .meta { font-weight: 400; }
+.folge-feld > .meta { margin: 0; }
+.folge-pillen { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.folge-pille { position: relative; cursor: pointer; }
+.folge-pille input { position: absolute; opacity: 0; pointer-events: none; }
+.folge-pille > span { display: inline-flex; align-items: center; gap: 4px; min-height: 36px; padding: 6px 14px; border: 1px solid var(--line); border-radius: var(--r-full);
+  background: var(--surface-2); font-size: var(--t-sm); font-weight: 600; color: var(--text-2); transition: border-color .15s var(--ease), background .15s var(--ease), color .15s var(--ease); }
+.folge-pille:hover > span { border-color: var(--accent-line); }
+.folge-pille input:checked + span { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.folge-pille input:focus-visible + span { box-shadow: var(--ring); }
+.folge-pille input:disabled + span { opacity: .45; cursor: not-allowed; }
+.folge-pille .meta { font-weight: 400; }
+.folge-fokus input { width: 100%; }
 
 .folge-los { position: sticky; z-index: 4; bottom: calc(var(--tabbar) + var(--s-3) + env(safe-area-inset-bottom)); display: grid; grid-template-columns: 1fr auto; align-items: center;
   gap: var(--s-2) var(--s-4); padding: var(--s-4) var(--s-5); border: 1px solid var(--accent-line); border-radius: var(--r-lg);

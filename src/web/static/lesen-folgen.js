@@ -8,7 +8,9 @@
 // App; dort spielt der native Player (Sperrbildschirm, AirPlay, Hintergrund).
 //
 // Auf `/lesen/folgen/neu` rechnet es den Satz am Knopf (Art, Texte, Dauer,
-// Kosten) beim Umschalten neu, wie `newSummary` in src/lesen/folgen-page.js.
+// Kosten, erst nur Transkript) beim Umschalten neu, wie `newSummary` in
+// src/lesen/folgen-page.js, zeigt die Erklärung zum gewählten Ton und lässt
+// höchstens `MAX_TOPICS` Themen wählen.
 //
 // Solange eine Folge entsteht, holt die Seite alle paar Sekunden
 // `/lesen/folgen/stand` und tauscht die Karten der entstehenden Folgen aus.
@@ -26,10 +28,18 @@
       costLine.textContent = cost;
     };
     const submit = form.querySelector('button[type=submit]');
+    const styleHint = form.querySelector('[data-style-hint]');
+    const MAX_TOPICS = 5;
     const update = () => {
       const kind = form.querySelector('input[name=art]:checked')?.value;
       const docs = [...form.querySelectorAll('input[name=doc]:checked')];
       const minutes = Number(form.querySelector('input[name=laenge]:checked')?.value) || 10;
+      const audio = form.querySelector('input[name=audio]:checked')?.value !== '0';
+      const style = form.querySelector('input[name=stil]:checked');
+      if (styleHint && style) styleHint.textContent = style.dataset.hint ?? '';
+      const topics = [...form.querySelectorAll('input[name=thema]')];
+      const full = topics.filter((t) => t.checked).length >= MAX_TOPICS;
+      for (const t of topics) t.disabled = full && !t.checked;
       if (!kind) return;
       submit.disabled = !docs.length;
       if (!docs.length) return show('Bitte mindestens einen Text wählen', '');
@@ -37,6 +47,8 @@
       if (kind === 'vorlesen') {
         const chars = docs.reduce((sum, d) => sum + (Number(d.dataset.chars) || 0), 0);
         show(`Vorlesen · ${n} · etwa ${Math.max(1, Math.round(chars / 900))} Min.`, chars ? `rund ${fmt.format(chars)} Zeichen bei ElevenLabs` : 'Schon alles gehört, kostet nichts');
+      } else if (!audio) {
+        show(`${KINDS[kind]} · ${n} · ${minutes} Min. · erst Transkript`, 'Nur dein Claude-Abo; Audio später auf Knopfdruck');
       } else {
         show(`${KINDS[kind]} · ${n} · ${minutes} Min.`, `rund ${fmt.format(minutes * 900)} Zeichen bei ElevenLabs, dazu dein Claude-Abo`);
       }
@@ -329,6 +341,7 @@
       li.replaceWith(next);
       bind(next);
       if (item.status === 'fertig') toast(`Fertig: ${next.dataset.title}`);
+      else if (item.status === 'transkript') toast('Transkript fertig, liegt im Vault');
     }
     poll();
   }
