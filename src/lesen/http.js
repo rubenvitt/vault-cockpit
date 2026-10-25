@@ -12,6 +12,7 @@ import { reviewRoutes } from './review-page.js';
 import { listenRoutes, listenQueue, listenText, listenAudio } from './listen.js';
 import { connectionRoutes } from './connections.js';
 import { folgenRoutes } from './folgen-page.js';
+import { ingestRoutes } from './ingest-page.js';
 
 /**
  * Routen des Bereichs „Lesen“, eingebunden in src/web/http.js (Sitzung, CSRF,
@@ -42,8 +43,15 @@ import { folgenRoutes } from './folgen-page.js';
  * `onChange(docId)` meldet Statuswechsel und geänderte Markierungen (für die
  * Lesestapel-Notiz im Vault, src/lesen/vault-export.js). `exporter` schaltet
  * „In den Vault“ und „Im Vault ablegen“ ein (VCP-96, src/lesen/doc.js).
+ * `ingest` ist der Ingest-Dienst (src/lesen/ingest.js, `createIngest`); ohne
+ * gibt es keine Ingest-Oberfläche (src/lesen/ingest-page.js), nur
+ * `/api/lesen/ingest` mit `enabled: false`.
+ *
+ * `nav` ergänzt die Unternavigation (`readingNav` in src/lesen/pages.js), etwa
+ * um „Ingest“ mit der Zahl der bereiten Entwürfe; src/web/http.js reicht es als
+ * `ctx.nav` an die Seiten.
  */
-export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefined, capture = null, review = {}, embedCache = null, connections = null, exporter = null, speech = null, episodes = null, onChange = () => {}, logger = console }) {
+export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefined, capture = null, review = {}, embedCache = null, connections = null, exporter = null, speech = null, episodes = null, ingest = null, onChange = () => {}, logger = console }) {
   const feeds = feedRoutes({ store, fetchFeed, logger });
   /** Fehler aus Abruf und Speicher als Meldung für die Seite. */
   const asAction = async (run) => {
@@ -60,13 +68,15 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
 
   const add = addRoutes({ store, asAction, logger });
 
-  const doc = docRoutes({ store, asAction, onChange, exporter });
+  const doc = docRoutes({ store, asAction, onChange, exporter, ingest });
   const marked = highlightRoutes({ store, asAction, capture, onChange, logger });
   const wiedersehen = reviewRoutes({ store, capture, logger, embedCache, ...review });
   const folgen = folgenRoutes({ store, episodes });
+  const ingestUi = ingestRoutes({ store, ingest, logger });
   const links = connections ? connectionRoutes({ store, embedCache, logger, ...connections }) : { pages: {}, actions: {} };
 
   return {
+    nav: ingest ? () => ({ ingest: ingest.counts()?.bereit ?? 0 }) : null,
     offlineDocs: (n) => upNext(store.list({ status: 'stapel', limit: -1 }), n).map((d) => docLink(d.id)),
     listen: {
       queue: (zeit) => listenQueue(store, zeit),
@@ -81,9 +91,10 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
       ...add.pages,
       '/lesen': async () => ({ redirect: '/lesen/eingang' }),
       ...inbox.pages,
-      ...stackRoutes({ store, vault: Boolean(exporter), folgen: Boolean(episodes) }).pages,
+      ...stackRoutes({ store, vault: Boolean(exporter), folgen: Boolean(episodes), ingest }).pages,
       ...listenRoutes({ store, speech }).pages,
       ...folgen.pages,
+      ...ingestUi.pages,
       ...feeds.pages,
       ...doc.pages,
       ...marked.pages,
@@ -92,6 +103,7 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
     },
     actions: {
       ...folgen.actions,
+      ...ingestUi.actions,
       ...inbox.actions,
       ...add.actions,
       ...doc.actions,

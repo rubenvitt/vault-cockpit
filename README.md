@@ -722,6 +722,33 @@ rund 20 000 Zeichen; mit `eleven_multilingual_v2` kostet das 20 000 Credits, mit
 steht unter **Einstellungen → Vorlesen → Stimme und Modell**. Beim Öffnen von
 `/lesen/hoeren` holt die Seite schon den ersten Satz, auch ohne Abspielen.
 
+**Ingest-Oberfläche** (`src/lesen/ingest-page.js`, nur mit Ingest-Dienst, siehe
+[Ingest](#ingest)): In der Unternavigation steht **Ingest** zwischen Stapel und
+Folgen, mit der Zahl der bereiten Entwürfe. Die Übersicht `/lesen/ingest` zeigt
+bereite Entwürfe als Karten (Quelle, zwei bis drei Kernaussagen, „3
+Verknüpfungen · 1 Synthese · 2 neue Seiten“), darunter **In Arbeit** und
+**Fehler** (mit „Erneut entwerfen“) und oben **Ganzen Stapel entwerfen**. Die
+Prüfansicht `/lesen/ingest/doc?id=…` ist zum Lesen in ein, zwei Minuten gedacht:
+**Das Wichtigste** (Kernaussagen, Neu für dich, Bestätigt, Widerspricht mit dem
+Hinweis auf `/wiki-lint`, Dockt an), die Source-Page mit änderbarem Titel,
+Summary (Zähler bis 80), Slug und Tags samt Vorschau, dann die Vorschläge zum
+Abhaken, gruppiert: Verknüpfen, Bestätigungen, **Synthesen & Fragen** (als
+Karten, Text zum Aufklappen, standardmäßig aus), neue Seiten und Relationen.
+**Ins Wiki übernehmen** (Leiste unten, mit der Zahl der gewählten Elemente) führt
+zum nächsten bereiten Entwurf, die Meldung verlinkt die neue Source-Page.
+Daneben **Neu entwerfen**, **Ohne Wiki erledigen** (gelesen, weg, mit
+Rückgängig) und **Entwurf verwerfen** (der Text bleibt auf dem Stapel). Ohne
+JavaScript ist alles ein Formular; mit `/static/lesen-ingest.js` gibt es
+„alle/keine“ je Gruppe, Tasten (J/K nächster/voriger Entwurf, Enter zweimal =
+übernehmen, E = ohne Wiki erledigen) und den Live-Stand über
+`/lesen/ingest/stand`. Im Stapel trägt jeder Text ein Abzeichen („Ingest
+bereit“, „wird entworfen…“, „Ingest-Fehler“) oder den Knopf **Ingest
+entwerfen**, die Leseansicht hat **Ingest prüfen** bzw. **Ingest entwerfen**.
+Was Claude schreibt, gilt als Fremdtext: maskiert, Markdown nur über den
+Vorschau-Renderer des Cockpits. Für die App: `/api/lesen/ingest` und
+`/api/lesen/ingest/doc?id=…` (ohne Dienst `enabled: false`), `ingest` je Eintrag
+in `/api/lesen/stapel` und in `/api/lesen/doc`.
+
 **Wiedersehen** (`/lesen/wiedersehen`, VCP-74) holt Markierungen nach einem
 einfachen Leitner-Schema zurück: Box 1 bis 5 mit 1, 3, 7, 21 und 60 Tagen
 Abstand, eine neue Markierung ist nach einem Tag dran. Je Karte: **Behalten**
