@@ -402,8 +402,9 @@ function sourceBlock(draft, applied, view) {
 
 /**
  * Ein Vorschlag zum Abhaken. Der Titel einer bestehenden Seite ist selbst der
- * Link auf sie; Aufklappbares steht neben dem `<label>`, sonst schaltete jeder
- * Tipp darauf das Häkchen um.
+ * eigenes Symbol „↗“ zum Öffnen neben dem `<label>` (nicht der Titel: ein Tipp
+ * darauf soll das Häkchen umschalten); Aufklappbares steht ebenfalls daneben,
+ * sonst schaltete jeder Tipp darauf das Häkchen um.
  */
 function itemRow(item, featured, view) {
   const id = esc(item.id);
@@ -413,7 +414,10 @@ function itemRow(item, featured, view) {
   const target = item.path ?? item.to;
   // Nur bestehende Seiten verlinken: nicht, was neu angelegt wird, auch nicht als Ziel einer Relation.
   const exists = item.action !== 'neu' && wikiPath(target) && view.known.get(slugOf(target).toLowerCase())?.path === target;
-  const name = (label) => (exists ? `<a href="${esc(noteLink(target))}" class="ingest-item-link">${esc(label)}</a>` : esc(label));
+  // Der Titel bleibt Teil des <label> (Tippen schaltet das Häkchen); geöffnet wird über ein eigenes Symbol daneben.
+  const name = (label) => esc(label);
+  const titleText = item.title || item.slug || readable(slugOf(target));
+  const open = exists ? `<a href="${esc(noteLink(target))}" class="ingest-item-open" title="Seite öffnen" aria-label="${esc(`„${titleText}“ öffnen`)}">↗</a>` : '';
   let main;
   if (item.kind === 'relation') {
     const type = RELATION[item.type] ?? item.type ?? 'Relation';
@@ -430,8 +434,8 @@ function itemRow(item, featured, view) {
     item.body ? `<details class="ingest-body"><summary>${featured ? 'Ganzen Text lesen' : 'Text der Seite ansehen'}</summary><div class="md ingest-md">${view.block(item.body)}</div></details>` : '',
   ].filter(Boolean).join('');
   const where = item.action === 'neu' && item.slug ? `<span class="ingest-path">neu: ${esc(item.slug)}</span>` : '';
-  return `<li class="ingest-item${featured ? ' is-featured' : ''}" data-item="${id}">
-    <label class="ingest-pick">${box}<span class="ingest-pick-text"><span class="ingest-item-head">${head}${main}</span>${why}${where}</span></label>
+  return `<li class="ingest-item${featured ? ' is-featured' : ''}${open ? ' has-open' : ''}" data-item="${id}">
+    ${open}<label class="ingest-pick">${box}<span class="ingest-pick-text"><span class="ingest-item-head">${head}${main}</span>${why}${where}</span></label>
     ${extra ? `<div class="ingest-item-more">${extra}</div>` : ''}
   </li>`;
 }

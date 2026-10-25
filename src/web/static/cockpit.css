@@ -1122,8 +1122,12 @@ a.ingest-ref { text-decoration-color: var(--accent-line); }
 .ingest-item-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--s-2); min-width: 0; }
 .ingest-item-head > .ingest-summary, .ingest-item-head > .ingest-claim { flex-basis: 100%; }
 .ingest-item-title { font-weight: 650; min-width: 0; }
-a.ingest-item-link { color: inherit; text-decoration: underline; text-decoration-color: var(--accent-line); text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
-a.ingest-item-link:hover { color: var(--accent); text-decoration-color: currentColor; }
+/* Öffnen als eigenes Ziel oben rechts, außerhalb des <label>: der Titel schaltet das Häkchen */
+.ingest-item.has-open { position: relative; }
+.ingest-item.has-open .ingest-pick { padding-right: calc(var(--s-4) + 32px); }
+a.ingest-item-open { position: absolute; top: 6px; right: 6px; display: grid; place-items: center; width: 32px; height: 32px;
+  border-radius: var(--r-sm); color: var(--text-2); text-decoration: none; font-size: var(--t-sm); }
+a.ingest-item-open:hover, a.ingest-item-open:focus-visible { color: var(--accent); background: var(--accent-soft); }
 .ingest-summary, .ingest-claim { color: var(--text); }
 .ingest-claim { font-family: var(--font-read); }
 .ingest-why { font-size: var(--t-sm); line-height: 1.4; color: var(--text-2); }

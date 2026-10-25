@@ -574,7 +574,7 @@ test('Ingest: „Ganzen Stapel entwerfen“ zählt wie der Dienst – ohne Entwu
   });
 });
 
-test('Ingest: Prüfansicht verlinkt Titel bestehender Seiten statt „Seite ansehen“, Neues bleibt Text', async () => {
+test('Ingest: Prüfansicht öffnet bestehende Seiten über ein Symbol neben dem Häkchen statt „Seite ansehen“, Neues ohne Link', async () => {
   await withIngest(async ({ html, add, ingest }) => {
     const d = add('Kompakt');
     const draft = draftFor('Kompakt');
@@ -584,11 +584,17 @@ test('Ingest: Prüfansicht verlinkt Titel bestehender Seiten statt „Seite anse
     assert.ok(!/>Seite ansehen/.test(page), 'kein eigener Link je Karte');
     assert.ok(!page.includes('ingest-open'));
     const item = (id) => page.match(new RegExp(`<li class="ingest-item[^"]*" data-item="${id}">[^]*?</li>`))[0];
-    assert.match(item('v1'), /<span class="ingest-item-head"><span class="ingest-pill">Konzept<\/span><span class="ingest-item-title"><a href="\/notiz\?pfad=wiki%2Fconcepts%2Fcontext-engineering\.md" class="ingest-item-link">Context Engineering<\/a><\/span><\/span><span class="ingest-why">Kernthema<\/span>/);
-    assert.match(item('b1'), /<span class="ingest-item-title"><a href="\/notiz\?pfad=wiki%2Fconcepts%2Fcontext-engineering\.md" class="ingest-item-link">Context Engineering<\/a><\/span><span class="ingest-claim">Kontext ist knapp<\/span>/);
-    assert.match(item('r2'), /verwandt mit<\/span> <a href="\/notiz\?pfad=wiki%2Fconcepts%2Frag\.md" class="ingest-item-link">RAG<\/a>/);
+    const openLink = (path) => new RegExp(`<a href="\\/notiz\\?pfad=${path}" class="ingest-item-open"[^>]*>↗<\\/a><label class="ingest-pick">`);
+    assert.match(item('v1'), openLink('wiki%2Fconcepts%2Fcontext-engineering\\.md'));
+    assert.match(item('v1'), /<span class="ingest-item-head"><span class="ingest-pill">Konzept<\/span><span class="ingest-item-title">Context Engineering<\/span><\/span><span class="ingest-why">Kernthema<\/span>/);
+    assert.match(item('b1'), openLink('wiki%2Fconcepts%2Fcontext-engineering\\.md'));
+    assert.match(item('b1'), /<span class="ingest-item-title">Context Engineering<\/span><span class="ingest-claim">Kontext ist knapp<\/span>/);
+    assert.match(item('r2'), openLink('wiki%2Fconcepts%2Frag\\.md'));
+    assert.match(item('r2'), /verwandt mit<\/span> RAG<\/span>/);
+    // Im <label> steht kein Link: ein Tipp auf den Titel schaltet nur das Häkchen.
+    for (const id of ['v1', 'b1', 'r2']) assert.ok(!item(id).match(/<label[^]*<\/label>/)[0].includes('<a '), `${id}: Link außerhalb des Labels`);
     // Robert Glaser entsteht erst mit diesem Entwurf: weder als neue Seite noch als Ziel der Relation ein Link.
-    assert.ok(!item('n1').includes('<a '), 'neue Seite ohne Link');
+    assert.ok(!item('n1').includes('ingest-item-open'), 'neue Seite ohne Link');
     assert.match(item('r1'), /verfasst von<\/span> Robert Glaser<\/span>/);
     // Der Titel steht im <label>, die Häkchen bleiben dort.
     assert.match(item('v1'), /<label class="ingest-pick"><input type="checkbox" name="item" value="v1" checked>/);
