@@ -14,7 +14,8 @@ import { writePrivate } from '../cockpit/settings.js';
  * (will ich lesen), `archiv` (gelesen, Notiz im Vault), `abgelegt` (ungelesen
  * mit Volltext im Vault, VCP-96), `weg` (verworfen; mit `read_at` „fertig,
  * weg“ nach dem Lesen, ohne vor dem Lesen). `previous_status` hält den Stand vor
- * dem letzten Wechsel für „Rückgängig“.
+ * dem letzten Wechsel für „Rückgängig“. `heard_at` sagt, wann der Text zuletzt
+ * gehört wurde (`markHeard`), unabhängig vom Status.
  *
  * Kein WAL: Die Datei ist klein, es schreibt nur dieser Dienst, und ohne
  * `-wal`/`-shm` daneben bleibt Sichern und Zurückschreiben einfach.
@@ -109,6 +110,8 @@ export const MIGRATIONS = [
     created_at TEXT NOT NULL
   );
   ALTER TABLE feeds ADD COLUMN group_id TEXT REFERENCES feed_groups(id) ON DELETE SET NULL;`,
+  // Gehört (Folgen): wann der Text zuletzt in einer Folge vorkam, für `gehoert:` in der Notiz.
+  `ALTER TABLE documents ADD COLUMN heard_at TEXT;`,
 ];
 
 export class ReadingError extends Error {}
@@ -244,7 +247,7 @@ export function createReadingStore({ path, now = () => Date.now() }) {
      * `group`: nur aus Feeds dieser Gruppe, `NO_FEED` nur nicht aus Feeds.
      */
     list({ status = null, group = null, limit = 100, offset = 0 } = {}) {
-      const cols = 'id, url, canonical_url, title, author, site, kind, origin, excerpt, word_count, reading_minutes, status, previous_status, progress, scroll_anchor, topics, saved_at, status_changed_at, read_at, archived_at, updated_at';
+      const cols = 'id, url, canonical_url, title, author, site, kind, origin, excerpt, word_count, reading_minutes, status, previous_status, progress, scroll_anchor, topics, saved_at, status_changed_at, read_at, archived_at, heard_at, updated_at';
       const [where, args] = groupWhere(group);
       const rows = status
         ? db.prepare(`SELECT ${cols} FROM documents WHERE status = ? AND ${where} ORDER BY saved_at DESC, rowid DESC LIMIT ? OFFSET ?`).all(status, ...args, limit, offset)
@@ -314,6 +317,21 @@ export function createReadingStore({ path, now = () => Date.now() }) {
       if (p.topics) p.topics = JSON.stringify(p.topics);
       update('documents', id, p, ['canonical_url', 'title', 'author', 'site', 'kind', 'excerpt', 'content_html', 'content_text', 'word_count', 'reading_minutes', 'topics', 'updated_at']);
       return get(id);
+    },
+
+    /**
+     * Gehört (Folgen): setzt `heard_at` auf `at` (Standard jetzt); ein älterer
+     * Wert weicht dem neueren, ein neuerer bleibt. Unbekannte IDs fallen weg;
+     * liefert die Dokumente.
+     */
+    markHeard(ids, at = null) {
+      const when = new Date(at ?? now());
+      if (Number.isNaN(when.getTime())) throw new ReadingError('Ungültiger Zeitpunkt für „gehört“');
+      const t = when.toISOString();
+      const known = [...new Set(ids.map(String))].filter((id) => get(id));
+      const set = db.prepare('UPDATE documents SET heard_at = ?, updated_at = ? WHERE id = ? AND (heard_at IS NULL OR heard_at < ?)');
+      inTransaction(() => known.forEach((id) => set.run(t, iso(), id, t)));
+      return known.map(get);
     },
 
     deleteDocument: (id) => db.prepare('DELETE FROM documents WHERE id = ?').run(String(id ?? '')).changes > 0,

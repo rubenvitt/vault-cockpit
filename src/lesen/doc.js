@@ -85,13 +85,14 @@ function highlightList(highlights, orphans, ctx) {
 
 /**
  * Nach dem Lesen: „Fertig, weg“ (E), „In den Vault“ (V, nur mit Lesestapel-Notizen)
- * mit Wahl „mit Volltext“, und nach einer Entscheidung „Zurück auf den Stapel“.
+ * mit Wahl „mit Volltext“ (vorab gesetzt: der Volltext ist die Rohquelle fürs
+ * Wiki), und nach einer Entscheidung „Zurück auf den Stapel“.
  */
 function decide(doc, ctx, vault) {
   const form = (action, key, fields, body) => `<form method="post" action="${action}" class="act" data-decide="${key}">${hidden({ csrf: ctx.write.csrf, back: ctx.write.back, id: doc.id, ...fields })}${body}</form>`;
   return `<div class="lesen-decide">
       ${decisions(doc, vault).fertig ? form('/aktion/lesen/doc/fertig', 'fertig', {}, '<button type="submit" class="btn">Fertig, weg <kbd>E</kbd></button>') : ''}
-      ${vault ? form('/aktion/lesen/doc/vault', 'vault', {}, '<label class="lesen-volltext"><input type="checkbox" name="volltext" value="1"> mit Volltext</label><button type="submit" class="btn primary">In den Vault <kbd>V</kbd></button>') : ''}
+      ${vault ? form('/aktion/lesen/doc/vault', 'vault', {}, '<label class="lesen-volltext"><input type="checkbox" name="volltext" value="1" checked> mit Volltext</label><button type="submit" class="btn primary">In den Vault <kbd>V</kbd></button>') : ''}
       ${decisions(doc, vault).zurueck ? form(STATUS, 'zurueck', { status: 'stapel' }, '<button type="submit" class="btn quiet">Zurück auf den Stapel</button>') : ''}
     </div>`;
 }

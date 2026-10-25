@@ -681,7 +681,7 @@ ${backupHint(backup)}
   ${head2('Lesestapel')}
   <p class="meta">Gelesene Texte mit Markierungen kommen als Notiz in diesen Ordner, jede Markierung mit Block-ID zum Verlinken. Das Cockpit schreibt danach nur den Bereich „Markierungen“ neu; in vertraulichen und Readwise-Ordnern legt es nichts an.</p>
   <div class="grid">
-    <label>Ordner im Vault<input name="readingNotes.folder" value="${esc(stored.readingNotes?.folder ?? '')}" placeholder="${esc(d.readingNotesFolder ?? '30-ressourcen/lesestapel')}"></label>
+    <label>Ordner im Vault<input name="readingNotes.folder" value="${esc(stored.readingNotes?.folder ?? '')}" placeholder="${esc(d.readingNotesFolder ?? 'raw')}"></label>
   </div>
 </section>
 <section id="embeddings">

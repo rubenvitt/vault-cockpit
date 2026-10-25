@@ -220,7 +220,7 @@ export function createSettingsStore({ file = null, defaults = {}, logger = conso
     bridgeEnabled: true,
     bridgeTag: 'zunder',
     flameNoteEnabled: true,
-    readingNotesFolder: '30-ressourcen/lesestapel',
+    readingNotesFolder: 'raw',
     mailToken: null,
     mailSenders: [],
     mailbox: 'Vault',

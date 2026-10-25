@@ -14,7 +14,7 @@ import { findSection } from '../src/vault/generated-section.js';
 import { sanitizeHtml } from '../src/lesen/extract.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
-const FOLDER = '30-ressourcen/lesestapel';
+const FOLDER = 'raw';
 let root, idx, editor, settings, store, policy, exporter, doc;
 
 const read = (p) => readFileSync(join(root, p), 'utf8');
@@ -63,7 +63,7 @@ test('Archivieren: Markierung erscheint als Notiz mit Block-ID; vorher und ohne 
   exporter.changed(doc.id);
   const [r] = exporter.flush();
   assert.equal(r.state, 'angelegt');
-  assert.equal(r.path, `${FOLDER}/vom-lesen-ueber-stapel.md`);
+  assert.equal(r.path, `${FOLDER}/2026-10-20_vom-lesen-ueber-stapel.md`);
   const id = blockId(h.id);
   assert.match(id, /^hl-[0-9a-f]{8}$/);
   const text = read(r.path);
@@ -123,7 +123,7 @@ test('Fortschritt 1 allein legt nichts an (erst die Entscheidung, VCP-96); Titel
     exporter.changed(d.id);
   }
   const paths = exporter.flush().map((r) => r.path);
-  assert.deepEqual(paths, [`${FOLDER}/vom-lesen-ueber-stapel.md`, `${FOLDER}/vom-lesen-ueber-stapel-${blockId(other.id).slice(3)}.md`]);
+  assert.deepEqual(paths, [`${FOLDER}/2026-10-20_vom-lesen-ueber-stapel.md`, `${FOLDER}/2026-10-20_vom-lesen-ueber-stapel-${blockId(other.id).slice(3)}.md`]);
   assert.match(read(paths[0]), /^gelesen: 2026-10-20$/m);
   assert.equal(slugOf('  ?? '), 'text');
 });
@@ -136,7 +136,7 @@ test('Update: nur der Bereich ändert sich, eigener Text darunter bleibt, Umbene
 
   // In Obsidian umbenannt und verschoben, darunter eigene Gedanken.
   const moved = '30-ressourcen/gelesen/Über Stapel.md';
-  mkdirSync(join(root, '30-ressourcen/gelesen'));
+  mkdirSync(join(root, '30-ressourcen/gelesen'), { recursive: true });
   renameSync(join(root, path), join(root, moved));
   writeFileSync(join(root, moved), `${read(moved)}\nMein Gedanke mit [[Start]].\n\n## Noch was\n\nText.\n`);
   idx.refresh(path);
@@ -329,7 +329,7 @@ test('In den Vault: gelesen ohne Markierungen → Notiz mit Kurzfassung, ohne Vo
   store.updateDocument(doc.id, { excerpt: 'Kurz # gesagt, mit [[Link]].', content_html: ARTICLE });
   const { act, page } = decideRoutes();
   const { html } = await page('/lesen/doc', `?id=${doc.id}`);
-  assert.match(html, /data-decide="vault">[^]*?<input type="checkbox" name="volltext" value="1"> mit Volltext<\/label><button type="submit" class="btn primary">In den Vault <kbd>V<\/kbd>/);
+  assert.match(html, /data-decide="vault">[^]*?<input type="checkbox" name="volltext" value="1" checked> mit Volltext<\/label><button type="submit" class="btn primary">In den Vault <kbd>V<\/kbd>/);
 
   const r = await act('/aktion/lesen/doc/vault', { id: doc.id });
   assert.equal(r.message, 'Im Vault: Vom Lesen: Über Stapel');
@@ -398,6 +398,7 @@ test('Im Vault ablegen aus dem Eingang: Volltext, lesestatus ungelesen, ohne gel
   assert.match(text, /\nAnriss\.\n/);
   assert.match(textOf(path), /^#### Erster Teil/);
   assert.equal(idx.getNote(path).frontmatter.lesestatus, 'ungelesen');
+  assert.equal(idx.getNote(path).frontmatter.ingest, 'offen', 'Volltext: offen für den Ingest');
 
   // Rückgängig über den Eingang (Taste Z): wieder im Eingang, die Notiz bleibt.
   const back = await act('/aktion/lesen/sortieren', { id: fresh.id, ziel: 'eingang' });
@@ -464,6 +465,116 @@ test('Marker im Artikel (Code-Block, Text, Markierung): Bereiche bleiben heil, e
   assert.match(text, /> Davor/);
   assert.ok(text.endsWith('## Eigene Gedanken\n\nMein Gedanke.\n'));
   assert.equal(text.match(/^<!-- cockpit:/gm).length, 4, 'nur die echten Marker');
+});
+
+// --- Rohquellen fürs Wiki: raw/, Dateiname, ingest, gehört ------------------------
+
+test('Rohquelle: Standard raw/ mit dem Tag des Speicherns (lokal) im Dateinamen; eigener Ordner gilt weiter; vorhandene Notizen bleiben, wo sie sind', () => {
+  // 22:30 UTC ist in Berlin schon der nächste Tag, wie bei `gespeichert:`.
+  const late = createReadingStore({ path: ':memory:', now: () => Date.parse('2026-10-20T22:30:00Z') });
+  const { doc: night } = late.addDocument({ url: 'https://blatt.test/nacht', title: 'Nachts gespeichert' });
+  const svc = make({ store: late });
+  const r = svc.save(night.id, { read: false });
+  assert.equal(r.path, 'raw/2026-10-21_nachts-gespeichert.md');
+  assert.match(read(r.path), /^gespeichert: 2026-10-21$/m);
+  svc.stop();
+  late.close();
+
+  // Ein eigener Ordner (etwa der frühere Standard) gilt weiter, mit demselben Dateinamen-Schema.
+  settings.save({ readingNotes: { folder: '30-ressourcen/lesestapel' }, calendars: [] });
+  const own = exporter.save(doc.id, { read: false });
+  assert.equal(own.path, '30-ressourcen/lesestapel/2026-10-20_vom-lesen-ueber-stapel.md');
+  // Zurück auf den Standard: gefunden über `lesestapel_id`, nicht verschoben.
+  settings.save({ readingNotes: { folder: null }, calendars: [] });
+  assert.equal(exporter.save(doc.id, { read: true }).path, own.path);
+  assert.ok(!existsSync(join(root, FOLDER, '2026-10-20_vom-lesen-ueber-stapel.md')));
+});
+
+test('ingest: offen, sobald der Volltext dazukommt, nur wenn das Feld fehlt; ein Datum vom Skill bleibt', async () => {
+  const { act } = decideRoutes();
+  store.updateDocument(doc.id, { content_html: ARTICLE });
+  await act('/aktion/lesen/doc/vault', { id: doc.id });
+  const path = pathOf();
+  assert.doesNotMatch(read(path), /^ingest:/m, 'ohne Volltext kein ingest');
+  await act('/aktion/lesen/doc/vault', { id: doc.id, volltext: '1' });
+  assert.match(read(path), /^ingest: offen$/m);
+  assert.ok(textOf(path));
+
+  // Der Skill hat die Rohquelle verarbeitet: sein Datum bleibt, auch wenn der Volltext neu geschrieben wird.
+  editor.setFrontmatter({ path, set: { ingest: '2026-10-24' } });
+  await act('/aktion/lesen/doc/vault', { id: doc.id, volltext: '1' });
+  await act('/aktion/lesen/doc/vault', { id: doc.id });
+  assert.equal(read(path).match(/^ingest: .*$/gm).join(), 'ingest: 2026-10-24');
+
+  // Gleich mit Volltext angelegt: im Frontmatter der neuen Notiz.
+  const { doc: other } = store.addDocument({ url: 'https://blatt.test/c', title: 'Mit Text', status: 'stapel', content_html: ARTICLE });
+  await act('/aktion/lesen/doc/vault', { id: other.id, volltext: '1' });
+  assert.equal(idx.getNote(exporter.notePath(other.id)).frontmatter.ingest, 'offen');
+});
+
+test('Gehört: heard vermerkt im Lesestapel, schreibt gehoert in eine vorhandene Notiz, eine neue bekommt es beim Anlegen', () => {
+  const { doc: other } = store.addDocument({ url: 'https://blatt.test/g', title: 'Gehört' });
+  exporter.save(doc.id, { read: false });
+  const path = pathOf();
+  assert.equal(exporter.notePath(other.id), null);
+
+  const r = exporter.heard([doc.id, other.id, doc.id, 'gibt-es-nicht']);
+  assert.deepEqual(r.map((x) => [x.state, x.doc]), [['geschrieben', doc.id], ['vermerkt', other.id], ['weg', 'gibt-es-nicht']]);
+  assert.equal(r[0].path, path);
+  assert.equal(store.get(other.id).heard_at, '2026-10-23T10:00:00.000Z');
+  assert.match(read(path), /^gehoert: 2026-10-23$/m);
+  assert.equal(idx.getNote(path).frontmatter.gehoert, '2026-10-23');
+  assert.equal(exporter.heard([doc.id])[0].state, 'aktuell');
+
+  // Ohne Notiz: das Anlegen trägt es ein.
+  const created = exporter.save(other.id, { read: false, fullText: true });
+  assert.match(read(created.path), /^gehoert: 2026-10-23\ningest: offen$/m);
+
+  // Später noch einmal gehört: der neuere Tag ersetzt den älteren.
+  const later = make({ now: () => new Date('2026-10-25T09:00:00Z') });
+  assert.equal(later.heard([doc.id])[0].state, 'geschrieben');
+  assert.equal(read(path).match(/^gehoert: .*$/gm).join(), 'gehoert: 2026-10-25');
+  later.stop();
+});
+
+test('Gehört: der Export trägt gehoert nach; scheitert der Editor, später; vertrauliche Notiz bleibt unberührt', () => {
+  exporter.save(doc.id, { read: false });
+  const path = pathOf();
+  // 21:00 UTC am 22.10. ist in Berlin noch der 22.10.
+  store.markHeard([doc.id], '2026-10-22T21:00:00Z');
+  exporter.changed(doc.id);
+  exporter.flush();
+  assert.match(read(path), /^gehoert: 2026-10-22$/m);
+
+  // Der Sync ändert gleichzeitig: vorgemerkt, der nächste Lauf schreibt.
+  let calls = 0;
+  const flaky = {
+    ...editor,
+    setFrontmatter(args) {
+      if (!calls++) throw new Error('gerade anderweitig geändert');
+      return editor.setFrontmatter(args);
+    },
+  };
+  const svc = make({ editor: flaky });
+  const [r] = svc.heard([doc.id]);
+  assert.equal(r.state, 'fehler');
+  assert.deepEqual(svc.pending(), [doc.id]);
+  svc.flush();
+  assert.equal(read(path).match(/^gehoert: .*$/gm).join(), 'gehoert: 2026-10-23');
+  svc.stop();
+
+  // In einen vertraulichen Ordner verschoben: nur der Lesestapel.
+  const secret = '20-bereiche/Gesundheit/Stapel.md';
+  mkdirSync(join(root, '20-bereiche/Gesundheit'), { recursive: true });
+  renameSync(join(root, path), join(root, secret));
+  idx.refresh(path);
+  idx.refresh(secret);
+  const before = read(secret);
+  const later = make({ now: () => new Date('2026-10-25T09:00:00Z') });
+  assert.deepEqual(later.heard([doc.id]).map((x) => [x.state, x.path]), [['übersprungen', secret]]);
+  assert.equal(read(secret), before);
+  assert.equal(store.get(doc.id).heard_at, '2026-10-25T09:00:00.000Z');
+  later.stop();
 });
 
 test('blockId: verschieden auch bei Client-IDs mit gleichem Anfang', () => {

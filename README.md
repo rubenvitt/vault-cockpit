@@ -741,17 +741,21 @@ feste Versionen).
 
 **Nach dem Lesen entscheiden** (VCP-96): In der Leseansicht steht
 **Fertig, weg** (Taste E) neben **In den Vault** (Taste V) mit dem Häkchen
-**mit Volltext** (Standard aus). „Fertig, weg“ setzt den Status `weg` mit
+**mit Volltext** (Standard an, der Volltext ist die Rohquelle fürs Wiki; in der
+iOS-App ist „In den Vault“ mit Volltext, lange drücken bietet „ohne
+Volltext“). Wer `volltext` nicht mitschickt, bekommt wie bisher keinen; nur die
+Oberflächen setzen das Häkchen vorab. „Fertig, weg“ setzt den Status `weg` mit
 Lesedatum (`read_at`) und schreibt nichts in den Vault; eine schon vorhandene
 Notiz bleibt unangetastet. „Weg“ im Eingang hat kein Lesedatum, das Aufräumen
 kann beides unterscheiden. „In den Vault“ legt die Lesestapel-Notiz an oder
 frischt sie auf, auch ohne Markierungen, mit `lesestatus: gelesen`, `gelesen:`
 und der Kurzfassung; mit Häkchen kommt der Artikel als Markdown in einen
-eigenen generierten Bereich unter „## Text“ (vor „## Eigene Gedanken“). Der Text
-ist dann archiviert (`archiv`). Im Eingang (Knopf, Taste A) und auf dem Stapel
-(je Eintrag ein Knopf) gibt es **Im Vault ablegen**: Notiz immer mit Volltext,
-`lesestatus: ungelesen` und ohne `gelesen:`; der Text bekommt den Status
-`abgelegt` und verlässt Eingang und Stapel. Wer ihn später doch liest und „In den
+eigenen generierten Bereich unter „## Text“ (vor „## Eigene Gedanken“) und
+`ingest: offen` ins Frontmatter. Der Text ist dann archiviert (`archiv`). Im
+Eingang (Knopf, Taste A) und auf dem Stapel (je Eintrag ein Knopf) gibt es
+**Im Vault ablegen**: Notiz immer mit Volltext, `lesestatus: ungelesen` und
+ohne `gelesen:`; der Text bekommt den Status `abgelegt` und verlässt Eingang
+und Stapel. Wer ihn später doch liest und „In den
 Vault“ wählt, bekommt `lesestatus: gelesen` und `gelesen:` nachgetragen, der
 Volltext bleibt, wie er ist. Alle drei lassen sich rückgängig machen (Status
 zurück, im Eingang auch mit Z); eine schon geschriebene Notiz bleibt dabei
@@ -764,13 +768,30 @@ Obsidian etwas auslösen würden (`#`, `[[`, `$`, `==`, `%%` …), sind maskiert
 
 **Markierungen im Vault** (VCP-75): Der Vault bleibt Quelle der Wahrheit. Wird
 ein Text mit Markierungen archiviert, legt das Cockpit über den Editor eine
-Notiz an, Standard `30-ressourcen/lesestapel/<slug>.md` (änderbar unter
-**Einstellungen → Lesestapel**); Fortschritt 1 allein reicht seit VCP-96 nicht
-mehr, das entscheidet „In den Vault“. Ihr Frontmatter hat `type: lesestapel`,
-`lesestapel_id`, `quelle`, `url`, `gespeichert`, `lesestatus`
-(`gelesen`/`ungelesen`), `gelesen` und `themen`. Jede Markierung steht
-als Zitat mit eigener Block-ID (`[[vom-lesen#^hl-1a2b3c4d]]`), darunter Notiz und
-Verknüpfungen als Wikilinks:
+Notiz an, Standard `raw/YYYY-MM-DD_<slug>.md` (Ordner änderbar unter
+**Einstellungen → Lesestapel**, ein dort gesetzter gilt weiter); Fortschritt 1
+allein reicht seit VCP-96 nicht mehr, das entscheidet „In den Vault“. `raw/`
+und der Dateiname folgen den Rohquellen des Wikis: Der Skill `wiki-ingest` holt
+die Notiz von dort, statt die Adresse noch einmal abzurufen. Das Datum ist der
+Tag des Speicherns in der eingestellten Zeitzone (wie `gespeichert`), bei
+gleichem Namen kommt eine Kurz-ID dazu. Notizen von früher (etwa in
+`30-ressourcen/lesestapel/`) bleiben, wo sie sind. Ihr Frontmatter hat
+`type: lesestapel`, `lesestapel_id`, `quelle`, `url`, `gespeichert`,
+`lesestatus` (`gelesen`/`ungelesen`), `gelesen` und `themen`, dazu:
+
+- `ingest: offen`, sobald die Notiz den Volltext bekommt (beim Anlegen oder
+  nachgetragen), aber nur, wenn das Feld fehlt. Der Skill setzt danach ein
+  Datum; das Cockpit überschreibt es nie und setzt es nie zurück. Ein
+  ingestierter Text gilt als gelesen.
+- `gehoert: YYYY-MM-DD`, der Tag, an dem der Text zuletzt gehört wurde
+  (`heard_at` im Lesestapel, gesetzt über `heard` aus
+  `src/lesen/vault-export.js`): beim Anlegen, wenn er schon gehört war, und in
+  vorhandenen Notizen sofort nachgetragen; ein früherer Tag weicht dem
+  neueren.
+
+Jede Markierung steht als Zitat mit eigener Block-ID
+(`[[2026-10-20_vom-lesen#^hl-1a2b3c4d]]`), darunter Notiz und Verknüpfungen als
+Wikilinks:
 
 ```markdown
 ## Markierungen

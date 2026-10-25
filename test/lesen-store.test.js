@@ -222,3 +222,43 @@ test('Lesestapel: Feed-Gruppen anlegen, ordnen, zuordnen, filtern, löschen', ()
   assert.equal(store.getFeed(a.id).group_to_stack, false);
   assert.deepEqual(store.listGroups().map((g) => g.name), ['News']);
 });
+
+test('Lesestapel: gehört vermerken, der neuere Zeitpunkt gewinnt, Status bleibt', () => {
+  const c = clock();
+  const store = createReadingStore({ path: ':memory:', now: c.now });
+  const a = store.addDocument({ url: 'https://a.test', title: 'A', status: 'stapel' }).doc;
+  const b = store.addDocument({ url: 'https://b.test', title: 'B' }).doc;
+  assert.equal(a.heard_at, null);
+
+  const marked = store.markHeard([a.id, a.id, 'gibt-es-nicht', b.id], '2026-10-24T18:00:00Z');
+  assert.deepEqual(marked.map((d) => [d.id, d.heard_at]), [[a.id, '2026-10-24T18:00:00.000Z'], [b.id, '2026-10-24T18:00:00.000Z']]);
+  assert.equal(store.get(a.id).status, 'stapel');
+  assert.equal(store.list({ status: 'stapel' })[0].heard_at, '2026-10-24T18:00:00.000Z');
+
+  // Älter überschreibt nichts, neuer schon; ohne Zeitpunkt gilt jetzt.
+  assert.equal(store.markHeard([a.id], '2026-10-01T00:00:00Z')[0].heard_at, '2026-10-24T18:00:00.000Z');
+  assert.equal(store.markHeard([a.id], new Date('2026-10-25T07:00:00Z'))[0].heard_at, '2026-10-25T07:00:00.000Z');
+  const { doc: fresh } = store.addDocument({ url: 'https://c.test', title: 'C' });
+  assert.equal(store.markHeard([fresh.id])[0].heard_at, '2026-10-23T08:00:00.000Z');
+  assert.deepEqual(store.markHeard([]), []);
+  assert.throws(() => store.markHeard([a.id], 'gestern'), /Ungültiger Zeitpunkt/);
+});
+
+test('Lesestapel: Fassung 2 bekommt heard_at, Dokumente bleiben', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'vc-lesen-'));
+  try {
+    const file = join(dir, 'lesestapel.db');
+    const db = new DatabaseSync(file);
+    db.exec(MIGRATIONS[0]);
+    db.exec(MIGRATIONS[1]);
+    db.exec('PRAGMA user_version = 2');
+    db.prepare("INSERT INTO documents (id, url, saved_at, status_changed_at, updated_at) VALUES ('d1', 'https://a.test', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z')").run();
+    db.close();
+    const store = createReadingStore({ path: file });
+    assert.equal(store.get('d1').heard_at, null);
+    assert.equal(store.markHeard(['d1'], '2026-10-02T00:00:00Z')[0].heard_at, '2026-10-02T00:00:00.000Z');
+    store.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
