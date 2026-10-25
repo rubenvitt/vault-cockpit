@@ -32,6 +32,14 @@ struct CaptureBar: View {
                     .padding(.horizontal, 12)
                     .transition(.opacity)
                     .accessibilityLabel("Vorschau: \(preview.line)")
+            } else if focused.wrappedValue && store.text.isEmpty {
+                // Der lange Platzhalter passte auf dem iPhone nicht in eine Zeile; der Hinweis steht darunter.
+                Text("Mit ! vorne wird es eine Zunder-Aufgabe")
+                    .font(.caption)
+                    .foregroundStyle(Theme.text3)
+                    .padding(.horizontal, 12)
+                    .transition(.opacity)
+                    .accessibilityHidden(true)
             }
         }
         .padding(.horizontal, 16)
@@ -39,6 +47,7 @@ struct CaptureBar: View {
         .background(.bar)
         .overlay(alignment: .top) { Divider() }
         .animation(.snappy, value: store.preview?.line)
+        .animation(.snappy, value: focused.wrappedValue)
         .animation(.snappy, value: store.entries.count)
         .onChange(of: store.nudge) { _, _ in
             guard !reduceMotion else { return }
@@ -51,18 +60,22 @@ struct CaptureBar: View {
     }
 
     private var field: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
+        // Mitte statt Grundlinie: Mit dem mitwachsenden Feld meldete die Grundlinie die falsche
+        // Zeile, das Kästchen stand über dem Text.
+        HStack(alignment: .center, spacing: 8) {
             Text(store.label)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(store.isTask ? Theme.onAccent : Theme.text2)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
                 .background(store.isTask ? Theme.accent : Theme.bgSunk, in: Capsule())
+                .fixedSize()
                 .contentTransition(.opacity)
                 .accessibilityHidden(true)
-            TextField("Gedanke festhalten … mit ! vorne wird es eine Zunder-Aufgabe", text: $store.text, axis: .vertical)
+            TextField("Gedanke festhalten …", text: $store.text, axis: .vertical)
                 .font(.body)
-                .lineLimit(1...8)
+                .lineLimit(1...6)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .focused(focused)
                 .submitLabel(.send)
                 .onSubmit { send() }
@@ -72,10 +85,12 @@ struct CaptureBar: View {
                 .accessibilityLabel("Schnelleingabe, \(store.label)")
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .padding(.vertical, 8)
+        // So hoch wie der Senden-Knopf, solange es eine Zeile ist.
+        .frame(minHeight: 44)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .strokeBorder(store.isTask ? Theme.accent : Theme.lineStrong, lineWidth: store.isTask ? 1.5 : 1)
         }
         .modifier(ShakeEffect(animatableData: shake))
@@ -96,7 +111,7 @@ struct CaptureBar: View {
                         .foregroundStyle(Theme.onAccent)
                 }
             }
-            .frame(width: 40, height: 40)
+            .frame(width: 44, height: 44)
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
