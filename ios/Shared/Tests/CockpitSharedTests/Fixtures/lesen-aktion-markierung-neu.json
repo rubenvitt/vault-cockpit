@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "message": "Markiert",
+  "highlight": {
+    "id": "6f1c0b0e-1111-4c4c-9d9d-000000000001"
+  },
+  "undo": {
+    "action": "/aktion/lesen/markierung/loeschen",
+    "fields": {
+      "id": "6f1c0b0e-1111-4c4c-9d9d-000000000001"
+    }
+  }
+}

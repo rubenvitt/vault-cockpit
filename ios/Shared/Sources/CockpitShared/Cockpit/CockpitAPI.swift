@@ -68,9 +68,16 @@ public enum CockpitError: Error, Equatable, LocalizedError, Sendable {
     }
 }
 
+/// Antwort einer Aktion mit `ok` und `message`: `ActionResponse` und die Antworten eigener
+/// Bereiche (`ReadingActionResponse` im Lesen).
+public protocol ActionReply: Decodable {
+    var ok: Bool { get }
+    var message: String { get }
+}
+
 /// Antwort einer Aktion (`POST /aktion/…` mit `Accept: application/json`):
 /// `{ok: true, message, undo?, redirect?, task?, result?, path?}`.
-public struct ActionResponse: Decodable, Equatable, Sendable {
+public struct ActionResponse: ActionReply, Equatable, Sendable {
     public let ok: Bool
     /// Meldung für den Toast, z. B. „Erledigt: VCP-47 Planen im Cockpit“.
     public let message: String
@@ -153,10 +160,30 @@ public struct CockpitAPI: Sendable {
     /// Schickt eine Aktion (`/aktion/status` usw.) als Formular. Wirft `CockpitError.failed`
     /// mit der Meldung des Servers, wenn er ablehnt.
     public func action(_ path: String, fields: [String: String]) async throws -> ActionResponse {
-        let data = try await perform(actionRequest(path, fields: fields), action: true)
-        let response = try Self.decode(ActionResponse.self, from: data)
-        guard response.ok else { throw CockpitError.failed(status: 200, code: nil, message: response.message) }
-        return response
+        try await action(path, fields: fields, as: ActionResponse.self)
+    }
+
+    /// Wie `action(_:fields:)`, dekodiert aber in ein eigenes Antwortmodell (z. B. mit `doc`
+    /// oder `highlight` im Lesen).
+    public func action<R: ActionReply>(_ path: String, fields: [String: String], as type: R.Type) async throws -> R {
+        try Self.reply(R.self, from: try await perform(actionRequest(path, fields: fields), action: true))
+    }
+
+    /// Formular mit wiederholten Feldern in fester Reihenfolge (`doc` je Text bei „Neue Folge“).
+    public func action<R: ActionReply>(_ path: String, pairs: [(String, String)], as type: R.Type) async throws -> R {
+        var request = actionRequest(path, fields: [:])
+        request.httpBody = Data(Self.formBody(pairs: pairs).utf8)
+        return try Self.reply(R.self, from: try await perform(request, action: true))
+    }
+
+    /// Lädt eine Datei als `multipart/form-data` hoch (PDF unter `/aktion/lesen/pdf`), dazu
+    /// Textfelder wie `cid`. Die Datei liegt ganz im Speicher (höchstens 20 MB).
+    public func upload<R: ActionReply>(_ path: String, fields: [String: String], file: UploadFile, as type: R.Type) async throws -> R {
+        let boundary = "CockpitGrenze-\(UUID().uuidString)"
+        var request = actionRequest(path, fields: [:])
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Self.multipartBody(fields: fields, file: file, boundary: boundary)
+        return try Self.reply(R.self, from: try await perform(request, action: true))
     }
 
     /// Spielt ein `undo` ab (das Formular aus der Antwort einer Aktion).
@@ -194,6 +221,40 @@ public struct CockpitAPI: Sendable {
     /// `+` und `&` (URLSearchParams auf dem Server liest `+` als Leerzeichen).
     public static func formBody(_ fields: [String: String]) -> String {
         fields.sorted { $0.key < $1.key }.map { "\(formEncode($0.key))=\(formEncode($0.value))" }.joined(separator: "&")
+    }
+
+    /// Wie `formBody`, aber in der gegebenen Reihenfolge und mit wiederholten Schlüsseln.
+    public static func formBody(pairs: [(String, String)]) -> String {
+        pairs.map { "\(formEncode($0.0))=\(formEncode($0.1))" }.joined(separator: "&")
+    }
+
+    /// Body für `multipart/form-data`: Textfelder (sortiert), dann die Datei. Anführungszeichen
+    /// und Zeilenumbrüche im Dateinamen würden den Kopf des Teils brechen und fallen weg.
+    static func multipartBody(fields: [String: String], file: UploadFile, boundary: String) -> Data {
+        var body = Data()
+        func line(_ text: String) { body.append(Data("\(text)\r\n".utf8)) }
+        for (name, value) in fields.sorted(by: { $0.key < $1.key }) {
+            line("--\(boundary)")
+            line("Content-Disposition: form-data; name=\"\(name)\"")
+            line("")
+            line(value)
+        }
+        let filename = String(file.filename.filter { $0 != "\"" && !$0.isNewline })
+        line("--\(boundary)")
+        line("Content-Disposition: form-data; name=\"\(file.field)\"; filename=\"\(filename)\"")
+        line("Content-Type: \(file.contentType)")
+        line("")
+        body.append(file.data)
+        line("")
+        line("--\(boundary)--")
+        return body
+    }
+
+    /// Dekodiert die Antwort einer Aktion; `ok: false` wird `CockpitError.failed`.
+    static func reply<R: ActionReply>(_ type: R.Type, from data: Data) throws -> R {
+        let response = try decode(R.self, from: data)
+        guard response.ok else { throw CockpitError.failed(status: 200, code: nil, message: response.message) }
+        return response
     }
 
     static func formEncode(_ value: String) -> String {
@@ -265,5 +326,20 @@ public struct CockpitAPI: Sendable {
             case error, message
             case description = "error_description"
         }
+    }
+}
+
+/// Datei für `CockpitAPI.upload`: Feldname (`datei`), Dateiname, Typ und Inhalt.
+public struct UploadFile: Sendable {
+    public let field: String
+    public let filename: String
+    public let contentType: String
+    public let data: Data
+
+    public init(field: String = "datei", filename: String, contentType: String = "application/pdf", data: Data) {
+        self.field = field
+        self.filename = filename
+        self.contentType = contentType
+        self.data = data
     }
 }

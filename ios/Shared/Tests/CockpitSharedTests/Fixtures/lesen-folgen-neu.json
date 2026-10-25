@@ -1,0 +1,146 @@
+{
+  "ok": true,
+  "enabled": true,
+  "zeit": 30,
+  "windows": [
+    5,
+    15,
+    30,
+    60
+  ],
+  "docs": [
+    {
+      "id": "5bf93e17-f5bc-4b68-9ba6-afde50ab3c14",
+      "url": "https://a.example.org/",
+      "canonicalUrl": null,
+      "title": "Warum der Stapel wächst",
+      "author": null,
+      "site": "Blatt",
+      "kind": "artikel",
+      "kindLabel": "Artikel",
+      "origin": "formular",
+      "excerpt": "Eins.",
+      "wordCount": 1,
+      "readingMinutes": 12,
+      "status": "stapel",
+      "previousStatus": null,
+      "progress": 0,
+      "scrollAnchor": 0,
+      "topics": [],
+      "savedAt": "2026-10-23T09:07:32.228Z",
+      "statusChangedAt": "2026-10-23T09:07:32.228Z",
+      "readAt": null,
+      "archivedAt": null,
+      "updatedAt": "2026-10-23T09:07:32.228Z",
+      "remaining": 12,
+      "started": false,
+      "chars": 4321
+    },
+    {
+      "id": "2c492c54-b754-4de2-a84b-7acbf133ccf5",
+      "url": "https://b.example.org/",
+      "canonicalUrl": null,
+      "title": "Vom langsamen Lesen",
+      "author": null,
+      "site": "Zeit",
+      "kind": "artikel",
+      "kindLabel": "Artikel",
+      "origin": "formular",
+      "excerpt": "Zwei.",
+      "wordCount": 1,
+      "readingMinutes": 7,
+      "status": "stapel",
+      "previousStatus": null,
+      "progress": 0,
+      "scrollAnchor": 0,
+      "topics": [],
+      "savedAt": "2026-10-23T09:07:32.228Z",
+      "statusChangedAt": "2026-10-23T09:07:32.228Z",
+      "readAt": null,
+      "archivedAt": null,
+      "updatedAt": "2026-10-23T09:07:32.228Z",
+      "remaining": 7,
+      "started": false,
+      "chars": 0
+    },
+    {
+      "id": "01d00131-4abf-4b27-b88a-e32b8ec3498a",
+      "url": "https://c.example.org/",
+      "canonicalUrl": null,
+      "title": "Kurze Notiz",
+      "author": null,
+      "site": "Kurz",
+      "kind": "artikel",
+      "kindLabel": "Artikel",
+      "origin": "formular",
+      "excerpt": "Drei.",
+      "wordCount": 1,
+      "readingMinutes": 4,
+      "status": "stapel",
+      "previousStatus": null,
+      "progress": 0,
+      "scrollAnchor": 0,
+      "topics": [],
+      "savedAt": "2026-10-23T09:07:32.228Z",
+      "statusChangedAt": "2026-10-23T09:07:32.228Z",
+      "readAt": null,
+      "archivedAt": null,
+      "updatedAt": "2026-10-23T09:07:32.228Z",
+      "remaining": 4,
+      "started": false,
+      "chars": 4321
+    }
+  ],
+  "chars": 8642,
+  "availability": {
+    "vorlesen": null,
+    "podcast": null,
+    "report": "Podcast und Report brauchen Claude: CLAUDE_CODE_OAUTH_TOKEN im Deployment (Token aus `claude setup-token`)"
+  },
+  "kinds": [
+    {
+      "kind": "vorlesen",
+      "label": "Vorlesen",
+      "description": "Die ganzen Texte nacheinander, eine Erzählerstimme.",
+      "cost": "Kosten nach Textlänge, Gehörtes ist gratis",
+      "missing": null
+    },
+    {
+      "kind": "podcast",
+      "label": "Podcast",
+      "description": "Claude schreibt ein Gespräch zweier Stimmen über die Texte.",
+      "cost": "900 Zeichen je Minute, dazu Claude",
+      "missing": null
+    },
+    {
+      "kind": "report",
+      "label": "Report",
+      "description": "Claude schreibt einen Bericht: als Notiz in die Inbox und eine Stimme liest ihn.",
+      "cost": "900 Zeichen je Minute, dazu Claude",
+      "missing": "Podcast und Report brauchen Claude: CLAUDE_CODE_OAUTH_TOKEN im Deployment (Token aus `claude setup-token`)"
+    }
+  ],
+  "defaultKind": "vorlesen",
+  "lengths": [
+    5,
+    10,
+    20
+  ],
+  "defaultLength": 10,
+  "maxDocs": 20,
+  "spokenCharsPerMinute": 900,
+  "summary": {
+    "main": "Vorlesen · 3 Texte · etwa 10 Min.",
+    "cost": "rund 8.642 Zeichen bei ElevenLabs"
+  },
+  "summaries": {
+    "vorlesen": {
+      "main": "Vorlesen · 3 Texte · etwa 10 Min.",
+      "cost": "rund 8.642 Zeichen bei ElevenLabs"
+    },
+    "podcast": {
+      "main": "Podcast · 3 Texte · 10 Min.",
+      "cost": "rund 9.000 Zeichen bei ElevenLabs, dazu dein Claude-Abo"
+    }
+  }
+}

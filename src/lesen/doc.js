@@ -2,7 +2,9 @@ import { ActionError } from '../cockpit/actions.js';
 import { esc, head, appHeader, assets } from '../web/layout.js';
 import { hidden, flashToast } from '../web/render.js';
 import { readingNav, readingPage } from './pages.js';
-import { markHighlights } from './anchor.js';
+import { markHighlights, placeHighlights, weiterAt } from './anchor.js';
+import { textBlocks } from './blocks.js';
+import { docJson, highlightJson, jsonReply } from './json.js';
 
 /**
  * Leseansicht `/lesen/doc?id=…` (VCP-71): Lesetext in Leseschrift mit den
@@ -15,6 +17,10 @@ import { markHighlights } from './anchor.js';
  *
  * Link-Vertrag für die anderen Seiten: `/lesen/doc?id=<id>`, mit `#weiter`
  * an die zuletzt gelesene Stelle (`scroll_anchor`, Zeichen im Lesetext).
+ *
+ * `/api/lesen/doc?id=…` liefert dasselbe für die native Leseansicht: den
+ * Lesetext als Blöcke (src/lesen/blocks.js) und die Markierungen als Bereiche
+ * darin, gerechnet wie die `<mark>` der Seite.
  */
 
 const STATUS_MESSAGE = { eingang: 'In den Eingang gelegt', stapel: 'Auf den Stapel gelegt', archiv: 'Archiviert', abgelegt: 'Im Vault abgelegt', weg: 'Verworfen' };
@@ -24,6 +30,10 @@ const href = (u) => (/^https?:\/\//i.test(u ?? '') ? u : '#');
 export const docLink = (id) => `/lesen/doc?id=${encodeURIComponent(id)}`;
 const remaining = (d) => Math.max(1, Math.ceil(d.reading_minutes * (1 - d.progress)));
 const restLabel = (d) => (d.progress >= 1 ? 'gelesen' : d.reading_minutes ? `noch ${remaining(d)} min` : '');
+const NO_TEXT = 'Für diesen Artikel gibt es keinen Lesetext.';
+const NOT_FOUND = 'Diesen Artikel gibt es nicht (mehr).';
+/** Welche Entscheidungen nach dem Lesen gehen (Knöpfe der Seite). */
+const decisions = (doc, vault) => ({ fertig: doc.status !== 'weg', vault, zurueck: ['archiv', 'abgelegt', 'weg'].includes(doc.status) });
 const short = (s, n = 160) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
 
 const KEYS = [
@@ -80,9 +90,9 @@ function highlightList(highlights, orphans, ctx) {
 function decide(doc, ctx, vault) {
   const form = (action, key, fields, body) => `<form method="post" action="${action}" class="act" data-decide="${key}">${hidden({ csrf: ctx.write.csrf, back: ctx.write.back, id: doc.id, ...fields })}${body}</form>`;
   return `<div class="lesen-decide">
-      ${doc.status !== 'weg' ? form('/aktion/lesen/doc/fertig', 'fertig', {}, '<button type="submit" class="btn">Fertig, weg <kbd>E</kbd></button>') : ''}
+      ${decisions(doc, vault).fertig ? form('/aktion/lesen/doc/fertig', 'fertig', {}, '<button type="submit" class="btn">Fertig, weg <kbd>E</kbd></button>') : ''}
       ${vault ? form('/aktion/lesen/doc/vault', 'vault', {}, '<label class="lesen-volltext"><input type="checkbox" name="volltext" value="1"> mit Volltext</label><button type="submit" class="btn primary">In den Vault <kbd>V</kbd></button>') : ''}
-      ${['archiv', 'abgelegt', 'weg'].includes(doc.status) ? form(STATUS, 'zurueck', { status: 'stapel' }, '<button type="submit" class="btn quiet">Zurück auf den Stapel</button>') : ''}
+      ${decisions(doc, vault).zurueck ? form(STATUS, 'zurueck', { status: 'stapel' }, '<button type="submit" class="btn quiet">Zurück auf den Stapel</button>') : ''}
     </div>`;
 }
 
@@ -91,7 +101,7 @@ function renderDoc(doc, { highlights, stackDocs, counts, vault }, ctx) {
   const meta = [doc.site, doc.author, doc.reading_minutes ? `${doc.reading_minutes} min` : null].filter(Boolean).map(esc).join(' · ');
   const text = doc.content_html
     ? html
-    : `<span id="weiter"></span><p>${esc(doc.excerpt || 'Für diesen Artikel gibt es keinen Lesetext.')}</p>`;
+    : `<span id="weiter"></span><p>${esc(doc.excerpt || NO_TEXT)}</p>`;
   const nav = ['eingang', 'stapel'].includes(doc.status) ? doc.status : null;
   return `<!doctype html>
 <html lang="de">
@@ -140,6 +150,39 @@ ${stack(stackDocs, doc.id)}
 </html>`;
 }
 
+/**
+ * Leseansicht als JSON: Dokument, Lesetext als Blöcke, Markierungen mit ihrer
+ * Stelle (`start`/`end`, `lost` = „Stelle nicht mehr im Text“) und als
+ * überlappungsfreie Bereiche `ranges` wie die `<mark>` der Seite, Lesestelle
+ * (`anchor` wie gespeichert, `weiter` = erstes sichtbares Zeichen dort),
+ * Bereiche mit Zählern, Stapel (30) und die möglichen Entscheidungen.
+ */
+function docJsonModel(doc, { highlights, stackDocs, counts, vault }) {
+  const { text, blocks } = textBlocks(doc.content_html ?? '');
+  const { ranges, found } = placeHighlights(text, highlights);
+  const anchor = Number(doc.scroll_anchor) || 0;
+  return {
+    ok: true,
+    doc: { ...docJson(doc), rest: restLabel(doc), remaining: doc.reading_minutes ? remaining(doc) : null },
+    hasText: Boolean(doc.content_html),
+    length: text.length,
+    anchor,
+    weiter: weiterAt(text, anchor),
+    // Ohne Lesetext zeigt die Seite den Anriss oder einen Hinweis; Markierungen haben dann keine Stelle.
+    blocks: doc.content_html ? blocks : textBlocks(`<p>${esc(doc.excerpt || NO_TEXT)}</p>`).blocks,
+    highlights: highlights.map((h) => {
+      const at = found.get(h.id);
+      return { ...highlightJson(h), start: at?.start ?? null, end: at?.end ?? null, lost: !at };
+    }),
+    ranges: ranges.map((r) => ({ id: r.h.id, start: r.start, end: r.end, note: r.h.note ?? null })),
+    counts,
+    stack: stackDocs.map((d) => ({ id: d.id, title: d.title ?? null, url: d.url, site: d.site ?? null, progress: d.progress, readingMinutes: d.reading_minutes, rest: restLabel(d), started: d.progress > 0 && d.progress < 1, current: d.id === doc.id })),
+    nav: ['eingang', 'stapel'].includes(doc.status) ? doc.status : null,
+    vault,
+    decisions: decisions(doc, vault),
+  };
+}
+
 /** Antwort einer Entscheidung: Meldung, neuer Status, Rückgängig (alter Status), wenn sich etwas geändert hat. */
 const decided = (message, { doc, previous, changed }) => ({
   message: `${message}: ${name(doc)}`,
@@ -172,13 +215,19 @@ export function docRoutes({ store, asAction, onChange = () => {}, exporter = nul
     return r;
   };
 
+  const model = (doc) => ({ highlights: store.listHighlights({ docId: doc.id }), stackDocs: store.list({ status: 'stapel', limit: 30 }), counts: store.counts(), vault: Boolean(exporter) });
+
   return {
     pages: {
       async '/lesen/doc'(ctx) {
         const doc = store.get(ctx.url.searchParams.get('id'));
-        if (!doc) return { status: 404, html: readingPage(ctx, { key: null, title: 'Nicht gefunden', body: '<section><p class="empty">Diesen Artikel gibt es nicht (mehr).</p></section>' }) };
-        const model = { highlights: store.listHighlights({ docId: doc.id }), stackDocs: store.list({ status: 'stapel', limit: 30 }), counts: store.counts(), vault: Boolean(exporter) };
-        return { html: renderDoc(doc, model, ctx) };
+        if (!doc) return { status: 404, html: readingPage(ctx, { key: null, title: 'Nicht gefunden', body: `<section><p class="empty">${NOT_FOUND}</p></section>` }) };
+        return { html: renderDoc(doc, model(doc), ctx) };
+      },
+      async '/api/lesen/doc'(ctx) {
+        const doc = store.get(ctx.url.searchParams.get('id'));
+        if (!doc) return jsonReply(404, { error: 'not_found', message: NOT_FOUND });
+        return jsonReply(200, docJsonModel(doc, model(doc)));
       },
     },
     actions: {

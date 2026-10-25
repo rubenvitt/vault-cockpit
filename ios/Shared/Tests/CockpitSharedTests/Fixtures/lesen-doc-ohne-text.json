@@ -1,0 +1,108 @@
+{
+  "ok": true,
+  "doc": {
+    "id": "169e24bf-e9a9-4ba8-ba3d-ccc9be8dd2c4",
+    "url": "https://leer.example.org/",
+    "canonicalUrl": null,
+    "title": "Ohne Lesetext",
+    "author": null,
+    "site": null,
+    "kind": "artikel",
+    "kindLabel": "Artikel",
+    "origin": "formular",
+    "excerpt": "Nur der Anriss ist da.",
+    "wordCount": 0,
+    "readingMinutes": 0,
+    "status": "archiv",
+    "previousStatus": null,
+    "progress": 0,
+    "scrollAnchor": 0,
+    "topics": [],
+    "savedAt": "2026-10-25T09:07:32.067Z",
+    "statusChangedAt": "2026-10-25T09:07:32.067Z",
+    "readAt": null,
+    "archivedAt": null,
+    "updatedAt": "2026-10-25T09:07:32.067Z",
+    "rest": "",
+    "remaining": null
+  },
+  "hasText": false,
+  "length": 0,
+  "anchor": 0,
+  "weiter": 0,
+  "blocks": [
+    {
+      "kind": "paragraph",
+      "start": 0,
+      "end": 22,
+      "runs": [
+        {
+          "text": "Nur der Anriss ist da.",
+          "start": 0
+        }
+      ]
+    }
+  ],
+  "highlights": [],
+  "ranges": [],
+  "counts": {
+    "eingang": 1,
+    "stapel": 4,
+    "archiv": 1,
+    "abgelegt": 0,
+    "weg": 1
+  },
+  "stack": [
+    {
+      "id": "ff3eea66-3591-44e4-ad42-08700fe429e8",
+      "title": "Kurze Notiz",
+      "url": "https://kurz.example.org/notiz",
+      "site": "Kurz",
+      "progress": 0.5,
+      "readingMinutes": 4,
+      "rest": "noch 2 min",
+      "started": true,
+      "current": false
+    },
+    {
+      "id": "18cb7b5f-aedf-4072-b4a5-47dd13d3782c",
+      "title": "Ein sehr langes Essay",
+      "url": "https://lang.example.org/essay",
+      "site": "Essay",
+      "progress": 0,
+      "readingMinutes": 45,
+      "rest": "noch 45 min",
+      "started": false,
+      "current": false
+    },
+    {
+      "id": "b2ff6382-a773-4263-ae89-1ab3c95d63f5",
+      "title": "Vom langsamen Lesen",
+      "url": "https://zeit.example.org/lesen",
+      "site": "Zeit",
+      "progress": 0,
+      "readingMinutes": 7,
+      "rest": "noch 7 min",
+      "started": false,
+      "current": false
+    },
+    {
+      "id": "1031d266-e30f-4163-af2c-483c2fe68816",
+      "title": "Warum der Stapel wächst",
+      "url": "https://blatt.example.org/stapel",
+      "site": "Blatt",
+      "progress": 0.35,
+      "readingMinutes": 12,
+      "rest": "noch 8 min",
+      "started": true,
+      "current": false
+    }
+  ],
+  "nav": null,
+  "vault": true,
+  "decisions": {
+    "fertig": true,
+    "vault": true,
+    "zurueck": true
+  }
+}

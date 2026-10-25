@@ -1,0 +1,156 @@
+{
+  "ok": true,
+  "zeit": null,
+  "sort": "kurz",
+  "windows": [
+    5,
+    15,
+    30,
+    60
+  ],
+  "sorts": [
+    {
+      "key": "passt",
+      "label": "Passt jetzt"
+    },
+    {
+      "key": "neu",
+      "label": "Neueste"
+    },
+    {
+      "key": "kurz",
+      "label": "Kürzeste"
+    }
+  ],
+  "filter": {
+    "gruppe": null
+  },
+  "groups": [
+    {
+      "id": "f60a3c79-3a3c-4e05-bda2-4c565b140c5f",
+      "name": "Technik"
+    },
+    {
+      "id": "3d9a6963-3cc9-44b6-be6e-4462fb99c0f1",
+      "name": "Gesellschaft"
+    }
+  ],
+  "showGroups": true,
+  "count": 4,
+  "items": [
+    {
+      "id": "ff3eea66-3591-44e4-ad42-08700fe429e8",
+      "url": "https://kurz.example.org/notiz",
+      "canonicalUrl": null,
+      "title": "Kurze Notiz",
+      "author": null,
+      "site": "Kurz",
+      "kind": "artikel",
+      "kindLabel": "Artikel",
+      "origin": "formular",
+      "excerpt": "Kurz.",
+      "wordCount": 1,
+      "readingMinutes": 4,
+      "status": "stapel",
+      "previousStatus": null,
+      "progress": 0.5,
+      "scrollAnchor": 0,
+      "topics": [],
+      "savedAt": "2026-10-23T09:07:32.037Z",
+      "statusChangedAt": "2026-10-23T09:07:32.037Z",
+      "readAt": null,
+      "archivedAt": null,
+      "updatedAt": "2026-10-23T09:07:32.037Z",
+      "remaining": 2,
+      "started": true
+    },
+    {
+      "id": "b2ff6382-a773-4263-ae89-1ab3c95d63f5",
+      "url": "https://zeit.example.org/lesen",
+      "canonicalUrl": null,
+      "title": "Vom langsamen Lesen",
+      "author": null,
+      "site": "Zeit",
+      "kind": "artikel",
+      "kindLabel": "Artikel",
+      "origin": "formular",
+      "excerpt": "Langsam lesen heißt besser behalten. Der Stapel darf warten.",
+      "wordCount": 9,
+      "readingMinutes": 7,
+      "status": "stapel",
+      "previousStatus": null,
+      "progress": 0,
+      "scrollAnchor": 0,
+      "topics": [
+        "Lesen"
+      ],
+      "savedAt": "2026-10-23T09:07:32.037Z",
+      "statusChangedAt": "2026-10-23T09:07:32.037Z",
+      "readAt": null,
+      "archivedAt": null,
+      "updatedAt": "2026-10-23T09:07:32.037Z",
+      "remaining": 7,
+      "started": false
+    },
+    {
+      "id": "1031d266-e30f-4163-af2c-483c2fe68816",
+      "url": "https://blatt.example.org/stapel",
+      "canonicalUrl": null,
+      "title": "Warum der Stapel wächst",
+      "author": "Ada Beispiel",
+      "site": "Blatt",
+      "kind": "artikel",
+      "kindLabel": "Artikel",
+      "origin": "kurzbefehl",
+      "excerpt": "Der Stapel wächst, weil Speichern leichter ist als Lesen. Wer viel speichert, liest am Ende weniger – sagt eine Studie.",
+      "wordCount": 76,
+      "readingMinutes": 12,
+      "status": "stapel",
+      "previousStatus": null,
+      "progress": 0.35,
+      "scrollAnchor": 186,
+      "topics": [
+        "Lesen",
+        "Gewohnheit"
+      ],
+      "savedAt": "2026-10-23T09:07:32.037Z",
+      "statusChangedAt": "2026-10-23T09:07:32.037Z",
+      "readAt": null,
+      "archivedAt": null,
+      "updatedAt": "2026-10-23T09:07:32.037Z",
+      "remaining": 8,
+      "started": true
+    },
+    {
+      "id": "18cb7b5f-aedf-4072-b4a5-47dd13d3782c",
+      "url": "https://lang.example.org/essay",
+      "canonicalUrl": null,
+      "title": "Ein sehr langes Essay",
+      "author": null,
+      "site": "Essay",
+      "kind": "artikel",
+      "kindLabel": "Artikel",
+      "origin": "formular",
+      "excerpt": "Lang.",
+      "wordCount": 1,
+      "readingMinutes": 45,
+      "status": "stapel",
+      "previousStatus": null,
+      "progress": 0,
+      "scrollAnchor": 0,
+      "topics": [],
+      "savedAt": "2026-10-23T09:07:32.037Z",
+      "statusChangedAt": "2026-10-23T09:07:32.037Z",
+      "readAt": null,
+      "archivedAt": null,
+      "updatedAt": "2026-10-23T09:07:32.037Z",
+      "remaining": 45,
+      "started": false
+    }
+  ],
+  "window": null,
+  "vault": true,
+  "episodes": true,
+  "listenZeit": 15,
+  "episodeZeit": 30
+}

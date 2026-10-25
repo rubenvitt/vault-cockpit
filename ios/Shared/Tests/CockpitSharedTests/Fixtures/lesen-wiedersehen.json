@@ -1,0 +1,188 @@
+{
+  "ok": true,
+  "seen": 0,
+  "left": 4,
+  "later": 0,
+  "total": 4,
+  "limit": 20,
+  "maxBox": 5,
+  "canCapture": true,
+  "cards": [
+    {
+      "id": "3c68dd32-aad2-4e99-9ca7-33ec7275e374",
+      "docId": "b2ff6382-a773-4263-ae89-1ab3c95d63f5",
+      "quote": "Der Stapel darf warten.",
+      "prefix": "besser behalten. ",
+      "suffix": "",
+      "startHint": 38,
+      "note": null,
+      "createdAt": "2026-10-23T09:07:32.037Z",
+      "updatedAt": "2026-10-23T09:07:32.037Z",
+      "reviewBox": 0,
+      "reviewDue": "2026-10-24T09:07:32.037Z",
+      "reviewState": "aktiv",
+      "docTitle": "Vom langsamen Lesen",
+      "docUrl": "https://zeit.example.org/lesen",
+      "docSite": "Zeit",
+      "docTopics": [
+        "Lesen"
+      ],
+      "box": 1,
+      "dueAt": "2026-10-24T09:07:32.037Z"
+    },
+    {
+      "id": "bc9fa004-ce9f-490c-9f9c-f5ab36321994",
+      "docId": "1031d266-e30f-4163-af2c-483c2fe68816",
+      "quote": "Dieser Satz wurde aus dem Artikel gestrichen.",
+      "prefix": "",
+      "suffix": "",
+      "startHint": 0,
+      "note": "Alte Stelle",
+      "createdAt": "2026-10-23T09:07:32.037Z",
+      "updatedAt": "2026-10-23T09:07:32.037Z",
+      "reviewBox": 0,
+      "reviewDue": "2026-10-24T09:07:32.037Z",
+      "reviewState": "aktiv",
+      "docTitle": "Warum der Stapel wächst",
+      "docUrl": "https://blatt.example.org/stapel",
+      "docSite": "Blatt",
+      "docTopics": [
+        "Lesen",
+        "Gewohnheit"
+      ],
+      "box": 1,
+      "dueAt": "2026-10-24T09:07:32.037Z"
+    },
+    {
+      "id": "2a2cb0a5-a618-46f6-9d58-2561f594f970",
+      "docId": "1031d266-e30f-4163-af2c-483c2fe68816",
+      "quote": "Ein Stapel ist ein Versprechen an sich selbst.",
+      "prefix": "wegs 🚆Wir überschätzen später.\n",
+      "suffix": "\nstapel.push(text)\nstapel.length",
+      "startHint": 287,
+      "note": null,
+      "createdAt": "2026-10-23T09:07:32.037Z",
+      "updatedAt": "2026-10-23T09:07:32.037Z",
+      "reviewBox": 0,
+      "reviewDue": "2026-10-24T09:07:32.037Z",
+      "reviewState": "aktiv",
+      "docTitle": "Warum der Stapel wächst",
+      "docUrl": "https://blatt.example.org/stapel",
+      "docSite": "Blatt",
+      "docTopics": [
+        "Lesen",
+        "Gewohnheit"
+      ],
+      "box": 1,
+      "dueAt": "2026-10-24T09:07:32.037Z"
+    },
+    {
+      "id": "de8f6b53-f1c2-4992-9657-69f54f1173a5",
+      "docId": "1031d266-e30f-4163-af2c-483c2fe68816",
+      "quote": "Speichern leichter ist als Lesen",
+      "prefix": " wächst\nDer Stapel wächst, weil ",
+      "suffix": ". Wer viel speichert, liest am E",
+      "startHint": 48,
+      "note": "Kern des Arguments",
+      "createdAt": "2026-10-23T09:07:32.037Z",
+      "updatedAt": "2026-10-23T09:07:32.037Z",
+      "reviewBox": 0,
+      "reviewDue": "2026-10-24T09:07:32.037Z",
+      "reviewState": "aktiv",
+      "docTitle": "Warum der Stapel wächst",
+      "docUrl": "https://blatt.example.org/stapel",
+      "docSite": "Blatt",
+      "docTopics": [
+        "Lesen",
+        "Gewohnheit"
+      ],
+      "box": 1,
+      "dueAt": "2026-10-24T09:07:32.037Z"
+    }
+  ],
+  "week": {
+    "id": "2026-W43",
+    "year": 2026,
+    "week": 43,
+    "monday": "2026-10-19",
+    "sunday": "2026-10-25",
+    "start": "2026-10-18T22:00:00.000Z",
+    "end": "2026-10-25T23:00:00.000Z",
+    "label": "19.10. – 25.10.",
+    "prev": {
+      "id": "2026-W42",
+      "week": 42
+    },
+    "next": {
+      "id": "2026-W44",
+      "week": 44
+    },
+    "stats": {
+      "highlights": 5,
+      "texts": 2,
+      "topics": 2
+    },
+    "topics": [
+      {
+        "label": "Lesen",
+        "count": 5
+      },
+      {
+        "label": "Gewohnheit",
+        "count": 4
+      }
+    ],
+    "clusters": [
+      {
+        "ids": [
+          "3c68dd32-aad2-4e99-9ca7-33ec7275e374",
+          "2a2cb0a5-a618-46f6-9d58-2561f594f970"
+        ],
+        "items": [
+          {
+            "id": "3c68dd32-aad2-4e99-9ca7-33ec7275e374",
+            "docId": "b2ff6382-a773-4263-ae89-1ab3c95d63f5",
+            "quote": "Der Stapel darf warten.",
+            "prefix": "besser behalten. ",
+            "suffix": "",
+            "startHint": 38,
+            "note": null,
+            "createdAt": "2026-10-23T09:07:32.037Z",
+            "updatedAt": "2026-10-23T09:07:32.037Z",
+            "reviewBox": 0,
+            "reviewDue": "2026-10-24T09:07:32.037Z",
+            "reviewState": "aktiv",
+            "docTitle": "Vom langsamen Lesen",
+            "docUrl": "https://zeit.example.org/lesen",
+            "docSite": "Zeit",
+            "docTopics": [
+              "Lesen"
+            ]
+          },
+          {
+            "id": "2a2cb0a5-a618-46f6-9d58-2561f594f970",
+            "docId": "1031d266-e30f-4163-af2c-483c2fe68816",
+            "quote": "Ein Stapel ist ein Versprechen an sich selbst.",
+            "prefix": "wegs 🚆Wir überschätzen später.\n",
+            "suffix": "\nstapel.push(text)\nstapel.length",
+            "startHint": 287,
+            "note": null,
+            "createdAt": "2026-10-23T09:07:32.037Z",
+            "updatedAt": "2026-10-23T09:07:32.037Z",
+            "reviewBox": 0,
+            "reviewDue": "2026-10-24T09:07:32.037Z",
+            "reviewState": "aktiv",
+            "docTitle": "Warum der Stapel wächst",
+            "docUrl": "https://blatt.example.org/stapel",
+            "docSite": "Blatt",
+            "docTopics": [
+              "Lesen",
+              "Gewohnheit"
+            ]
+          }
+        ]
+      }
+    ],
+    "export": "/api/lesen/wiedersehen.md?woche=2026-W43"
+  }
+}

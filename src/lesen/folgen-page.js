@@ -3,8 +3,9 @@ import { esc, assets } from '../web/layout.js';
 import { hidden } from '../web/render.js';
 import { ActionError } from '../cockpit/actions.js';
 import { readingPage } from './pages.js';
-import { WINDOWS, fitToWindow } from './stack.js';
-import { EpisodeError, KINDS, LENGTHS, BYTES_PER_SECOND } from './folgen.js';
+import { WINDOWS, fitToWindow, stackItemJson } from './stack.js';
+import { EpisodeError, KINDS, LENGTHS, MAX_DOCS, BYTES_PER_SECOND } from './folgen.js';
+import { jsonReply } from './json.js';
 
 /**
  * Seiten der Folgen (src/lesen/folgen.js), ohne JavaScript bedienbar:
@@ -19,6 +20,8 @@ import { EpisodeError, KINDS, LENGTHS, BYTES_PER_SECOND } from './folgen.js';
  *   Seite den Fortschritt ohne Neuladen zeigt.
  * - `/lesen/folgen/audio?id=…`: die MP3, mit `Range` (Safari spielt Audio
  *   nur so ab, und Vorspulen braucht es auch).
+ * - `/api/lesen/folgen` und `/api/lesen/folgen/neu?zeit=30`: dasselbe als JSON
+ *   für die App (auch ohne Folgen, dann mit `enabled: false`).
  */
 
 const fmt = new Intl.NumberFormat('de-DE');
@@ -50,29 +53,32 @@ const since = (iso, at) => {
 
 /**
  * Wo eine entstehende Folge steht: Schritte, aktueller Schritt, Prozent
- * (`null` = unbestimmt, solange Claude schreibt) und ein Satz dazu. Beim
- * Sprechen schätzt `rest` die verbleibende Zeit aus dem bisherigen Tempo.
+ * (`null` = unbestimmt, solange Claude schreibt; `fraction` dasselbe als
+ * Anteil 0..1) und ein Satz dazu. Beim Sprechen schätzt `restMinutes` die
+ * verbleibende Zeit aus dem bisherigen Tempo (`null`, solange unbekannt).
  */
 export function progressOf(ep, at = Date.now()) {
   const writes = ep.kind !== 'vorlesen';
   const steps = writes ? ['Eingereiht', 'Claude schreibt', 'Stimmen sprechen', 'Fertig'] : ['Eingereiht', 'Stimme spricht', 'Fertig'];
   const step = { wartet: 0, schreibt: 1, spricht: writes ? 2 : 1 }[ep.status] ?? steps.length - 1;
-  if (ep.status === 'wartet') return { steps, step, percent: null, label: 'Wartet, bis die Folge davor fertig ist' };
+  if (ep.status === 'wartet') return { steps, step, percent: null, fraction: null, restMinutes: null, label: 'Wartet, bis die Folge davor fertig ist' };
   if (ep.status === 'schreibt') {
     const what = ep.kind === 'podcast' ? 'Claude schreibt das Gespräch' : 'Claude schreibt den Report';
-    return { steps, step, percent: null, label: `${what}, ${since(ep.writing_at ?? ep.updated_at, at)} (meist 1 bis 3 Minuten)` };
+    return { steps, step, percent: null, fraction: null, restMinutes: null, label: `${what}, ${since(ep.writing_at ?? ep.updated_at, at)} (meist 1 bis 3 Minuten)` };
   }
   const done = ep.done ?? 0;
   const total = ep.total ?? 0;
   const percent = total ? Math.min(99, Math.floor((done / total) * 100)) : 0;
   const from = ep.speaking_from ?? 0;
   let rest = '';
+  let restMinutes = null;
   if (ep.speaking_at && done > from && total > done) {
     const each = (at - Date.parse(ep.speaking_at)) / (done - from);
-    const left = Math.round((each * (total - done)) / 60_000);
-    rest = left < 1 ? ', gleich fertig' : `, noch etwa ${left} Min.`;
+    restMinutes = Math.round((each * (total - done)) / 60_000);
+    rest = restMinutes < 1 ? ', gleich fertig' : `, noch etwa ${restMinutes} Min.`;
   }
-  return { steps, step, percent, label: `${writes ? 'ElevenLabs spricht' : 'ElevenLabs liest vor'}: ${percent} %${rest}` };
+  const fraction = total ? Math.min(1, done / total) : 0;
+  return { steps, step, percent, fraction, restMinutes, label: `${writes ? 'ElevenLabs spricht' : 'ElevenLabs liest vor'}: ${percent} %${rest}` };
 }
 
 /** Dauer der fertigen MP3 (feste Bitrate), sonst null. */
@@ -103,15 +109,20 @@ export function newSummary({ kind, texts, chars, minutes }) {
   return { main: `${KINDS[kind]} · ${n} · ${minutes} Min.`, cost: `rund ${fmt.format(minutes * SPOKEN_CHARS_PER_MINUTE)} Zeichen bei ElevenLabs, dazu dein Claude-Abo` };
 }
 
-function newPage(episodes, store, ctx) {
-  const n = Number(ctx.url.searchParams.get('zeit'));
+/** Kosten einer Art in einem Satz (Auswahl „Was soll daraus werden?“). */
+const kindCost = (kind) => (kind === 'vorlesen' ? 'Kosten nach Textlänge, Gehörtes ist gratis' : '900 Zeichen je Minute, dazu Claude');
+
+/**
+ * Was „Neue Folge“ zeigt, für Seite und JSON: Zeitfenster (`zeit`, sonst 30),
+ * die passenden Texte des Stapels mit ihren Zeichen fürs Vorlesen (0, wenn
+ * schon gehört oder offline geladen), fehlende Voraussetzungen je Art
+ * (`missing`), die erste mögliche Art und die Zusammenfassung dazu.
+ */
+export function newEpisodeModel(episodes, store, zeitParam) {
+  const n = Number(zeitParam);
   const zeit = WINDOWS.includes(n) ? n : 30;
   const { items } = fitToWindow(store.list({ status: 'stapel', limit: -1 }), zeit);
   const missing = episodes.availability();
-  const picker = `<nav class="chips folge-zeit" aria-label="Zeitfenster">${WINDOWS.map((m) => `<a href="/lesen/folgen/neu?zeit=${m}" class="chip"${m === zeit ? ' aria-current="true"' : ''}>${m} Min.</a>`).join('')}</nav>`;
-  const step = (nr, title, hint = '') => `<div class="folge-schritt-kopf"><span class="folge-nr" aria-hidden="true">${nr}</span><div><h2>${title}</h2>${hint ? `<p class="meta">${hint}</p>` : ''}</div></div>`;
-  if (!items.length) return `<section class="folge-schritt">${step(1, 'Welche Texte?', 'Aus dem Stapel, passend zur Zeit, die du hast.')}${picker}<p class="empty">Für dieses Zeitfenster passt nichts vom Stapel.</p></section>`;
-
   // Zeichen je Text fürs Vorlesen; Gehörtes und offline Geladenes kostet nichts mehr.
   const charsOf = (id) => {
     try {
@@ -122,6 +133,17 @@ function newPage(episodes, store, ctx) {
   };
   const docs = items.map((d) => ({ d, chars: charsOf(d.id) }));
   const full = docs.reduce((sum, x) => sum + x.chars, 0);
+  const first = Object.keys(KINDS).find((k) => !missing[k]) ?? null;
+  const summary = first ? newSummary({ kind: first, texts: docs.length, chars: full, minutes: 10 }) : { main: 'Folgen brauchen ElevenLabs', cost: 'Einstellungen → Vorlesen' };
+  return { zeit, docs, full, missing, first, summary };
+}
+
+function newPage(episodes, store, ctx) {
+  const { zeit, docs, missing, first, summary } = newEpisodeModel(episodes, store, ctx.url.searchParams.get('zeit'));
+  const picker = `<nav class="chips folge-zeit" aria-label="Zeitfenster">${WINDOWS.map((m) => `<a href="/lesen/folgen/neu?zeit=${m}" class="chip"${m === zeit ? ' aria-current="true"' : ''}>${m} Min.</a>`).join('')}</nav>`;
+  const step = (nr, title, hint = '') => `<div class="folge-schritt-kopf"><span class="folge-nr" aria-hidden="true">${nr}</span><div><h2>${title}</h2>${hint ? `<p class="meta">${hint}</p>` : ''}</div></div>`;
+  if (!docs.length) return `<section class="folge-schritt">${step(1, 'Welche Texte?', 'Aus dem Stapel, passend zur Zeit, die du hast.')}${picker}<p class="empty">Für dieses Zeitfenster passt nichts vom Stapel.</p></section>`;
+
   const texts = docs
     .map(
       ({ d, chars }) => `<li><label class="folge-textwahl">
@@ -131,20 +153,17 @@ function newPage(episodes, store, ctx) {
     )
     .join('');
 
-  const first = Object.keys(KINDS).find((k) => !missing[k]);
   const kinds = Object.entries(KINDS)
     .map(([kind, label]) => {
       const off = missing[kind];
-      const cost = kind === 'vorlesen' ? 'Kosten nach Textlänge, Gehörtes ist gratis' : '900 Zeichen je Minute, dazu Claude';
       return `<label class="folge-wahl${off ? ' is-off' : ''}">
         <input type="radio" name="art" value="${kind}"${off ? ' disabled' : kind === first ? ' checked' : ''}>
         <span class="folge-wahl-icon"><svg viewBox="0 0 24 24" aria-hidden="true">${KIND_ICONS[kind]}</svg></span>
-        <span class="folge-wahl-text"><b>${label}</b><span>${esc(DESCRIPTIONS[kind])}</span><span class="meta">${esc(off ?? cost)}</span></span>
+        <span class="folge-wahl-text"><b>${label}</b><span>${esc(DESCRIPTIONS[kind])}</span><span class="meta">${esc(off ?? kindCost(kind))}</span></span>
       </label>`;
     })
     .join('');
   const lengths = LENGTHS.map((m) => `<label><input type="radio" name="laenge" value="${m}"${m === 10 ? ' checked' : ''}><span>${m} Min.</span></label>`).join('');
-  const summary = first ? newSummary({ kind: first, texts: docs.length, chars: full, minutes: 10 }) : { main: 'Folgen brauchen ElevenLabs', cost: 'Einstellungen → Vorlesen' };
 
   return `<form method="post" action="/aktion/lesen/folge/neu" class="folge-neu" data-folge-neu>
     ${hidden({ csrf: ctx.write.csrf, back: ctx.write.back })}
@@ -167,6 +186,43 @@ function newPage(episodes, store, ctx) {
       <p class="meta">Die Folge entsteht im Hintergrund, du kannst die Seite verlassen. Fertige stehen unter <a href="/lesen/folgen">Folgen</a>.</p>
     </div>
   </form>`;
+}
+
+/** Nach einem Fehler: Knopf und Erklärung, je nachdem, ob Claudes Skript schon da ist. */
+const retryOf = (resumable) =>
+  resumable
+    ? { label: 'Fortsetzen', hint: 'Schon Gesprochenes und Claudes Skript bleiben; es kostet nur, was noch fehlt.' }
+    : { label: 'Erneut versuchen', hint: 'Claudes Skript fehlt noch, dafür schreibt Claude noch einmal (über dein Abo).' };
+
+/**
+ * Eine Folge als JSON für die App: alle Felder, Dauer der fertigen MP3
+ * (`seconds`, `bytes`), bei entstehenden der Stand wie `progressOf`, bei
+ * fehlgeschlagenen der Fehler und ob sie sich fortsetzen lässt.
+ */
+export function episodeJson(ep, { resumable = false, at = Date.now() } = {}) {
+  const busy = BUSY.includes(ep.status);
+  const failed = ep.status === 'fehler';
+  return {
+    id: ep.id,
+    kind: ep.kind,
+    kindLabel: KINDS[ep.kind] ?? ep.kind,
+    title: ep.title,
+    minutes: ep.minutes ?? null,
+    status: ep.status,
+    busy,
+    docs: ep.docs ?? [],
+    chars: ep.chars ?? 0,
+    createdAt: ep.created_at,
+    updatedAt: ep.updated_at ?? null,
+    finishedAt: ep.finished_at ?? null,
+    seconds: ep.status === 'fertig' ? secondsOf(ep) : null,
+    bytes: ep.bytes ?? null,
+    note: ep.note ?? null,
+    error: failed ? (ep.error ?? 'Unbekannter Fehler') : null,
+    resumable: failed && resumable,
+    retry: failed ? retryOf(resumable) : null,
+    progress: busy ? progressOf(ep, at) : null,
+  };
 }
 
 /** Eine Folge als Karte; auch für `/lesen/folgen/stand`. */
@@ -204,17 +260,15 @@ export function episodeCard(ep, { ctx, resumable = false, at = Date.now() }) {
   }
 
   if (ep.status === 'fehler') {
-    const again = resumable
-      ? ['Fortsetzen', 'Schon Gesprochenes und Claudes Skript bleiben; es kostet nur, was noch fehlt.']
-      : ['Erneut versuchen', 'Claudes Skript fehlt noch, dafür schreibt Claude noch einmal (über dein Abo).'];
+    const again = retryOf(resumable);
     return `<li class="folge is-failed" data-folge="${esc(ep.id)}" data-status="fehler">
     <div class="folge-card">${head([ep.minutes ? `${ep.minutes} Min.` : null, created])}</div>
     <p class="problem">${esc(ep.error ?? 'Unbekannter Fehler')}</p>
     <div class="folge-actions">
-      <form method="post" action="/aktion/lesen/folge/fortsetzen" class="inline">${hidden({ csrf: ctx.write.csrf, back: '/lesen/folgen', id: ep.id })}<button type="submit" class="btn primary">${again[0]}</button></form>
+      <form method="post" action="/aktion/lesen/folge/fortsetzen" class="inline">${hidden({ csrf: ctx.write.csrf, back: '/lesen/folgen', id: ep.id })}<button type="submit" class="btn primary">${again.label}</button></form>
       ${remove()}
     </div>
-    <p class="meta">${esc(again[1])}</p>
+    <p class="meta">${esc(again.hint)}</p>
   </li>`;
   }
 
@@ -284,10 +338,50 @@ const asAction = (run) => {
   }
 };
 
+/** JSON der Folgen, auch ohne Folgen (`enabled: false`): Die App fragt, statt zu raten. */
+function episodeApi({ store, episodes }) {
+  const off = { ok: true, enabled: false };
+  const kinds = (missing) => Object.entries(KINDS).map(([kind, label]) => ({ kind, label, description: DESCRIPTIONS[kind], cost: kindCost(kind), missing: missing?.[kind] ?? null }));
+  return {
+    /** Alle Folgen, neueste zuerst, und welche Arten gerade gehen. */
+    async '/api/lesen/folgen'() {
+      if (!episodes) return jsonReply(200, { ...off, items: [], kinds: kinds(null) });
+      const at = Date.now();
+      const missing = episodes.availability();
+      return jsonReply(200, { ok: true, enabled: true, items: episodes.list().map((ep) => episodeJson(ep, { resumable: episodes.resumable(ep.id), at })), availability: missing, kinds: kinds(missing) });
+    },
+    /** Vorschau für „Neue Folge“: Texte des Zeitfensters mit Zeichen, Arten, Längen und die Zusammenfassung je Art. */
+    async '/api/lesen/folgen/neu'(ctx) {
+      if (!episodes) return jsonReply(200, { ...off, docs: [], kinds: kinds(null) });
+      const { zeit, docs, full, missing, first, summary } = newEpisodeModel(episodes, store, ctx.url.searchParams.get('zeit'));
+      const summaries = Object.fromEntries(Object.keys(KINDS).filter((k) => !missing[k]).map((kind) => [kind, newSummary({ kind, texts: docs.length, chars: full, minutes: 10 })]));
+      return jsonReply(200, {
+        ok: true,
+        enabled: true,
+        zeit,
+        windows: WINDOWS,
+        docs: docs.map(({ d, chars }) => ({ ...stackItemJson(d), chars })),
+        chars: full,
+        availability: missing,
+        kinds: kinds(missing),
+        defaultKind: first,
+        lengths: LENGTHS,
+        defaultLength: 10,
+        maxDocs: MAX_DOCS,
+        spokenCharsPerMinute: SPOKEN_CHARS_PER_MINUTE,
+        summary,
+        summaries,
+      });
+    },
+  };
+}
+
 export function folgenRoutes({ store, episodes }) {
-  if (!episodes) return { pages: {}, actions: {} };
+  const api = episodeApi({ store, episodes });
+  if (!episodes) return { pages: api, actions: {} };
   return {
     pages: {
+      ...api,
       async '/lesen/folgen'(ctx) {
         return { html: readingPage(ctx, { key: 'folgen', title: 'Folgen', body: `<section>${listPage(episodes, ctx)}</section>`, scripts: [assets.lesenFolgen] }) };
       },

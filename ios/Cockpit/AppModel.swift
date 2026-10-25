@@ -5,7 +5,7 @@ import OSLog
 import UIKit
 import WebKit
 
-/// Reiter nach dem Login. Woche und Rückblick sind nativ, Lesen und Einstellungen (noch) Web.
+/// Reiter nach dem Login. Woche, Lesen und Rückblick sind nativ, Einstellungen (noch) Web.
 enum AppTab: Hashable {
     case week, reading, review, settings
 
@@ -78,11 +78,19 @@ final class AppModel {
     var tab: AppTab = .week
     /// Stapel des Reiters „Woche“ (Planen).
     var weekPath: [WeekDestination] = []
-    /// Startpfade der Web-Reiter; nach dem Login z. B. die Seite, auf der die Sitzung ablief.
-    var readingPath = AppTab.reading.path
+    /// Bereich des Reiters „Lesen“ (Unternavigation) und sein Stapel (Leseansicht, Neue Folge).
+    var readingSection: LesenSection = .eingang
+    var readingPath: [ReadingRoute] = []
+    /// Woche für „Wiedersehen“ (`/lesen/wiedersehen?woche=`), nil = laufende Woche.
+    var reviewWeek: String?
+    /// Filter für „Markiert“ (`/lesen/markiert?quelle=&thema=`).
+    var highlightQuery = HighlightQuery()
+    /// Zeitfenster für „Neue Folge“ (`/lesen/folgen/neu?zeit=`), nil = 30 Min.
+    var newEpisodeZeit: Int?
+    /// Blatt „Hinzufügen“ (Adresse oder PDF) im Reiter „Lesen“.
+    var showsAdd = false
+    /// Startpfad des Web-Reiters; nach dem Login z. B. die Seite, auf der die Sitzung ablief.
     var settingsPath = AppTab.settings.path
-    /// Zählt hoch, wenn ein nativer Bildschirm den Reiter „Lesen“ auf `readingPath` schickt (neu laden).
-    var readingLoads = 0
     var webSheet: WebPage?
     /// Zählt hoch, wenn die Schnelleingabe den Fokus bekommen soll (`/?erfassen=1`).
     var captureFocusRequest = 0
@@ -191,11 +199,57 @@ final class AppModel {
     }
 
     /// Reiter „Lesen“ auf einer Seite öffnen, z. B. „Markierungen dieser Woche wiedersehen“ aus dem Rückblick.
+    /// Was noch nicht nativ ist (Feeds, Wissen), kommt als Blatt.
     func openReading(path: String) {
+        if let route = ReadingRoute(webPath: path) {
+            open(reading: route)
+        } else {
+            webSheet = WebPage(path: path)
+        }
+    }
+
+    /// Link auf eine Seite des Lesens: Bereich wählen und laden, Leseansicht oder „Neue Folge“
+    /// auf den Stapel legen, „Hinzufügen“ als Blatt, „Unterwegs hören“ im nativen Player.
+    func open(reading route: ReadingRoute) {
         webSheet = nil
-        readingPath = path
-        readingLoads += 1
+        let wasReading = tab == .reading
+        switch route {
+        case .listen(let zeit):
+            // Der Player liegt über allen Reitern; der Reiter bleibt.
+            listening = ListenRequest(minutes: zeit ?? 15)
+            return
+        case .inbox(let group):
+            show(.eingang)
+            if let cockpit { Task { await cockpit.inbox.load(group: group) } }
+        case .stack(let query):
+            show(.stapel)
+            if let cockpit { Task { await cockpit.stack.load(query) } }
+        case .highlights(let query):
+            highlightQuery = query
+            show(.markiert)
+        case .review(let week):
+            reviewWeek = week
+            show(.wiedersehen)
+        case .episodes:
+            show(.folgen)
+        case .add:
+            showsAdd = true
+        case .reader, .newEpisode:
+            if case .newEpisode(let zeit) = route { newEpisodeZeit = zeit }
+            // Aus dem Lesen heraus obendrauf (zurück führt dorthin), aus anderen Reitern frisch.
+            if wasReading, readingPath.last != route {
+                readingPath.append(route)
+            } else if !wasReading {
+                readingPath = [route]
+            }
+        }
         tab = .reading
+    }
+
+    /// Bereich der Unternavigation wählen; der Stapel (Leseansicht …) geht zu.
+    private func show(_ section: LesenSection) {
+        readingPath = []
+        readingSection = section
     }
 
     /// Reiter gewechselt (Leiste oder Link). Wie der Link „Rückblick“ im Web zeigt der Rückblick
@@ -213,6 +267,8 @@ final class AppModel {
     func open(path: String) {
         if let route = NativeRoute(webPath: path) {
             open(route)
+        } else if let route = ReadingRoute(webPath: path) {
+            open(reading: route)
         } else {
             webSheet = WebPage(path: path)
         }
@@ -220,11 +276,8 @@ final class AppModel {
 
     /// Nach dem Login dorthin, wo die Sitzung ablief: nativer Bildschirm, Web-Reiter oder Blatt.
     private func open(afterLogin path: String) {
-        if NativeRoute(webPath: path) != nil {
+        if NativeRoute(webPath: path) != nil || ReadingRoute(webPath: path) != nil {
             open(path: path)
-        } else if path.hasPrefix(AppTab.reading.path) {
-            readingPath = path
-            tab = .reading
         } else if path.hasPrefix(AppTab.settings.path) {
             settingsPath = path
             tab = .settings
@@ -268,8 +321,12 @@ final class AppModel {
         SnapshotStore.applicationSupport().removeAll()
         tab = .week
         weekPath = []
-        readingPath = AppTab.reading.path
-        readingLoads = 0
+        readingSection = .eingang
+        readingPath = []
+        reviewWeek = nil
+        highlightQuery = HighlightQuery()
+        newEpisodeZeit = nil
+        showsAdd = false
         settingsPath = AppTab.settings.path
         webSheet = nil
         startPath = "/"

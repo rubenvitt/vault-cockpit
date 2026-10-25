@@ -11,7 +11,9 @@ final class WebShellTests: XCTestCase {
     }
 
     func testOwnPagesStayInWebView() {
-        XCTAssertEqual(decide("https://vault.test/lesen/stapel?zeit=15"), .allow)
+        XCTAssertEqual(decide("https://vault.test/lesen/feeds"), .allow, "Feeds bleiben Web")
+        XCTAssertEqual(decide("https://vault.test/wissen?q=lesen"), .allow, "Wissen bleibt Web")
+        XCTAssertEqual(decide("https://vault.test/einstellungen"), .allow)
         XCTAssertEqual(decide("https://vault.test/logout"), .allow, "nur POST meldet ab")
         XCTAssertEqual(decide("about:blank"), .allow)
     }
@@ -48,6 +50,107 @@ final class WebShellTests: XCTestCase {
         XCTAssertEqual(review, .allow)
         let week = NavigationDecision.decide(URL(string: "https://vault.test/?woche=2026-W40")!, method: "GET", server: server, isMainFrame: true, webOnly: "/rueckblick")
         XCTAssertEqual(week, .native(.week("2026-W40")))
+    }
+
+    func testReadingPagesOpenNatively() {
+        XCTAssertEqual(decide("https://vault.test/lesen"), .reading(.inbox(group: nil)))
+        XCTAssertEqual(decide("https://vault.test/lesen/eingang?gruppe=ohne"), .reading(.inbox(group: "ohne")))
+        XCTAssertEqual(decide("https://vault.test/lesen/stapel?zeit=15"), .reading(.stack(StackQuery(zeit: 15))))
+        XCTAssertEqual(decide("https://vault.test/lesen/stapel?sort=kurz&gruppe=g1"), .reading(.stack(StackQuery(sort: "kurz", group: "g1"))))
+        XCTAssertEqual(decide("https://vault.test/lesen/doc?id=d1#weiter"), .reading(.reader(id: "d1", highlight: nil, resume: true)))
+        XCTAssertEqual(decide("https://vault.test/lesen/doc?id=d1#h-m7"), .reading(.reader(id: "d1", highlight: "m7", resume: false)))
+        XCTAssertEqual(decide("https://vault.test/lesen/markiert?quelle=Blatt"), .reading(.highlights(HighlightQuery(site: "Blatt"))))
+        XCTAssertEqual(decide("https://vault.test/lesen/wiedersehen?woche=2026-W43"), .reading(.review(week: "2026-W43")))
+        XCTAssertEqual(decide("https://vault.test/lesen/folgen"), .reading(.episodes))
+        XCTAssertEqual(decide("https://vault.test/lesen/folgen/neu?zeit=15"), .reading(.newEpisode(zeit: 15)))
+        XCTAssertEqual(decide("https://vault.test/lesen/hinzufuegen"), .reading(.add))
+        XCTAssertEqual(decide("https://vault.test/lesen/hoeren?zeit=30"), .reading(.listen(zeit: 30)))
+        // Ohne ID keine Leseansicht; Formulare und Rahmen bleiben in der Seite.
+        XCTAssertEqual(decide("https://vault.test/lesen/doc"), .allow)
+        XCTAssertEqual(decide("https://vault.test/lesen/stapel", method: "POST"), .allow)
+        XCTAssertEqual(decide("https://vault.test/lesen/stapel", mainFrame: false), .allow)
+        XCTAssertEqual(decide("https://blatt.test/lesen/stapel"), .external(URL(string: "https://blatt.test/lesen/stapel")!))
+    }
+
+    @MainActor
+    func testReadingLinksSwitchToTheReadingTab() {
+        let model = AppModel(config: AppConfiguration(info: ["CockpitServerURL": "https://vault.test"]))
+        model.open(path: "/lesen/stapel?zeit=15")
+        XCTAssertEqual(model.tab, .reading)
+        XCTAssertEqual(model.readingSection, .stapel)
+        XCTAssertEqual(model.readingPath, [])
+
+        model.open(path: "/lesen/doc?id=d1#weiter")
+        XCTAssertEqual(model.readingPath, [.reader(id: "d1", highlight: nil, resume: true)])
+        model.open(path: "/lesen/doc?id=d2")
+        XCTAssertEqual(model.readingPath.count, 2, "aus dem Lesen heraus obendrauf")
+        model.open(path: "/lesen/doc?id=d2")
+        XCTAssertEqual(model.readingPath.count, 2, "derselbe Text nicht zweimal")
+
+        model.openReading(path: "/lesen/wiedersehen?woche=2026-W43")
+        XCTAssertEqual(model.readingSection, .wiedersehen)
+        XCTAssertEqual(model.reviewWeek, "2026-W43")
+        XCTAssertEqual(model.readingPath, [], "Bereich wechseln schließt die Leseansicht")
+
+        model.tab = .week
+        model.open(path: "/lesen/doc?id=d3#h-m1")
+        XCTAssertEqual(model.tab, .reading)
+        XCTAssertEqual(model.readingPath, [.reader(id: "d3", highlight: "m1", resume: false)], "aus einem anderen Reiter frisch")
+
+        model.open(path: "/lesen/hoeren?zeit=30")
+        XCTAssertEqual(model.listening?.minutes, 30)
+        model.open(path: "/lesen/hinzufuegen")
+        XCTAssertTrue(model.showsAdd)
+        model.open(path: "/lesen/feeds")
+        XCTAssertEqual(model.webSheet?.path, "/lesen/feeds", "Feeds als Blatt")
+        model.open(path: "/lesen/folgen/neu?zeit=15")
+        XCTAssertNil(model.webSheet)
+        XCTAssertEqual(model.newEpisodeZeit, 15)
+        XCTAssertEqual(model.readingPath.last, .newEpisode(zeit: 15))
+        model.open(path: "/lesen/markiert?thema=Technik")
+        XCTAssertEqual(model.readingSection, .markiert)
+        XCTAssertEqual(model.highlightQuery, HighlightQuery(topic: "Technik"))
+    }
+
+    func testReadingSections() {
+        XCTAssertEqual(LesenSection.allCases.map(\.label), ["Eingang", "Stapel", "Folgen", "Markiert", "Wiedersehen", "Wissen", "Feeds"])
+        XCTAssertEqual(LesenSection.wissen.webPath, "/wissen")
+        XCTAssertEqual(LesenSection.feeds.webPath, "/lesen/feeds")
+        XCTAssertNil(LesenSection.stapel.webPath, "nativ")
+    }
+
+    func testInboxSwipe() {
+        let card = CGSize(width: 300, height: 400)
+        var swipe = EingangSwipe(startX: 100, width: 390)
+        swipe.update(CGSize(width: 20, height: 5))
+        XCTAssertEqual(swipe.offset, .zero, "erst ab 32 pt steht die Richtung fest")
+        swipe.update(CGSize(width: 60, height: 10))
+        XCTAssertEqual(swipe.axis, .horizontal)
+        XCTAssertEqual(swipe.offset, CGSize(width: 60, height: 0), "nur entlang der Achse")
+        XCTAssertNil(swipe.target(card: card), "unter 30 % der Breite")
+        swipe.update(CGSize(width: 95, height: 40))
+        XCTAssertEqual(swipe.target(card: card), .lesen)
+        XCTAssertEqual(swipe.rotation, 95.0 / 30, accuracy: 0.001)
+        swipe.update(CGSize(width: -95, height: 0))
+        XCTAssertEqual(swipe.target(card: card), .weg)
+
+        var down = EingangSwipe(startX: 100, width: 390)
+        down.update(CGSize(width: 5, height: 40))
+        XCTAssertEqual(down.axis, .vertical)
+        down.update(CGSize(width: 5, height: 130))
+        XCTAssertEqual(down.target(card: card), .stapel)
+        down.update(CGSize(width: 0, height: -50))
+        XCTAssertEqual(down.offset, .zero, "nach oben bleibt die Karte liegen")
+
+        var diagonal = EingangSwipe(startX: 100, width: 390)
+        diagonal.update(CGSize(width: 30, height: 30))
+        XCTAssertTrue(diagonal.isRejected, "schräg zählt nicht")
+        diagonal.update(CGSize(width: 200, height: 0))
+        XCTAssertEqual(diagonal.offset, .zero)
+        XCTAssertNil(diagonal.target(card: card))
+
+        XCTAssertTrue(EingangSwipe(startX: 10, width: 390).isRejected, "Rand gehört der Zurück-Geste")
+        XCTAssertTrue(EingangSwipe(startX: 380, width: 390).isRejected)
     }
 
     @MainActor

@@ -1,0 +1,80 @@
+{
+  "ok": true,
+  "zeit": 5,
+  "sort": "passt",
+  "windows": [
+    5,
+    15,
+    30,
+    60
+  ],
+  "sorts": [
+    {
+      "key": "passt",
+      "label": "Passt jetzt"
+    },
+    {
+      "key": "neu",
+      "label": "Neueste"
+    },
+    {
+      "key": "kurz",
+      "label": "Kürzeste"
+    }
+  ],
+  "filter": {
+    "gruppe": "ohne"
+  },
+  "groups": [
+    {
+      "id": "f60a3c79-3a3c-4e05-bda2-4c565b140c5f",
+      "name": "Technik"
+    },
+    {
+      "id": "3d9a6963-3cc9-44b6-be6e-4462fb99c0f1",
+      "name": "Gesellschaft"
+    }
+  ],
+  "showGroups": true,
+  "count": 4,
+  "items": [
+    {
+      "id": "b2ff6382-a773-4263-ae89-1ab3c95d63f5",
+      "url": "https://zeit.example.org/lesen",
+      "canonicalUrl": null,
+      "title": "Vom langsamen Lesen",
+      "author": null,
+      "site": "Zeit",
+      "kind": "artikel",
+      "kindLabel": "Artikel",
+      "origin": "formular",
+      "excerpt": "Langsam lesen heißt besser behalten. Der Stapel darf warten.",
+      "wordCount": 9,
+      "readingMinutes": 7,
+      "status": "stapel",
+      "previousStatus": null,
+      "progress": 0,
+      "scrollAnchor": 0,
+      "topics": [
+        "Lesen"
+      ],
+      "savedAt": "2026-10-23T09:07:32.037Z",
+      "statusChangedAt": "2026-10-23T09:07:32.037Z",
+      "readAt": null,
+      "archivedAt": null,
+      "updatedAt": "2026-10-23T09:07:32.037Z",
+      "remaining": 7,
+      "started": false
+    }
+  ],
+  "window": {
+    "used": 0,
+    "of": 5,
+    "more": 0,
+    "fits": false
+  },
+  "vault": true,
+  "episodes": true,
+  "listenZeit": 5,
+  "episodeZeit": 5
+}

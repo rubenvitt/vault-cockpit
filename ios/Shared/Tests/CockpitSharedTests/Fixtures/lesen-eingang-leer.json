@@ -1,0 +1,40 @@
+{
+  "ok": true,
+  "doc": null,
+  "left": 0,
+  "more": false,
+  "today": {
+    "seen": 1,
+    "total": 1,
+    "last": {
+      "id": "2f94c7c3-f257-413a-be3a-365c29ddcb50",
+      "title": "Newsletter Oktober",
+      "url": "https://mail.example.org/n1"
+    }
+  },
+  "undo": {
+    "action": "/aktion/lesen/sortieren",
+    "fields": {
+      "id": "2f94c7c3-f257-413a-be3a-365c29ddcb50",
+      "ziel": "eingang"
+    }
+  },
+  "filter": {
+    "gruppe": "ohne"
+  },
+  "groups": [
+    {
+      "id": "f60a3c79-3a3c-4e05-bda2-4c565b140c5f",
+      "name": "Technik",
+      "count": 1
+    },
+    {
+      "id": "3d9a6963-3cc9-44b6-be6e-4462fb99c0f1",
+      "name": "Gesellschaft",
+      "count": 0
+    }
+  ],
+  "noFeedCount": 0,
+  "showGroups": true,
+  "vault": true
+}

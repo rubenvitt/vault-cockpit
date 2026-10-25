@@ -1,0 +1,103 @@
+{
+  "ok": true,
+  "filter": {
+    "quelle": null,
+    "thema": "Gewohnheit"
+  },
+  "facets": {
+    "sites": [
+      "Blatt",
+      "Zeit"
+    ],
+    "topics": [
+      "Gewohnheit",
+      "Lesen"
+    ]
+  },
+  "items": [
+    {
+      "id": "6f1c0b0e-1111-4c4c-9d9d-000000000001",
+      "docId": "1031d266-e30f-4163-af2c-483c2fe68816",
+      "quote": "Wir überschätzen später.",
+      "prefix": "raucht Zeit:am Abendunterwegs 🚆",
+      "suffix": "\nEin Stapel ist ein Versprechen ",
+      "startHint": 262,
+      "note": null,
+      "createdAt": "2026-10-25T09:07:32.067Z",
+      "updatedAt": "2026-10-25T09:07:32.067Z",
+      "reviewBox": 0,
+      "reviewDue": "2026-10-26T09:07:32.067Z",
+      "reviewState": "aktiv",
+      "docTitle": "Warum der Stapel wächst",
+      "docUrl": "https://blatt.example.org/stapel",
+      "docSite": "Blatt",
+      "docTopics": [
+        "Lesen",
+        "Gewohnheit"
+      ]
+    },
+    {
+      "id": "bc9fa004-ce9f-490c-9f9c-f5ab36321994",
+      "docId": "1031d266-e30f-4163-af2c-483c2fe68816",
+      "quote": "Dieser Satz wurde aus dem Artikel gestrichen.",
+      "prefix": "",
+      "suffix": "",
+      "startHint": 0,
+      "note": "Alte Stelle",
+      "createdAt": "2026-10-23T09:07:32.037Z",
+      "updatedAt": "2026-10-23T09:07:32.037Z",
+      "reviewBox": 0,
+      "reviewDue": "2026-10-24T09:07:32.037Z",
+      "reviewState": "aktiv",
+      "docTitle": "Warum der Stapel wächst",
+      "docUrl": "https://blatt.example.org/stapel",
+      "docSite": "Blatt",
+      "docTopics": [
+        "Lesen",
+        "Gewohnheit"
+      ]
+    },
+    {
+      "id": "2a2cb0a5-a618-46f6-9d58-2561f594f970",
+      "docId": "1031d266-e30f-4163-af2c-483c2fe68816",
+      "quote": "Ein Stapel ist ein Versprechen an sich selbst.",
+      "prefix": "wegs 🚆Wir überschätzen später.\n",
+      "suffix": "\nstapel.push(text)\nstapel.length",
+      "startHint": 287,
+      "note": null,
+      "createdAt": "2026-10-23T09:07:32.037Z",
+      "updatedAt": "2026-10-23T09:07:32.037Z",
+      "reviewBox": 0,
+      "reviewDue": "2026-10-24T09:07:32.037Z",
+      "reviewState": "aktiv",
+      "docTitle": "Warum der Stapel wächst",
+      "docUrl": "https://blatt.example.org/stapel",
+      "docSite": "Blatt",
+      "docTopics": [
+        "Lesen",
+        "Gewohnheit"
+      ]
+    },
+    {
+      "id": "de8f6b53-f1c2-4992-9657-69f54f1173a5",
+      "docId": "1031d266-e30f-4163-af2c-483c2fe68816",
+      "quote": "Speichern leichter ist als Lesen",
+      "prefix": " wächst\nDer Stapel wächst, weil ",
+      "suffix": ". Wer viel speichert, liest am E",
+      "startHint": 48,
+      "note": "Kern des Arguments",
+      "createdAt": "2026-10-23T09:07:32.037Z",
+      "updatedAt": "2026-10-23T09:07:32.037Z",
+      "reviewBox": 0,
+      "reviewDue": "2026-10-24T09:07:32.037Z",
+      "reviewState": "aktiv",
+      "docTitle": "Warum der Stapel wächst",
+      "docUrl": "https://blatt.example.org/stapel",
+      "docSite": "Blatt",
+      "docTopics": [
+        "Lesen",
+        "Gewohnheit"
+      ]
+    }
+  ]
+}

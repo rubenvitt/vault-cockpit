@@ -2,6 +2,7 @@ import { esc } from '../web/layout.js';
 import { hidden } from '../web/render.js';
 import { readingPage } from './pages.js';
 import { NO_FEED } from './store.js';
+import { docJson, groupsJson, jsonReply } from './json.js';
 
 /**
  * Stapel nach Zeitfenster (VCP-72): `/lesen/stapel?zeit=15` füllt die Zeit
@@ -9,6 +10,7 @@ import { NO_FEED } from './store.js';
  * `?sort=passt|neu|kurz`. Links und je Eintrag „Im Vault ablegen“ als
  * Formular (VCP-96), funktioniert ohne JavaScript. `?gruppe=` schränkt auf
  * eine Feed-Gruppe oder „ohne Feed“ ein (VCP-97), auch im Eingang.
+ * `/api/lesen/stapel` liefert dieselbe Auswahl als JSON für die App.
  */
 
 export const WINDOWS = [5, 15, 30, 60];
@@ -91,13 +93,29 @@ function windowPicker(zeit, gruppe) {
   return `<nav class="chips stapel-zeit" aria-label="Zeitfenster">${links.join('')}</nav>`;
 }
 
-function windowBody(docs, zeit, file) {
-  const { items, total } = fitToWindow(docs, zeit);
-  if (!items.length) {
-    const [shortest = docs[0]] = docs.filter(known).map((d) => ({ ...d, remaining: remainingMinutes(d) })).sort((a, b) => a.remaining - b.remaining);
-    return `<p class="empty">Nichts passt ganz – lies den Anfang eines längeren Textes</p>${list([shortest], file)}`;
+/**
+ * Was `/lesen/stapel` zeigt, für Seite und JSON: mit Zeitfenster `zeit` die
+ * passenden Texte (`total` Minuten, `rest` weitere warten), passt nichts, nur
+ * der kürzeste (`fits: false`); ohne Zeitfenster alle nach `sort`.
+ */
+export function stackSelection(docs, { zeit = null, sort = 'passt' } = {}) {
+  if (zeit) {
+    const { items, total } = fitToWindow(docs, zeit);
+    if (!items.length) {
+      const [shortest = docs[0]] = docs.filter(known).map((d) => ({ ...d, remaining: remainingMinutes(d) })).sort((a, b) => a.remaining - b.remaining);
+      return { items: shortest ? [shortest] : [], total: 0, rest: 0, fits: false };
+    }
+    return { items, total, rest: docs.length - items.length, fits: true };
   }
-  const rest = docs.length - items.length;
+  const all = docs.map((d) => ({ ...d, remaining: remainingMinutes(d) }));
+  // `neu`: Reihenfolge aus dem Speicher, neueste zuerst.
+  if (sort === 'kurz') all.sort((a, b) => a.remaining - b.remaining);
+  if (sort === 'passt') all.sort(fitsNow);
+  return { items: all, total: null, rest: 0, fits: true };
+}
+
+function windowBody({ items, total, rest, fits }, zeit, file) {
+  if (!fits) return `<p class="empty">Nichts passt ganz – lies den Anfang eines längeren Textes</p>${list(items, file)}`;
   return `<div class="stapel-fill">
     <progress class="stapel-bar" value="${total}" max="${zeit}" aria-hidden="true"></progress>
     <span class="meta">${total} von ${zeit} Min.</span>
@@ -106,34 +124,62 @@ function windowBody(docs, zeit, file) {
   ${rest ? `<p class="meta stapel-rest">${rest} weitere warten</p>` : ''}`;
 }
 
-function allBody(docs, sort, file, gruppe) {
-  const all = docs.map((d) => ({ ...d, remaining: remainingMinutes(d) }));
-  // `neu`: Reihenfolge aus dem Speicher, neueste zuerst.
-  if (sort === 'kurz') all.sort((a, b) => a.remaining - b.remaining);
-  if (sort === 'passt') all.sort(fitsNow);
+function allBody({ items }, sort, file, gruppe) {
   const sorter = `<nav class="chips stapel-sort" aria-label="Sortierung">${SORTS.map(([key, label]) => chip(link('/lesen/stapel', { sort: key, gruppe }), label, sort === key)).join('')}</nav>`;
-  return `${sorter}${list(all, file)}`;
+  return `${sorter}${list(items, file)}`;
 }
 
+/** Eintrag des Stapels als JSON: Restzeit (`null` ohne bekannte Lesezeit) und ob angefangen. */
+export const stackItemJson = (d) => ({ ...docJson(d), remaining: known(d) ? (d.remaining ?? remainingMinutes(d)) : null, started: started(d) });
+
 export function stackRoutes({ store, vault = false, folgen = false }) {
+  /** Zeitfenster, Sortierung und Gruppe aus der Query, dazu die Texte des Stapels. */
+  const query = (url) => {
+    const zeit = Number(url.searchParams.get('zeit'));
+    const minutes = WINDOWS.includes(zeit) ? zeit : null;
+    const sortParam = url.searchParams.get('sort');
+    const sort = SORTS.some(([key]) => key === sortParam) ? sortParam : 'passt';
+    // SQLite: LIMIT -1 heißt ohne Grenze; kurze Texte sollen auch hinter den neuesten 100 passen.
+    const filter = groupFilter(store, url);
+    const docs = store.list({ status: 'stapel', group: filter.group, limit: -1 });
+    return { minutes, sortParam, sort, filter, docs };
+  };
   return {
     pages: {
       async '/lesen/stapel'(ctx) {
-        const zeit = Number(ctx.url.searchParams.get('zeit'));
-        const minutes = WINDOWS.includes(zeit) ? zeit : null;
-        const sortParam = ctx.url.searchParams.get('sort');
-        const sort = SORTS.some(([key]) => key === sortParam) ? sortParam : 'passt';
-        // SQLite: LIMIT -1 heißt ohne Grenze; kurze Texte sollen auch hinter den neuesten 100 passen.
-        const filter = groupFilter(store, ctx.url);
-        const docs = store.list({ status: 'stapel', group: filter.group, limit: -1 });
+        const { minutes, sortParam, sort, filter, docs } = query(ctx.url);
         // Im Vault ablegen (VCP-96): je Eintrag ein Formular, die Aktion steht in src/lesen/doc.js.
         const file = vault
           ? (d) => `<form method="post" action="/aktion/lesen/ablegen" class="act lesen-ablegen">${hidden({ csrf: ctx.write.csrf, back: ctx.write.back, id: d.id })}<button type="submit" class="btn quiet">Im Vault ablegen<span class="sr-only">: ${esc(d.title || d.url)}</span></button></form>`
           : null;
-        const content = !docs.length ? '<p class="empty">Auf dem Stapel liegt nichts.</p>' : minutes ? windowBody(docs, minutes, file) : allBody(docs, sort, file, filter.group);
+        const selection = stackSelection(docs, { zeit: minutes, sort });
+        const content = !docs.length ? '<p class="empty">Auf dem Stapel liegt nichts.</p>' : minutes ? windowBody(selection, minutes, file) : allBody(selection, sort, file, filter.group);
         const groups = groupChips('/lesen/stapel', filter, { zeit: minutes, sort: sortParam === sort && !minutes ? sort : null });
         // „Unterwegs hören“ ohne `gruppe`: /lesen/hoeren kennt nur `zeit`.
         return { html: readingPage(ctx, { key: 'stapel', title: 'Stapel', body: `<section>${groups}${windowPicker(minutes, filter.group)}<p class="stapel-hoeren"><a href="/lesen/hoeren?zeit=${minutes ?? 15}" class="btn quiet">Unterwegs hören</a>${folgen ? ` <a href="/lesen/folgen/neu?zeit=${minutes ?? 30}" class="btn quiet">Folge erzeugen</a>` : ''}</p>${content}</section>` }) };
+      },
+      /** Stapel als JSON: Einträge mit Restzeit, beim Zeitfenster `window` (x von y Min., n weitere, ob etwas passt). */
+      async '/api/lesen/stapel'(ctx) {
+        const { minutes, sort, filter, docs } = query(ctx.url);
+        const { items, total, rest, fits } = stackSelection(docs, { zeit: minutes, sort });
+        return jsonReply(200, {
+          ok: true,
+          zeit: minutes,
+          sort,
+          windows: WINDOWS,
+          sorts: SORTS.map(([key, label]) => ({ key, label })),
+          filter: { gruppe: filter.group },
+          groups: groupsJson(filter.groups),
+          showGroups: filter.groups.length > 0 || Boolean(filter.group),
+          count: docs.length,
+          items: items.map(stackItemJson),
+          window: minutes ? { used: total, of: minutes, more: rest, fits } : null,
+          vault,
+          episodes: folgen,
+          // Zeitfenster für „Unterwegs hören“ und „Folge erzeugen“ wie die Knöpfe der Seite.
+          listenZeit: minutes ?? 15,
+          episodeZeit: minutes ?? 30,
+        });
       },
     },
     actions: {},

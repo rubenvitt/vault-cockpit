@@ -9,7 +9,8 @@ import { docLink } from './doc.js';
 import { inboxText } from './highlights.js';
 import { REVIEW_STATES } from './store.js';
 import { createEmbedCache } from './embed-cache.js';
-import { MAX_BOX, SESSION_LIMIT, dueCards, findClusters, isDue, keep, letGo, seenToday } from './review.js';
+import { MAX_BOX, SESSION_LIMIT, dueAt, dueCards, findClusters, isDue, keep, letGo, seenToday } from './review.js';
+import { highlightJson, jsonReply } from './json.js';
 
 /**
  * Wiedersehen (VCP-74): fällige Markierungen nacheinander, je Karte Behalten,
@@ -22,6 +23,9 @@ import { MAX_BOX, SESSION_LIMIT, dueCards, findClusters, isDue, keep, letGo, see
  * - `/aktion/lesen/wiedersehen`: `id`, `ziel` (`behalten|worte|loslassen`), bei `worte` dazu `worte`, `cid`
  * - `/aktion/lesen/wiedersehen/zurueck`: `id`, `box`, `faellig`, `zustand` (der Stand vor der Entscheidung)
  * - `/aktion/lesen/wiedersehen/verbindung`: `ids` (Markierungen, durch Komma getrennt)
+ *
+ * `/api/lesen/wiedersehen?woche=` liefert die Karten von heute und die Woche
+ * als JSON, `/api/lesen/wiedersehen.md?woche=` den Export für die App.
  */
 
 const REVIEW = '/aktion/lesen/wiedersehen';
@@ -61,9 +65,18 @@ export function weekMarkdown(items, w) {
   return `# Markierungen KW ${w.week} (${range})\n\n${sections.length ? sections.join('\n\n') : 'Keine Markierungen in dieser Woche.'}\n`;
 }
 
+/** Box 1..5 für die Anzeige („Box b von 5“); neue zählen als Box 1. */
+const boxLabel = (h) => Math.min(MAX_BOX, Math.max(1, h.review_box));
+
+/** Zahlen der Woche: Markierungen, Texte, Themen (je Thema, sonst Quelle). */
+function weekStats(items) {
+  const topics = topicCounts(items);
+  return { topics, docs: new Set(items.map((h) => h.doc_id)).size };
+}
+
 function renderCard(h, ctx, { canCapture }) {
   const write = { csrf: ctx.write.csrf, back: ctx.write.back };
-  const meta = [`<a href="${esc(`${docLink(h.doc_id)}#h-${h.id}`)}">${esc(name(h))}</a>`, h.doc_site ? esc(h.doc_site) : null, `Box ${Math.min(MAX_BOX, Math.max(1, h.review_box))} von ${MAX_BOX}`].filter(Boolean).join(' · ');
+  const meta = [`<a href="${esc(`${docLink(h.doc_id)}#h-${h.id}`)}">${esc(name(h))}</a>`, h.doc_site ? esc(h.doc_site) : null, `Box ${boxLabel(h)} von ${MAX_BOX}`].filter(Boolean).join(' · ');
   const words = canCapture
     ? `<details class="wiedersehen-worte"><summary>In eigenen Worten</summary>
       <form method="post" action="${REVIEW}" class="act">${hidden({ ...write, id: h.id, ziel: 'worte', cid: randomUUID() })}
@@ -87,9 +100,8 @@ function renderCard(h, ctx, { canCapture }) {
 }
 
 function renderWeek({ w, items, clusters }, ctx, { canCapture }) {
-  const topics = topicCounts(items);
+  const { topics, docs } = weekStats(items);
   const max = topics[0]?.count ?? 0;
-  const docs = new Set(items.map((h) => h.doc_id)).size;
   const pager = `<nav class="pager" aria-label="Wochen">
     <a href="/lesen/wiedersehen?woche=${esc(w.prev)}" rel="prev" aria-label="Vorige Woche, KW ${Number(w.prev.slice(6))}"><span aria-hidden="true">‹</span> KW ${Number(w.prev.slice(6))}</a>
     <span class="pager-now">KW ${w.week}</span>
@@ -168,31 +180,75 @@ export function reviewRoutes({ store, capture = null, embedder = () => null, emb
   };
   const undoOf = (h) => ({ action: UNDO, fields: { id: h.id, box: h.review_box, faellig: h.review_due ?? '', zustand: h.review_state } });
 
+  /** Was die Seite zeigt: Fällige, Zähler von heute, die Woche aus `?woche=` mit Häufungen. */
+  async function model(ctx) {
+    const t = now();
+    // Ohne Grenze (`LIMIT -1`): auch alte Markierungen kommen wieder.
+    const all = store.listHighlights({ limit: -1 });
+    const seen = all.filter((h) => seenToday(h, dayStart(t, ctx.tz), t)).length;
+    const due = dueCards(all, t);
+    const left = Math.min(due.length, Math.max(0, SESSION_LIMIT - seen));
+    const w = weekFrom(ctx.url, t, ctx.tz);
+    const items = all.filter((h) => inWeek(h, w));
+    const sample = items.slice(0, CLUSTER_MAX_ITEMS);
+    const vectors = await vectorsFor(sample);
+    const clusters = vectors ? findClusters(sample, vectors, { threshold: CLUSTER_THRESHOLD }).slice(0, 3) : [];
+    return { card: left ? due[0] : null, due, seen, left, later: due.length - left, w, items, clusters };
+  }
+
+  /** Markdown der Woche als Download (Web) und für die App. */
+  async function markdown(ctx) {
+    const w = weekFrom(ctx.url, now(), ctx.tz);
+    const items = store.listHighlights({ limit: -1 }).filter((h) => inWeek(h, w));
+    return {
+      body: weekMarkdown(items, w),
+      headers: { 'content-type': 'text/markdown; charset=utf-8', 'content-disposition': `attachment; filename="markierungen-${w.id}.md"`, 'cache-control': 'no-store' },
+    };
+  }
+
   return {
     pages: {
       async '/lesen/wiedersehen'(ctx) {
-        const t = now();
-        // Ohne Grenze (`LIMIT -1`): auch alte Markierungen kommen wieder.
-        const all = store.listHighlights({ limit: -1 });
-        const seen = all.filter((h) => seenToday(h, dayStart(t, ctx.tz), t)).length;
-        const due = dueCards(all, t);
-        const left = Math.min(due.length, Math.max(0, SESSION_LIMIT - seen));
-        const w = weekFrom(ctx.url, t, ctx.tz);
-        const items = all.filter((h) => inWeek(h, w));
-        const sample = items.slice(0, CLUSTER_MAX_ITEMS);
-        const vectors = await vectorsFor(sample);
-        const clusters = vectors ? findClusters(sample, vectors, { threshold: CLUSTER_THRESHOLD }).slice(0, 3) : [];
-        const model = { card: left ? due[0] : null, seen, left, later: due.length - left, w, items, clusters };
-        return { html: renderReviewPage(model, ctx, { canCapture: Boolean(capture) }) };
+        return { html: renderReviewPage(await model(ctx), ctx, { canCapture: Boolean(capture) }) };
       },
-      async '/lesen/wiedersehen.md'(ctx) {
-        const w = weekFrom(ctx.url, now(), ctx.tz);
-        const items = store.listHighlights({ limit: -1 }).filter((h) => inWeek(h, w));
-        return {
-          body: weekMarkdown(items, w),
-          headers: { 'content-type': 'text/markdown; charset=utf-8', 'content-disposition': `attachment; filename="markierungen-${w.id}.md"`, 'cache-control': 'no-store' },
-        };
+      /**
+       * JSON: alle Karten, die heute noch dran sind (höchstens bis `SESSION_LIMIT`),
+       * Zähler wie „Heute x von y gesehen · n weitere morgen“ und die Woche.
+       */
+      async '/api/lesen/wiedersehen'(ctx) {
+        const { due, seen, left, later, w, items, clusters } = await model(ctx);
+        const { topics, docs } = weekStats(items);
+        const card = (h) => ({ ...highlightJson(h), box: boxLabel(h), dueAt: dueAt(h) });
+        return jsonReply(200, {
+          ok: true,
+          seen,
+          left,
+          later,
+          total: seen + left,
+          limit: SESSION_LIMIT,
+          maxBox: MAX_BOX,
+          canCapture: Boolean(capture),
+          cards: due.slice(0, left).map(card),
+          week: {
+            id: w.id,
+            year: w.year,
+            week: w.week,
+            monday: w.monday,
+            sunday: w.sunday,
+            start: w.start.toISOString(),
+            end: w.end.toISOString(),
+            label: `${dateLabel(w.start, ctx.tz)} – ${dateLabel(w.days[6].start, ctx.tz)}`,
+            prev: { id: w.prev, week: Number(w.prev.slice(6)) },
+            next: { id: w.next, week: Number(w.next.slice(6)) },
+            stats: { highlights: items.length, texts: docs, topics: topics.length },
+            topics,
+            clusters: clusters.map((group) => ({ ids: group.map((h) => h.id), items: group.map(highlightJson) })),
+            export: items.length ? `/api/lesen/wiedersehen.md?woche=${w.id}` : null,
+          },
+        });
       },
+      '/lesen/wiedersehen.md': markdown,
+      '/api/lesen/wiedersehen.md': markdown,
     },
     actions: {
       async [REVIEW](form, session) {

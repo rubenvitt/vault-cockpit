@@ -1,0 +1,28 @@
+{
+  "ok": true,
+  "enabled": false,
+  "docs": [],
+  "kinds": [
+    {
+      "kind": "vorlesen",
+      "label": "Vorlesen",
+      "description": "Die ganzen Texte nacheinander, eine Erzählerstimme.",
+      "cost": "Kosten nach Textlänge, Gehörtes ist gratis",
+      "missing": null
+    },
+    {
+      "kind": "podcast",
+      "label": "Podcast",
+      "description": "Claude schreibt ein Gespräch zweier Stimmen über die Texte.",
+      "cost": "900 Zeichen je Minute, dazu Claude",
+      "missing": null
+    },
+    {
+      "kind": "report",
+      "label": "Report",
+      "description": "Claude schreibt einen Bericht: als Notiz in die Inbox und eine Stimme liest ihn.",
+      "cost": "900 Zeichen je Minute, dazu Claude",
+      "missing": null
+    }
+  ]
+}

@@ -1,18 +1,26 @@
 import CockpitShared
 import Foundation
 import Network
+import Observation
 
 /// Was die nativen Bildschirme einer Anmeldung teilen: API mit dem Geräte-Token, Zwischenspeicher,
-/// Meldungen und die Stores. `AppModel` legt sie nach jedem Login neu an.
+/// Meldungen und die Stores. `AppModel` legt sie nach jedem Login neu an; `MainView` gibt sie
+/// als Environment weiter (`@Environment(CockpitSession.self)`).
 @MainActor
+@Observable
 final class CockpitSession {
     let context: CockpitContext
     let week: WeekStore
     let review: ReviewStore
     let plan: PlanStore
+    /// Puffer der Leseansicht (Markierungen, Fortschritt, Entscheidungen ohne Netz), einer je Anmeldung.
+    let reading: ReadingBuffer
+    /// Eingang und „Hinzufügen“, Stapel: bleiben beim Wechsel der Bereiche stehen.
+    let inbox: InboxStore
+    let stack: StackStore
 
-    private var monitor: NWPathMonitor?
-    private var online = true
+    @ObservationIgnored private var monitor: NWPathMonitor?
+    @ObservationIgnored private var online = true
 
     init(serverURL: URL, token: String) {
         context = CockpitContext(
@@ -23,6 +31,9 @@ final class CockpitSession {
         week = WeekStore(context: context)
         review = ReviewStore(context: context)
         plan = PlanStore(context: context)
+        reading = ReadingBuffer(context: context)
+        inbox = InboxStore(context: context)
+        stack = StackStore(context: context)
     }
 
     var toasts: ToastCenter { context.toasts }
@@ -38,6 +49,7 @@ final class CockpitSession {
         monitor.start(queue: DispatchQueue(label: "dev.rubeen.cockpit.netz"))
         self.monitor = monitor
         Task { await week.capture.resume() }
+        Task { await reading.resume() }
     }
 
     /// Abmelden oder neue Anmeldung: Netz, Vorschau und Wiederholung anhalten, Meldungen weg.
@@ -45,12 +57,14 @@ final class CockpitSession {
         monitor?.cancel()
         monitor = nil
         week.capture.stop()
+        reading.stop()
         context.toasts.dismissAll()
     }
 
     /// App wieder im Vordergrund: Puffer senden, eine ältere Woche neu laden (wie `visibilitychange` im Web).
     func foreground() async {
         await week.capture.flush()
+        await reading.flush()
         if let updated = week.state.lastUpdated, context.now().timeIntervalSince(updated) > 60, !week.state.isRefreshing {
             await week.refresh()
         }
@@ -58,6 +72,8 @@ final class CockpitSession {
 
     /// Netz zurück: Puffer senden, und was ohne Netz alt blieb, neu laden.
     private func network(online: Bool) {
+        // Zurück online sendet der Puffer des Lesens selbst.
+        reading.setOnline(online)
         let back = online && !self.online
         self.online = online
         guard back else { return }
@@ -67,6 +83,8 @@ final class CockpitSession {
             // Rückblick und Planung nur, wenn sie schon etwas zeigen.
             if review.model != nil, review.state.isStale || review.state.isOffline { await review.refresh() }
             if plan.model != nil, plan.state.isStale || plan.state.isOffline { await plan.refresh() }
+            if inbox.model != nil, inbox.state.isStale || inbox.state.isOffline { await inbox.refresh() }
+            if stack.model != nil, stack.state.isStale || stack.state.isOffline { await stack.refresh() }
         }
     }
 }
