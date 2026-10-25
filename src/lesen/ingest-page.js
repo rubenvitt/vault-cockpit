@@ -68,6 +68,8 @@ export function kindLabel(item) {
   if (item.kind === 'question') return 'Frage';
   if (item.kind === 'entity') return ENTITY[item.entity_type] ?? 'Entity';
   if (item.kind === 'concept') return 'Konzept';
+  // Verknüpfen mit einer anderen Source-Page (der Dienst nimmt den Seitentyp als Art).
+  if (item.kind === 'source') return 'Quelle';
   if (item.kind === 'bestaetigung') return 'Bestätigung';
   if (item.kind === 'relation') return 'Relation';
   return item.kind ?? 'Vorschlag';
@@ -278,25 +280,32 @@ function digestBlock(draft) {
   return `<section class="ingest-digest" aria-labelledby="ingest-digest"><h2 id="ingest-digest">Das Wichtigste</h2>${parts.join('')}</section>`;
 }
 
-function sourceBlock(draft) {
-  const s = draft?.source ?? {};
+/**
+ * `applied`: Stand eines unterbrochenen Übernehmens (src/lesen/ingest.js). Steht
+ * die Source-Page schon im Wiki, wirken Änderungen an ihren Feldern nicht mehr,
+ * der Slug ist ab dem ersten Schreiben fest; dann sind die Felder schreibgeschützt.
+ */
+function sourceBlock(draft, applied = null) {
+  const s = { ...(draft?.source ?? {}), ...(applied?.slug ? { slug: applied.slug } : {}) };
+  const written = list(applied?.steps).includes('source');
+  const lock = (on) => (on ? ' readonly' : '');
   const summary = String(s.summary ?? '');
   const tags = list(s.tags).join(', ');
   const meta = [s.confidence ? `Konfidenz: ${CONFIDENCE[s.confidence] ?? s.confidence}` : null, s.slug ? `wiki/sources/${s.slug}.md` : null].filter(Boolean);
   return `<section class="ingest-source" aria-labelledby="ingest-source">
     <h2 id="ingest-source">Source-Page <span class="hint">${esc(meta.join(' · '))}</span></h2>
     <div class="ingest-fields">
-      <label class="ingest-field is-wide"><span>Titel</span><input type="text" name="title" value="${esc(s.title ?? '')}" required></label>
-      <label class="ingest-field is-wide"><span class="ingest-field-row">Summary <span class="ingest-count${summary.length > SUMMARY_MAX ? ' is-over' : ''}" data-ingest-count-for="summary">${summary.length}/${SUMMARY_MAX}</span></span><input type="text" name="summary" value="${esc(summary)}" maxlength="${SUMMARY_MAX}" data-ingest-summary></label>
-      <label class="ingest-field"><span>Slug</span><input type="text" name="slug" value="${esc(s.slug ?? '')}" pattern="[a-z0-9]+(-[a-z0-9]+)*" spellcheck="false" autocapitalize="off" autocomplete="off" title="Kleinbuchstaben, Ziffern und Bindestriche"></label>
-      <label class="ingest-field"><span>Tags</span><input type="text" name="tags" value="${esc(tags)}" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="englisch, mit Komma"></label>
+      <label class="ingest-field is-wide"><span>Titel</span><input type="text" name="title" value="${esc(s.title ?? '')}" required${lock(written)}></label>
+      <label class="ingest-field is-wide"><span class="ingest-field-row">Summary <span class="ingest-count${summary.length > SUMMARY_MAX ? ' is-over' : ''}" data-ingest-count-for="summary">${summary.length}/${SUMMARY_MAX}</span></span><input type="text" name="summary" value="${esc(summary)}" maxlength="${SUMMARY_MAX}" data-ingest-summary${lock(written)}></label>
+      <label class="ingest-field"><span>Slug</span><input type="text" name="slug" value="${esc(s.slug ?? '')}" pattern="[a-z0-9]+(-[a-z0-9]+)*" spellcheck="false" autocapitalize="off" autocomplete="off" title="Kleinbuchstaben, Ziffern und Bindestriche"${lock(Boolean(applied?.slug))}></label>
+      <label class="ingest-field"><span>Tags</span><input type="text" name="tags" value="${esc(tags)}" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="englisch, mit Komma"${lock(written)}></label>
     </div>
     ${s.body ? `<details class="ingest-body"><summary>Text der Source-Page ansehen</summary><div class="md ingest-md">${renderMarkdown(s.body)}</div></details>` : ''}
   </section>`;
 }
 
 /** Ein Vorschlag zum Abhaken; Aufklappbares steht neben dem `<label>`, sonst schaltete jeder Tipp darauf das Häkchen um. */
-function itemRow(item, featured) {
+function itemRow(item, featured, titles = new Map()) {
   const id = esc(item.id);
   const box = `<input type="checkbox" name="item" value="${id}"${item.default === true ? ' checked' : ''}>`;
   const pill = `<span class="ingest-pill${featured ? ' is-offer' : ''}">${esc(kindLabel(item))}</span>`;
@@ -315,7 +324,7 @@ function itemRow(item, featured) {
   const open = wikiPath(target) && item.action !== 'neu' ? `<a href="${esc(noteLink(target))}" class="ingest-open">Seite ansehen<span class="sr-only">: ${esc(item.title || slugOf(target))}</span></a>` : '';
   const involved = list(item.beteiligte).filter(Boolean);
   const extra = [
-    involved.length ? `<p class="ingest-involved"><span class="meta">Beteiligt:</span> ${involved.map((p) => pageRef(p, null)).join(', ')}</p>` : '',
+    involved.length ? `<p class="ingest-involved"><span class="meta">Beteiligt:</span> ${involved.map((p) => pageRef(p, titles.get(p))).join(', ')}</p>` : '',
     item.body ? `<details class="ingest-body"><summary>${featured ? 'Ganzen Text lesen' : 'Text der Seite ansehen'}</summary><div class="md ingest-md">${renderMarkdown(item.body)}</div></details>` : '',
     open,
   ].filter(Boolean).join('');
@@ -326,8 +335,20 @@ function itemRow(item, featured) {
   </li>`;
 }
 
+/** Titel bekannter Wiki-Seiten aus dem Entwurf (Vorschläge und Digest), für Pfade ohne eigenen Titel wie `beteiligte`. */
+function pageTitles(draft) {
+  const d = draft?.digest ?? {};
+  const titles = new Map();
+  for (const x of [...list(draft?.items), ...list(d.bestaetigt), ...list(d.widerspricht), ...list(d.dockt_an)]) {
+    const path = x?.path ?? x?.to;
+    if (typeof path === 'string' && x.title && !titles.has(path)) titles.set(path, String(x.title));
+  }
+  return titles;
+}
+
 function itemGroups(draft) {
   const groups = groupItems(draft?.items);
+  const titles = pageTitles(draft);
   if (!groups.length) return '<section class="ingest-group"><p class="empty">Claude schlägt nichts über die Source-Page hinaus vor.</p></section>';
   return groups
     .map(
@@ -337,7 +358,7 @@ function itemGroups(draft) {
       <span class="ingest-all" data-ingest-all hidden><button type="button" class="chip quiet" data-select="all">alle</button><button type="button" class="chip quiet" data-select="none">keine</button></span>
     </div>
     ${g.hint ? `<p class="meta ingest-group-hint">${esc(g.hint)}</p>` : ''}
-    <ul class="ingest-items">${g.items.map((i) => itemRow(i, g.featured)).join('')}</ul>
+    <ul class="ingest-items">${g.items.map((i) => itemRow(i, g.featured, titles)).join('')}</ul>
   </section>`,
     )
     .join('');
@@ -382,6 +403,20 @@ function reviewHead(e, doc, nav) {
   </div>${pager}`;
 }
 
+/**
+ * Unterbrochenes Übernehmen: Der Entwurf bleibt bereit, `error` und `applied`
+ * sagen, was schon geschrieben ist. Ohne diesen Hinweis sähe die Prüfansicht
+ * aus wie vorher, obwohl Rohquelle und Source-Page schon im Vault liegen.
+ */
+function haltedBlock(e) {
+  const a = e?.applied;
+  if (!e?.error || !a || (!list(a.steps).length && !a.source)) return '';
+  const written = list(a.steps).includes('source') && wikiPath(a.source);
+  return `<section class="ingest-state" role="status"><p class="problem">Übernehmen unterbrochen: ${esc(e.error)}</p><p class="meta">${
+    written ? `Die Source-Page <a href="${esc(noteLink(a.source))}">${esc(slugOf(a.source))}</a> ist schon geschrieben; ihre Felder lassen sich hier nicht mehr ändern.` : 'Ein Teil ist schon geschrieben.'
+  } „Ins Wiki übernehmen“ setzt dort fort, ohne etwas doppelt zu schreiben.</p></section>`;
+}
+
 /** Prüfansicht eines bereiten Entwurfs: ein Formular, die Nebenaktionen per `formaction`. */
 function reviewForm(e, ctx, nav) {
   const draft = e.draft ?? {};
@@ -390,8 +425,9 @@ function reviewForm(e, ctx, nav) {
   return `<form method="post" action="${UEBERNEHMEN}" class="ingest-form" data-ingest-form>
     ${hidden({ csrf: ctx.write.csrf, back, id: e.doc_id })}
     <button type="submit" class="ingest-guard" disabled hidden aria-hidden="true" tabindex="-1"></button>
+    ${haltedBlock(e)}
     ${digestBlock(draft)}
-    ${sourceBlock(draft)}
+    ${sourceBlock(draft, e.applied)}
     ${itemGroups(draft)}
     <div class="ingest-weitere">
       <button type="submit" class="btn quiet" formaction="${ENTWERFEN}" formnovalidate name="force" value="1" data-confirm="Claude entwirft neu, der jetzige Entwurf geht verloren.">Neu entwerfen</button>
@@ -545,6 +581,8 @@ export function ingestRoutes({ store, ingest = null, logger = console }) {
         const back = ctx.url.searchParams.get('back');
         const safeBack = typeof back === 'string' && /^\/lesen\/[\w/-]*$/.test(back) ? back : '/lesen/stapel';
         const available = Boolean(ingest.available()?.ok);
+        // Die Leseansicht nennt das fertige Abzeichen „Ingest prüfen“ (src/lesen/doc.js); der Austausch soll es nicht umbenennen.
+        const ready = safeBack === '/lesen/doc' ? 'Ingest prüfen' : 'Ingest bereit';
         let items;
         if (ids.length) {
           const st = ingest.statusFor(ids);
@@ -554,7 +592,7 @@ export function ingestRoutes({ store, ingest = null, logger = console }) {
         }
         const out = items.map(({ id, status }) => {
           const title = nameOf(id);
-          return { id, status, busy: BUSY.includes(status), title, badge: ingestBadge(id, status, { ctx, title, available, back: safeBack }) };
+          return { id, status, busy: BUSY.includes(status), title, badge: ingestBadge(id, status, { ctx, title, available, ready, back: safeBack }) };
         });
         return jsonReply(200, { ok: true, counts: ingest.counts(), available, items: out });
       },

@@ -6,7 +6,7 @@ import { createCookieSigner } from '../src/web/session.js';
 import { createSettingsStore } from '../src/cockpit/settings.js';
 import { createReadingStore } from '../src/lesen/store.js';
 import { readingRoutes } from '../src/lesen/http.js';
-import { groupItems, tally, tallyLabel } from '../src/lesen/ingest-page.js';
+import { groupItems, kindLabel, tally, tallyLabel } from '../src/lesen/ingest-page.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
 const SECRET = 'x'.repeat(40);
@@ -187,6 +187,13 @@ test('Ingest: Gruppen und Zählung folgen dem Entwurf', () => {
   assert.equal(tallyLabel(tally({ items: [d.items[0], { ...d.items[0], id: 'v2' }, d.items[4], { ...d.items[4], id: 'n2' }] })), '2 Verknüpfungen · 2 neue Seiten');
 });
 
+test('Ingest: Kennzeichen auf Deutsch, auch für Verknüpfungen mit Quellen und Entities', () => {
+  // Der Dienst nimmt beim Verknüpfen den Seitentyp als Art, also auch `source`, und `entity_type` aus dem Frontmatter.
+  assert.equal(kindLabel({ kind: 'source', action: 'verknuepfen' }), 'Quelle');
+  assert.equal(kindLabel({ kind: 'entity', action: 'verknuepfen', entity_type: 'tool' }), 'Werkzeug');
+  assert.equal(kindLabel({ kind: 'entity', action: 'verknuepfen' }), 'Entity');
+});
+
 test('Ingest: ohne Dienst keine Oberfläche, die App-JSON sagt enabled: false', async () => {
   await withIngest(
     async ({ call, html, add }) => {
@@ -306,6 +313,10 @@ test('Ingest: Prüfansicht mit Digest, Source-Page, gruppierten Vorschlägen und
     assert.match(page, /<span class="ingest-pill is-offer">Synthese · Vergleich<\/span><span class="ingest-item-title">Gedächtnis statt RAG\?<\/span>/);
     assert.match(page, /<span class="ingest-pill is-offer">Frage<\/span>/);
     assert.match(page, /<details class="ingest-body"><summary>Ganzen Text lesen<\/summary><div class="md ingest-md"><p>Ein <strong>Vergleich<\/strong>\.<\/p>/);
+    // Beteiligte stehen im Entwurf nur als Pfad; der Titel kommt aus dem Digest, sonst bliebe der Slug.
+    assert.match(page, /<span class="meta">Beteiligt:<\/span> <a href="\/notiz\?pfad=wiki%2Fconcepts%2Frag\.md" class="ingest-ref">RAG<\/a><\/p>/);
+    assert.ok(!page.includes('ingest-halted') && !page.includes('Übernehmen unterbrochen'), 'kein Hinweis ohne Abbruch');
+    assert.ok(!/name="title"[^>]*readonly/.test(page), 'Felder änderbar');
     assert.match(page, /<span class="ingest-pill">Person<\/span><span class="ingest-item-title">Robert Glaser<\/span>/);
     assert.match(page, /<span class="ingest-rel" title="authored-by">verfasst von<\/span> Robert Glaser/);
     assert.match(page, /<span class="ingest-all" data-ingest-all hidden><button type="button" class="chip quiet" data-select="all">alle<\/button>/);
@@ -360,6 +371,30 @@ test('Ingest: Übernehmen schickt gewählte Vorschläge und Felder, führt zum n
     assert.equal(body.redirect, '/lesen/ingest');
     assert.equal(body.link.href, '/notiz?pfad=wiki%2Fsources%2Fx.md');
     assert.deepEqual(ingest.calls.filter((c) => c[0] === 'apply').at(-1)[2].items, [], 'nichts abgehakt: nur die Source-Page');
+  });
+});
+
+test('Ingest: unterbrochenes Übernehmen steht in der Prüfansicht, die Felder der schon geschriebenen Source-Page sind fest', async () => {
+  await withIngest(async ({ html, add, ingest }) => {
+    const a = add('Halb');
+    // So hinterlässt der Dienst einen Abbruch: bereit, mit Fehler und dem Stand der Schritte.
+    ingest.put(a.id, 'bereit', {
+      draft: draftFor('Halb'),
+      error: '"wiki/concepts/rag.md" wurde gerade anderweitig geändert. <b>x</b>',
+      applied: { steps: ['raw', 'source'], items: {}, written: ['wiki/sources/halb-1234.md'], linked: [], raw: 'raw/halb.md', slug: 'halb-1234', source: 'wiki/sources/halb-1234.md' },
+    });
+    const page = await html(`/lesen/ingest/doc?id=${a.id}`);
+    assert.match(page, /<section class="ingest-state" role="status"><p class="problem">Übernehmen unterbrochen: &quot;wiki\/concepts\/rag\.md&quot; wurde gerade anderweitig geändert\. &lt;b&gt;x&lt;\/b&gt;<\/p>/);
+    assert.match(page, /Die Source-Page <a href="\/notiz\?pfad=wiki%2Fsources%2Fhalb-1234\.md">halb-1234<\/a> ist schon geschrieben/);
+    for (const name of ['title', 'summary', 'tags', 'slug']) assert.match(page, new RegExp(`name="${name}"[^>]*readonly>`), `${name} schreibgeschützt`);
+    assert.match(page, /<input type="text" name="slug" value="halb-1234"/, 'der Slug, den der Dienst festgelegt hat');
+    assert.match(page, /wiki\/sources\/halb-1234\.md<\/span><\/h2>/);
+
+    // Nur die Rohquelle geschrieben: Hinweis ja, Felder noch frei.
+    ingest.rows.get(a.id).applied = { steps: ['raw'], items: {}, written: [], linked: [], raw: 'raw/halb.md' };
+    const early = await html(`/lesen/ingest/doc?id=${a.id}`);
+    assert.match(early, /Übernehmen unterbrochen:[^]*Ein Teil ist schon geschrieben\./);
+    assert.ok(!/name="title"[^>]*readonly/.test(early));
   });
 });
 
@@ -476,6 +511,9 @@ test('Ingest: Live-Stand und App-JSON', async () => {
     assert.deepEqual(s.items.map((i) => [i.title, i.status, i.busy]), [['Bereit', 'bereit', false], ['Läuft', 'wartet', true], ['Ohne', null, false]]);
     assert.match(s.items[0].badge, /class="ingest-badge is-ready"/);
     assert.match(s.items[2].badge, /<input type="hidden" name="back" value="\/lesen\/stapel">/);
+    // Aus der Leseansicht heißt das fertige Abzeichen wie dort „Ingest prüfen“, sonst benennt der Austausch es um.
+    const fromDoc = await (await call(`/lesen/ingest/stand?ids=${a.id}&back=/lesen/doc`)).json();
+    assert.match(fromDoc.items[0].badge, /class="ingest-badge is-ready"[^>]*>Ingest prüfen<span class="sr-only">: Bereit<\/span><\/a>/);
     const all = await (await call('/lesen/ingest/stand')).json();
     assert.deepEqual(all.items.map((i) => i.id).sort(), [a.id, b.id].sort(), 'ohne ids: alle offenen');
 

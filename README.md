@@ -936,7 +936,8 @@ zugleich; nach einem Neustart werden angefangene wieder eingereiht.
 **Übernehmen** schreibt in festen Schritten über den Editor, jeder für sich
 wiederholbar; der Fortschritt steht in der Datenbank. Bricht ein Schritt ab
 (etwa weil der Sync eine Seite gleichzeitig ändert), bleibt der Entwurf bereit,
-und der nächste Versuch setzt dort fort, ohne etwas doppelt zu schreiben:
+die Prüfansicht nennt den Abbruch (steht die Source-Page schon, sind ihre Felder
+dann fest), und der nächste Versuch setzt dort fort, ohne etwas doppelt zu schreiben:
 
 1. **Rohquelle**: die Lesestapel-Notiz über den Exporter, mit Volltext und
    `lesestatus: gelesen` (wie „In den Vault“ mit Volltext).

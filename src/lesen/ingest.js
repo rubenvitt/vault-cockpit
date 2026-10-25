@@ -291,7 +291,8 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
   function describePage(path) {
     const note = index.getNote(path);
     const fm = note?.frontmatter ?? {};
-    return { path, title: oneLine(note?.title ?? fm.title ?? stemOf(path)), type: note?.type ?? fm.type ?? null, summary: oneLine(fm.summary ?? '', 200), status: fm.status ?? note?.status ?? null };
+    const entityType = ENTITY_TYPES.includes(fm['entity-type']) ? fm['entity-type'] : null;
+    return { path, title: oneLine(note?.title ?? fm.title ?? stemOf(path)), type: note?.type ?? fm.type ?? null, entity_type: entityType, summary: oneLine(fm.summary ?? '', 200), status: fm.status ?? note?.status ?? null };
   }
   /** Seitentyp → Art eines Items (unbekannt: concept). */
   const kindOf = (type) => (['source', 'entity', 'concept', 'synthesis', 'question'].includes(type) ? type : 'concept');
@@ -360,7 +361,8 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
     const verknuepfen = (p, warum) => {
       if (linked.has(p.path) || items.filter((i) => i.action === 'verknuepfen').length >= LIMITS.verknuepfen) return;
       linked.add(p.path);
-      items.push({ id: nextId('v'), kind: kindOf(p.type), action: 'verknuepfen', path: p.path, title: p.title, warum: oneLine(warum, 500), default: true });
+      // `entity_type` aus dem Frontmatter, damit die Oberfläche „Person“ oder „Werkzeug“ statt „Entity“ zeigt.
+      items.push({ id: nextId('v'), kind: kindOf(p.type), action: 'verknuepfen', path: p.path, title: p.title, ...(p.entity_type ? { entity_type: p.entity_type } : {}), warum: oneLine(warum, 500), default: true });
     };
 
     const dockt = [];
@@ -816,7 +818,7 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
     } catch (err) {
       store.saveIngest(id, { applied, error: err.message });
       if (err instanceof IngestError) throw err;
-      throw new IngestError(`Übernehmen unterbrochen: ${err.message}. Der Fortschritt ist gesichert, ein neuer Versuch setzt dort fort.`, 409);
+      throw new IngestError(`Übernehmen unterbrochen: ${String(err.message).replace(/[.\s]+$/, '')}. Der Fortschritt ist gesichert, ein neuer Versuch setzt dort fort.`, 409);
     } finally {
       applying.delete(id);
     }

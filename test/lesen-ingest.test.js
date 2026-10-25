@@ -166,6 +166,9 @@ test('Entwurf: Text, Markierungen und Kandidaten gehen an Claude; die Antwort wi
     'b1 bestaetigung  wiki/questions/widerstand.md true',
     'r1 relation uses wiki/concepts/backpressure.md true',
   ]);
+  // Verknüpfen trägt `entity_type` aus dem Frontmatter, damit die Oberfläche „Person“ zeigt statt „Entity“.
+  assert.equal(d.items.find((i) => i.id === 'v2').entity_type, 'person');
+  assert.equal('entity_type' in d.items.find((i) => i.id === 'v1'), false);
   const s1 = d.items.find((i) => i.id === 's1');
   assert.equal(s1.art, 'querverbindung');
   assert.deepEqual(s1.beteiligte, ['wiki/concepts/backpressure.md']);
@@ -340,7 +343,7 @@ test('Übernehmen: Abbruch mittendrin wird gemerkt, der nächste Versuch setzt f
     return real(args);
   };
   const items = ['v1', 'v2', 'n1', 'r1'];
-  await assert.rejects(first.apply(doc.id, { items }), (e) => e.status === 409 && /unterbrochen.*anderweitig geändert/.test(e.message));
+  await assert.rejects(first.apply(doc.id, { items }), (e) => e.status === 409 && /unterbrochen.*anderweitig geändert\. Der Fortschritt/.test(e.message) && !e.message.includes('..'));
   let row = first.get(doc.id);
   assert.equal(row.status, 'bereit');
   assert.match(row.error, /anderweitig/);
