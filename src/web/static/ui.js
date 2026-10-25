@@ -61,6 +61,15 @@
 
   addEventListener('pageshow', settle);
 
+  // Externe Links (andere Herkunft, http/https) öffnen in einem neuen Tab, auf jeder Seite
+  // und auch in Texten aus Feeds oder dem Vault. Die iOS-App gibt sie an Safari weiter.
+  document.addEventListener('click', (e) => {
+    const a = e.target instanceof Element ? e.target.closest('a[href]') : null;
+    if (!a || a.target || a.hasAttribute('download') || !/^https?:$/.test(a.protocol) || a.origin === location.origin) return;
+    a.target = '_blank';
+    a.relList.add('noopener', 'noreferrer');
+  });
+
   /** Seitenwechsel aus einem Script (Weiterleitung nach einer Aktion, Graph) mit derselben Rückmeldung. */
   window.cockpitWechsel = (url) => {
     navigating(null);

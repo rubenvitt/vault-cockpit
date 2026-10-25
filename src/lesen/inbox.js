@@ -49,7 +49,7 @@ export function whyHere(doc, { getFeed, tz }) {
 function card(d, ctx, { getFeed, more }) {
   const site = d.site || (URL.canParse(d.url) ? new URL(d.url).hostname : null);
   const meta = [
-    site ? `<a href="${esc(href(d.url))}" rel="noopener noreferrer">${esc(site)}</a>` : null,
+    site ? `<a href="${esc(href(d.url))}" rel="noopener noreferrer" target="_blank">${esc(site)}</a>` : null,
     esc(KIND[d.kind] ?? d.kind),
     d.reading_minutes ? `${d.reading_minutes} min` : null,
   ].filter(Boolean).join(' · ');
