@@ -257,6 +257,11 @@ final class ReadingModelTests: XCTestCase {
         XCTAssertEqual(model.spokenCharsPerMinute, 900)
         XCTAssertEqual(model.summary, EpisodeSummary(main: "Vorlesen · 3 Texte · etwa 10 Min.", cost: "rund 8.642 Zeichen bei ElevenLabs"))
         XCTAssertEqual(Set(model.summaries.keys), ["vorlesen", "podcast"])
+        XCTAssertEqual(model.styles.map(\.style), ["ausgewogen", "locker", "kritisch", "tiefgang"])
+        XCTAssertEqual(model.defaultStyle, "ausgewogen")
+        XCTAssertEqual(model.topics, [EpisodeTopic(label: "Lesen", count: 2), EpisodeTopic(label: "Medien", count: 1)])
+        XCTAssertEqual([model.maxTopics, model.maxFocus], [5, 200])
+        XCTAssertTrue(model.transcriptOnly)
 
         let off = try decode(NewEpisodeModel.self, "lesen-folgen-neu-aus")
         XCTAssertFalse(off.enabled)
@@ -264,6 +269,8 @@ final class ReadingModelTests: XCTestCase {
         XCTAssertNil(off.zeit)
         XCTAssertNil(off.summary)
         XCTAssertEqual(off.lengths, [5, 10, 20])
+        XCTAssertTrue(off.styles.isEmpty)
+        XCTAssertFalse(off.transcriptOnly)
     }
 
     /// Der Satz am Knopf, in Swift gerechnet, gleicht dem des Servers für jede Art.
@@ -280,6 +287,7 @@ final class ReadingModelTests: XCTestCase {
         XCTAssertEqual(NewEpisodeStore.summary(kind: "podcast", texts: 0, chars: 0, minutes: 10), EpisodeSummary(main: "Bitte mindestens einen Text wählen", cost: ""))
         // Math.round: 1350 / 900 = 1,5 → 2
         XCTAssertEqual(NewEpisodeStore.summary(kind: "vorlesen", texts: 1, chars: 1350, minutes: 10).main, "Vorlesen · 1 Text · etwa 2 Min.")
+        XCTAssertEqual(NewEpisodeStore.summary(kind: "report", texts: 2, chars: 0, minutes: 5, audio: false), EpisodeSummary(main: "Report · 2 Texte · 5 Min. · erst Transkript", cost: "Nur dein Claude-Abo; Audio später auf Knopfdruck"))
         XCTAssertEqual(NewEpisodeStore.grouped(1_234_567), "1.234.567")
         XCTAssertEqual(NewEpisodeStore.grouped(999), "999")
         XCTAssertEqual(NewEpisodeStore.grouped(0), "0")

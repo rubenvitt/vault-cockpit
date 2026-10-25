@@ -154,6 +154,17 @@ struct FolgenList: View {
                 download: { download(episode) },
                 delete: { confirmDelete(episode) }
             )
+        } else if episode.isTranscript {
+            FolgenTranscriptCard(
+                episode: episode,
+                isBusy: busy,
+                openNote: { path in
+                    toasts.signal(.selection)
+                    model.open(path: CockpitFormat.notePath(path))
+                },
+                speak: { speak(episode) },
+                delete: { confirmDelete(episode) }
+            )
         } else if episode.isFailed {
             FolgenFailedCard(
                 episode: episode,
@@ -191,6 +202,11 @@ struct FolgenList: View {
     private func resume(_ episode: Episode) {
         toasts.signal(.selection)
         Task { await store.resume(episode) }
+    }
+
+    private func speak(_ episode: Episode) {
+        toasts.signal(.selection)
+        Task { await store.speak(episode) }
     }
 
     private func download(_ episode: Episode) {

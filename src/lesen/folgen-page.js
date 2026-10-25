@@ -4,19 +4,22 @@ import { hidden } from '../web/render.js';
 import { ActionError } from '../cockpit/actions.js';
 import { readingPage } from './pages.js';
 import { WINDOWS, fitToWindow, stackItemJson } from './stack.js';
-import { EpisodeError, KINDS, LENGTHS, MAX_DOCS, BYTES_PER_SECOND } from './folgen.js';
+import { EpisodeError, KINDS, LENGTHS, MAX_DOCS, BYTES_PER_SECOND, STYLES, DEFAULT_STYLE, MAX_TOPICS, MAX_FOCUS } from './folgen.js';
 import { jsonReply } from './json.js';
 
 /**
  * Seiten der Folgen (src/lesen/folgen.js), ohne JavaScript bedienbar:
  *
  * - `/lesen/folgen/neu?zeit=30`: Texte des Zeitfensters zum Abhaken, Art,
- *   Länge und die geschätzten Zeichen, die ElevenLabs berechnet.
+ *   Länge, bei Podcast und Report Ton, Schwerpunkt (Themen der Texte, eigener
+ *   Wunsch) und ob gleich das Audio entsteht oder erst nur das Transkript,
+ *   dazu die geschätzten Zeichen, die ElevenLabs berechnet.
  * - `/lesen/folgen`: alle Folgen als Karten. Fertige mit Abspiel-Knopf
  *   (/static/lesen-folgen.js: eigener Player mit Sperrbildschirm über die
  *   Media Session; in der iOS-App spielt der native Player) und dem Link
  *   „Im Vault“ aufs Transkript (Podcast, Report), entstehende mit
- *   Schritten und Fortschritt, fehlgeschlagene mit „Fortsetzen“.
+ *   Schritten und Fortschritt, fehlgeschlagene mit „Fortsetzen“, reine
+ *   Transkripte mit „Im Vault“ und „Audio erzeugen“.
  * - `/lesen/folgen/stand`: dieselben Karten der Folgen als JSON, damit die
  *   Seite den Fortschritt ohne Neuladen zeigt.
  * - `/lesen/folgen/audio?id=…`: die MP3, mit `Range` (Safari spielt Audio
@@ -60,7 +63,7 @@ const since = (iso, at) => {
  */
 export function progressOf(ep, at = Date.now()) {
   const writes = ep.kind !== 'vorlesen';
-  const steps = writes ? ['Eingereiht', 'Claude schreibt', 'Stimmen sprechen', 'Fertig'] : ['Eingereiht', 'Stimme spricht', 'Fertig'];
+  const steps = !writes ? ['Eingereiht', 'Stimme spricht', 'Fertig'] : ep.audio === false ? ['Eingereiht', 'Claude schreibt', 'Transkript fertig'] : ['Eingereiht', 'Claude schreibt', 'Stimmen sprechen', 'Fertig'];
   const step = { wartet: 0, schreibt: 1, spricht: writes ? 2 : 1 }[ep.status] ?? steps.length - 1;
   if (ep.status === 'wartet') return { steps, step, percent: null, fraction: null, restMinutes: null, label: 'Wartet, bis die Folge davor fertig ist' };
   if (ep.status === 'schreibt') {
@@ -101,13 +104,33 @@ const SPOKEN_CHARS_PER_MINUTE = 900;
  * Zusammenfassung am Knopf: `main` (Art, Texte, Dauer) und `cost`. Dieselbe
  * Rechnung macht /static/lesen-folgen.js beim Umschalten.
  */
-export function newSummary({ kind, texts, chars, minutes }) {
+export function newSummary({ kind, texts, chars, minutes, audio = true }) {
   if (!texts) return { main: 'Bitte mindestens einen Text wählen', cost: '' };
   const n = `${texts} ${texts === 1 ? 'Text' : 'Texte'}`;
   if (kind === 'vorlesen') {
     return { main: `${KINDS.vorlesen} · ${n} · etwa ${Math.max(1, Math.round(chars / SPOKEN_CHARS_PER_MINUTE))} Min.`, cost: chars ? `rund ${fmt.format(chars)} Zeichen bei ElevenLabs` : 'Schon alles gehört, kostet nichts' };
   }
+  if (!audio) return { main: `${KINDS[kind]} · ${n} · ${minutes} Min. · erst Transkript`, cost: 'Nur dein Claude-Abo; Audio später auf Knopfdruck' };
   return { main: `${KINDS[kind]} · ${n} · ${minutes} Min.`, cost: `rund ${fmt.format(minutes * SPOKEN_CHARS_PER_MINUTE)} Zeichen bei ElevenLabs, dazu dein Claude-Abo` };
+}
+
+/** Themen der Texte für den Schwerpunkt, häufigste zuerst: `[{ label, count }]`. */
+export function topicsOf(docs, max = 12) {
+  const counts = new Map();
+  for (const d of docs) for (const t of new Set(d.topics ?? [])) if (String(t).trim()) counts.set(t, (counts.get(t) ?? 0) + 1);
+  return [...counts]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'de'))
+    .slice(0, max)
+    .map(([label, count]) => ({ label, count }));
+}
+
+/** Ton und Schwerpunkt einer Folge in einer Zeile, ohne Wünsche null. */
+export function wishesOf(ep) {
+  const parts = [
+    ep.style && ep.style !== DEFAULT_STYLE ? (STYLES[ep.style]?.label ?? ep.style) : null,
+    ep.topics?.length || ep.focus ? `Schwerpunkt: ${[...(ep.topics ?? []), ...(ep.focus ? [ep.focus] : [])].join(', ')}` : null,
+  ].filter(Boolean);
+  return parts.length ? parts.join(' · ') : null;
 }
 
 /** Kosten einer Art in einem Satz (Auswahl „Was soll daraus werden?“). */
@@ -136,11 +159,11 @@ export function newEpisodeModel(episodes, store, zeitParam) {
   const full = docs.reduce((sum, x) => sum + x.chars, 0);
   const first = Object.keys(KINDS).find((k) => !missing[k]) ?? null;
   const summary = first ? newSummary({ kind: first, texts: docs.length, chars: full, minutes: 10 }) : { main: 'Folgen brauchen ElevenLabs', cost: 'Einstellungen → Vorlesen' };
-  return { zeit, docs, full, missing, first, summary };
+  return { zeit, docs, full, missing, first, summary, topics: topicsOf(items) };
 }
 
 function newPage(episodes, store, ctx) {
-  const { zeit, docs, missing, first, summary } = newEpisodeModel(episodes, store, ctx.url.searchParams.get('zeit'));
+  const { zeit, docs, missing, first, summary, topics } = newEpisodeModel(episodes, store, ctx.url.searchParams.get('zeit'));
   const picker = `<nav class="chips folge-zeit" aria-label="Zeitfenster">${WINDOWS.map((m) => `<a href="/lesen/folgen/neu?zeit=${m}" class="chip"${m === zeit ? ' aria-current="true"' : ''}>${m} Min.</a>`).join('')}</nav>`;
   const step = (nr, title, hint = '') => `<div class="folge-schritt-kopf"><span class="folge-nr" aria-hidden="true">${nr}</span><div><h2>${title}</h2>${hint ? `<p class="meta">${hint}</p>` : ''}</div></div>`;
   if (!docs.length) return `<section class="folge-schritt">${step(1, 'Welche Texte?', 'Aus dem Stapel, passend zur Zeit, die du hast.')}${picker}<p class="empty">Für dieses Zeitfenster passt nichts vom Stapel.</p></section>`;
@@ -165,6 +188,12 @@ function newPage(episodes, store, ctx) {
     })
     .join('');
   const lengths = LENGTHS.map((m) => `<label><input type="radio" name="laenge" value="${m}"${m === 10 ? ' checked' : ''}><span>${m} Min.</span></label>`).join('');
+  const styles = Object.entries(STYLES)
+    .map(([key, st]) => `<label class="folge-pille" title="${esc(st.description)}"><input type="radio" name="stil" value="${key}" data-hint="${esc(st.description)}"${key === DEFAULT_STYLE ? ' checked' : ''}><span>${esc(st.label)}</span></label>`)
+    .join('');
+  const themes = topics.length
+    ? `<div class="folge-pillen" role="group" aria-label="Themen der Texte">${topics.map((t) => `<label class="folge-pille"><input type="checkbox" name="thema" value="${esc(t.label)}"><span>${esc(t.label)}<span class="meta"> ${t.count}</span></span></label>`).join('')}</div>`
+    : '';
 
   return `<form method="post" action="/aktion/lesen/folge/neu" class="folge-neu" data-folge-neu>
     ${hidden({ csrf: ctx.write.csrf, back: ctx.write.back })}
@@ -181,6 +210,23 @@ function newPage(episodes, store, ctx) {
       ${step(3, 'Wie lang?', 'Gilt für Podcast und Report; Vorlesen dauert so lange wie die Texte.')}
       <div class="folge-segmente" role="radiogroup" aria-label="Länge">${lengths}</div>
     </section>
+    <section class="folge-schritt folge-claude">
+      ${step(4, 'Ton und Schwerpunkt', 'Für Claude, bei Podcast und Report. Ohne Schwerpunkt geht es um alles in den Texten.')}
+      <div class="folge-feld">
+        <h3>Ton</h3>
+        <div class="folge-pillen" role="radiogroup" aria-label="Ton">${styles}</div>
+        <p class="meta" data-style-hint>${esc(STYLES[DEFAULT_STYLE].description)}</p>
+      </div>
+      <div class="folge-feld">
+        <h3>Schwerpunkt <span class="meta">optional${topics.length ? `, höchstens ${MAX_TOPICS} Themen` : ''}</span></h3>
+        ${themes}
+        <label class="folge-fokus"><span class="sr-only">Eigener Schwerpunkt</span><input type="text" name="fokus" maxlength="${MAX_FOCUS}" placeholder="Eigener Wunsch, z. B. Was heißt das für den Alltag?" autocomplete="off"></label>
+      </div>
+    </section>
+    <section class="folge-schritt folge-claude">
+      ${step(5, 'Gleich mit Audio?', 'Erst nur das Transkript kostet bei ElevenLabs nichts. Gefällt es dir, wird daraus auf Knopfdruck das Audio, ohne dass Claude noch einmal schreibt.')}
+      <div class="folge-segmente" role="radiogroup" aria-label="Audio"><label><input type="radio" name="audio" value="1" checked><span>Mit Audio</span></label><label><input type="radio" name="audio" value="0"><span>Erst nur Transkript</span></label></div>
+    </section>
     <div class="folge-los">
       <p class="folge-summe" aria-live="polite"><b data-summary>${esc(summary.main)}</b><span class="meta" data-cost>${esc(summary.cost)}</span></p>
       <button type="submit" class="btn primary"${first ? '' : ' disabled'}>Folge erzeugen</button>
@@ -194,6 +240,9 @@ const retryOf = (resumable) =>
   resumable
     ? { label: 'Fortsetzen', hint: 'Schon Gesprochenes und Claudes Skript bleiben; es kostet nur, was noch fehlt.' }
     : { label: 'Erneut versuchen', hint: 'Claudes Skript fehlt noch, dafür schreibt Claude noch einmal (über dein Abo).' };
+
+/** „Audio erzeugen“ zu einem Transkript: Knopf und was es kostet. */
+const speakOf = (ep) => ({ label: 'Audio erzeugen', hint: `Aus demselben Skript, Claude schreibt nicht noch einmal: rund ${fmt.format(ep.chars ?? 0)} Zeichen bei ElevenLabs.` });
 
 /**
  * Eine Folge als JSON für die App: alle Felder, Dauer der fertigen MP3
@@ -219,6 +268,14 @@ export function episodeJson(ep, { resumable = false, at = Date.now() } = {}) {
     seconds: ep.status === 'fertig' ? secondsOf(ep) : null,
     bytes: ep.bytes ?? null,
     note: ep.note ?? null,
+    /** false: erst nur das Transkript (Status `transkript`), Audio auf Knopfdruck. */
+    audio: ep.audio !== false,
+    style: ep.style ?? null,
+    styleLabel: ep.style ? (STYLES[ep.style]?.label ?? ep.style) : null,
+    topics: ep.topics ?? [],
+    focus: ep.focus || null,
+    wishes: wishesOf(ep),
+    speak: ep.status === 'transkript' ? speakOf(ep) : null,
     error: failed ? (ep.error ?? 'Unbekannter Fehler') : null,
     resumable: failed && resumable,
     retry: failed ? retryOf(resumable) : null,
@@ -230,7 +287,8 @@ export function episodeJson(ep, { resumable = false, at = Date.now() } = {}) {
 export function episodeCard(ep, { ctx, resumable = false, at = Date.now() }) {
   const remove = (label = 'Löschen') => `<form method="post" action="/aktion/lesen/folge/loeschen" class="inline">${hidden({ csrf: ctx.write.csrf, back: '/lesen/folgen', id: ep.id })}<button type="submit" class="btn quiet">${label}</button></form>`;
   const badge = `<span class="folge-art">${esc(KINDS[ep.kind] ?? ep.kind)}</span>`;
-  const head = (meta) => `<div class="folge-text">${badge}<span class="lesen-title">${esc(ep.title)}</span><span class="meta">${esc(meta.filter(Boolean).join(' · '))}</span></div>`;
+  const wishes = wishesOf(ep);
+  const head = (meta) => `<div class="folge-text">${badge}<span class="lesen-title">${esc(ep.title)}</span><span class="meta">${esc(meta.filter(Boolean).join(' · '))}</span>${wishes ? `<span class="meta">${esc(wishes)}</span>` : ''}</div>`;
   const created = when(ep.created_at, ctx.tz);
   const id = encodeURIComponent(ep.id);
 
@@ -258,6 +316,22 @@ export function episodeCard(ep, { ctx, resumable = false, at = Date.now() }) {
       <p class="problem" data-error hidden></p>
     </div>
     <div class="folge-actions">${note}<a href="${esc(src)}" class="btn quiet" download="${esc(ep.title.replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'Folge')}.mp3">Herunterladen</a>${remove()}</div>
+  </li>`;
+  }
+
+  if (ep.status === 'transkript') {
+    const speak = speakOf(ep);
+    const note = ep.note
+      ? `<a href="/notiz?pfad=${esc(encodeURIComponent(ep.note))}" class="btn">Transkript lesen</a>`
+      : '<span class="meta">Das Transkript ließ sich nicht im Vault anlegen; das Skript liegt im Cockpit.</span>';
+    return `<li class="folge is-transcript" data-folge="${esc(ep.id)}" data-status="transkript">
+    <div class="folge-card"><span class="folge-play folge-play-doc" aria-hidden="true"><svg viewBox="0 0 24 24">${KIND_ICONS.report}</svg></span>${head(['Transkript', ep.minutes ? `${ep.minutes} Min.` : null, created])}</div>
+    <div class="folge-actions">
+      ${note}
+      <form method="post" action="/aktion/lesen/folge/sprechen" class="inline">${hidden({ csrf: ctx.write.csrf, back: '/lesen/folgen', id: ep.id })}<button type="submit" class="btn primary">${esc(speak.label)}</button></form>
+      ${remove()}
+    </div>
+    <p class="meta">${esc(speak.hint)}</p>
   </li>`;
   }
 
@@ -344,6 +418,7 @@ const asAction = (run) => {
 function episodeApi({ store, episodes }) {
   const off = { ok: true, enabled: false };
   const kinds = (missing) => Object.entries(KINDS).map(([kind, label]) => ({ kind, label, description: DESCRIPTIONS[kind], cost: kindCost(kind), missing: missing?.[kind] ?? null }));
+  const styles = Object.entries(STYLES).map(([style, st]) => ({ style, label: st.label, description: st.description }));
   return {
     /** Alle Folgen, neueste zuerst, und welche Arten gerade gehen. */
     async '/api/lesen/folgen'() {
@@ -355,7 +430,7 @@ function episodeApi({ store, episodes }) {
     /** Vorschau für „Neue Folge“: Texte des Zeitfensters mit Zeichen, Arten, Längen und die Zusammenfassung je Art. */
     async '/api/lesen/folgen/neu'(ctx) {
       if (!episodes) return jsonReply(200, { ...off, docs: [], kinds: kinds(null) });
-      const { zeit, docs, full, missing, first, summary } = newEpisodeModel(episodes, store, ctx.url.searchParams.get('zeit'));
+      const { zeit, docs, full, missing, first, summary, topics } = newEpisodeModel(episodes, store, ctx.url.searchParams.get('zeit'));
       const summaries = Object.fromEntries(Object.keys(KINDS).filter((k) => !missing[k]).map((kind) => [kind, newSummary({ kind, texts: docs.length, chars: full, minutes: 10 })]));
       return jsonReply(200, {
         ok: true,
@@ -371,6 +446,13 @@ function episodeApi({ store, episodes }) {
         defaultLength: 10,
         maxDocs: MAX_DOCS,
         spokenCharsPerMinute: SPOKEN_CHARS_PER_MINUTE,
+        // Podcast und Report: Ton, Themen der Texte für den Schwerpunkt, eigener Wunsch, erst nur Transkript.
+        styles,
+        defaultStyle: DEFAULT_STYLE,
+        topics,
+        maxTopics: MAX_TOPICS,
+        maxFocus: MAX_FOCUS,
+        transcriptOnly: true,
         summary,
         summaries,
       });
@@ -403,9 +485,25 @@ export function folgenRoutes({ store, episodes }) {
     },
     actions: {
       async '/aktion/lesen/folge/neu'(form) {
-        const ep = asAction(() => episodes.create({ kind: form.get('art') ?? '', docIds: form.getAll('doc'), minutes: Number(form.get('laenge') ?? 10) }));
+        const ep = asAction(() =>
+          episodes.create({
+            kind: form.get('art') ?? '',
+            docIds: form.getAll('doc'),
+            minutes: Number(form.get('laenge') ?? 10),
+            audio: form.get('audio') !== '0',
+            style: form.get('stil') || undefined,
+            topics: form.getAll('thema'),
+            focus: form.get('fokus') ?? '',
+          }),
+        );
         ep.done?.catch(() => {});
+        if (ep.audio === false) return { message: `${KINDS[ep.kind]}: Claude schreibt das Transkript, Audio danach auf Knopfdruck.`, redirect: '/lesen/folgen' };
         return { message: `${KINDS[ep.kind]} entsteht im Hintergrund, rund ${fmt.format(ep.chars)} Zeichen.`, redirect: '/lesen/folgen' };
+      },
+      async '/aktion/lesen/folge/sprechen'(form) {
+        const ep = asAction(() => episodes.speak(form.get('id') ?? ''));
+        ep.done?.catch(() => {});
+        return { message: `Audio entsteht: ${ep.title}, rund ${fmt.format(ep.chars ?? 0)} Zeichen.`, redirect: '/lesen/folgen' };
       },
       async '/aktion/lesen/folge/fortsetzen'(form) {
         const ep = asAction(() => episodes.retry(form.get('id') ?? ''));

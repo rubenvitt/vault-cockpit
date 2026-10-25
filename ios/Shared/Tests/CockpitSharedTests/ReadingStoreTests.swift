@@ -484,7 +484,7 @@ final class ReadingStoreTests: XCTestCase {
         let request = transport.requests[1]
         XCTAssertEqual(path(of: request), "/aktion/lesen/folge/neu")
         let ids = try XCTUnwrap(store.model?.docs.map(\.id))
-        XCTAssertEqual(String(decoding: try XCTUnwrap(request.httpBody), as: UTF8.self), "art=podcast&" + ids.map { "doc=\($0)" }.joined(separator: "&") + "&laenge=10")
+        XCTAssertEqual(String(decoding: try XCTUnwrap(request.httpBody), as: UTF8.self), "art=podcast&" + ids.map { "doc=\($0)" }.joined(separator: "&") + "&laenge=10&stil=ausgewogen&audio=1")
         XCTAssertTrue(store.didSubmit)
         XCTAssertFalse(store.canSubmit)
         XCTAssertEqual(created, 1)
@@ -492,6 +492,70 @@ final class ReadingStoreTests: XCTestCase {
         let third = await store.submit()
         XCTAssertFalse(third)
         XCTAssertEqual(transport.requests.count, 2)
+    }
+
+    @MainActor
+    func testNewEpisodeOptions() async throws {
+        let transport = server()
+        let store = NewEpisodeStore(context: try context(transport))
+        await store.load()
+        XCTAssertEqual(store.style, "ausgewogen")
+        XCTAssertTrue(store.audio)
+        XCTAssertEqual(store.styleHint, "Einordnen, erklären, Querverbindungen")
+        store.select(kind: "podcast")
+        store.select(style: "kritisch")
+        store.select(style: "gibtsnicht")
+        XCTAssertEqual(store.style, "kritisch")
+        XCTAssertEqual(store.styleHint, "Argumente prüfen, Lücken und Widersprüche benennen")
+        store.toggle(topic: "Medien")
+        store.toggle(topic: "Lesen")
+        store.toggle(topic: "Unbekannt")
+        XCTAssertEqual(store.selectedTopics, ["Lesen", "Medien"], "Reihenfolge der Liste")
+        store.set(focus: "  Alltag  ")
+        store.set(focus: String(repeating: "x", count: 250))
+        XCTAssertEqual(store.focus.count, 200)
+        store.set(focus: "  Alltag  ")
+        store.select(audio: false)
+        XCTAssertEqual(store.summary, EpisodeSummary(main: "Podcast · 3 Texte · 10 Min. · erst Transkript", cost: "Nur dein Claude-Abo; Audio später auf Knopfdruck"))
+
+        transport.respond { _ in (200, json(#"{"ok":true,"message":"Podcast: Claude schreibt das Transkript, Audio danach auf Knopfdruck.","redirect":"/lesen/folgen"}"#)) }
+        let ok = await store.submit()
+        XCTAssertTrue(ok)
+        let body = String(decoding: try XCTUnwrap(transport.requests.last?.httpBody), as: UTF8.self)
+        XCTAssertTrue(body.hasSuffix("&laenge=10&stil=kritisch&thema=Lesen&thema=Medien&fokus=Alltag&audio=0"), body)
+
+        // Vorlesen: keine Wünsche, immer mit Audio.
+        let reading = NewEpisodeStore(context: try context(server()))
+        await reading.load()
+        reading.select(audio: false)
+        XCTAssertEqual(reading.summary.main, "Vorlesen · 3 Texte · etwa 10 Min.")
+    }
+
+    @MainActor
+    func testEpisodeSpeakTranscript() async throws {
+        let transport = server()
+        let store = EpisodesStore(context: try context(transport), pollInterval: 0)
+        await store.load()
+        let transcript = try JSONDecoder().decode(Episode.self, from: json(#"{"id":"ep-transkript","kind":"report","title":"Report: Stapel","minutes":5,"status":"transkript","createdAt":"2026-10-25T09:00:00.000Z","note":"30-ressourcen/audio-reports/x.md","audio":false,"style":"tiefgang","styleLabel":"Tiefgang","topics":["Lesen"],"focus":null,"wishes":"Tiefgang · Schwerpunkt: Lesen","speak":{"label":"Audio erzeugen","hint":"rund 4.500 Zeichen bei ElevenLabs."}}"#))
+        XCTAssertTrue(transcript.isTranscript)
+        XCTAssertFalse(transcript.busy)
+        XCTAssertFalse(transcript.audio)
+        XCTAssertEqual(transcript.wishes, "Tiefgang · Schwerpunkt: Lesen")
+        XCTAssertEqual(transcript.speak?.label, "Audio erzeugen")
+        transport.respond { request in
+            path(of: request) == "/api/lesen/folgen" ? (200, try fixture("lesen-folgen")) : (200, json(#"{"ok":true,"message":"Audio entsteht: Report","redirect":"/lesen/folgen"}"#))
+        }
+        let ok = await store.speak(transcript)
+        XCTAssertTrue(ok)
+        let request = try XCTUnwrap(transport.requests.first { path(of: $0) == "/aktion/lesen/folge/sprechen" })
+        XCTAssertEqual(formFields(request), ["id": "ep-transkript"])
+
+        // Älterer Server ohne die Felder: mit Audio, ohne Wünsche.
+        let old = try JSONDecoder().decode(Episode.self, from: json(#"{"id":"a","kind":"podcast","status":"fertig","createdAt":"2026-10-25T09:00:00.000Z"}"#))
+        XCTAssertTrue(old.audio)
+        XCTAssertNil(old.wishes)
+        let fertig = await store.speak(old)
+        XCTAssertFalse(fertig, "nur zu einem Transkript")
     }
 
     @MainActor

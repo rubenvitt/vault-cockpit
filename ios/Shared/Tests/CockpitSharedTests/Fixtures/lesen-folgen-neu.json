@@ -26,7 +26,9 @@
       "previousStatus": null,
       "progress": 0,
       "scrollAnchor": 0,
-      "topics": [],
+      "topics": [
+        "Lesen"
+      ],
       "savedAt": "2026-10-23T09:07:32.228Z",
       "statusChangedAt": "2026-10-23T09:07:32.228Z",
       "readAt": null,
@@ -80,7 +82,10 @@
       "previousStatus": null,
       "progress": 0,
       "scrollAnchor": 0,
-      "topics": [],
+      "topics": [
+        "Lesen",
+        "Medien"
+      ],
       "savedAt": "2026-10-23T09:07:32.228Z",
       "statusChangedAt": "2026-10-23T09:07:32.228Z",
       "readAt": null,
@@ -129,6 +134,42 @@
   "defaultLength": 10,
   "maxDocs": 20,
   "spokenCharsPerMinute": 900,
+  "styles": [
+    {
+      "style": "ausgewogen",
+      "label": "Ausgewogen",
+      "description": "Einordnen, erklären, Querverbindungen"
+    },
+    {
+      "style": "locker",
+      "label": "Locker",
+      "description": "Unterhaltsam, mit Beispielen aus dem Alltag"
+    },
+    {
+      "style": "kritisch",
+      "label": "Kritisch",
+      "description": "Argumente prüfen, Lücken und Widersprüche benennen"
+    },
+    {
+      "style": "tiefgang",
+      "label": "Tiefgang",
+      "description": "Weniger Punkte, dafür gründlich erklärt"
+    }
+  ],
+  "defaultStyle": "ausgewogen",
+  "topics": [
+    {
+      "label": "Lesen",
+      "count": 2
+    },
+    {
+      "label": "Medien",
+      "count": 1
+    }
+  ],
+  "maxTopics": 5,
+  "maxFocus": 200,
+  "transcriptOnly": true,
   "summary": {
     "main": "Vorlesen · 3 Texte · etwa 10 Min.",
     "cost": "rund 8.642 Zeichen bei ElevenLabs"

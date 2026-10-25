@@ -454,7 +454,66 @@ test('Folgen: Fortschritt in Schritten, Prozent und Restzeit statt „1 von 4“
   assert.equal(newSummary({ kind: 'report', texts: 0 }).main, 'Bitte mindestens einen Text wählen');
   assert.equal(clock(75), '1:15');
   assert.equal(clock(3725), '1:02:05');
+  const transcript = progressOf({ kind: 'podcast', status: 'schreibt', audio: false, writing_at: '2026-10-23T09:59:00Z' }, t0);
+  assert.deepEqual(transcript.steps, ['Eingereiht', 'Claude schreibt', 'Transkript fertig'], 'erst nur Transkript: ohne Sprechen');
+  assert.deepEqual(newSummary({ kind: 'report', texts: 2, chars: 0, minutes: 5, audio: false }), { main: 'Report · 2 Texte · 5 Min. · erst Transkript', cost: 'Nur dein Claude-Abo; Audio später auf Knopfdruck' });
+  assert.equal(newSummary({ kind: 'vorlesen', texts: 1, chars: 900, audio: false }).main, 'Vorlesen · 1 Text · etwa 1 Min.', 'Vorlesen immer mit Audio');
 });
+
+test('Folgen: erst nur Transkript mit Ton und Schwerpunkt, Audio später aus demselben Skript', () =>
+  withDir(async (dir) => {
+    const { a, b, episodes, calls, setTts } = setup(dir);
+    // Ohne Stimme geht ein reines Transkript trotzdem, Claude genügt.
+    setTts(null);
+    const ep = episodes.create({ kind: 'podcast', docIds: [a.id, b.id], minutes: 5, audio: false, style: 'kritisch', topics: [' KI ', 'ki', 'Arbeit', '', 'A', 'B', 'C', 'D'], focus: '  Was heißt das\nfür mich?  ' });
+    assert.equal(ep.chars, 0, 'kostet bei ElevenLabs nichts');
+    assert.deepEqual([ep.audio, ep.style, ep.topics, ep.focus], [false, 'kritisch', ['KI', 'Arbeit', 'A', 'B', 'C'], 'Was heißt das für mich?']);
+    await ep.done;
+    let done = episodes.get(ep.id);
+    assert.equal(done.status, 'transkript', done.error);
+    assert.equal(calls.dialogue.length, 0, 'nichts gesprochen');
+    assert.equal(calls.heard.length, 0, 'noch nicht gehört');
+    assert.match(calls.writes[0].prompt, /Ton: kritisch\./);
+    assert.match(calls.writes[0].prompt, /Schwerpunkt \(Themen: KI, Arbeit, A, B, C; Wunsch: Was heißt das für mich\?\)/);
+    const { content } = calls.notes[0];
+    assert.match(content, /\nminuten: 5\nstil: kritisch\nthemen:\n {2}- "KI"\n {2}- "Arbeit"\n {2}- "A"\n {2}- "B"\n {2}- "C"\nschwerpunkt: "Was heißt das für mich\?"\nquellen:/);
+    assert.match(content, /\(Cockpit\)_\n\n> Ton: Kritisch · Schwerpunkt: KI, Arbeit, A, B, C, Was heißt das für mich\?\n\n## Gespräch/);
+    assert.equal(episodes.audioPath(ep.id), null);
+
+    const ctx = { tz: 'Europe/Berlin', write: { csrf: 'c' } };
+    const card = episodeCard(done, { ctx });
+    assert.match(card, /^<li class="folge is-transcript"/);
+    assert.match(card, /action="\/aktion\/lesen\/folge\/sprechen"/);
+    assert.match(card, /Transkript lesen/);
+    assert.match(card, /Kritisch · Schwerpunkt: KI/);
+
+    // Audio braucht die Stimme.
+    assert.throws(() => episodes.speak(ep.id), (err) => err instanceof EpisodeError && err.status === 409);
+    setTts(TTS);
+    const again = episodes.speak(ep.id);
+    await again.done;
+    done = episodes.get(ep.id);
+    assert.equal(done.status, 'fertig', done.error);
+    assert.equal(calls.writes.length, 1, 'Claude schreibt nicht noch einmal');
+    assert.equal(calls.notes.length, 1, 'keine zweite Notiz');
+    assert.deepEqual(calls.dialogue, [[{ text: 'Willkommen.', voice: 'Host' }, { text: 'Danke.', voice: 'Gast' }]]);
+    assert.deepEqual(calls.heard, [[a.id, b.id]]);
+    assert.throws(() => episodes.speak(ep.id), /nur zu einem fertigen Transkript/);
+  }));
+
+test('Folgen: unbekannter Ton abgelehnt; Vorlesen ohne Ton und Schwerpunkt; Standard ohne Zusätze im Auftrag', () =>
+  withDir(async (dir) => {
+    const { a, episodes, calls } = setup(dir);
+    assert.throws(() => episodes.create({ kind: 'report', docIds: [a.id], style: 'wild' }), /Ton: Ausgewogen, Locker, Kritisch, Tiefgang/);
+    const reading = episodes.create({ kind: 'vorlesen', docIds: [a.id], audio: false, style: 'kritisch', topics: ['KI'] });
+    assert.deepEqual([reading.audio, reading.style, reading.topics], [undefined, undefined, undefined]);
+    await reading.done;
+    assert.equal(episodes.get(reading.id).status, 'fertig');
+    const report = episodes.create({ kind: 'report', docIds: [a.id], minutes: 5 });
+    await report.done;
+    assert.doesNotMatch(calls.writes[0].prompt, /Ton:|Schwerpunkt/);
+    assert.doesNotMatch(calls.notes[0].content, /stil:|themen:|schwerpunkt:|\n> /);
+  }));
 
 test('Folgen: Seiten ohne JavaScript, Anlegen per Formular, Audio mit Range', () =>
   withDir(async (dir) => {
@@ -507,6 +566,50 @@ test('Folgen: Seiten ohne JavaScript, Anlegen per Formular, Audio mit Range', ()
 
     await routes.actions['/aktion/lesen/folge/loeschen'](new URLSearchParams({ id: ep.id }), {});
     assert.match((await page('/lesen/folgen')).html, /Noch keine Folgen/);
+  }));
+
+test('Folgen: Ton, Themen der Texte und „erst nur Transkript“ im Formular und in der App-Vorschau', () =>
+  withDir(async (dir) => {
+    const { store, a, b, episodes, calls } = setup(dir);
+    store.updateDocument(a.id, { topics: ['KI', 'Arbeit'] });
+    store.updateDocument(b.id, { topics: ['KI'] });
+    const routes = readingRoutes({ store, episodes, logger: quiet });
+    const ctx = (path) => ({ url: new URL(`https://vault.test${path}`), range: null, user: 'ruben', tz: 'Europe/Berlin', write: { csrf: 'c', back: path }, flash: null });
+    const page = (path) => routes.pages[new URL(`https://vault.test${path}`).pathname](ctx(path));
+
+    const neu = (await page('/lesen/folgen/neu?zeit=15')).html;
+    assert.match(neu, /name="stil" value="ausgewogen" data-hint="[^"]+" checked/);
+    assert.match(neu, /name="stil" value="kritisch"/);
+    assert.match(neu, /name="thema" value="KI"><span>KI<span class="meta"> 2<\/span>/, 'häufigstes Thema zuerst');
+    assert.match(neu, /name="thema" value="Arbeit"/);
+    assert.match(neu, /name="fokus" maxlength="200"/);
+    assert.match(neu, /name="audio" value="0"><span>Erst nur Transkript/);
+
+    const api = JSON.parse((await page('/api/lesen/folgen/neu?zeit=15')).body);
+    assert.deepEqual(api.topics, [{ label: 'KI', count: 2 }, { label: 'Arbeit', count: 1 }]);
+    assert.deepEqual(api.styles.map((s) => s.style), ['ausgewogen', 'locker', 'kritisch', 'tiefgang']);
+    assert.deepEqual([api.defaultStyle, api.maxTopics, api.maxFocus, api.transcriptOnly], ['ausgewogen', 5, 200, true]);
+
+    const form = new URLSearchParams([['art', 'report'], ['doc', a.id], ['laenge', '5'], ['stil', 'tiefgang'], ['thema', 'KI'], ['fokus', 'Folgen für Teams'], ['audio', '0']]);
+    const r = await routes.actions['/aktion/lesen/folge/neu'](form, { sub: 'ruben' });
+    assert.match(r.message, /^Report: Claude schreibt das Transkript/);
+    await new Promise((res) => setTimeout(res, 20));
+    const [ep] = episodes.list();
+    assert.deepEqual([ep.status, ep.style, ep.topics, ep.focus], ['transkript', 'tiefgang', ['KI'], 'Folgen für Teams']);
+    assert.equal(calls.speech.length, 0);
+
+    const list = JSON.parse((await page('/api/lesen/folgen')).body).items;
+    assert.deepEqual([list[0].audio, list[0].styleLabel, list[0].wishes, list[0].busy], [false, 'Tiefgang', 'Tiefgang · Schwerpunkt: KI, Folgen für Teams', false]);
+    assert.equal(list[0].speak.label, 'Audio erzeugen');
+    const stand = JSON.parse((await page('/lesen/folgen/stand')).body).items;
+    assert.match(stand[0].html, /^<li class="folge is-transcript"/);
+
+    const s = await routes.actions['/aktion/lesen/folge/sprechen'](new URLSearchParams({ id: ep.id }), {});
+    assert.match(s.message, /^Audio entsteht/);
+    await new Promise((res) => setTimeout(res, 20));
+    assert.equal(episodes.get(ep.id).status, 'fertig');
+    assert.equal(calls.writes.length, 1);
+    assert.deepEqual(calls.speech.map((c) => c.text), ['Zwei Texte. Beide kurz.']);
   }));
 
 /** Kindprozess-Attrappe für `claude -p`. */
