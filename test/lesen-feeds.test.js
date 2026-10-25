@@ -504,7 +504,7 @@ test('Feeds-Seite: Feeds einer Gruppe zuordnen, nach Gruppe anzeigen mit neuen E
       store.addDocument({ url: 'https://atom.test/a/1', origin: `feed:${atom.id}` });
       store.addDocument({ url: 'https://atom.test/a/2', origin: `feed:${atom.id}` });
       const page = await (await call('/lesen/feeds')).text();
-      assert.match(page, /<details open class="feed-group">\s*<summary><span class="feed-group-name">Tech<\/span> <span class="count-badge">2 neu<\/span><\/summary>/);
+      assert.match(page, /<details open class="feed-group" data-gruppe>\s*<summary><span class="feed-group-name">Tech<\/span> <span class="count-badge">2 neu<\/span><\/summary>/);
       assert.ok(page.includes(`<a href="/lesen/eingang?gruppe=${tech.id}">2 neue Einträge im Eingang</a>`));
       assert.match(page, /Noch keine Feeds in dieser Gruppe/);
       assert.ok(groupAt(page, 'Tech') < groupAt(page, 'Leer') && groupAt(page, 'Leer') < groupAt(page, 'Ohne Gruppe'));
@@ -556,4 +556,83 @@ test('Feeds-Seite: OPML-Import legt Ordner als Gruppen an, vorhandene Zuordnung 
     assert.equal(store.getFeed(known.id).group_id, tech.id, 'schon abonniert, ohne Gruppe: wird zugeordnet');
     assert.equal(store.getFeed(kept.id).group_id, politik.id, 'vorhandene Zuordnung bleibt');
   });
+});
+
+// --- Sammeln (VCP-110) ---------------------------------------------------------
+
+test('Feeds-Seite: viele Feeds auf einmal verschieben, pausieren, einstellen und nach Rückfrage entfernen', async () => {
+  await withWeb(async ({ call, store }) => {
+    const { group: tech } = store.addGroup({ name: 'Tech' });
+    const ids = ['a', 'b', 'c', 'd'].map((n) => store.addFeed({ url: `https://${n}.test/feed`, title: `Feed ${n.toUpperCase()}`, interval_minutes: 30 }).feed.id);
+    const [a, b, c, d] = ids;
+    const csrf = await csrfOf(call);
+    // Mehrere `feed`-Felder: als Liste von Paaren.
+    const bulk = (fields, picked) => call('/aktion/lesen/feeds/auswahl', { form: [['csrf', csrf], ['back', '/lesen/feeds'], ...Object.entries(fields), ...picked.map((id) => ['feed', id])] });
+
+    const page = await (await call('/lesen/feeds')).text();
+    for (const id of ids) assert.ok(page.includes(`<input type="checkbox" name="feed" value="${id}" form="feeds-auswahl" class="feed-pick" aria-label="Auswählen: Feed`), 'Häkchen je Feed gehört zum Sammelformular');
+    assert.match(page, /<form method="post" action="\/aktion\/lesen\/feeds\/auswahl" id="feeds-auswahl"/);
+    assert.match(page, /<option value="neu">Neue Gruppe …<\/option>/);
+    assert.match(page, /<script src="\/static\/lesen-feeds\.js\?v=[\w-]+" defer>/);
+    assert.match(page, /4 Feeds\. Zum gemeinsamen Bearbeiten/);
+    assert.ok(!/style=|<script>/.test(page), 'keine Inline-Styles oder -Skripte');
+
+    assert.equal(await toastAfter(call, await bulk({ tun: 'pausieren' }, [])), 'Bitte zuerst Feeds abhaken');
+
+    // In eine vorhandene Gruppe, in eine neue, wieder ohne.
+    assert.equal(await toastAfter(call, await bulk({ tun: 'gruppe', ziel: tech.id }, [a, b, a])), '2 Feeds in „Tech“');
+    assert.deepEqual([a, b, c].map((id) => store.getFeed(id).group_id), [tech.id, tech.id, null]);
+    assert.equal(await toastAfter(call, await bulk({ tun: 'gruppe', ziel: 'neu', neu: ' Politik ' }, [c, d])), '2 Feeds in „Politik“');
+    const politik = store.listGroups().find((g) => g.name === 'Politik');
+    assert.deepEqual([c, d].map((id) => store.getFeed(id).group_id), [politik.id, politik.id]);
+    assert.equal(await toastAfter(call, await bulk({ tun: 'gruppe', ziel: 'neu', neu: '' }, [c])), 'Name der Gruppe fehlt');
+    assert.equal(await toastAfter(call, await bulk({ tun: 'gruppe', ziel: 'weg' }, [c])), 'Diese Gruppe gibt es nicht mehr');
+    assert.equal(await toastAfter(call, await bulk({ tun: 'gruppe', ziel: '' }, [d])), '1 Feed jetzt ohne Gruppe');
+    assert.equal(store.getFeed(d).group_id, null);
+
+    // Schalter und Abstand; unbekannte Feeds fallen weg.
+    assert.equal(await toastAfter(call, await bulk({ tun: 'pausieren' }, [a, c, 'gibts-nicht'])), '2 Feeds pausiert');
+    assert.deepEqual(ids.map((id) => store.getFeed(id).paused), [true, false, true, false]);
+    await bulk({ tun: 'fortsetzen' }, [a]);
+    assert.equal(store.getFeed(a).paused, false);
+    await bulk({ tun: 'stapel-an' }, [b, d]);
+    assert.deepEqual(ids.map((id) => store.getFeed(id).to_stack), [false, true, false, true]);
+    await bulk({ tun: 'stapel-aus' }, [d]);
+    assert.equal(store.getFeed(d).to_stack, false);
+    assert.equal(await toastAfter(call, await bulk({ tun: 'abstand', intervall: '2' }, [a, b])), '2 Feeds alle 5 min');
+    assert.deepEqual(ids.map((id) => store.getFeed(id).interval_minutes), [5, 5, 30, 30]);
+    assert.equal(await toastAfter(call, await bulk({ tun: 'abstand', intervall: 'x' }, [a])), 'Bitte einen Abstand in Minuten angeben');
+    assert.equal(await toastAfter(call, await bulk({ tun: 'quer' }, [a])), 'Unbekannte Aktion');
+    assert.equal(await toastAfter(call, await bulk({ tun: 'pausieren' }, ['gibts-nicht'])), 'Diese Feeds gibt es nicht mehr');
+
+    // Entfernen ohne Bestätigung: erst die Rückfrage, nichts ist weg.
+    const ask = await bulk({ tun: 'entfernen' }, [a, b]);
+    assert.equal(ask.status, 303);
+    assert.equal(ask.headers.get('location'), `/lesen/feeds/entfernen?feed=${a}&feed=${b}`);
+    assert.equal(store.listFeeds().length, 4);
+    const confirm = await (await call(ask.headers.get('location'), { cookie: ask.headers.getSetCookie() })).text();
+    assert.match(confirm, /2 Feeds entfernen\? Gespeicherte Artikel bleiben/);
+    assert.match(confirm, /Feed A[\s\S]*Feed B/);
+    assert.ok(!confirm.includes('Feed C'));
+    assert.ok(confirm.includes(`<input type="hidden" name="feed" value="${a}">`) && confirm.includes('name="bestaetigt" value="1"'));
+    assert.ok(!/toast-text/.test(confirm), 'keine leere Meldung');
+
+    store.addDocument({ url: 'https://a.test/1', origin: `feed:${a}` });
+    const del = await bulk({ tun: 'entfernen', bestaetigt: '1' }, [a, b]);
+    assert.equal(await toastAfter(call, del), '2 Feeds entfernt. Gespeicherte Artikel bleiben.');
+    assert.deepEqual(store.listFeeds().map((f) => f.id).sort(), [c, d].sort());
+    assert.equal(store.list({ limit: 10 }).length, 1, 'Artikel bleibt');
+    assert.match(await (await call(`/lesen/feeds/entfernen?feed=${a}`)).text(), /Diese Feeds gibt es nicht mehr/);
+  });
+});
+
+test('Lesestapel: updateFeeds und deleteFeeds gehen alles oder nichts', () => {
+  const store = createReadingStore({ path: ':memory:' });
+  const a = store.addFeed({ url: 'https://a.test/feed' }).feed.id;
+  const b = store.addFeed({ url: 'https://b.test/feed' }).feed.id;
+  assert.throws(() => store.updateFeeds([a, b], { group_id: 'gibts-nicht' }), /Diese Gruppe gibt es nicht/);
+  assert.deepEqual(store.updateFeeds([a, a, 'x'], { paused: true }).map((f) => f.id), [a]);
+  assert.equal(store.getFeed(b).paused, false);
+  assert.equal(store.deleteFeeds([a, b, 'x']), 2);
+  assert.equal(store.listFeeds().length, 0);
 });

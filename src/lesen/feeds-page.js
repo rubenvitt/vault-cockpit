@@ -1,5 +1,5 @@
 import { ActionError } from '../cockpit/actions.js';
-import { esc } from '../web/layout.js';
+import { esc, assets } from '../web/layout.js';
 import { hidden } from '../web/render.js';
 import { when } from '../web/health-render.js';
 import { maskSecrets } from '../health/mask.js';
@@ -16,6 +16,11 @@ import { parseOpml, toOpml } from './opml.js';
  * (src/lesen/feeds.js), ein neuer Feed ist beim nächsten Durchgang dran.
  * Gruppen (VCP-97): anlegen, umbenennen, ordnen, löschen; Pausieren und
  * „direkt auf den Stapel“ einer Gruppe gelten zusätzlich für alle ihre Feeds.
+ * Sammeln (VCP-110): Feeds abhaken und gemeinsam verschieben, pausieren,
+ * einstellen oder entfernen. Die Häkchen gehören über `form=` zum Formular der
+ * Leiste unten, so geht es auch ohne JavaScript; Entfernen fragt vorher nach
+ * (mit JavaScript im Dialog, sonst auf `/lesen/feeds/entfernen`).
+ * src/web/static/lesen-feeds.js ergänzt Suche, „Alle auswählen“ und Zähler.
  */
 
 const back = '/lesen/feeds';
@@ -23,6 +28,11 @@ const MIN_INTERVAL = 5;
 const MAX_INTERVAL = 24 * 60;
 /** Größte OPML-Datei für den Import. */
 const MAX_OPML = 2 * 1024 * 1024;
+/** Formular der Sammelleiste; die Häkchen der Feeds zeigen mit `form=` darauf. */
+const BULK = 'feeds-auswahl';
+/** Wert von `ziel` für „neue Gruppe anlegen“ (IDs sind nie so kurz). */
+const NEW_GROUP = 'neu';
+const feedsWord = (n) => `${n} ${n === 1 ? 'Feed' : 'Feeds'}`;
 
 const asAction = async (run) => {
   try {
@@ -63,10 +73,12 @@ const groupSelect = (groups, selected, label) =>
 function feedItem(f, ctx, groups) {
   const token = hidden({ csrf: ctx.write.csrf, back, id: f.id });
   const title = f.title || host(f.url);
-  const link = /^https?:\/\//i.test(f.site_url ?? '') ? `<a href="${esc(f.site_url)}" class="lesen-title" rel="noopener noreferrer">${esc(title)}</a>` : `<span class="lesen-title">${esc(title)}</span>`;
+  const group = groups.find((g) => g.id === f.group_id)?.name ?? '';
+  const search = [title, host(f.url), group].join(' ').toLocaleLowerCase('de');
+  const link = /^https?:\/\//i.test(f.site_url ?? '') ? `<a href="${esc(f.site_url)}" class="lesen-title" rel="noopener noreferrer" target="_blank">${esc(title)}</a>` : `<span class="lesen-title">${esc(title)}</span>`;
   const meta = [host(f.url), `alle ${f.interval_minutes} min`, f.to_stack ? 'direkt auf den Stapel' : f.group_to_stack ? 'direkt auf den Stapel (Gruppe)' : null, f.keyword_filter ? `nur „${f.keyword_filter}“` : null].filter(Boolean).map(esc).join(' · ');
-  return `<li class="lesen-item feed${f.error_count ? ' feed-failing' : ''}">
-    <div class="feed-head">${iconOf(f)}${link}</div>
+  return `<li class="lesen-item feed${f.error_count ? ' feed-failing' : ''}" data-suche="${esc(search)}"${f.error_count ? ' data-fehler' : ''}>
+    <div class="feed-head"><input type="checkbox" name="feed" value="${esc(f.id)}" form="${BULK}" class="feed-pick" aria-label="Auswählen: ${esc(title)}">${iconOf(f)}${link}</div>
     <span class="meta">${meta}</span>
     <span class="meta feed-status">${esc(status(f, ctx.tz))}</span>
     <details class="feed-edit"><summary>Einstellungen</summary>
@@ -78,18 +90,21 @@ function feedItem(f, ctx, groups) {
         ${groupSelect(groups, f.group_id, '<span>Gruppe</span>')}
         <p class="feed-actions"><button type="submit" class="btn">Speichern</button></p>
       </form>
-      <form method="post" action="/aktion/lesen/feed/entfernen">${token}<button type="submit" class="btn quiet danger">Feed entfernen</button></form>
+      <form method="post" action="/aktion/lesen/feed/entfernen" data-confirm="${esc(`„${title}“ entfernen? Gespeicherte Artikel bleiben.`)}">${token}<button type="submit" class="btn quiet danger">Feed entfernen</button></form>
     </details>
   </li>`;
 }
 
-const feedList = (feeds, ctx, groups, empty) => (feeds.length ? `<ul class="lesen-list">${feeds.map((f) => feedItem(f, ctx, groups)).join('')}</ul>` : `<p class="empty">${empty}</p>`);
+/** „Alle auswählen“ für einen Abschnitt; erst mit JavaScript sichtbar. */
+const pickAll = (label) => `<label class="feed-check feed-pick-all" hidden><input type="checkbox" data-alle> ${esc(label)}</label>`;
+const feedList = (feeds, ctx, groups, empty) =>
+  feeds.length ? `${pickAll('Alle hier auswählen')}<ul class="lesen-list">${feeds.map((f) => feedItem(f, ctx, groups)).join('')}</ul>` : `<p class="empty">${empty}</p>`;
 
 function groupSection(g, i, { feeds, groups, inbox, ctx }) {
   const token = hidden({ csrf: ctx.write.csrf, back, id: g.id });
   const n = inbox[g.id] ?? 0;
   const flags = [g.paused ? 'pausiert' : null, g.to_stack ? 'direkt auf den Stapel' : null].filter(Boolean).join(' · ');
-  return `<details open class="feed-group">
+  return `<details open class="feed-group" data-gruppe>
   <summary><span class="feed-group-name">${esc(g.name)}</span> <span class="count-badge">${n} neu</span></summary>
   <p class="meta"><a href="/lesen/eingang?gruppe=${encodeURIComponent(g.id)}">${n} ${n === 1 ? 'neuer Eintrag' : 'neue Einträge'} im Eingang</a>${flags ? ` · ${esc(flags)}` : ''}</p>
   ${feedList(feeds.filter((f) => f.group_id === g.id), ctx, groups, 'Noch keine Feeds in dieser Gruppe.')}
@@ -105,7 +120,7 @@ function groupSection(g, i, { feeds, groups, inbox, ctx }) {
       <button type="submit" name="richtung" value="hoch" class="btn quiet"${i === 0 ? ' disabled' : ''}>Nach oben<span class="sr-only">: ${esc(g.name)}</span></button>
       <button type="submit" name="richtung" value="runter" class="btn quiet"${i === groups.length - 1 ? ' disabled' : ''}>Nach unten<span class="sr-only">: ${esc(g.name)}</span></button>
     </form>
-    <form method="post" action="/aktion/lesen/gruppe/entfernen">${token}<button type="submit" class="btn quiet danger">Gruppe löschen</button> <span class="hint">Die Feeds bleiben, dann ohne Gruppe.</span></form>
+    <form method="post" action="/aktion/lesen/gruppe/entfernen" data-confirm="${esc(`Gruppe „${g.name}“ löschen? Die Feeds bleiben, dann ohne Gruppe.`)}">${token}<button type="submit" class="btn quiet danger">Gruppe löschen</button> <span class="hint">Die Feeds bleiben, dann ohne Gruppe.</span></form>
   </details>
 </details>`;
 }
@@ -119,7 +134,7 @@ export function renderFeeds({ feeds, groups = [], inbox = {} }, ctx) {
   else {
     const loose = feeds.filter((f) => !f.group_id);
     list = groups.map((g, i) => groupSection(g, i, { feeds, groups, inbox, ctx })).join('\n');
-    if (loose.length) list += `\n<details open class="feed-group"><summary><span class="feed-group-name">Ohne Gruppe</span></summary>${feedList(loose, ctx, groups)}</details>`;
+    if (loose.length) list += `\n<details open class="feed-group" data-gruppe><summary><span class="feed-group-name">Ohne Gruppe</span></summary>${feedList(loose, ctx, groups)}</details>`;
   }
   const body = `<section>
   <form method="post" action="/aktion/lesen/feed/abonnieren" class="lesen-save">${token}
@@ -129,7 +144,9 @@ export function renderFeeds({ feeds, groups = [], inbox = {} }, ctx) {
   </form>
   <p class="meta">Neue Einträge landen von selbst im Eingang, beim ersten Abruf die letzten fünf.</p>
 </section>
-<section>${list}</section>
+${feeds.length ? tools(feeds) : ''}
+<section class="feed-lists">${list}</section>
+${feeds.length ? bulkBar(groups, ctx) : ''}
 <section>
   <form method="post" action="/aktion/lesen/gruppe/anlegen" class="lesen-save">${token}
     <label class="lesen-url"><span class="sr-only">Name der neuen Gruppe</span><input name="name" required placeholder="Neue Gruppe" autocomplete="off"></label>
@@ -144,7 +161,65 @@ export function renderFeeds({ feeds, groups = [], inbox = {} }, ctx) {
   </form>
   <p><a href="/lesen/feeds.opml" class="btn quiet" download="feeds.opml">Als OPML exportieren</a></p>
 </section>`;
-  return readingPage(ctx, { key: 'feeds', title: 'Feeds', body });
+  return readingPage(ctx, { key: 'feeds', title: 'Feeds', body, scripts: [assets.lesenFeeds] });
+}
+
+/** Überblick, Suche und Filter über der Liste; Suche und Filter erst mit JavaScript. */
+function tools(feeds) {
+  const failing = feeds.filter((f) => f.error_count).length;
+  const paused = feeds.filter((f) => f.paused || f.group_paused).length;
+  const summary = [feedsWord(feeds.length), paused ? `${paused} pausiert` : null, failing ? `${failing} mit Fehlern` : null].filter(Boolean).join(' · ');
+  return `<section class="feed-tools">
+  <p class="meta">${esc(summary)}. Zum gemeinsamen Bearbeiten Feeds abhaken, mit Umschalt auch einen ganzen Bereich.</p>
+  <div class="feed-filter" data-feed-filter hidden>
+    <label class="lesen-url"><span class="sr-only">Feeds durchsuchen</span><input type="search" data-suche placeholder="Feeds durchsuchen" autocomplete="off" spellcheck="false" enterkeyhint="search"></label>
+    ${failing ? '<label class="feed-check"><input type="checkbox" data-nur-fehler> Nur mit Fehlern</label>' : ''}
+    ${pickAll('Alle sichtbaren auswählen')}
+  </div>
+  <p class="meta" data-treffer hidden></p>
+</section>`;
+}
+
+/** Ein Wert pro Aktion; Gruppe und Abstand blenden sich per CSS (`:has`) passend ein. */
+const ACTIONS = [
+  ['gruppe', 'In Gruppe verschieben'],
+  ['pausieren', 'Pausieren'],
+  ['fortsetzen', 'Fortsetzen'],
+  ['stapel-an', 'Direkt auf den Stapel'],
+  ['stapel-aus', 'Nicht mehr direkt auf den Stapel'],
+  ['abstand', 'Abstand ändern'],
+  ['entfernen', 'Entfernen'],
+];
+
+/** Leiste unten für alle abgehakten Feeds (Formular `BULK`). */
+function bulkBar(groups, ctx) {
+  const options = [['', 'ohne Gruppe'], ...groups.map((g) => [g.id, g.name]), [NEW_GROUP, 'Neue Gruppe …']];
+  return `<form method="post" action="/aktion/lesen/feeds/auswahl" id="${BULK}" class="feed-bulk" data-feed-bulk aria-label="Ausgewählte Feeds bearbeiten">${hidden({ csrf: ctx.write.csrf, back })}
+  <p class="feed-bulk-count" data-zahl>Abgehakte Feeds:</p>
+  <div class="feed-bulk-fields">
+    <label class="feed-field"><span class="sr-only">Aktion</span><select name="tun">${ACTIONS.map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join('')}</select></label>
+    <label class="feed-field feed-bulk-ziel"><span class="sr-only">Gruppe</span><select name="ziel">${options.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join('')}</select></label>
+    <label class="feed-field feed-bulk-neu"><span class="sr-only">Name der neuen Gruppe</span><input name="neu" placeholder="Name der neuen Gruppe" autocomplete="off"></label>
+    <label class="feed-field feed-bulk-abstand"><span class="sr-only">Abstand in Minuten</span><input name="intervall" type="number" min="${MIN_INTERVAL}" max="${MAX_INTERVAL}" value="${DEFAULT_INTERVAL}" inputmode="numeric" aria-describedby="feed-bulk-min"><span id="feed-bulk-min" class="hint">Minuten</span></label>
+    <button type="submit" class="btn primary">Anwenden</button>
+  </div>
+</form>`;
+}
+
+/** Rückfrage ohne JavaScript, bevor abgehakte Feeds entfernt werden. */
+export function renderRemove(feeds, ctx) {
+  const ids = feeds.map((f) => f.id);
+  const body = feeds.length
+    ? `<section class="feed-remove">
+  <p>${esc(feedsWord(feeds.length))} entfernen? Gespeicherte Artikel bleiben, es kommen nur keine neuen mehr.</p>
+  <ul class="lesen-list">${feeds.map((f) => `<li class="lesen-item feed"><div class="feed-head">${iconOf(f)}<span class="lesen-title">${esc(f.title || host(f.url))}</span></div><span class="meta">${esc(host(f.url))}</span></li>`).join('')}</ul>
+  <form method="post" action="/aktion/lesen/feeds/auswahl" class="feed-actions">${hidden({ csrf: ctx.write.csrf, back, tun: 'entfernen', bestaetigt: '1' })}${ids.map((id) => `<input type="hidden" name="feed" value="${esc(id)}">`).join('')}
+    <button type="submit" class="btn danger">${esc(feedsWord(feeds.length))} entfernen</button>
+    <a href="${back}" class="btn quiet">Abbrechen</a>
+  </form>
+</section>`
+    : `<p class="empty">Diese Feeds gibt es nicht mehr.</p><p><a href="${back}" class="btn quiet">Zurück zu den Feeds</a></p>`;
+  return readingPage(ctx, { key: 'feeds', title: 'Feeds entfernen', body });
 }
 
 /** Seiten und Aktionen für `readingRoutes` (src/lesen/http.js). */
@@ -163,6 +238,7 @@ export function feedRoutes({ store, fetchFeed = fetchFeedDefault, logger = conso
     uploads: { '/aktion/lesen/feeds/import': MAX_OPML },
     pages: {
       '/lesen/feeds': async (ctx) => ({ html: renderFeeds({ feeds: store.listFeeds(), groups: store.listGroups(), inbox: store.inboxByGroup() }, ctx) }),
+      '/lesen/feeds/entfernen': async (ctx) => ({ html: renderRemove([...new Set(ctx.url.searchParams.getAll('feed'))].map((id) => store.getFeed(id)).filter(Boolean), ctx) }),
       '/lesen/feeds.opml': async () => ({
         body: toOpml(store.listFeeds(), { groups: store.listGroups() }),
         headers: { 'content-type': 'text/x-opml; charset=utf-8', 'content-disposition': 'attachment; filename="feeds.opml"', 'cache-control': 'no-store' },
@@ -193,6 +269,49 @@ export function feedRoutes({ store, fetchFeed = fetchFeedDefault, logger = conso
         const feed = feedOf(form);
         store.deleteFeed(feed.id);
         return { message: `Entfernt: ${feed.title ?? host(feed.url)}. Gespeicherte Artikel bleiben.` };
+      },
+      async '/aktion/lesen/feeds/auswahl'(form, session) {
+        const ids = [...new Set(form.getAll('feed').filter(Boolean))];
+        if (!ids.length) throw new ActionError('Bitte zuerst Feeds abhaken');
+        const tun = form.get('tun');
+        const apply = async (patch, done) => {
+          const changed = await asAction(() => store.updateFeeds(ids, patch));
+          if (!changed.length) throw new ActionError('Diese Feeds gibt es nicht mehr', 404);
+          return { message: `${feedsWord(changed.length)} ${done}` };
+        };
+        switch (tun) {
+          case 'gruppe': {
+            const ziel = form.get('ziel') ?? '';
+            if (!ziel) return apply({ group_id: null }, 'jetzt ohne Gruppe');
+            const group = ziel === NEW_GROUP ? (await asAction(() => store.addGroup({ name: form.get('neu') }))).group : store.getGroup(ziel);
+            if (!group) throw new ActionError('Diese Gruppe gibt es nicht mehr', 404);
+            return apply({ group_id: group.id }, `in „${group.name}“`);
+          }
+          case 'pausieren':
+            return apply({ paused: true }, 'pausiert');
+          case 'fortsetzen':
+            return apply({ paused: false }, 'laufen wieder');
+          case 'stapel-an':
+            return apply({ to_stack: true }, 'legen direkt auf den Stapel');
+          case 'stapel-aus':
+            return apply({ to_stack: false }, 'legen in den Eingang');
+          case 'abstand': {
+            const minutes = Number(form.get('intervall'));
+            if (!Number.isFinite(minutes) || minutes <= 0) throw new ActionError('Bitte einen Abstand in Minuten angeben');
+            const m = Math.round(Math.min(MAX_INTERVAL, Math.max(MIN_INTERVAL, minutes)));
+            return apply({ interval_minutes: m }, `alle ${m} min`);
+          }
+          case 'entfernen': {
+            // Ohne Bestätigung erst die Rückfrage (mit JavaScript kam sie schon im Dialog).
+            if (form.get('bestaetigt') !== '1') return { message: '', redirect: `/lesen/feeds/entfernen?${new URLSearchParams(ids.map((id) => ['feed', id]))}` };
+            const n = store.deleteFeeds(ids);
+            if (!n) throw new ActionError('Diese Feeds gibt es nicht mehr', 404);
+            logger.info?.(`Feeds: ${n} auf einmal entfernt (${session.sub})`);
+            return { message: `${feedsWord(n)} entfernt. Gespeicherte Artikel bleiben.` };
+          }
+          default:
+            throw new ActionError('Unbekannte Aktion');
+        }
       },
       async '/aktion/lesen/feeds/import'(form, session) {
         const file = form.files?.get('datei');
