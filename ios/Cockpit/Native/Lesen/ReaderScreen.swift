@@ -363,15 +363,15 @@ struct ReaderScreen: View {
                 }
                 if model.vault {
                     Button {
-                        decide(store) { await $0.moveToVault(fullText: false) }
+                        decide(store) { await $0.moveToVault(fullText: true) }
                     } label: {
                         Label("In den Vault", systemImage: "archivebox")
                     }
                     .disabled(store.busy.contains("vault"))
                     Button {
-                        decide(store) { await $0.moveToVault(fullText: true) }
+                        decide(store) { await $0.moveToVault(fullText: false) }
                     } label: {
-                        Label("In den Vault mit Volltext", systemImage: "doc.text")
+                        Label("In den Vault ohne Volltext", systemImage: "doc")
                     }
                     .disabled(store.busy.contains("vault"))
                 }

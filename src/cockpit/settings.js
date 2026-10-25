@@ -50,6 +50,7 @@ const EMPTY = {
   embed: { url: null, model: null },
   tts: { provider: null, key: null, voice: null, model: null },
   episodes: { host: null, guest: null, model: null },
+  ingest: { nightly: null, hour: null, model: null, limit: null },
   calendars: [],
   hiddenEvents: null,
   session: { idleDays: null, maxDays: null, generation: 0 },
@@ -153,6 +154,22 @@ export function validateSettings(input) {
   if (claudeModel && !MODEL_ID.test(claudeModel)) throw new SettingsError('Claude-Modell: ein Alias wie sonnet oder opus oder ein voller Modellname', 'episodes.model');
   const episodes = { host: voiceOf(input.episodes?.host, 'Moderation', 'episodes.host'), guest: voiceOf(input.episodes?.guest, 'Gast', 'episodes.guest'), model: claudeModel };
 
+  // Ingest ins Wiki (src/lesen/ingest.js): Nachtlauf, Stunde, Claude-Modell, Höchstzahl je Nacht; `null` = Standard.
+  const whole = (v, min, max, what, field) => {
+    if (v === null || v === undefined || v === '') return null;
+    const n = Number(v);
+    if (!(Number.isInteger(n) && n >= min && n <= max)) throw new SettingsError(`${what}: ganze Zahl zwischen ${min} und ${max}`, field);
+    return n;
+  };
+  const ingestModel = text(input.ingest?.model, 64, 'Ingest-Modell', 'ingest.model');
+  if (ingestModel && !MODEL_ID.test(ingestModel)) throw new SettingsError('Ingest-Modell: ein Alias wie sonnet oder opus oder ein voller Modellname', 'ingest.model');
+  const ingest = {
+    nightly: typeof input.ingest?.nightly === 'boolean' ? input.ingest.nightly : null,
+    hour: whole(input.ingest?.hour, 0, 23, 'Ingest-Uhrzeit', 'ingest.hour'),
+    model: ingestModel,
+    limit: whole(input.ingest?.limit, 1, 100, 'Ingest-Höchstzahl je Nacht', 'ingest.limit'),
+  };
+
   // `formIndex` (aus `fromForm`): Nummer im Formular, damit ein Fehler das richtige Feld `cal.N.…` nennt.
   const calField = (c, i, k) => `cal.${Number.isInteger(c.formIndex) ? c.formIndex : i}.${k}`;
   const calendars = (input.calendars ?? []).map((c, i) => {
@@ -180,7 +197,7 @@ export function validateSettings(input) {
     ? [...new Set(input.hiddenEvents.map((t) => text(t, 200, 'Ausgeblendeter Termin', 'hiddenEvents')).filter(Boolean))].slice(0, 50)
     : null;
 
-  return { tz, vaultName: text(input.vaultName, 200, 'Vault-Name', 'vaultName'), inboxFolder, zunder: { url: zunderUrl, token: zunderToken }, bridge, flameNote, readingNotes: { folder: readingFolder }, mail, embed, tts, episodes, calendars, hiddenEvents, session: validateSession(input.session) };
+  return { tz, vaultName: text(input.vaultName, 200, 'Vault-Name', 'vaultName'), inboxFolder, zunder: { url: zunderUrl, token: zunderToken }, bridge, flameNote, readingNotes: { folder: readingFolder }, mail, embed, tts, episodes, ingest, calendars, hiddenEvents, session: validateSession(input.session) };
 }
 
 const days = (v, what, field) => {
@@ -231,7 +248,7 @@ export function createSettingsStore({ file = null, defaults = {}, logger = conso
     bridgeEnabled: true,
     bridgeTag: 'zunder',
     flameNoteEnabled: true,
-    readingNotesFolder: '30-ressourcen/lesestapel',
+    readingNotesFolder: 'raw',
     mailToken: null,
     mailSenders: [],
     mailbox: 'Vault',
@@ -245,6 +262,10 @@ export function createSettingsStore({ file = null, defaults = {}, logger = conso
     elevenlabsModel: ELEVENLABS_MODEL,
     episodeGuestVoice: ELEVENLABS_GUEST_VOICE,
     episodeModel: 'sonnet',
+    ingestNightly: true,
+    ingestHour: 3,
+    ingestModel: 'sonnet',
+    ingestLimit: 20,
     sessionIdleDays: 30,
     sessionMaxDays: 90,
     ...defaults,
@@ -298,6 +319,13 @@ export function createSettingsStore({ file = null, defaults = {}, logger = conso
           host: stored.episodes?.host ?? tts.voice ?? d.elevenlabsVoice,
           guest: stored.episodes?.guest ?? d.episodeGuestVoice,
           model: stored.episodes?.model ?? d.episodeModel,
+        },
+        // Ingest ins Wiki: Entwürfe nachts um `hour` (Zeitzone oben), höchstens `limit` Dokumente.
+        ingest: {
+          nightly: stored.ingest?.nightly ?? d.ingestNightly,
+          hour: stored.ingest?.hour ?? d.ingestHour,
+          model: stored.ingest?.model ?? d.ingestModel,
+          limit: stored.ingest?.limit ?? d.ingestLimit,
         },
         calendars: stored.calendars,
         hiddenEvents: stored.hiddenEvents ?? DEFAULT_HIDDEN_EVENTS,

@@ -157,7 +157,18 @@ function formSections(stored, d) {
     },
     lesestapel: {
       intro: 'Gelesene Texte mit Markierungen kommen als Notiz in diesen Ordner, jede Markierung mit Block-ID zum Verlinken. Das Cockpit schreibt danach nur den Bereich „Markierungen“ neu; in vertraulichen und Readwise-Ordnern legt es nichts an.',
-      fields: [field('readingNotes.folder', 'Ordner im Vault', { value: stored.readingNotes?.folder, placeholder: d.readingNotesFolder ?? '30-ressourcen/lesestapel' })],
+      fields: [
+        field('readingNotes.folder', 'Ordner im Vault', { value: stored.readingNotes?.folder, placeholder: d.readingNotesFolder ?? '30-ressourcen/lesestapel' }),
+        ...[
+          field('ingest.nightly', 'Nachts entwerfen', { kind: 'select', value: choice(stored.ingest?.nightly ?? null), options: onOff(d.ingestNightly ?? true) }),
+          field('ingest.hour', 'Uhrzeit', { kind: 'number', hint: 'volle Stunde, 0–23', value: stored.ingest?.hour, placeholder: d.ingestHour ?? 3 }),
+          field('ingest.model', 'Claude-Modell', { hint: 'sonnet schont das Abo', value: stored.ingest?.model, placeholder: d.ingestModel ?? 'sonnet' }),
+          field('ingest.limit', 'Höchstens je Nacht', { kind: 'number', hint: 'Texte', value: stored.ingest?.limit, placeholder: d.ingestLimit ?? 20 }),
+        ].map((f) => ({ ...f, group: 'Ingest ins Wiki' })),
+      ],
+      groups: {
+        'Ingest ins Wiki': 'Claude entwirft für Texte auf dem Stapel einen Ingest ins Mycel-Wiki; ins Wiki kommt erst, was du unter Lesen → Ingest abhakst. Braucht CLAUDE_CODE_OAUTH_TOKEN wie die Folgen.',
+      },
     },
     embeddings: {
       intro: 'Ollama-Server für die semantische Suche und ähnliche Notizen. Fehlt das Modell, lädt das Cockpit es selbst. Ein neues Modell bettet den Vault neu ein.',
@@ -296,6 +307,7 @@ const FIELDS = new Set([
   'embed.url', 'embed.model',
   'tts.provider', 'tts.key', 'tts.clear', 'tts.voice', 'tts.model',
   'episodes.host', 'episodes.guest', 'episodes.model',
+  'ingest.nightly', 'ingest.hour', 'ingest.model', 'ingest.limit',
   'hiddenEvents', 'session.idleDays', 'session.maxDays', 'cal.auth',
 ]);
 const CAL_FIELD = /^cal\.(\d{1,2})\.(id|name|kind|url|auth|username|password|filter|remove)$/;
@@ -331,6 +343,10 @@ export function formOfSettings(stored) {
   put('episodes.host', stored.episodes?.host);
   put('episodes.guest', stored.episodes?.guest);
   put('episodes.model', stored.episodes?.model);
+  put('ingest.nightly', choice(stored.ingest?.nightly ?? null));
+  put('ingest.hour', stored.ingest?.hour);
+  put('ingest.model', stored.ingest?.model);
+  put('ingest.limit', stored.ingest?.limit);
   put('session.idleDays', stored.session?.idleDays);
   put('session.maxDays', stored.session?.maxDays);
   put('cal.auth', '1');

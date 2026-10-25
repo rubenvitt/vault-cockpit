@@ -206,7 +206,7 @@ struct ReaderSelectionBar: View {
 
 // MARK: Nach dem Lesen
 
-/// Am Ende des Texts: „Fertig, weg“ und „In den Vault“ (lange drücken: mit Volltext), bis
+/// Am Ende des Texts: „Fertig, weg“ und „In den Vault“ (mit Volltext; lange drücken: ohne), bis
 /// entschieden oder weggeklickt.
 @MainActor
 struct ReaderDecisionBar: View {
@@ -230,16 +230,16 @@ struct ReaderDecisionBar: View {
             }
             if vault {
                 Menu {
-                    Button("In den Vault mit Volltext") { onVault(true) }
+                    Button("In den Vault ohne Volltext") { onVault(false) }
                 } label: {
                     Text("In den Vault")
                 } primaryAction: {
-                    onVault(false)
+                    onVault(true)
                 }
                 .menuStyle(.button)
                 .buttonStyle(.borderedProminent)
                 .disabled(busy.contains("vault"))
-                .accessibilityHint("Lange drücken für „mit Volltext“")
+                .accessibilityHint("Mit Volltext; lange drücken für „ohne Volltext“")
             }
             Button(action: onClose) {
                 Image(systemName: "xmark")

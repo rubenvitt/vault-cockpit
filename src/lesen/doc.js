@@ -5,6 +5,7 @@ import { readingNav, readingPage } from './pages.js';
 import { markHighlights, placeHighlights, weiterAt } from './anchor.js';
 import { textBlocks } from './blocks.js';
 import { docJson, highlightJson, jsonReply } from './json.js';
+import { ingestBadge } from './ingest-page.js';
 
 /**
  * Leseansicht `/lesen/doc?id=…` (VCP-71): Lesetext in Leseschrift mit den
@@ -85,18 +86,21 @@ function highlightList(highlights, orphans, ctx) {
 
 /**
  * Nach dem Lesen: „Fertig, weg“ (E), „In den Vault“ (V, nur mit Lesestapel-Notizen)
- * mit Wahl „mit Volltext“, und nach einer Entscheidung „Zurück auf den Stapel“.
+ * mit Wahl „mit Volltext“ (vorab gesetzt: der Volltext ist die Rohquelle fürs
+ * Wiki), und nach einer Entscheidung „Zurück auf den Stapel“.
+ * Mit dem Ingest-Dienst davor „Ingest prüfen“ bzw. „Ingest entwerfen“ (`ingest`: `{ status, available }`).
  */
-function decide(doc, ctx, vault) {
+function decide(doc, ctx, vault, ingest = null) {
   const form = (action, key, fields, body) => `<form method="post" action="${action}" class="act" data-decide="${key}">${hidden({ csrf: ctx.write.csrf, back: ctx.write.back, id: doc.id, ...fields })}${body}</form>`;
   return `<div class="lesen-decide">
+      ${ingest ? ingestBadge(doc.id, ingest.status, { ctx, available: ingest.available, ready: 'Ingest prüfen' }) : ''}
       ${decisions(doc, vault).fertig ? form('/aktion/lesen/doc/fertig', 'fertig', {}, '<button type="submit" class="btn">Fertig, weg <kbd>E</kbd></button>') : ''}
-      ${vault ? form('/aktion/lesen/doc/vault', 'vault', {}, '<label class="lesen-volltext"><input type="checkbox" name="volltext" value="1"> mit Volltext</label><button type="submit" class="btn primary">In den Vault <kbd>V</kbd></button>') : ''}
+      ${vault ? form('/aktion/lesen/doc/vault', 'vault', {}, '<label class="lesen-volltext"><input type="checkbox" name="volltext" value="1" checked> mit Volltext</label><button type="submit" class="btn primary">In den Vault <kbd>V</kbd></button>') : ''}
       ${decisions(doc, vault).zurueck ? form(STATUS, 'zurueck', { status: 'stapel' }, '<button type="submit" class="btn quiet">Zurück auf den Stapel</button>') : ''}
     </div>`;
 }
 
-function renderDoc(doc, { highlights, stackDocs, counts, vault }, ctx) {
+function renderDoc(doc, { highlights, stackDocs, counts, vault, ingest }, ctx) {
   const { html, orphans } = markHighlights(doc.content_html ?? '', highlights, { weiter: Number(doc.scroll_anchor) || 0 });
   const meta = [doc.site, doc.author, doc.reading_minutes ? `${doc.reading_minutes} min` : null].filter(Boolean).map(esc).join(' · ');
   const text = doc.content_html
@@ -105,10 +109,10 @@ function renderDoc(doc, { highlights, stackDocs, counts, vault }, ctx) {
   const nav = ['eingang', 'stapel'].includes(doc.status) ? doc.status : null;
   return `<!doctype html>
 <html lang="de">
-${head(doc.title || doc.url, { script: true, scripts: [assets.lesenDoc, assets.lesenLinks] })}
+${head(doc.title || doc.url, { script: true, scripts: [assets.lesenDoc, assets.lesenLinks, ...(ingest ? [assets.lesenIngest] : [])] })}
 <body class="page-lesen page-lesen-doc">
 ${appHeader({ current: 'lesen', user: ctx.user })}
-${readingNav(nav)}
+${readingNav(nav, ctx.nav)}
 <main class="lesen-doc">
 ${areas(counts)}
 ${stack(stackDocs, doc.id)}
@@ -128,7 +132,7 @@ ${stack(stackDocs, doc.id)}
       <button type="button" class="btn quiet" data-size="1" aria-label="Schrift größer">A+</button>
       <button type="button" class="btn quiet" data-font aria-pressed="false">Ohne Serifen</button>
     </div>
-    ${decide(doc, ctx, vault)}
+    ${decide(doc, ctx, vault, ingest)}
   </div>
   <div class="lesen-text">${text}</div>
 </article>
@@ -157,7 +161,7 @@ ${stack(stackDocs, doc.id)}
  * (`anchor` wie gespeichert, `weiter` = erstes sichtbares Zeichen dort),
  * Bereiche mit Zählern, Stapel (30) und die möglichen Entscheidungen.
  */
-function docJsonModel(doc, { highlights, stackDocs, counts, vault }) {
+function docJsonModel(doc, { highlights, stackDocs, counts, vault, ingest }) {
   const { text, blocks } = textBlocks(doc.content_html ?? '');
   const { ranges, found } = placeHighlights(text, highlights);
   const anchor = Number(doc.scroll_anchor) || 0;
@@ -180,6 +184,8 @@ function docJsonModel(doc, { highlights, stackDocs, counts, vault }) {
     nav: ['eingang', 'stapel'].includes(doc.status) ? doc.status : null,
     vault,
     decisions: decisions(doc, vault),
+    // Ingest (src/lesen/ingest-page.js): Status des Entwurfs und ob Claude entwerfen kann; ohne Dienst null.
+    ingest: ingest ?? null,
   };
 }
 
@@ -196,7 +202,7 @@ const decided = (message, { doc, previous, changed }) => ({
  * Lesestapel-Notiz (src/lesen/vault-export.js; ohne gibt es „In den Vault“ und
  * „Im Vault ablegen“ nicht).
  */
-export function docRoutes({ store, asAction, onChange = () => {}, exporter = null }) {
+export function docRoutes({ store, asAction, onChange = () => {}, exporter = null, ingest = null }) {
   const must = (id) => {
     const doc = store.get(id);
     if (!doc) throw new ActionError('Dieses Dokument gibt es nicht', 404);
@@ -215,7 +221,14 @@ export function docRoutes({ store, asAction, onChange = () => {}, exporter = nul
     return r;
   };
 
-  const model = (doc) => ({ highlights: store.listHighlights({ docId: doc.id }), stackDocs: store.list({ status: 'stapel', limit: 30 }), counts: store.counts(), vault: Boolean(exporter) });
+  /** Stand des Ingests für dieses Dokument (nur mit Dienst). */
+  const ingestOf = (doc) => {
+    if (!ingest) return null;
+    const m = ingest.statusFor([doc.id]);
+    const status = (m instanceof Map ? m.get(doc.id) : m?.[doc.id]) ?? null;
+    return { status, available: Boolean(ingest.available()?.ok) && ['eingang', 'stapel'].includes(doc.status) };
+  };
+  const model = (doc) => ({ highlights: store.listHighlights({ docId: doc.id }), stackDocs: store.list({ status: 'stapel', limit: 30 }), counts: store.counts(), vault: Boolean(exporter), ingest: ingestOf(doc) });
 
   return {
     pages: {

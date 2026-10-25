@@ -328,6 +328,15 @@ function frontmatterEnd(lines) {
   return 0;
 }
 
+/**
+ * Überschriften einer Notiz wie bei `append` mit `heading`: hinter dem
+ * Frontmatter, außerhalb von Code-Blöcken, `{ line, level, text }`.
+ */
+export function headingsOf(content) {
+  const lines = String(content ?? '').split(/\r?\n/);
+  return findHeadings(lines, frontmatterEnd(lines));
+}
+
 function findHeadings(lines, from) {
   const found = [];
   let fence = null;
