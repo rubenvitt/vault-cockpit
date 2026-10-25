@@ -414,8 +414,10 @@ public struct HealthService: Decodable, Equatable, Identifiable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        id = try c.decode(String.self, forKey: .id)
-        name = try c.decodeIfPresent(String.self, forKey: .name) ?? id
+        // Ältere Server schicken Teile (Brücke, Kalender, Feeds) ohne `id`: dann zählt der Name.
+        let name = try c.decodeIfPresent(String.self, forKey: .name)
+        id = try c.decodeIfPresent(String.self, forKey: .id) ?? name ?? ""
+        self.name = name ?? id
         state = try c.decodeIfPresent(HealthState.self, forKey: .state) ?? .unknown
         summary = try c.decodeIfPresent(String.self, forKey: .summary)
         lastOkAt = try c.decodeIfPresent(String.self, forKey: .lastOkAt)

@@ -245,6 +245,8 @@ test('Zustand: alles läuft, kein Hinweis, /health ohne degraded', () => {
   assert.deepEqual(health.failing(), []);
   assert.equal(health.degraded(), false);
   assert.match(list.find((s) => s.id === 'embeddings').facts.find((f) => f.label === 'Fortschritt').value, /100 von 100 Notizen \(100 %\)/);
+  // Die App braucht je Teil eine eindeutige `id`.
+  assert.deepEqual(list.find((s) => s.id === 'bridge').items.map((i) => i.id), ['bridge-transfer', 'bridge-sync']);
 });
 
 test('Zustand: Sync stale und Mail-Fehler werden rot, mit Zeitpunkt und Text', () => {
@@ -342,6 +344,7 @@ test('Zustand: Kalender je Teil, Adresse mit Geheimnis wird maskiert; check() pr
   const cal = services.find((s) => s.id === 'calendars');
   assert.equal(cal.state, 'error');
   assert.equal(cal.items[0].lastError, 'CalDAV PROPFIND mit ••• abgelehnt');
+  assert.equal(cal.items[0].id, 'calendar-c1');
   assert.equal(cal.lastError, 'Privat: CalDAV PROPFIND mit ••• abgelehnt');
 });
 
