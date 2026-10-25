@@ -524,6 +524,44 @@ const csrfOf = async (call) => (await (await call('/lesen/feeds')).text()).match
 const toastAfter = async (call, res) => (await (await call('/lesen/feeds', { cookie: res.headers.getSetCookie() })).text()).match(/toast-text">([^<]*)</)?.[1];
 const groupAt = (page, name) => page.indexOf(`feed-group-name">${name}<`);
 
+test('Feeds-Seite: Adresse ändern – geprüft, Website führt zum Feed, Fehler zurückgesetzt, höchstens fünf neue', async () => {
+  const items = [1, 2, 3, 4, 5, 6, 7].map((n) => rssItem(n));
+  await withWeb(
+    async ({ call, store }) => {
+      const csrf = await csrfOf(call);
+      const form = (fields) => call('/aktion/lesen/feed/aendern', { form: { csrf, back: '/lesen/feeds', intervall: '30', ...fields } });
+      const { feed } = store.addFeed({ url: 'https://hnrss.test/frontpage?points=100=50', title: 'Hacker News', interval_minutes: 30 });
+      store.updateFeed(feed.id, { error_count: 3, last_error: 'Die Seite antwortet mit HTTP 502', etag: '"alt"', next_fetch_at: '2026-10-21T08:00:00Z' });
+      store.rememberEntry(feed.id, 'blog-7', null);
+      assert.match(await (await call('/lesen/feeds')).text(), /name="url" type="url" value="https:\/\/hnrss\.test\/frontpage\?points=100=50"/);
+
+      // Kein Feed unter der neuen Adresse: nichts geändert.
+      const bad = await form({ id: feed.id, url: 'https://leer.test/' });
+      assert.match(await toastAfter(call, bad), /kein Feed zu finden/);
+      assert.equal(store.getFeed(feed.id).url, 'https://hnrss.test/frontpage?points=100=50');
+
+      // Website-Adresse: führt zum Feed; Fehler, ETag und Wartezeit weg, Titel bleibt.
+      const ok = await form({ id: feed.id, url: ' https://blog.test/ ', filter: 'rust' });
+      assert.match(await toastAfter(call, ok), /Gespeichert: Hacker News/);
+      const f = store.getFeed(feed.id);
+      assert.deepEqual([f.url, f.title, f.error_count, f.last_error, f.etag, f.next_fetch_at, f.keyword_filter], ['https://blog.test/feed', 'Hacker News', 0, null, null, null, 'rust']);
+      // Bekannt: blog-7 von vorher, dazu alle bis auf die neuesten fünf neuen (6, 5, 4, 3, 2).
+      assert.deepEqual([...store.knownEntries(feed.id)].sort(), ['blog-1', 'blog-7']);
+
+      // Gleiche Adresse oder leer: nur die übrigen Einstellungen; eine schon abonnierte: Fehler.
+      await form({ id: feed.id, url: 'https://blog.test/feed', intervall: '60' });
+      assert.equal(store.getFeed(feed.id).interval_minutes, 60);
+      await form({ id: feed.id, intervall: '90' });
+      assert.equal(store.getFeed(feed.id).url, 'https://blog.test/feed');
+      const other = store.addFeed({ url: 'https://atom.test/feed.xml' }).feed;
+      const dup = await form({ id: other.id, url: 'https://blog.test/feed' });
+      assert.match(await toastAfter(call, dup), /Diesen Feed gibt es schon/);
+      assert.equal(store.getFeed(other.id).url, 'https://atom.test/feed.xml');
+    },
+    { 'https://blog.test/': '<html><head><link rel="alternate" type="application/rss+xml" href="/feed"></head></html>', 'https://blog.test/feed': rss(items), 'https://leer.test/': '<html><head></head></html>' },
+  );
+});
+
 test('Feeds-Seite: Gruppen anlegen, umbenennen, einstellen, ordnen, löschen', async () => {
   await withWeb(async ({ call, store }) => {
     const csrf = await csrfOf(call);

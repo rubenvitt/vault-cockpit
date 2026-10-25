@@ -360,13 +360,14 @@ final class SettingsStoreTests: XCTestCase {
         settings.intervalMinutes = 1
         settings.groupId = "g2"
         await store.update(atom, settings)
-        XCTAssertEqual(formFields(transport.requests[3]), ["id": atom.id, "stapel": "1", "filter": "swift, ios", "intervall": "5", "gruppe": "g2"])
+        XCTAssertEqual(formFields(transport.requests[3]), ["id": atom.id, "stapel": "1", "filter": "swift, ios", "intervall": "5", "gruppe": "g2", "url": "https://atom.test/feed.xml"])
 
         settings.groupId = nil
         settings.toStack = false
         settings.filter = "  "
+        settings.url = " https://blog.test/ "
         await store.update(atom, settings)
-        XCTAssertEqual(formFields(transport.requests[5]), ["id": atom.id, "filter": "", "intervall": "5", "gruppe": ""])
+        XCTAssertEqual(formFields(transport.requests[5]), ["id": atom.id, "filter": "", "intervall": "5", "gruppe": "", "url": "https://blog.test/"])
 
         await store.remove(atom)
         XCTAssertEqual(path(of: transport.requests[7]), "/aktion/lesen/feed/entfernen")
