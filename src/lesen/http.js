@@ -71,7 +71,7 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
   const doc = docRoutes({ store, asAction, onChange, exporter, ingest });
   const marked = highlightRoutes({ store, asAction, capture, onChange, logger });
   const wiedersehen = reviewRoutes({ store, capture, logger, embedCache, ...review });
-  const folgen = folgenRoutes({ store, episodes });
+  const folgen = folgenRoutes({ store, episodes, ingest });
   const ingestUi = ingestRoutes({ store, ingest, logger });
   const links = connections ? connectionRoutes({ store, embedCache, logger, ...connections }) : { pages: {}, actions: {} };
 

@@ -108,6 +108,7 @@ public enum ReadingAction {
     public static let episodeNew = "/aktion/lesen/folge/neu"
     public static let episodeResume = "/aktion/lesen/folge/fortsetzen"
     public static let episodeSpeak = "/aktion/lesen/folge/sprechen"
+    public static let episodeIngest = "/aktion/lesen/folge/ingest"
     public static let episodeDelete = "/aktion/lesen/folge/loeschen"
 
     /// Aktionen, die ohne Netz in den Puffer gehen, mit ihrem Namen (`BUFFERED` in lesen-doc.js).

@@ -12,6 +12,8 @@ struct FolgenDoneCard: View {
     let isDownloading: Bool
     let play: () -> Void
     let openNote: (String) -> Void
+    let ingest: () -> Void
+    let openIngest: () -> Void
     let download: () -> Void
     let delete: () -> Void
 
@@ -58,11 +60,13 @@ struct FolgenDoneCard: View {
                 .disabled(isDownloading)
                 .accessibilityLabel(isDownloading ? "Wird geladen" : "Herunterladen")
                 .accessibilityHint("MP3 sichern oder teilen")
+                FolgenIngestButton(episode: episode, ingest: ingest)
                 Button(role: .destructive, action: delete) {
                     Label("Löschen", systemImage: "trash")
                 }
                 .buttonStyle(LesenQuietButtonStyle())
             }
+            FolgenIngestLine(episode: episode, open: openIngest)
         }
         .cardStyle()
         .opacity(isBusy ? 0.5 : 1)
@@ -78,6 +82,8 @@ struct FolgenTranscriptCard: View {
     let isBusy: Bool
     let openNote: (String) -> Void
     let speak: () -> Void
+    let ingest: () -> Void
+    let openIngest: () -> Void
     let delete: () -> Void
 
     var body: some View {
@@ -118,6 +124,7 @@ struct FolgenTranscriptCard: View {
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accent)
                 .accessibilityHint(episode.speak?.hint ?? "")
+                FolgenIngestButton(episode: episode, ingest: ingest)
                 Button(role: .destructive, action: delete) {
                     Label("Löschen", systemImage: "trash")
                 }
@@ -136,6 +143,7 @@ struct FolgenTranscriptCard: View {
                     .foregroundStyle(Theme.text3)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            FolgenIngestLine(episode: episode, open: openIngest)
         }
         .cardStyle()
         .accessibilityElement(children: .contain)
@@ -241,6 +249,46 @@ struct FolgenBusyCard: View {
 }
 
 // MARK: Teile
+
+/// „Texte ingesten“ (`/aktion/lesen/folge/ingest`): nur, solange es Texte ohne Entwurf gibt und
+/// Claude angebunden ist.
+struct FolgenIngestButton: View {
+    let episode: Episode
+    let ingest: () -> Void
+
+    var body: some View {
+        if let info = episode.ingest, info.canRequest {
+            Button(action: ingest) {
+                Label(info.total == 1 ? "Text ingesten" : "Texte ingesten", systemImage: "books.vertical")
+            }
+            .buttonStyle(LesenQuietButtonStyle())
+            .accessibilityHint("Entwürfe für das Wiki, auch für Texte, die nicht mehr im Stapel liegen")
+        }
+    }
+}
+
+/// Stand des Ingests der Texte („Ingest: 1 bereit zum Prüfen · 1 im Wiki“), mit „Prüfen“, wenn
+/// ein Entwurf bereit ist.
+struct FolgenIngestLine: View {
+    let episode: Episode
+    let open: () -> Void
+
+    var body: some View {
+        if let info = episode.ingest, let label = info.label {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(label)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.text3)
+                    .fixedSize(horizontal: false, vertical: true)
+                if info.ready > 0 {
+                    Button("Prüfen", action: open)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Theme.accent)
+                }
+            }
+        }
+    }
+}
 
 /// Art, Titel und Meta-Zeile einer Folge (`.folge-text`).
 struct FolgenHead: View {
