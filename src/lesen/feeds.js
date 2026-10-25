@@ -369,6 +369,7 @@ export function createFeedPoller({ store, fetchFeed = fetchFeedDefault, fetchPag
     // Name nie die Adresse: private Feeds tragen gern einen Token darin.
     // shortcut: Ein dauerhaft toter Feed hält den Dienst auf „Fehler“ (Störung in der Kopfzeile, `degraded`), bis man ihn pausiert oder entfernt; wie bei den Kalendern.
     const items = feeds.map((f) => ({
+      id: `feed-${f.id}`,
       name: f.title || hostOf(f.url),
       state: f.paused || f.group_paused ? 'off' : f.error_count ? 'error' : f.last_fetch_at ? 'ok' : 'unknown',
       summary: f.paused || f.group_paused ? 'pausiert' : f.error_count ? `${f.error_count}× fehlgeschlagen` : f.last_fetch_at ? null : 'noch nicht abgerufen',

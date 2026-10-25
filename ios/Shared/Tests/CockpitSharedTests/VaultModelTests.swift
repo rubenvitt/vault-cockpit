@@ -278,6 +278,14 @@ final class VaultModelTests: XCTestCase {
         XCTAssertEqual(HealthModel.when("2026-10-24T08:35:00.000Z", now: now, timeZone: berlin), "24.10. 10:35 · vor 24 h")
     }
 
+    /// Ältere Server schicken die Teile der Brücke ohne `id`: Der Zustand lädt trotzdem.
+    func testHealthItemsWithoutID() throws {
+        let body = #"{"ok":true,"services":[{"id":"bridge","name":"Zunder-Brücke","state":"ok","facts":[],"items":[{"name":"Neue Checkboxen → Zunder","state":"ok"},{"name":"Abgleich","state":"ok"}]}]}"#
+        let health = try JSONDecoder().decode(HealthModel.self, from: Data(body.utf8))
+        XCTAssertEqual(health.services[0].items.map(\.id), ["Neue Checkboxen → Zunder", "Abgleich"])
+        XCTAssertEqual(health.services[0].items[0].name, "Neue Checkboxen → Zunder")
+    }
+
     func testWeekAlert() throws {
         let week = try decode(WeekModel.self, "rest-woche-stoerung")
         XCTAssertEqual(week.failingServices, [ServiceAlert(id: "calendars", name: "Kalender")])

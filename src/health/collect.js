@@ -202,7 +202,8 @@ export function createHealth({
     if (!bridge || !bridge.enabled()) return { ...base, state: 'off', summary: 'aus', facts: [] };
     if (!bridge.active()) return { ...base, state: 'off', summary: 'ruht, kein Zunder-Zugang', facts: [{ label: 'Tag', value: `#${bridge.tag}` }] };
     const st = bridge.status();
-    const item = (name, r) => ({
+    const item = (id, name, r) => ({
+      id,
       name,
       state: r.failing ? 'error' : r.okAt ? 'ok' : 'unknown',
       summary: r.failing || r.okAt ? null : 'noch kein Lauf',
@@ -210,7 +211,7 @@ export function createHealth({
       lastErrorAt: r.errorAt,
       lastError: r.error,
     });
-    const items = [item('Neue Checkboxen → Zunder', st.transfer), item('Abgleich erledigt/verworfen (beide Richtungen)', st.sync)];
+    const items = [item('bridge-transfer', 'Neue Checkboxen → Zunder', st.transfer), item('bridge-sync', 'Abgleich erledigt/verworfen (beide Richtungen)', st.sync)];
     const state = worst(items);
     const failed = items.filter((i) => i.state === 'error');
     const last = [...items].filter((i) => i.lastErrorAt).sort((a, b) => a.lastErrorAt.localeCompare(b.lastErrorAt)).at(-1);
@@ -268,7 +269,8 @@ export function createHealth({
     const base = { id: 'calendars', name: 'Kalender' };
     const list = settings.get().calendars;
     if (!list.length || !calendars) return { ...base, state: 'off', summary: 'keine Kalender', facts: [] };
-    const items = (calendars.status?.() ?? []).map((c) => ({
+    const items = (calendars.status?.() ?? []).map((c, i) => ({
+      id: `calendar-${c.id ?? i}`,
       name: c.name,
       state: c.failing ? 'error' : c.lastOkAt ? 'ok' : 'unknown',
       summary: c.failing ? null : c.lastOkAt ? `${c.count} ${c.count === 1 ? 'Termin' : 'Termine'} im letzten Abruf` : 'noch nicht abgerufen',

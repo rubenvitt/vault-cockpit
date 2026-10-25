@@ -243,6 +243,7 @@ test('Feeds: ein kaputter Feed stört die anderen nicht, Backoff und Zustand auf
   await poller.runDue();
   assert.ok(!calls.some((c) => c.url.startsWith('https://kaputt.test')));
   assert.equal(poller.health().items.find((i) => i.name === 'Blog & Co').state, 'ok');
+  assert.match(poller.health().items.find((i) => i.name === 'Blog & Co').id, /^feed-\S+$/, 'je Feed eine id für die App');
 });
 
 test('Feeds: bedingte Anfrage mit ETag und Last-Modified, 304 ändert nichts', async () => {
