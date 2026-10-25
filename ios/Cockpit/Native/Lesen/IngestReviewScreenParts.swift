@@ -422,7 +422,7 @@ struct IngestGroupSection: View {
 }
 
 /// Ein Vorschlag (`itemRow`): Häkchen, Kennzeichen, Titel (Relation mit Typ), Aussage oder
-/// Summary, warum, bei neuen Seiten der Slug. Ein Tipp auf die Zeile schaltet das Häkchen; das
+/// Summary, warum, bei neuen Seiten der Slug, bei „Synthese ergänzen“ die ergänzte Synthese. Ein Tipp auf die Zeile schaltet das Häkchen; das
 /// Symbol daneben öffnet die bestehende Seite. Text und Beteiligte stehen außerhalb des Knopfs,
 /// damit ihre Links und das Aufklappen nicht das Häkchen umschalten.
 @MainActor
@@ -480,7 +480,7 @@ struct IngestItemRow: View {
                     NoteScreenBlocks(blocks: blocks, actions: actions, prefix: "\(item.id)-")
                         .padding(.top, 6)
                 } label: {
-                    Text(featured ? "Ganzen Text lesen" : "Text der Seite ansehen")
+                    Text(item.bodyLabel(featured: featured))
                         .font(.subheadline)
                         .foregroundStyle(Theme.text2)
                 }
@@ -534,6 +534,10 @@ struct IngestItemRow: View {
             }
             if let slug = item.slug {
                 Text("neu: \(slug)")
+                    .font(.caption.monospaced())
+                    .foregroundStyle(Theme.text3)
+            } else if let target = item.extendedSlug {
+                Text("ergänzt: \(target)")
                     .font(.caption.monospaced())
                     .foregroundStyle(Theme.text3)
             }

@@ -57,11 +57,13 @@
       "verknuepfen": 1,
       "bestaetigung": 1,
       "synthese": 1,
+      "ergaenzung": 1,
       "frage": 1,
       "neu": 1,
       "relation": 1
     },
-    "tallyLabel": "1 Verknüpfung · 1 Bestätigung · 1 Synthese · 1 Frage · 1 neue Seite · 1 Relation"
+    "tallyLabel": "1 Verknüpfung · 1 Bestätigung · 1 Synthese · 1 Synthese-Ergänzung · 1 Frage · 1 neue Seite · 1 Relation",
+    "offerLabel": "Synthese angeboten"
   },
   "error": "\"wiki/concepts/rag.md\" wurde gerade anderweitig geändert.",
   "draft": {
@@ -173,6 +175,16 @@
         "to": "wiki/entities/robert-glaser.md",
         "title": "Robert Glaser",
         "default": true
+      },
+      {
+        "id": "e1",
+        "kind": "synthesis",
+        "action": "ergaenzen",
+        "path": "wiki/synthesis/gedaechtnis-und-kontext.md",
+        "title": "Gedächtnis und Kontext",
+        "body": "Der Text **stützt** die These mit [[context-engineering]].",
+        "warum": "Neuer Beleg für die Synthese",
+        "default": false
       }
     ],
     "hinweise": [
@@ -548,6 +560,66 @@
         "warum": null,
         "body": null,
         "beteiligte": []
+      },
+      {
+        "id": "e1",
+        "kind": "synthesis",
+        "action": "ergaenzen",
+        "label": "Synthese ergänzen",
+        "title": "Gedächtnis und Kontext",
+        "default": false,
+        "open": "wiki/synthesis/gedaechtnis-und-kontext.md",
+        "slug": null,
+        "relation": null,
+        "claim": null,
+        "summary": null,
+        "warum": [
+          {
+            "type": "text",
+            "text": "Neuer Beleg für die Synthese"
+          }
+        ],
+        "body": [
+          {
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "text": "Der Text "
+              },
+              {
+                "type": "bold",
+                "children": [
+                  {
+                    "type": "text",
+                    "text": "stützt"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "text": " die These mit "
+              },
+              {
+                "type": "wikilink",
+                "target": "wiki/concepts/context-engineering",
+                "heading": null,
+                "alias": "Context Engineering",
+                "embed": false,
+                "path": "wiki/concepts/context-engineering.md",
+                "self": false,
+                "anchor": null,
+                "status": "note",
+                "text": "Context Engineering"
+              },
+              {
+                "type": "text",
+                "text": "."
+              }
+            ]
+          }
+        ],
+        "beteiligte": []
       }
     ],
     "halted": {
@@ -571,6 +643,10 @@
     "robert-glaser": {
       "path": null,
       "title": "Robert Glaser"
+    },
+    "gedaechtnis-und-kontext": {
+      "path": "wiki/synthesis/gedaechtnis-und-kontext.md",
+      "title": "Gedächtnis und Kontext"
     },
     "rag": {
       "path": "wiki/concepts/rag.md",
@@ -615,7 +691,7 @@
     {
       "key": "synthese",
       "label": "Synthesen & Fragen",
-      "hint": "Claudes Angebote über diesen Text hinaus. Aufklappen, lesen, abhaken.",
+      "hint": "Claudes Angebote über diesen Text hinaus, auch Ergänzungen bestehender Synthesen. Aufklappen, lesen, abhaken.",
       "featured": true,
       "items": [
         {
@@ -626,6 +702,11 @@
         {
           "id": "q1",
           "label": "Frage",
+          "default": false
+        },
+        {
+          "id": "e1",
+          "label": "Synthese ergänzen",
           "default": false
         }
       ]
