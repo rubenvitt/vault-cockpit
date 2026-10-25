@@ -18,6 +18,10 @@ public struct URLSessionTransport: HTTPTransport {
     }
 
     public func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        // Nur der Geräte-Token zählt: Ein Sitzungs-Cookie aus dem gemeinsamen Keksglas würde der
+        // Server sonst vorziehen und für Aktionen ein CSRF-Token verlangen.
+        var request = request
+        request.httpShouldHandleCookies = false
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
         return (data, http)
