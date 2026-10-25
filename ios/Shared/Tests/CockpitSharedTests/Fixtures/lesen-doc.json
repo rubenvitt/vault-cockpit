@@ -1,0 +1,435 @@
+{
+  "ok": true,
+  "doc": {
+    "id": "1031d266-e30f-4163-af2c-483c2fe68816",
+    "url": "https://blatt.example.org/stapel",
+    "canonicalUrl": null,
+    "title": "Warum der Stapel wächst",
+    "author": "Ada Beispiel",
+    "site": "Blatt",
+    "kind": "artikel",
+    "kindLabel": "Artikel",
+    "origin": "kurzbefehl",
+    "excerpt": "Der Stapel wächst, weil Speichern leichter ist als Lesen. Wer viel speichert, liest am Ende weniger – sagt eine Studie.",
+    "wordCount": 76,
+    "readingMinutes": 12,
+    "status": "stapel",
+    "previousStatus": null,
+    "progress": 0.35,
+    "scrollAnchor": 186,
+    "topics": [
+      "Lesen",
+      "Gewohnheit"
+    ],
+    "savedAt": "2026-10-23T09:07:32.037Z",
+    "statusChangedAt": "2026-10-23T09:07:32.037Z",
+    "readAt": null,
+    "archivedAt": null,
+    "updatedAt": "2026-10-23T09:07:32.037Z",
+    "rest": "noch 8 min",
+    "remaining": 8
+  },
+  "hasText": true,
+  "length": 501,
+  "anchor": 186,
+  "weiter": 187,
+  "blocks": [
+    {
+      "kind": "heading",
+      "level": 2,
+      "start": 0,
+      "end": 23,
+      "runs": [
+        {
+          "text": "Warum der Stapel wächst",
+          "start": 0
+        }
+      ]
+    },
+    {
+      "kind": "paragraph",
+      "start": 24,
+      "end": 143,
+      "runs": [
+        {
+          "text": "Der Stapel ",
+          "start": 24
+        },
+        {
+          "text": "wächst",
+          "start": 35,
+          "italic": true
+        },
+        {
+          "text": ", weil Speichern ",
+          "start": 41
+        },
+        {
+          "text": "leichter ist als Lesen",
+          "start": 58,
+          "bold": true
+        },
+        {
+          "text": ". Wer viel speichert, liest am Ende weniger – sagt ",
+          "start": 80
+        },
+        {
+          "text": "eine Studie",
+          "start": 131,
+          "link": "https://example.org/studie"
+        },
+        {
+          "text": ".",
+          "start": 142
+        }
+      ]
+    },
+    {
+      "kind": "image",
+      "start": 144,
+      "end": 167,
+      "src": "https://blatt.example.org/bilder/stapel.jpg",
+      "alt": "Ein Stapel Bücher",
+      "runs": []
+    },
+    {
+      "kind": "caption",
+      "start": 167,
+      "end": 186,
+      "runs": [
+        {
+          "text": "Bücher, die warten.",
+          "start": 167
+        }
+      ]
+    },
+    {
+      "kind": "heading",
+      "level": 3,
+      "start": 187,
+      "end": 198,
+      "runs": [
+        {
+          "text": "Drei Gründe",
+          "start": 187
+        }
+      ]
+    },
+    {
+      "kind": "listItem",
+      "ordered": true,
+      "depth": 1,
+      "number": 1,
+      "start": 199,
+      "end": 223,
+      "runs": [
+        {
+          "text": "Speichern kostet nichts.",
+          "start": 199
+        }
+      ]
+    },
+    {
+      "kind": "listItem",
+      "ordered": true,
+      "depth": 1,
+      "number": 2,
+      "start": 223,
+      "end": 242,
+      "runs": [
+        {
+          "text": "Lesen braucht Zeit:",
+          "start": 223
+        }
+      ]
+    },
+    {
+      "kind": "listItem",
+      "ordered": false,
+      "depth": 2,
+      "start": 242,
+      "end": 250,
+      "runs": [
+        {
+          "text": "am Abend",
+          "start": 242
+        }
+      ]
+    },
+    {
+      "kind": "listItem",
+      "ordered": false,
+      "depth": 2,
+      "start": 250,
+      "end": 262,
+      "runs": [
+        {
+          "text": "unterwegs 🚆",
+          "start": 250
+        }
+      ]
+    },
+    {
+      "kind": "listItem",
+      "ordered": true,
+      "depth": 1,
+      "number": 3,
+      "start": 262,
+      "end": 286,
+      "runs": [
+        {
+          "text": "Wir überschätzen später.",
+          "start": 262
+        }
+      ]
+    },
+    {
+      "kind": "quote",
+      "start": 287,
+      "end": 333,
+      "runs": [
+        {
+          "text": "Ein Stapel ist ein Versprechen an sich selbst.",
+          "start": 287
+        }
+      ]
+    },
+    {
+      "kind": "code",
+      "start": 334,
+      "end": 375,
+      "runs": [
+        {
+          "text": "stapel.push(text)\nstapel.length // wächst",
+          "start": 334,
+          "code": true
+        }
+      ]
+    },
+    {
+      "kind": "rule",
+      "start": 376,
+      "end": 376,
+      "runs": []
+    },
+    {
+      "kind": "row",
+      "header": true,
+      "start": 377,
+      "end": 400,
+      "runs": [
+        {
+          "text": "Woche",
+          "start": 377,
+          "bold": true
+        },
+        {
+          "text": "\t",
+          "start": 382,
+          "extra": true
+        },
+        {
+          "text": "Gespeichert",
+          "start": 382,
+          "bold": true
+        },
+        {
+          "text": "\t",
+          "start": 393,
+          "extra": true
+        },
+        {
+          "text": "Gelesen",
+          "start": 393,
+          "bold": true
+        }
+      ]
+    },
+    {
+      "kind": "row",
+      "header": false,
+      "start": 400,
+      "end": 408,
+      "runs": [
+        {
+          "text": "KW 42",
+          "start": 400
+        },
+        {
+          "text": "\t",
+          "start": 405,
+          "extra": true
+        },
+        {
+          "text": "14",
+          "start": 405
+        },
+        {
+          "text": "\t",
+          "start": 407,
+          "extra": true
+        },
+        {
+          "text": "3",
+          "start": 407
+        }
+      ]
+    },
+    {
+      "kind": "paragraph",
+      "start": 409,
+      "end": 501,
+      "runs": [
+        {
+          "text": "Zum Schluss: Weniger speichern, mehr lesen.",
+          "start": 409
+        },
+        {
+          "text": "\n",
+          "start": 452,
+          "extra": true
+        },
+        {
+          "text": "Oder wenigstens: den Stapel ",
+          "start": 452
+        },
+        {
+          "text": "ignorieren",
+          "start": 480,
+          "strike": true
+        },
+        {
+          "text": " sortieren.",
+          "start": 490
+        }
+      ]
+    }
+  ],
+  "highlights": [
+    {
+      "id": "bc9fa004-ce9f-490c-9f9c-f5ab36321994",
+      "docId": "1031d266-e30f-4163-af2c-483c2fe68816",
+      "quote": "Dieser Satz wurde aus dem Artikel gestrichen.",
+      "prefix": "",
+      "suffix": "",
+      "startHint": 0,
+      "note": "Alte Stelle",
+      "createdAt": "2026-10-23T09:07:32.037Z",
+      "updatedAt": "2026-10-23T09:07:32.037Z",
+      "reviewBox": 0,
+      "reviewDue": "2026-10-24T09:07:32.037Z",
+      "reviewState": "aktiv",
+      "start": null,
+      "end": null,
+      "lost": true
+    },
+    {
+      "id": "de8f6b53-f1c2-4992-9657-69f54f1173a5",
+      "docId": "1031d266-e30f-4163-af2c-483c2fe68816",
+      "quote": "Speichern leichter ist als Lesen",
+      "prefix": " wächst\nDer Stapel wächst, weil ",
+      "suffix": ". Wer viel speichert, liest am E",
+      "startHint": 48,
+      "note": "Kern des Arguments",
+      "createdAt": "2026-10-23T09:07:32.037Z",
+      "updatedAt": "2026-10-23T09:07:32.037Z",
+      "reviewBox": 0,
+      "reviewDue": "2026-10-24T09:07:32.037Z",
+      "reviewState": "aktiv",
+      "start": 48,
+      "end": 80,
+      "lost": false
+    },
+    {
+      "id": "2a2cb0a5-a618-46f6-9d58-2561f594f970",
+      "docId": "1031d266-e30f-4163-af2c-483c2fe68816",
+      "quote": "Ein Stapel ist ein Versprechen an sich selbst.",
+      "prefix": "wegs 🚆Wir überschätzen später.\n",
+      "suffix": "\nstapel.push(text)\nstapel.length",
+      "startHint": 287,
+      "note": null,
+      "createdAt": "2026-10-23T09:07:32.037Z",
+      "updatedAt": "2026-10-23T09:07:32.037Z",
+      "reviewBox": 0,
+      "reviewDue": "2026-10-24T09:07:32.037Z",
+      "reviewState": "aktiv",
+      "start": 287,
+      "end": 333,
+      "lost": false
+    }
+  ],
+  "ranges": [
+    {
+      "id": "de8f6b53-f1c2-4992-9657-69f54f1173a5",
+      "start": 48,
+      "end": 80,
+      "note": "Kern des Arguments"
+    },
+    {
+      "id": "2a2cb0a5-a618-46f6-9d58-2561f594f970",
+      "start": 287,
+      "end": 333,
+      "note": null
+    }
+  ],
+  "counts": {
+    "eingang": 1,
+    "stapel": 4,
+    "archiv": 0,
+    "abgelegt": 0,
+    "weg": 1
+  },
+  "stack": [
+    {
+      "id": "ff3eea66-3591-44e4-ad42-08700fe429e8",
+      "title": "Kurze Notiz",
+      "url": "https://kurz.example.org/notiz",
+      "site": "Kurz",
+      "progress": 0.5,
+      "readingMinutes": 4,
+      "rest": "noch 2 min",
+      "started": true,
+      "current": false
+    },
+    {
+      "id": "18cb7b5f-aedf-4072-b4a5-47dd13d3782c",
+      "title": "Ein sehr langes Essay",
+      "url": "https://lang.example.org/essay",
+      "site": "Essay",
+      "progress": 0,
+      "readingMinutes": 45,
+      "rest": "noch 45 min",
+      "started": false,
+      "current": false
+    },
+    {
+      "id": "b2ff6382-a773-4263-ae89-1ab3c95d63f5",
+      "title": "Vom langsamen Lesen",
+      "url": "https://zeit.example.org/lesen",
+      "site": "Zeit",
+      "progress": 0,
+      "readingMinutes": 7,
+      "rest": "noch 7 min",
+      "started": false,
+      "current": false
+    },
+    {
+      "id": "1031d266-e30f-4163-af2c-483c2fe68816",
+      "title": "Warum der Stapel wächst",
+      "url": "https://blatt.example.org/stapel",
+      "site": "Blatt",
+      "progress": 0.35,
+      "readingMinutes": 12,
+      "rest": "noch 8 min",
+      "started": true,
+      "current": true
+    }
+  ],
+  "nav": "stapel",
+  "vault": true,
+  "decisions": {
+    "fertig": true,
+    "vault": true,
+    "zurueck": false
+  }
+}

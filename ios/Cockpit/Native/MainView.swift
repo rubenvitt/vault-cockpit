@@ -1,7 +1,8 @@
 import CockpitShared
 import SwiftUI
 
-/// Rahmen nach dem Login: Woche und Rückblick nativ, Lesen und Einstellungen als Web-Reiter.
+/// Rahmen nach dem Login: Woche, Lesen und Rückblick nativ, Einstellungen als Web-Reiter. App und
+/// Sitzung stehen im Environment (`@Environment(AppModel.self)`, `@Environment(CockpitSession.self)`).
 @MainActor
 struct MainView: View {
     @Bindable var model: AppModel
@@ -12,9 +13,7 @@ struct MainView: View {
             WeekTab(model: model, session: session)
                 .tabItem { Label("Woche", systemImage: "calendar") }
                 .tag(AppTab.week)
-            webTab(model.readingPath)
-                // Neu, wenn der Rückblick „Wiedersehen“ einer Woche verlangt (`AppModel.openReading`).
-                .id("\(model.webViewID.uuidString) \(model.readingLoads)")
+            LesenScreen(model: model, session: session)
                 .tabItem { Label("Lesen", systemImage: "book") }
                 .tag(AppTab.reading)
             ReviewScreen(model: model, store: session.review, toasts: session.toasts)
@@ -39,6 +38,10 @@ struct MainView: View {
         .sheet(item: $model.webSheet) { page in
             WebSheet(model: model, page: page)
         }
+        .environment(model)
+        .environment(session)
+        // Kontext und Puffer für Leseansichten, auch aus Blättern heraus.
+        .readerServices(ReaderServices(context: session.context, buffer: session.reading))
     }
 
     /// Eigener WKWebView je Reiter; nach jedem Login neu (frisches Cookie).

@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "message": "Behalten",
+  "undo": {
+    "action": "/aktion/lesen/wiedersehen/zurueck",
+    "fields": {
+      "id": "3c68dd32-aad2-4e99-9ca7-33ec7275e374",
+      "box": 0,
+      "faellig": "2026-10-24T09:07:32.037Z",
+      "zustand": "aktiv"
+    }
+  }
+}

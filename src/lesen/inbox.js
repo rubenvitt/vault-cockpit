@@ -4,6 +4,8 @@ import { esc, assets } from '../web/layout.js';
 import { hidden } from '../web/render.js';
 import { readingPage, saveForm } from './pages.js';
 import { groupChips, groupFilter } from './stack.js';
+import { KIND_LABELS, docJson, groupsJson, jsonReply } from './json.js';
+import { NO_FEED } from './store.js';
 
 /**
  * Eingang sortieren (VCP-70): eine Karte nach der anderen, je Karte Weg,
@@ -14,15 +16,18 @@ import { groupChips, groupFilter } from './stack.js';
  * `/static/lesen-eingang.js` macht Wischen und Tasten daraus. `?gruppe=`
  * schränkt Karte, Zähler und „Heute x von y“ auf eine Feed-Gruppe ein
  * (VCP-97); `back` und das Neuladen tragen die Query mit.
+ *
+ * `/api/lesen/eingang?gruppe=` liefert dasselbe als JSON für die App.
  */
 
 const SORT = '/aktion/lesen/sortieren';
 /** `ziel` aus dem Formular → neuer Status. `eingang` ist das Rückgängig. */
 const TARGETS = { weg: 'weg', stapel: 'stapel', lesen: 'stapel', eingang: 'eingang' };
-const KIND = { artikel: 'Artikel', newsletter: 'Newsletter', feed: 'Feed-Eintrag', pdf: 'PDF' };
 
 const name = (d) => d.title || d.url;
 const href = (u) => (/^https?:\/\//i.test(u ?? '') ? u : '#');
+/** Quelle für die Kopfzeile der Karte: `site`, sonst der Host. */
+const siteOf = (d) => d.site || (URL.canParse(d.url) ? new URL(d.url).hostname : null);
 const dateLabel = (iso, tz) => new Date(iso).toLocaleDateString('de-DE', { day: 'numeric', month: 'short', timeZone: tz });
 
 /** Beginn des heutigen Tages in der Zeitzone, als ISO-Text wie in der Datenbank. */
@@ -47,10 +52,10 @@ export function whyHere(doc, { getFeed, tz }) {
 }
 
 function card(d, ctx, { getFeed, more }) {
-  const site = d.site || (URL.canParse(d.url) ? new URL(d.url).hostname : null);
+  const site = siteOf(d);
   const meta = [
     site ? `<a href="${esc(href(d.url))}" rel="noopener noreferrer" target="_blank">${esc(site)}</a>` : null,
-    esc(KIND[d.kind] ?? d.kind),
+    esc(KIND_LABELS[d.kind] ?? d.kind),
     d.reading_minutes ? `${d.reading_minutes} min` : null,
   ].filter(Boolean).join(' · ');
   const topics = d.topics?.length ? `<ul class="inbox-topics" aria-label="Themen">${d.topics.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : '';
@@ -98,17 +103,47 @@ export function renderInboxPage({ doc, left, today, filter }, ctx, { getFeed, va
   return readingPage(ctx, { key: 'eingang', title: 'Eingang', body, scripts: [assets.inbox] });
 }
 
-/** Seite und Aktion für src/lesen/http.js; `vault` zeigt „Im Vault ablegen“. `now` nur für Tests. */
+/**
+ * Eingang als JSON: oberste Karte (mit Herkunft in einem Satz und Feed),
+ * „Heute x von y gesichtet“, Rückgängig der letzten Entscheidung von heute,
+ * Gruppen mit ihren Zählern und der aktive Filter.
+ */
+function inboxJson({ doc, left, today, filter }, { store, tz, vault }) {
+  const feed = doc?.origin?.startsWith('feed:') ? store.getFeed(doc.origin.slice(5)) : null;
+  const perGroup = store.inboxByGroup();
+  return {
+    ok: true,
+    doc: doc && {
+      ...docJson(doc),
+      siteLabel: siteOf(doc),
+      why: whyHere(doc, { getFeed: store.getFeed, tz }),
+      savedLabel: dateLabel(doc.saved_at, tz),
+      feed: feed && { id: feed.id, title: feed.title ?? null, url: feed.url, siteUrl: feed.site_url ?? null, groupId: feed.group_id ?? null },
+    },
+    left,
+    more: left > 1,
+    today: { seen: today.count, total: today.count + left, last: today.last },
+    undo: today.last ? { action: SORT, fields: { id: today.last.id, ziel: 'eingang' } } : null,
+    filter: { gruppe: filter.group },
+    groups: groupsJson(filter.groups).map((g) => ({ ...g, count: perGroup[g.id] ?? 0 })),
+    noFeedCount: store.counts({ group: NO_FEED }).eingang,
+    showGroups: filter.groups.length > 0 || Boolean(filter.group),
+    vault,
+  };
+}
+
+/** Seite, JSON und Aktion für src/lesen/http.js; `vault` zeigt „Im Vault ablegen“. `now` nur für Tests. */
 export function inboxRoutes({ store, vault = false, now = () => Date.now() }) {
+  const model = (ctx) => {
+    const filter = groupFilter(store, ctx.url);
+    const { group } = filter;
+    const [doc = null] = store.list({ status: 'eingang', group, limit: 1 });
+    return { doc, left: store.counts({ group }).eingang, today: store.leftInboxSince(dayStart(now(), ctx.tz), { group }), filter };
+  };
   return {
     pages: {
-      '/lesen/eingang': async (ctx) => {
-        const filter = groupFilter(store, ctx.url);
-        const { group } = filter;
-        const [doc = null] = store.list({ status: 'eingang', group, limit: 1 });
-        const model = { doc, left: store.counts({ group }).eingang, today: store.leftInboxSince(dayStart(now(), ctx.tz), { group }), filter };
-        return { html: renderInboxPage(model, ctx, { getFeed: store.getFeed, vault }) };
-      },
+      '/lesen/eingang': async (ctx) => ({ html: renderInboxPage(model(ctx), ctx, { getFeed: store.getFeed, vault }) }),
+      '/api/lesen/eingang': async (ctx) => jsonReply(200, inboxJson(model(ctx), { store, tz: ctx.tz, vault })),
     },
     actions: {
       async [SORT](form) {

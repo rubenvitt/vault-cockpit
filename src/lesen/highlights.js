@@ -3,6 +3,7 @@ import { CAPTURE_ID } from '../capture/router.js';
 import { esc } from '../web/layout.js';
 import { readingPage } from './pages.js';
 import { docLink } from './doc.js';
+import { highlightJson, jsonReply } from './json.js';
 
 /**
  * Markierungen (VCP-71): die Liste „Markiert“ und die Aktionen, mit denen die
@@ -16,6 +17,8 @@ import { docLink } from './doc.js';
  * - `/aktion/lesen/markierung/notiz`: `id` (Markierung), `notiz` (leer löscht sie)
  * - `/aktion/lesen/markierung/loeschen`: `id` (Markierung); Rückgängig legt sie neu an
  * - `/aktion/lesen/markierung/inbox`: `markierung` (vorhandene) oder `id` (Dokument) mit `quote`, dazu `notiz`?, `cid`
+ *
+ * `/api/lesen/markiert?quelle=&thema=` liefert die Liste mit den Filtern als JSON.
  */
 
 const MAX_QUOTE = 4000;
@@ -84,11 +87,18 @@ export function highlightRoutes({ store, asAction, capture = null, onChange = ()
     return h;
   };
 
+  const filterOf = (url) => ({ site: url.searchParams.get('quelle') || null, topic: url.searchParams.get('thema') || null });
+
   return {
     pages: {
       async '/lesen/markiert'(ctx) {
-        const filter = { site: ctx.url.searchParams.get('quelle') || null, topic: ctx.url.searchParams.get('thema') || null };
+        const filter = filterOf(ctx.url);
         return { html: renderMarked(store.listHighlights(filter), store.highlightFacets(), filter, ctx) };
+      },
+      /** Neueste zuerst (höchstens 200), dazu Quellen und Themen für die Filter. */
+      async '/api/lesen/markiert'(ctx) {
+        const filter = filterOf(ctx.url);
+        return jsonReply(200, { ok: true, filter: { quelle: filter.site, thema: filter.topic }, facets: store.highlightFacets(), items: store.listHighlights(filter).map(highlightJson) });
       },
     },
     actions: {

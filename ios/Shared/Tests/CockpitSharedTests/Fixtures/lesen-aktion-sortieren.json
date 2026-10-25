@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "message": "Weg: Newsletter Oktober",
+  "doc": {
+    "id": "2f94c7c3-f257-413a-be3a-365c29ddcb50",
+    "status": "weg"
+  },
+  "undo": {
+    "action": "/aktion/lesen/sortieren",
+    "fields": {
+      "id": "2f94c7c3-f257-413a-be3a-365c29ddcb50",
+      "ziel": "eingang"
+    }
+  },
+  "redirect": null
+}

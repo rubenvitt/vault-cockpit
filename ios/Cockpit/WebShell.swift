@@ -17,6 +17,9 @@ enum NavigationDecision: Equatable {
     case system(URL)
     /// Seite, die die App nativ zeigt (`/`, `/rueckblick`, `/planen`): Reiter wechseln statt HTML laden.
     case native(NativeRoute)
+    /// Seite des Lesens, die die App nativ zeigt (Eingang, Stapel, Leseansicht, …); Feeds und
+    /// Wissen bleiben Web.
+    case reading(ReadingRoute)
 
     /// `webOnly`: Pfad, der trotzdem im WKWebView bleibt (die Web-Ansicht, die einen nativen
     /// Bildschirm vertritt, blättert in sich selbst).
@@ -33,7 +36,9 @@ enum NavigationDecision: Equatable {
         case "/logout" where method == "POST":
             return .logout
         default:
-            if isMainFrame, method == "GET", let route = NativeRoute(url: url), route.path != webOnly { return .native(route) }
+            guard isMainFrame, method == "GET", url.path() != webOnly else { return .allow }
+            if let route = NativeRoute(url: url) { return .native(route) }
+            if let route = ReadingRoute(url: url) { return .reading(route) }
             return .allow
         }
     }
@@ -201,6 +206,8 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
             await UIApplication.shared.open(url)
         case .native(let route):
             model.open(route)
+        case .reading(let route):
+            model.open(reading: route)
         }
         return .cancel
     }

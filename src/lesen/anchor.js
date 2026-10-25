@@ -70,12 +70,65 @@ export const anchorAt = (text, start, end) => ({
 
 // `content_html` kommt aus `sanitizeHtml`: Text ist mit `esc` maskiert, Tags enthalten kein rohes `>`.
 const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'", apos: "'", nbsp: ' ' };
-const decode = (s) => s.replace(/&(amp|lt|gt|quot|#39|apos|nbsp);/g, (_, e) => ENTITIES[e]);
+export const decode = (s) => s.replace(/&(amp|lt|gt|quot|#39|apos|nbsp);/g, (_, e) => ENTITIES[e]);
 
 /** Lesetext von gesäubertem HTML, wie `textContent` im Browser. */
 export const htmlText = (html) => decode(String(html ?? '').split(/<[^>]*>/).join(''));
 
 const WEITER = '<span id="weiter" class="lesen-weiter"></span>';
+
+/**
+ * Markierungen im Lesetext `text`: `ranges` in Lesereihenfolge, Überlappungen
+ * gekürzt (jedes Zeichen gehört höchstens einer Markierung, ganz verdeckte
+ * fallen weg), `found` je Markierungs-ID die ungekürzte Stelle `{ start, end }`,
+ * `orphans` die Markierungen, deren Zitat nicht mehr im Text steht. Dieselbe
+ * Rechnung für `<mark>` im Web und die Bereiche der App (`/api/lesen/doc`).
+ */
+export function placeHighlights(text, highlights = []) {
+  const compacted = compact(text);
+  const ranges = [];
+  const orphans = [];
+  const found = new Map();
+  for (const h of highlights) {
+    const r = findAnchor(text, h, compacted);
+    if (r) {
+      ranges.push({ ...r, h });
+      found.set(h.id, r);
+    } else orphans.push(h);
+  }
+  ranges.sort((a, b) => a.start - b.start);
+  // shortcut: Eine Markierung ganz innerhalb einer anderen verschwindet aus dem Text (bleibt in der Seitenleiste); verschachteln, wenn das stört.
+  let edge = 0;
+  for (const r of ranges) {
+    r.start = Math.max(r.start, edge);
+    edge = Math.max(edge, r.end);
+  }
+  return { ranges: ranges.filter((r) => r.end > r.start), found, orphans };
+}
+
+/** Stelle der Sprungmarke `#weiter`: das erste sichtbare Zeichen ab `weiter` (ohne Angabe der Anfang). */
+export function weiterAt(text, weiter) {
+  // Leerraum zwischen Blöcken ist kein Platz für die Sprungmarke.
+  const from = Number.isInteger(weiter) && weiter > 0 ? weiter : 0;
+  return from + text.slice(from).search(/\S|$/);
+}
+
+/**
+ * Lesetext von gesäubertem HTML in Stücken: `parts` wie `split` an den Tags
+ * (gerade Indizes Text, ungerade Tags), `segs` je Textstück `{ i, start, end }`
+ * im Lesetext, `text` der ganze Lesetext.
+ */
+export function textSegments(html) {
+  const parts = String(html ?? '').split(/(<[^>]*>)/);
+  const segs = [];
+  let text = '';
+  for (let i = 0; i < parts.length; i += 2) {
+    const raw = decode(parts[i]);
+    segs.push({ i, start: text.length, end: text.length + raw.length });
+    text += raw;
+  }
+  return { parts, segs, text };
+}
 
 /**
  * Setzt Markierungen als `<mark>` in gesäubertes HTML und die Sprungmarke
@@ -88,34 +141,10 @@ const WEITER = '<span id="weiter" class="lesen-weiter"></span>';
  * mehr im Text steht.
  */
 export function markHighlights(html, highlights = [], { weiter = null } = {}) {
-  const parts = String(html ?? '').split(/(<[^>]*>)/);
-  const segs = [];
-  let text = '';
-  for (let i = 0; i < parts.length; i += 2) {
-    const raw = decode(parts[i]);
-    segs.push({ i, start: text.length, end: text.length + raw.length });
-    text += raw;
-  }
-  const compacted = compact(text);
-  const ranges = [];
-  const orphans = [];
-  for (const h of highlights) {
-    const r = findAnchor(text, h, compacted);
-    if (r) ranges.push({ ...r, h, opened: false });
-    else orphans.push(h);
-  }
-  ranges.sort((a, b) => a.start - b.start);
-  // Überlappungen kürzen: Jedes Zeichen gehört höchstens einer Markierung.
-  // shortcut: Eine Markierung ganz innerhalb einer anderen verschwindet aus dem Text (bleibt in der Seitenleiste); verschachteln, wenn das stört.
-  let edge = 0;
-  for (const r of ranges) {
-    r.start = Math.max(r.start, edge);
-    edge = Math.max(edge, r.end);
-  }
-  const live = ranges.filter((r) => r.end > r.start);
-  // Erst am nächsten sichtbaren Zeichen: Leerraum zwischen Blöcken ist kein Platz für die Sprungmarke.
-  const from = Number.isInteger(weiter) && weiter > 0 ? weiter : 0;
-  const at = from + text.slice(from).search(/\S|$/);
+  const { parts, segs, text } = textSegments(html);
+  const { ranges, orphans } = placeHighlights(text, highlights);
+  const live = ranges.map((r) => ({ ...r, opened: false }));
+  const at = weiterAt(text, weiter);
   let placed = false;
 
   for (const seg of segs) {

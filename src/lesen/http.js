@@ -19,7 +19,9 @@ import { folgenRoutes } from './folgen-page.js';
  *
  * - `pages`: Pfad → `async (ctx) => ({ html, status? } | { redirect } | { body, headers })`,
  *   nur angemeldet, nur GET. `ctx` siehe src/lesen/pages.js; `body` mit
- *   `headers` für Downloads (OPML-Export).
+ *   `headers` für Downloads (OPML-Export) und JSON. Pfade unter `/api/lesen/…`
+ *   gelten auch mit dem Geräte-Token der App (src/lesen/json.js): Eingang,
+ *   Stapel, Dokument (Lesetext als Blöcke), Markiert, Wiedersehen, Folgen.
  * - `actions`: Pfad → `async (form, session) => ({ message, undo?, redirect? })`
  *   wie die übrigen `/aktion/…`; Fehler als `ActionError`.
  * - `uploads`: Aktion → Größenlimit für Aktionen mit Datei (`multipart/form-data`),

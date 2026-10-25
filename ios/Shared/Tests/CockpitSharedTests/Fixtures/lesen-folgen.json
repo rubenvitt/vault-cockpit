@@ -1,0 +1,238 @@
+{
+  "ok": true,
+  "enabled": true,
+  "items": [
+    {
+      "id": "ep-wartet",
+      "kind": "report",
+      "kindLabel": "Report",
+      "title": "Report: Vom langsamen Lesen",
+      "minutes": 10,
+      "status": "wartet",
+      "busy": true,
+      "docs": [
+        "d1"
+      ],
+      "chars": 9000,
+      "createdAt": "2026-10-25T09:07:02.228Z",
+      "updatedAt": "2026-10-25T09:07:02.228Z",
+      "finishedAt": null,
+      "seconds": null,
+      "bytes": null,
+      "note": null,
+      "error": null,
+      "resumable": false,
+      "retry": null,
+      "progress": {
+        "steps": [
+          "Eingereiht",
+          "Claude schreibt",
+          "Stimmen sprechen",
+          "Fertig"
+        ],
+        "step": 0,
+        "percent": null,
+        "fraction": null,
+        "restMinutes": null,
+        "label": "Wartet, bis die Folge davor fertig ist"
+      }
+    },
+    {
+      "id": "ep-schreibt",
+      "kind": "podcast",
+      "kindLabel": "Podcast",
+      "title": "Podcast: Warum der Stapel wächst und 2 weitere",
+      "minutes": 10,
+      "status": "schreibt",
+      "busy": true,
+      "docs": [
+        "d1",
+        "d2",
+        "d3"
+      ],
+      "chars": 9000,
+      "createdAt": "2026-10-25T09:05:02.228Z",
+      "updatedAt": "2026-10-25T09:05:32.228Z",
+      "finishedAt": null,
+      "seconds": null,
+      "bytes": null,
+      "note": null,
+      "error": null,
+      "resumable": false,
+      "retry": null,
+      "progress": {
+        "steps": [
+          "Eingereiht",
+          "Claude schreibt",
+          "Stimmen sprechen",
+          "Fertig"
+        ],
+        "step": 1,
+        "percent": null,
+        "fraction": null,
+        "restMinutes": null,
+        "label": "Claude schreibt das Gespräch, seit 2 Min. (meist 1 bis 3 Minuten)"
+      }
+    },
+    {
+      "id": "ep-spricht",
+      "kind": "vorlesen",
+      "kindLabel": "Vorlesen",
+      "title": "Vorlesen: Kurze Notiz",
+      "minutes": null,
+      "status": "spricht",
+      "busy": true,
+      "docs": [
+        "d4"
+      ],
+      "chars": 4321,
+      "createdAt": "2026-10-25T08:57:32.228Z",
+      "updatedAt": "2026-10-25T09:07:22.228Z",
+      "finishedAt": null,
+      "seconds": null,
+      "bytes": null,
+      "note": null,
+      "error": null,
+      "resumable": false,
+      "retry": null,
+      "progress": {
+        "steps": [
+          "Eingereiht",
+          "Stimme spricht",
+          "Fertig"
+        ],
+        "step": 1,
+        "percent": 37,
+        "fraction": 0.375,
+        "restMinutes": 5,
+        "label": "ElevenLabs liest vor: 37 %, noch etwa 5 Min."
+      }
+    },
+    {
+      "id": "ep-fehler-skript",
+      "kind": "podcast",
+      "kindLabel": "Podcast",
+      "title": "Podcast: Vom langsamen Lesen",
+      "minutes": 5,
+      "status": "fehler",
+      "busy": false,
+      "docs": [
+        "d2"
+      ],
+      "chars": 4500,
+      "createdAt": "2026-10-24T09:07:32.228Z",
+      "updatedAt": "2026-10-24T09:07:32.228Z",
+      "finishedAt": null,
+      "seconds": null,
+      "bytes": null,
+      "note": null,
+      "error": "ElevenLabs antwortet mit 429 (zu viele Anfragen)",
+      "resumable": true,
+      "retry": {
+        "label": "Fortsetzen",
+        "hint": "Schon Gesprochenes und Claudes Skript bleiben; es kostet nur, was noch fehlt."
+      },
+      "progress": null
+    },
+    {
+      "id": "ep-fehler",
+      "kind": "report",
+      "kindLabel": "Report",
+      "title": "Report: Ein sehr langes Essay",
+      "minutes": 5,
+      "status": "fehler",
+      "busy": false,
+      "docs": [
+        "d3"
+      ],
+      "chars": 4500,
+      "createdAt": "2026-10-23T09:07:32.228Z",
+      "updatedAt": "2026-10-23T09:07:32.228Z",
+      "finishedAt": null,
+      "seconds": null,
+      "bytes": null,
+      "note": null,
+      "error": "Claude hat nicht geantwortet",
+      "resumable": false,
+      "retry": {
+        "label": "Erneut versuchen",
+        "hint": "Claudes Skript fehlt noch, dafür schreibt Claude noch einmal (über dein Abo)."
+      },
+      "progress": null
+    },
+    {
+      "id": "ep-fertig",
+      "kind": "report",
+      "kindLabel": "Report",
+      "title": "Report: Warum der Stapel wächst",
+      "minutes": 5,
+      "status": "fertig",
+      "busy": false,
+      "docs": [
+        "d1"
+      ],
+      "chars": 4500,
+      "createdAt": "2026-10-22T09:07:32.228Z",
+      "updatedAt": "2026-10-22T09:07:32.228Z",
+      "finishedAt": "2026-10-22T09:11:32.228Z",
+      "seconds": 312,
+      "bytes": 4992000,
+      "note": "Inbox/2026-10-24 1810 - Report Stapel.md",
+      "error": null,
+      "resumable": false,
+      "retry": null,
+      "progress": null
+    },
+    {
+      "id": "ep-fertig-vorlesen",
+      "kind": "vorlesen",
+      "kindLabel": "Vorlesen",
+      "title": "Vorlesen: Vom langsamen Lesen",
+      "minutes": null,
+      "status": "fertig",
+      "busy": false,
+      "docs": [
+        "d2"
+      ],
+      "chars": 2100,
+      "createdAt": "2026-10-21T09:07:32.228Z",
+      "updatedAt": "2026-10-21T09:07:32.228Z",
+      "finishedAt": "2026-10-21T09:08:32.228Z",
+      "seconds": 140,
+      "bytes": 2240000,
+      "note": null,
+      "error": null,
+      "resumable": false,
+      "retry": null,
+      "progress": null
+    }
+  ],
+  "availability": {
+    "vorlesen": null,
+    "podcast": null,
+    "report": "Podcast und Report brauchen Claude: CLAUDE_CODE_OAUTH_TOKEN im Deployment (Token aus `claude setup-token`)"
+  },
+  "kinds": [
+    {
+      "kind": "vorlesen",
+      "label": "Vorlesen",
+      "description": "Die ganzen Texte nacheinander, eine Erzählerstimme.",
+      "cost": "Kosten nach Textlänge, Gehörtes ist gratis",
+      "missing": null
+    },
+    {
+      "kind": "podcast",
+      "label": "Podcast",
+      "description": "Claude schreibt ein Gespräch zweier Stimmen über die Texte.",
+      "cost": "900 Zeichen je Minute, dazu Claude",
+      "missing": null
+    },
+    {
+      "kind": "report",
+      "label": "Report",
+      "description": "Claude schreibt einen Bericht: als Notiz in die Inbox und eine Stimme liest ihn.",
+      "cost": "900 Zeichen je Minute, dazu Claude",
+      "missing": "Podcast und Report brauchen Claude: CLAUDE_CODE_OAUTH_TOKEN im Deployment (Token aus `claude setup-token`)"
+    }
+  ]
+}
