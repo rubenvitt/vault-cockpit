@@ -238,6 +238,8 @@ test('Übernehmen: Rohquelle, Source-Page, neue Seiten, Verknüpfungen, Log, Arc
     linked: ['wiki/concepts/backpressure.md', 'wiki/entities/robert-glaser.md'],
     confirmed: ['wiki/questions/widerstand.md'],
     extended: [],
+    // Ohne `onApplied` reiht niemand das Einpflanzen ein.
+    plant: null,
   });
   // Die Rohquelle bekommt im Ingest des Cockpits nie `ingest: offen`, erst das Datum (f).
   assert.doesNotMatch(read(raw), /^ingest: offen$/m);

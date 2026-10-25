@@ -5,7 +5,8 @@
 // die Seite alle paar Sekunden `/lesen/ingest/stand?ids=…`. Ändert sich ein
 // Status, tauscht sie das Abzeichen aus (Stapel, Leseansicht), lädt die
 // Übersicht neu (nur `main`) bzw. die Prüfansicht ganz. Die Zahl an „Ingest“ in
-// der Unternavigation läuft mit.
+// der Unternavigation läuft mit. Ebenso beim Einpflanzen nach dem Übernehmen
+// (`[data-ingest-plant]`, Stand `plant` statt `status`).
 //
 // Prüfansicht: „alle/keine“ je Gruppe, die Zahl am Knopf „Ins Wiki übernehmen“,
 // der Zähler der Summary (bis 80) und Nachfragen vor „Neu entwerfen“ und
@@ -66,8 +67,13 @@
       let reloadMain = false;
       for (const item of data.items ?? []) {
         for (const el of document.querySelectorAll(`[data-ingest-watch="${CSS.escape(item.id)}"]`)) {
-          if ((el.dataset.ingestStatus || '') === (item.status || '')) continue;
-          if (item.status === 'bereit') toast(`Entwurf bereit: ${item.title}`);
+          // Einpflanzen (`data-ingest-plant`) beobachtet den Stand des Agenten statt den des Entwurfs.
+          const plant = el.hasAttribute('data-ingest-plant');
+          if ((el.dataset.ingestStatus || '') === ((plant ? item.plant : item.status) || '')) continue;
+          if (plant) {
+            if (item.plant === 'fertig') toast(`Eingepflanzt: ${item.title}`);
+            else if (item.plant === 'fehler') toast(`Einpflanzen fehlgeschlagen: ${item.title}`, { kind: 'error' });
+          } else if (item.status === 'bereit') toast(`Entwurf bereit: ${item.title}`);
           else if (item.status === 'fehler') toast(`Entwurf fehlgeschlagen: ${item.title}`, { kind: 'error' });
           if (el.hasAttribute('data-ingest-reload')) {
             location.reload();

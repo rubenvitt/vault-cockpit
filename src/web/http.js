@@ -719,7 +719,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
         model: field('tts.model'),
       },
       episodes: { host: field('episodes.host'), guest: field('episodes.guest'), model: field('episodes.model'), language: field('episodes.language') },
-      ingest: { nightly: choice('ingest.nightly'), hour: field('ingest.hour'), model: field('ingest.model'), limit: field('ingest.limit') },
+      ingest: { nightly: choice('ingest.nightly'), hour: field('ingest.hour'), model: field('ingest.model'), limit: field('ingest.limit'), agent: choice('ingest.agent') },
       calendars: calendarsIn,
       hiddenEvents: form.has('hiddenEvents') ? field('hiddenEvents').split(',') : stored.hiddenEvents,
       // Die Generation ändert nur „Überall abmelden“.

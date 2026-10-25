@@ -12,7 +12,8 @@ import { jsonReply } from './json.js';
  * wird abgehakt, was davon hinein soll. Ohne JavaScript ist alles ein Formular.
  *
  * - `/lesen/ingest`: Übersicht. Bereite Entwürfe als Karten (Kernaussagen und
- *   was angeboten wird), darunter „In Arbeit“ und „Fehler“, oben „Ganzen Stapel
+ *   was angeboten wird), darunter „In Arbeit“, „Einpflanzen“ (der Agent nach dem
+ *   Übernehmen, src/lesen/einpflanzen.js) und „Fehler“, oben „Ganzen Stapel
  *   entwerfen“.
  * - `/lesen/ingest/doc?id=`: Prüfansicht. Digest (Kernaussagen, Neu für dich,
  *   Bestätigt, Widerspricht, Dockt an), die Source-Page mit änderbaren Feldern
@@ -21,7 +22,8 @@ import { jsonReply } from './json.js';
  *   unter „Was ergänzt wird“). „Ins Wiki übernehmen“ führt zum nächsten bereiten
  *   Entwurf.
  * - `/lesen/ingest/stand?ids=a,b`: Stand als JSON für die Live-Aktualisierung
- *   (/static/lesen-ingest.js): Zähler, je Dokument Status und Abzeichen.
+ *   (/static/lesen-ingest.js): Zähler, je Dokument Status, Stand des
+ *   Einpflanzens (`plant`) und Abzeichen.
  * - `/api/lesen/ingest` und `/api/lesen/ingest/doc?id=`: dasselbe für die App
  *   (ohne Dienst mit `enabled: false`). Claudes Texte kommen dort zusätzlich als
  *   Baum (`view`, wie `/api/notiz`: `parseInline`/`parseMarkdown`, Wikilinks wie
@@ -39,10 +41,14 @@ const STAND = '/lesen/ingest/stand';
 const ENTWERFEN = '/aktion/lesen/ingest/entwerfen';
 const UEBERNEHMEN = '/aktion/lesen/ingest/uebernehmen';
 const VERWERFEN = '/aktion/lesen/ingest/verwerfen';
+const EINPFLANZEN = '/aktion/lesen/ingest/einpflanzen';
 const DOC_STATUS = '/aktion/lesen/doc/status';
 
 const BUSY = ['wartet', 'entwirft'];
 const ACTIVE = [...BUSY, 'bereit', 'fehler'];
+const PLANT_BUSY = ['wartet', 'laeuft'];
+// So lange steht ein fertiges Einpflanzen noch in der Übersicht.
+const PLANT_RECENT_MS = 3 * 24 * 3_600_000;
 const SUMMARY_MAX = 80;
 
 /** Nur echte Wiki-Pfade werden Links; alles andere bleibt Text. */
@@ -163,7 +169,7 @@ async function run(fn) {
   } catch (err) {
     if (err instanceof ActionError) throw err;
     if (err instanceof ReadingError) throw new ActionError(err.message, err.status ?? 400);
-    if (err?.name === 'IngestError' || err?.constructor?.name === 'IngestError') throw new ActionError(err.message, err.status ?? 400);
+    if (['IngestError', 'PlantError'].includes(err?.name) || ['IngestError', 'PlantError'].includes(err?.constructor?.name)) throw new ActionError(err.message, err.status ?? 400);
     throw err;
   }
 }
@@ -185,6 +191,82 @@ export function ingestBadge(id, status, { ctx, title = '', available = true, rea
   if (status === 'uebernommen') return `<span class="ingest-badge is-done" ${data}>Im Wiki</span>`;
   if (!available) return '';
   return `<form method="post" action="${ENTWERFEN}" class="act ingest-badge-form" ${data}>${hidden({ csrf: ctx.write.csrf, back: back ?? ctx.write.back, id })}<button type="submit" class="btn quiet">Ingest entwerfen${sr}</button></form>`;
+}
+
+// --- Einpflanzen ------------------------------------------------------------
+
+const plantOf = (e) => (e?.status === 'uebernommen' ? (e.applied?.plant ?? null) : null);
+
+/** Satz zum Stand des Einpflanzens. */
+function plantLabel(p) {
+  if (p.status === 'wartet') return 'Wartet, bis Claude frei ist';
+  if (p.status === 'laeuft') return 'Claude pflanzt die Quelle in die Seiten ein, meist 2 bis 6 Minuten';
+  if (p.status === 'fehler') return `Einpflanzen fehlgeschlagen: ${p.error || 'unbekannter Fehler'}`;
+  const n = list(p.changed).filter((c) => wikiPath(c?.path)).length;
+  return n ? `Eingepflanzt in ${plural(n, 'Seite', 'Seiten')}` : 'Eingepflanzt, keine Seite brauchte mehr als den Link';
+}
+
+/** In der Übersicht: was wartet, läuft, fehlschlug oder in den letzten Tagen fertig wurde. */
+function plantingNow(all, at = Date.now()) {
+  return all.filter((e) => {
+    const p = plantOf(e);
+    if (!p) return false;
+    if (p.status !== 'fertig') return true;
+    const t = Date.parse(p.finished_at ?? '');
+    return !Number.isNaN(t) && at - t < PLANT_RECENT_MS;
+  });
+}
+
+const plantForm = (ctx, id, back, label, cls = 'btn') => `<form method="post" action="${EINPFLANZEN}" class="act">${hidden({ csrf: ctx.write.csrf, back, id })}<button type="submit" class="${cls}">${label}</button></form>`;
+
+/** Geänderte Seiten mit dem, was sie bekommen haben, und was offen bleibt. */
+function plantDetails(p) {
+  const changed = list(p.changed).filter((c) => wikiPath(c?.path));
+  const pages = changed.length
+    ? `<ul class="ingest-plant-pages">${changed.map((c) => `<li><a href="${esc(noteLink(c.path))}" class="ingest-ref">${esc(readable(slugOf(c.path)))}</a>${c.was ? ` – ${inlineMd(c.was)}` : ''}</li>`).join('')}</ul>`
+    : '';
+  const open = list(p.open).length ? `<p class="meta">Offen für dich:</p><ul class="ingest-plant-open">${list(p.open).map((o) => `<li>${inlineMd(o)}</li>`).join('')}</ul>` : '';
+  return `${p.summary ? `<p>${inlineMd(p.summary)}</p>` : ''}${pages}${open}`;
+}
+
+/**
+ * Stand des Einpflanzens in der Prüfansicht eines übernommenen Entwurfs; läuft
+ * es, lädt /static/lesen-ingest.js die Seite neu, sobald es fertig ist.
+ */
+function plantBlock(e, ctx, planter) {
+  if (!planter) return '';
+  const id = e.doc_id;
+  const back = ingestLink(id);
+  const p = plantOf(e);
+  const can = Boolean(planter.available?.()?.ok);
+  if (!p) {
+    return `<section class="ingest-state ingest-plant"><p><b>Einpflanzen</b><span class="meta"> Ein Agent arbeitet die Quelle in die Seiten ein, an die sie andockt, und hält Widersprüche als Spannung fest.</span></p>${can ? plantForm(ctx, id, back, 'Jetzt einpflanzen') : ''}</section>`;
+  }
+  if (PLANT_BUSY.includes(p.status)) {
+    return `<section class="ingest-state ingest-plant" data-ingest-watch="${esc(id)}" data-ingest-plant data-ingest-status="${esc(p.status)}" data-ingest-reload>
+      <div class="ingest-state-row"><span class="folge-spinner" aria-hidden="true"></span><p><b>Einpflanzen</b><span class="meta">${esc(plantLabel(p))}. Die Seite aktualisiert sich, sobald es fertig ist.</span></p></div>
+      <noscript><p class="meta"><a href="${esc(back)}">Stand aktualisieren</a></p></noscript>
+    </section>`;
+  }
+  if (p.status === 'fehler') {
+    return `<section class="ingest-state ingest-plant"><p class="problem">${esc(plantLabel(p))}</p>${plantDetails(p)}${can ? plantForm(ctx, id, back, 'Erneut einpflanzen') : ''}</section>`;
+  }
+  return `<section class="ingest-state ingest-plant"><p><b>${esc(plantLabel(p))}</b>${p.finished_at ? `<span class="meta"> · ${esc(when(p.finished_at, ctx.tz) ?? '')}</span>` : ''}</p>${plantDetails(p)}${can ? plantForm(ctx, id, back, 'Noch einmal einpflanzen', 'btn quiet') : ''}</section>`;
+}
+
+function plantRow(e, ctx, planter) {
+  const p = plantOf(e);
+  const busy = PLANT_BUSY.includes(p.status);
+  const watch = busy ? ` data-ingest-watch="${esc(e.doc_id)}" data-ingest-plant data-ingest-status="${esc(p.status)}"` : '';
+  const retry = p.status === 'fehler' && planter?.available?.()?.ok ? `<div class="ingest-row-actions">${plantForm(ctx, e.doc_id, INGEST, 'Erneut einpflanzen')}</div>` : '';
+  const pages = list(p.changed).filter((c) => wikiPath(c?.path));
+  return `<li class="ingest-row${busy ? ' is-busy' : p.status === 'fehler' ? ' is-failed' : ''}" data-ingest-doc="${esc(e.doc_id)}"${watch}>
+    ${busy ? '<span class="folge-spinner" aria-hidden="true"></span>' : ''}
+    <span class="ingest-row-text"><a href="${esc(ingestLink(e.doc_id))}" class="lesen-title">${esc(titleOf(e))}</a><span class="meta">${esc(plantLabel(p))}</span>${
+      p.status === 'fertig' && pages.length ? `<span class="meta">${pages.map((c) => esc(readable(slugOf(c.path)))).join(' · ')}</span>` : ''
+    }</span>
+    ${retry}
+  </li>`;
 }
 
 // --- Übersicht ---------------------------------------------------------------
@@ -238,12 +320,13 @@ function failedRow(e, ctx, available) {
 /** Hinweis, wenn Claude fehlt: Entwürfe abhaken geht trotzdem. */
 const unavailable = (av) => `<p class="problem unconfigured">Claude ist gerade nicht verfügbar${av.reason ? `: ${esc(av.reason)}` : ''}. Neue Entwürfe entstehen erst wieder, wenn Claude angebunden ist; fertige lassen sich weiter abhaken.</p>`;
 
-function overview({ store, ingest }, ctx) {
+function overview({ store, ingest, planter }, ctx) {
   const av = ingest.available() ?? { ok: false };
   const all = ingest.list();
   const ready = all.filter((e) => e.status === 'bereit');
   const busy = all.filter((e) => BUSY.includes(e.status));
   const failed = all.filter((e) => e.status === 'fehler');
+  const planting = planter ? plantingNow(all) : [];
   const open = openOnStack(store, ingest);
   const at = Date.now();
 
@@ -252,7 +335,7 @@ function overview({ store, ingest }, ctx) {
     : '';
   const intro = `<div class="ingest-intro">${av.ok ? '' : unavailable(av)}${stackForm}</div>`;
 
-  if (!ready.length && !busy.length && !failed.length) {
+  if (!ready.length && !busy.length && !failed.length && !planting.length) {
     const empty = `<div class="ingest-empty">
       <p class="ingest-empty-title">Nichts zum Abhaken</p>
       <p>Claude liest die Texte auf deinem Stapel und schlägt vor, was davon ins Wiki gehört: Source-Page, Verknüpfungen, neue Seiten, Synthesen. Nachts von selbst, oder jetzt per Knopf. Ins Wiki kommt nur, was du hier abhakst.</p>
@@ -266,6 +349,7 @@ function overview({ store, ingest }, ctx) {
       ready.length ? `<ul class="ingest-cards">${ready.map((e) => readyCard(e, ctx)).join('')}</ul>` : '<p class="empty">Gerade keiner. Was in Arbeit ist, erscheint hier, sobald Claude fertig ist.</p>'
     }</section>`,
     busy.length ? `<section class="ingest-busy" aria-labelledby="ingest-arbeit"><h2 id="ingest-arbeit">In Arbeit <span class="hint">${busy.length}</span></h2><ul class="ingest-rows">${busy.map((e) => busyRow(e, at)).join('')}</ul><noscript><p class="meta"><a href="${INGEST}">Stand aktualisieren</a></p></noscript></section>` : '',
+    planting.length ? `<section class="ingest-planting" aria-labelledby="ingest-einpflanzen"><h2 id="ingest-einpflanzen">Einpflanzen <span class="hint">${planting.length}</span></h2><ul class="ingest-rows">${planting.map((e) => plantRow(e, ctx, planter)).join('')}</ul></section>` : '',
     failed.length ? `<section class="ingest-failed" id="fehler" aria-labelledby="ingest-fehler"><h2 id="ingest-fehler">Fehler <span class="hint">${failed.length}</span></h2><ul class="ingest-rows">${failed.map((e) => failedRow(e, ctx, av.ok)).join('')}</ul></section>` : '',
   ];
   return `${intro}${sections.join('')}`;
@@ -574,7 +658,7 @@ function reviewForm(e, ctx, nav) {
 }
 
 /** Prüfansicht, wenn (noch) kein bereiter Entwurf da ist. */
-function reviewState(e, doc, ctx, available) {
+function reviewState(e, doc, ctx, available, planter = null) {
   const id = e?.doc_id ?? doc.id;
   const back = ingestLink(id);
   const draftForm = (label, force = false, cls = 'btn primary') =>
@@ -590,7 +674,7 @@ function reviewState(e, doc, ctx, available) {
   }
   if (e?.status === 'uebernommen') {
     const src = e.applied?.source;
-    return `<section class="ingest-state"><p class="notice">Schon im Wiki${e.applied_at ? `, seit ${esc(when(e.applied_at, ctx.tz) ?? '')}` : ''}.</p>${wikiPath(src) ? `<p><a href="${esc(noteLink(src))}" class="btn">Source-Page öffnen</a></p>` : ''}</section>`;
+    return `<section class="ingest-state"><p class="notice">Schon im Wiki${e.applied_at ? `, seit ${esc(when(e.applied_at, ctx.tz) ?? '')}` : ''}.</p>${wikiPath(src) ? `<p><a href="${esc(noteLink(src))}" class="btn">Source-Page öffnen</a></p>` : ''}</section>${plantBlock(e, ctx, planter)}`;
   }
   // Vom Dienst verworfen, weil die Rohquelle schon im Wiki ist: Grund nennen, kein neuer Entwurf.
   if (e?.status === 'verworfen' && e.error) return `<section class="ingest-state"><p class="notice">${esc(e.error)}</p></section>`;
@@ -599,6 +683,22 @@ function reviewState(e, doc, ctx, available) {
 }
 
 // --- JSON --------------------------------------------------------------------
+
+/** Stand des Einpflanzens für die App; null, solange nichts übernommen oder eingereiht ist. */
+function plantJson(e) {
+  const p = plantOf(e);
+  if (!p) return null;
+  return {
+    status: p.status,
+    label: plantLabel(p),
+    summary: p.summary ?? null,
+    changed: list(p.changed).filter((c) => wikiPath(c?.path)).map((c) => ({ path: c.path, title: readable(slugOf(c.path)), was: c.was ?? null })),
+    open: list(p.open),
+    error: p.status === 'fehler' ? (p.error ?? null) : null,
+    requestedAt: p.requested_at ?? null,
+    finishedAt: p.finished_at ?? null,
+  };
+}
 
 /** Ein Eintrag als JSON für die App (ohne die Texte des Entwurfs). */
 export function ingestJson(e) {
@@ -625,6 +725,7 @@ export function ingestJson(e) {
     tally: t,
     tallyLabel: tallyLabel(t),
     offerLabel: offerLabel(t),
+    plant: plantJson(e),
   };
 }
 
@@ -698,7 +799,7 @@ function appView(e) {
   };
 }
 
-const ACTIONS = { draft: ENTWERFEN, apply: UEBERNEHMEN, discard: VERWERFEN };
+const ACTIONS = { draft: ENTWERFEN, apply: UEBERNEHMEN, discard: VERWERFEN, plant: EINPFLANZEN };
 
 /**
  * Rücksprung der ausgetauschten Abzeichen: eine Seite unter `/lesen/` samt
@@ -719,14 +820,15 @@ export function standBack(raw) {
 
 /**
  * Meldung nach dem Übernehmen; `confirmed` (bestätigte Seiten) zählt der Dienst getrennt von `linked`,
- * `extended` die ergänzten Synthesen; ältere Fassungen kennen beides nicht.
+ * `extended` die ergänzten Synthesen; ältere Fassungen kennen beides nicht. `plant`: Einpflanzen eingereiht.
  */
 export function appliedMessage(title, r) {
   const pages = list(r?.written).filter((p) => p !== r.source && wikiPath(p) && p !== 'wiki/log.md');
   const linked = list(r?.linked).length;
   const confirmed = Array.isArray(r?.confirmed) ? r.confirmed.length : 0;
   const extended = list(r?.extended).length;
-  return `Im Wiki: ${title}${pages.length ? ` + ${plural(pages.length, 'Seite', 'Seiten')}` : ''}${linked ? `, ${linked} verknüpft` : ''}${confirmed ? `, ${confirmed} bestätigt` : ''}${extended ? `, ${plural(extended, 'Synthese', 'Synthesen')} ergänzt` : ''}`;
+  const plant = r?.plant === 'wartet' || r?.plant === 'laeuft' ? ' · Claude pflanzt es jetzt ein' : '';
+  return `Im Wiki: ${title}${pages.length ? ` + ${plural(pages.length, 'Seite', 'Seiten')}` : ''}${linked ? `, ${linked} verknüpft` : ''}${confirmed ? `, ${confirmed} bestätigt` : ''}${extended ? `, ${plural(extended, 'Synthese', 'Synthesen')} ergänzt` : ''}${plant}`;
 }
 
 // --- Routen ------------------------------------------------------------------
@@ -735,7 +837,7 @@ export function appliedMessage(title, r) {
  * Seiten, Stand und Aktionen des Ingests. Ohne `ingest` gibt es nur die
  * JSON-Endpunkte mit `enabled: false`, damit die App fragt statt rät.
  */
-export function ingestRoutes({ store, ingest = null, logger = console }) {
+export function ingestRoutes({ store, ingest = null, planter = null, logger = console }) {
   const off = { ok: true, enabled: false };
   const api = {
     async '/api/lesen/ingest'() {
@@ -752,6 +854,9 @@ export function ingestRoutes({ store, ingest = null, logger = console }) {
         ready: all.filter((e) => e.status === 'bereit').map(ingestJson),
         busy: all.filter((e) => BUSY.includes(e.status)).map((e) => ({ ...ingestJson(e), label: busyLabel(e) })),
         failed: all.filter((e) => e.status === 'fehler').map(ingestJson),
+        // Einpflanzen nach dem Übernehmen: wartet, läuft, fehlgeschlagen oder in den letzten Tagen fertig.
+        planting: planter ? plantingNow(all).map(ingestJson) : [],
+        plantAvailable: Boolean(planter?.available?.()?.ok),
         actions: ACTIONS,
       });
     },
@@ -807,7 +912,7 @@ export function ingestRoutes({ store, ingest = null, logger = console }) {
     pages: {
       ...api,
       async [INGEST](ctx) {
-        return { html: readingPage(ctx, { key: 'ingest', title: 'Ingest', body: overview({ store, ingest }, ctx), scripts: [assets.lesenIngest] }) };
+        return { html: readingPage(ctx, { key: 'ingest', title: 'Ingest', body: overview({ store, ingest, planter }, ctx), scripts: [assets.lesenIngest] }) };
       },
       async '/lesen/ingest/doc'(ctx) {
         const id = ctx.url.searchParams.get('id') ?? '';
@@ -816,7 +921,7 @@ export function ingestRoutes({ store, ingest = null, logger = console }) {
         if (!e && !doc) return { status: 404, html: readingPage(ctx, { key: 'ingest', title: 'Nicht gefunden', body: '<section><p class="empty">Diesen Text gibt es nicht (mehr).</p></section>' }) };
         const av = ingest.available() ?? { ok: false };
         const nav = e?.status === 'bereit' ? neighbours(ingest, id) : null;
-        const body = e?.status === 'bereit' && e.draft ? reviewForm(e, ctx, nav) : `${av.ok ? '' : unavailable(av)}${reviewState(e, { ...doc, id }, ctx, av.ok)}`;
+        const body = e?.status === 'bereit' && e.draft ? reviewForm(e, ctx, nav) : `${av.ok ? '' : unavailable(av)}${reviewState(e, { ...doc, id }, ctx, av.ok, planter)}`;
         return {
           html: readingPage(ctx, { key: 'ingest', title: `Ingest: ${docTitle(e ?? { doc })}`, heading: reviewHead(e, { ...doc, id }, nav), bodyClass: 'page-ingest', body, scripts: [assets.lesenIngest] }),
         };
@@ -837,7 +942,8 @@ export function ingestRoutes({ store, ingest = null, logger = console }) {
         }
         const out = items.map(({ id, status }) => {
           const title = nameOf(id);
-          return { id, status, busy: BUSY.includes(status), title, badge: ingestBadge(id, status, { ctx, title, available, ready, back: safeBack }) };
+          const plant = status === 'uebernommen' ? (ingest.get(id)?.applied?.plant?.status ?? null) : null;
+          return { id, status, plant, busy: BUSY.includes(status), title, badge: ingestBadge(id, status, { ctx, title, available, ready, back: safeBack }) };
         });
         return jsonReply(200, { ok: true, counts: ingest.counts(), available, items: out });
       },
@@ -877,6 +983,15 @@ export function ingestRoutes({ store, ingest = null, logger = console }) {
         const message = appliedMessage(source.title ?? titleOf(e), r);
         logger.info?.(`Ingest übernommen: ${id} → ${r?.source ?? '?'}`);
         return { message, link: wikiPath(r?.source) ? { href: noteLink(r.source), label: 'Source-Page öffnen' } : null, redirect: nextAfter(order, id), result: r ?? null };
+      },
+      /** Einpflanzen von Hand: für ältere Ingests, nach einem Fehler oder noch einmal. */
+      async [EINPFLANZEN](form) {
+        const id = form.get('id') ?? '';
+        const e = must(id);
+        if (!planter) throw new ActionError('Einpflanzen ist hier nicht eingerichtet', 409);
+        const status = await run(() => planter.request(id));
+        logger.info?.(`Einpflanzen: ${id} eingereiht`);
+        return { message: `${status === 'laeuft' ? 'Wird schon eingepflanzt' : 'Wird eingepflanzt'}: ${titleOf(e)}`, plant: { id, status } };
       },
       /** Verwerfen; `done=1` erledigt den Text ohne Wiki (gelesen, weg), mit Rückgängig. */
       async [VERWERFEN](form) {

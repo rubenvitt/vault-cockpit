@@ -42,7 +42,10 @@ import { parseNote } from '../vault/markdown.js';
  * schneller) oder `übersprungen`, entsteht kein Entwurf und Übernehmen lehnt ab.
  *
  * Supersession und Widersprüche löst das Cockpit nicht auf; sie stehen nur als
- * Hinweis im Entwurf („per /wiki-lint“).
+ * Hinweis im Entwurf („per /wiki-lint“). Nach dem Übernehmen ruft der Dienst
+ * `onApplied(docId)`: Dort reiht main.js das Einpflanzen ein
+ * (src/lesen/einpflanzen.js), das die Quelle in die Seiten einarbeitet und
+ * Widersprüche als Spannung festhält.
  *
  * Es entsteht immer nur ein Entwurf zugleich (Claude-Abo schonen). Nach einem
  * Neustart gehen angefangene Entwürfe wieder in die Warteschlange.
@@ -332,7 +335,7 @@ function itemCounts(draft) {
  * - `settings.get()`: `tz` und `ingest` (`nightly`, `hour`, `model`, `limit`).
  * - `resumeDelayMs`: Pause vor dem Fortsetzen nach dem Start.
  */
-export function createIngest({ store, writer, search, index, exporter, editor, policy, settings, vaultPath, logger = console, now = () => new Date(), resumeDelayMs = 1000 }) {
+export function createIngest({ store, writer, search, index, exporter, editor, policy, settings, vaultPath, onApplied = null, logger = console, now = () => new Date(), resumeDelayMs = 1000 }) {
   const queue = [];
   const applying = new Set();
   let pump = null;
@@ -747,11 +750,14 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
     linkPage(path, slug, { update: true, confirm: true });
   }
 
-  /** Eintrag in `wiki/log.md`. Steht das Log nicht im Index (Policy schließt es oft aus), direkt anhängen. */
-  function appendLog(entry, slug) {
+  /**
+   * Eintrag in `wiki/log.md`. Steht das Log nicht im Index (Policy schließt es oft aus), direkt anhängen.
+   * Mit `slug` nur, wenn es zu dieser Source-Page noch keinen Ingest-Eintrag gibt (zweiter Versuch nach einem Abbruch).
+   */
+  function appendLog(entry, slug = null) {
     if (policy.sensitivityOf(LOG) || policy.classify(LOG) !== 'core') throw new IngestError(`${LOG} liegt in einem vertraulichen oder importierten Ordner`, 409);
     const abs = join(vaultPath, LOG);
-    const done = (content) => new RegExp(`ingest \\(cockpit\\) \\|[^\\n]*\\n- Source-Page: \\[\\[${escRe(slug)}\\]\\]`).test(content);
+    const done = (content) => slug != null && new RegExp(`ingest \\(cockpit\\) \\|[^\\n]*\\n- Source-Page: \\[\\[${escRe(slug)}\\]\\]`).test(content);
     const note = index.getNote(LOG);
     if (note && note.content !== null && note.class === 'core' && !note.sensitivity) {
       if (!done(note.content)) editor.append({ path: LOG, text: `\n${entry}` });
@@ -866,7 +872,7 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
     const row = store.getIngest(id);
     const doc = store.get(id);
     if (!row || !doc) throw new IngestError('Zu diesem Dokument gibt es keinen Entwurf', 404);
-    if (row.status === 'uebernommen' && row.applied?.result) return row.applied.result;
+    if (row.status === 'uebernommen' && row.applied?.result) return { ...row.applied.result, plant: row.applied.plant?.status ?? null };
     if (row.status !== 'bereit' || !row.draft) throw new IngestError('Dieser Entwurf ist nicht bereit zum Übernehmen', 409);
     if (applying.has(id)) throw new IngestError('Wird gerade übernommen', 409);
     if (!folderAllowed(WIKI_FOLDERS.source)) throw new IngestError(`${WIKI_FOLDERS.source} ist vertraulich oder ausgeschlossen; dort schreibt das Cockpit nicht`, 409);
@@ -1050,7 +1056,14 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
       applied.result = result;
       store.saveIngest(id, { status: 'uebernommen', applied, applied_at: iso(), error: null });
       logger.info?.(`Ingest „${source.title}“ übernommen: ${result.written.length} geschrieben, ${linked.length} verknüpft, ${confirmed.length} bestätigt, ${result.extended.length} Synthesen ergänzt`);
-      return result;
+      // Danach pflanzt ein Agent die Quelle ein (src/lesen/einpflanzen.js); scheitert das Einreihen, bleibt das Übernommene.
+      let plant = null;
+      try {
+        plant = onApplied?.(id) ?? null;
+      } catch (err) {
+        logger.warn?.(`Ingest „${source.title}“: Einpflanzen nicht eingereiht: ${err.message}`);
+      }
+      return { ...result, plant };
     } catch (err) {
       store.saveIngest(id, { applied, error: err.message });
       if (err instanceof IngestError) throw err;
@@ -1135,6 +1148,8 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
     apply,
     discard,
     nightly,
+    /** Eintrag ans Ende von `wiki/log.md` (für das Einpflanzen). */
+    log: (entry) => appendLog(entry),
     /** Wartet, bis die Warteschlange leer ist (Tests, Herunterfahren). */
     async idle() {
       if (!pump && queue.length) kick();

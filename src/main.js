@@ -34,6 +34,7 @@ import { createSpeech, createSpeechCache } from './lesen/tts.js';
 import { createClaudeWriter } from './lesen/claude.js';
 import { createEpisodes } from './lesen/folgen.js';
 import { createIngest, createNightlyClock } from './lesen/ingest.js';
+import { createPlanter } from './lesen/einpflanzen.js';
 import { createOidcLogin } from './web/oidc.js';
 import { createWebHttp } from './web/http.js';
 import { APP_TEAM_ID, APP_BUNDLE_ID } from './web/app-access.js';
@@ -365,9 +366,10 @@ const episodes = createEpisodes({
 // Lesestapel), der Nutzer hakt unter Lesen → Ingest ab, erst dann schreibt das
 // Cockpit über den Editor. Nachts entstehen Entwürfe für den Stapel: alle 10
 // Minuten nachsehen, ob die eingestellte Stunde da ist; der letzte Tag liegt unter /data.
+const ingestClaude = createClaudeWriter({ model: () => cockpitSettings.get().ingest.model });
 const ingest = createIngest({
   store: reading,
-  writer: createClaudeWriter({ model: () => cockpitSettings.get().ingest.model }),
+  writer: ingestClaude,
   search: (query, opts) => hybridSearch({ index, semantic: currentSemantic, query, ...opts }),
   index,
   exporter: readingExport,
@@ -375,6 +377,20 @@ const ingest = createIngest({
   policy: POLICY,
   settings: cockpitSettings,
   vaultPath: VAULT_PATH,
+  // Nach dem Übernehmen pflanzt ein Agent die Quelle ein (Einstellungen → Lesestapel, Standard an).
+  onApplied: (docId) => planter.request(docId, { auto: true }),
+});
+// Der Agent arbeitet über die Vault-Werkzeuge, auf einem eigenen MCP-Server nur an 127.0.0.1:
+// ohne vertrauliche Ordner, mit einem Editor, der nur unter wiki/ ergänzt (src/lesen/einpflanzen.js).
+const planter = createPlanter({
+  store: reading,
+  claude: ingestClaude,
+  mcp: ({ editor: guarded, verifyToken }) =>
+    createVaultMcpHandler({ index, capture: null, editor: guarded, policy: POLICY, semantic: currentSemantic, graph, verifyToken, captureFolder: CAPTURE_FOLDER, layoutHint: POLICY.layoutHint, allowSensitive: false }),
+  editor,
+  index,
+  settings: cockpitSettings,
+  log: (entry) => ingest.log(entry),
 });
 const ingestClock = createNightlyClock({ ingest, settings: cockpitSettings, file: join(dirname(COCKPIT_SETTINGS_FILE), 'ingest-nacht.txt') });
 setInterval(() => ingestClock.tick(), 10 * 60_000).unref();
@@ -416,6 +432,7 @@ const webHttp = process.env.WEB_CLIENT_ID
         exporter: readingExport,
         // Ingest ins Wiki: Entwürfe prüfen, abhaken, übernehmen.
         ingest,
+        planter,
         onChange: (id) => readingExport.changed(id),
       }),
       oidc: createOidcLogin({
@@ -510,7 +527,7 @@ app.listen(PORT, '0.0.0.0', () => {
   const t = cockpitSettings.get().tts;
   console.log(`  Folgen      : ${process.env.CLAUDE_CODE_OAUTH_TOKEN ? 'Vorlesen, Podcast und Report' : 'nur Vorlesen (Podcast und Report brauchen CLAUDE_CODE_OAUTH_TOKEN)'}`);
   const ig = cockpitSettings.get().ingest;
-  console.log(`  Ingest      : ${ingest.available().ok ? `Entwürfe per Knopf${ig.nightly ? `, nachts um ${ig.hour} Uhr (höchstens ${ig.limit})` : ''}, Modell ${ig.model}` : 'aus (braucht CLAUDE_CODE_OAUTH_TOKEN)'}`);
+  console.log(`  Ingest      : ${ingest.available().ok ? `Entwürfe per Knopf${ig.nightly ? `, nachts um ${ig.hour} Uhr (höchstens ${ig.limit})` : ''}, Modell ${ig.model}${ig.agent ? ', danach einpflanzen' : ''}` : 'aus (braucht CLAUDE_CODE_OAUTH_TOKEN)'}`);
   console.log(`  Vorlesen    : ${t ? `ElevenLabs (${t.model}, Stimme ${t.voice})` : 'Gerätestimme (Einstellungen → Vorlesen)'}`);
   console.log(`  Cockpit     : ${webHttp ? `${PUBLIC_URL}/ (${cockpitSettings.get().calendars.length} Kalender, Einstellungen unter /einstellungen)` : 'aus (WEB_CLIENT_ID)'}`);
 });
