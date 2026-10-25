@@ -265,6 +265,12 @@ XCODE_ACCOUNT=1 ios/scripts/testflight.sh
 Per GitHub: Jeder Push auf `main`, der `ios/` ändert, lädt automatisch zu TestFlight hoch. Sonst den Workflow „iOS TestFlight“ manuell starten oder einen Tag `ios/v…` pushen (z. B. `git tag ios/v1.0-1 && git push origin ios/v1.0-1`). Mit einer Xcode-Beta lädt App Store Connect nichts an, lokal geht dann nur `EXPORT_DESTINATION=export`. Er braucht die Repo-Secrets
 `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8_BASE64` (Inhalt der `.p8`, base64) und `APPLE_TEAM_ID`.
 
+Der frische Mac jedes Laufs hat kein Zertifikat, also legt das automatische Signieren mit dem
+API-Key jedes Mal ein neues „Apple Development“-Zertifikat an. Damit Apples Höchstzahl nicht
+erreicht wird, widerruft `ios/scripts/certificates-cleanup.js` vor und nach dem Archivieren die
+Entwicklungszertifikate „Created via API“; die eigenen aus Xcode und das Distributionszertifikat
+bleiben. Nur auflisten: `DRY_RUN=1 node ios/scripts/certificates-cleanup.js`.
+
 ### An Testgruppen verteilen
 
 Nach dem Upload verteilt der Job `distribute` den Build an die Gruppen aus der Repo-Variable

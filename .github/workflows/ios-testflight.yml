@@ -38,12 +38,28 @@ jobs:
           key="$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
           (umask 077; printf '%s' "$ASC_KEY_P8_BASE64" | base64 --decode > "$key")
           echo "ASC_KEY_PATH=$key" >> "$GITHUB_ENV"
+      # Jeder Lauf legt beim automatischen Signieren ein neues Entwicklungszertifikat an; ohne
+      # Aufräumen ist Apples Höchstzahl nach einigen Läufen erreicht und das Archivieren scheitert.
+      # Vorher räumt Reste ab (abgebrochene Läufe), nachher das Zertifikat dieses Laufs.
+      - name: Alte CI-Zertifikate widerrufen
+        continue-on-error: true
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: node ios/scripts/certificates-cleanup.js
       - name: Archivieren und hochladen
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: ios/scripts/testflight.sh
+      - name: Zertifikat dieses Laufs widerrufen
+        if: always()
+        continue-on-error: true
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: node ios/scripts/certificates-cleanup.js
       - name: API-Key löschen
         if: always()
         run: rm -f "$ASC_KEY_PATH"
