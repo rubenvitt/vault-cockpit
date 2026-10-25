@@ -84,6 +84,17 @@ function resolveLinkPost(entry) {
   return { ...entry, url, comments: comments && comments !== url ? comments : null };
 }
 
+/**
+ * Gespeicherter Feed-Eintrag von vor der Auflösung → `{ url, comments }` oder
+ * `null`: Reddit über `[link]` im Inhalt, Hacker News (hnrss) über „Comments
+ * URL: …“ im Text.
+ */
+export function storedLinkPost(doc) {
+  const hn = /Comments URL:\s*(https?:\/\/\S+)/.exec(doc.content_text ?? '')?.[1];
+  const { url, comments } = resolveLinkPost({ url: doc.url, html: doc.content_html, comments: hn ? absolute(hn, doc.url) : null });
+  return comments ? { url, comments } : null;
+}
+
 function parseAny(body, baseUrl) {
   const src = String(body ?? '').replace(/^\uFEFF/, '').trimStart();
   if (src.startsWith('{')) return parseJsonFeed(src, baseUrl);
@@ -380,12 +391,45 @@ export function createFeedPoller({ store, fetchFeed = fetchFeedDefault, fetchPag
     };
   }
 
+  /**
+   * Feed-Einträge von vor der Auflösung nachträglich wie neue behandeln:
+   * Artikel als Adresse, Diskussion als Kommentar-Link, Volltext von der
+   * Seite. Nur im Eingang und auf dem Stapel und ohne Markierungen (Archiv
+   * und Abgelegtes haben schon eine Notiz im Vault, Markierungen hängen am
+   * alten Text). Neuer Text setzt den Lesefortschritt zurück. Gibt es den
+   * Artikel schon als eigenes Dokument, bleibt der Eintrag, wie er ist.
+   * Liefert die Zahl aufgelöster Dokumente.
+   */
+  async function resolveOld() {
+    let resolved = 0;
+    for (const doc of store.listFeedStubs(FULL_TEXT_WORDS)) {
+      const link = storedLinkPost(doc);
+      if (!link) continue;
+      const other = link.url !== doc.url ? store.find({ url: link.url }) : null;
+      if (other && other.id !== doc.id) continue;
+      const full = await article({ url: link.url, comments: link.comments, title: doc.title, author: doc.author, html: doc.content_html ?? '' }, doc.site);
+      const longer = full.word_count > doc.word_count;
+      // Seite nicht erreichbar: Adresse und Kommentar-Link trotzdem, der Kurztext bleibt.
+      store.updateDocument(doc.id, {
+        url: link.url,
+        comments_url: link.comments,
+        ...(longer ? { canonical_url: full.canonical_url ?? null, excerpt: full.excerpt, content_html: full.content_html, content_text: full.content_text, word_count: full.word_count, reading_minutes: full.reading_minutes } : {}),
+      });
+      if (longer && doc.progress > 0) store.setProgress(doc.id, 0, null);
+      resolved += 1;
+    }
+    if (resolved) logger.info?.(`Feeds: ${resolved} ältere Einträge nachträglich aufgelöst`);
+    return resolved;
+  }
+
   return {
     runDue,
     health,
-    /** Jede Minute nachsehen, welche Feeds dran sind (jeder hat seinen eigenen Abstand). */
+    resolveOld,
+    /** Jede Minute nachsehen, welche Feeds dran sind (jeder hat seinen eigenen Abstand); einmal ältere Einträge auflösen. */
     start(tickMinutes = 1) {
       runDue();
+      resolveOld().catch((err) => logger.error?.(`Feeds: Nachträgliches Auflösen fehlgeschlagen: ${err.message}`));
       timer = setInterval(runDue, tickMinutes * 60_000);
       timer.unref?.();
     },

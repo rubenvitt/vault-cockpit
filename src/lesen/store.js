@@ -334,11 +334,24 @@ export function createReadingStore({ path, now = () => Date.now() }) {
     },
 
     /** Weitere Felder ändern (Titel, Themen, Inhalt nach erneutem Holen …). */
+    /**
+     * Feed-Einträge mit Kurztext (unter `maxWords` Wörtern) ohne Kommentar-Link
+     * im Eingang oder auf dem Stapel, ohne Markierungen: Kandidaten für das
+     * nachträgliche Auflösen (`resolveOld` in feeds.js).
+     */
+    listFeedStubs(maxWords) {
+      return db
+        .prepare(`SELECT * FROM documents WHERE origin LIKE 'feed:%' AND status IN ('eingang', 'stapel') AND comments_url IS NULL AND word_count < ?
+          AND NOT EXISTS (SELECT 1 FROM highlights h WHERE h.doc_id = documents.id) ORDER BY saved_at`)
+        .all(maxWords)
+        .map(fromRow);
+    },
+
     updateDocument(id, patch) {
       must(get(id), 'Dieses Dokument');
       const p = { ...patch, updated_at: iso() };
       if (p.topics) p.topics = JSON.stringify(p.topics);
-      update('documents', id, p, ['canonical_url', 'title', 'author', 'site', 'kind', 'excerpt', 'content_html', 'content_text', 'word_count', 'reading_minutes', 'topics', 'updated_at']);
+      update('documents', id, p, ['url', 'canonical_url', 'comments_url', 'title', 'author', 'site', 'kind', 'excerpt', 'content_html', 'content_text', 'word_count', 'reading_minutes', 'topics', 'updated_at']);
       return get(id);
     },
 

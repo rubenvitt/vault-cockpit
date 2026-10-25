@@ -276,6 +276,40 @@ test('Feeds: direkt auf den Stapel, Stichwort-Filter, Seite nicht erreichbar →
   assert.equal(docsOf(store, feeds.json).length, 0, 'pausiert');
 });
 
+test('Feeds: ältere Hacker-News- und Reddit-Einträge werden nachträglich aufgelöst', async () => {
+  const { store, pages, pageCalls, poller, feeds } = setup({ rssItems: [] });
+  const origin = `feed:${feeds.blog.id}`;
+  const stub = (url, html, extra = {}) => store.addDocument({ url, title: url, kind: 'feed', origin, status: 'stapel', content_html: html, content_text: html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' '), word_count: 12, reading_minutes: 1, ...extra }).doc;
+  const hnHtml = '<p>Article URL: <a href="https://kuehn.test/ambitious/">https://kuehn.test/ambitious/</a></p><p>Comments URL: <a href="https://news.ycombinator.com/item?id=7">https://news.ycombinator.com/item?id=7</a></p><p>Points: 508</p>';
+  const hn = stub('https://kuehn.test/ambitious/', hnHtml);
+  store.setProgress(hn.id, 1, '40');
+  const reddit = stub('https://www.reddit.com/r/prog/comments/a1/post/', redditBody('a1', 'https://kuehn.test/artikel'));
+  const marked = stub('https://kuehn.test/markiert/', hnHtml.replace('ambitious', 'markiert').replace('id=7', 'id=8'));
+  store.addHighlight({ doc_id: marked.id, quote: 'Points' });
+  const archived = stub('https://kuehn.test/alt/', hnHtml.replace('ambitious', 'alt').replace('id=7', 'id=9'), { status: 'archiv' });
+  const blog = stub('https://blog.test/kurz', '<p>Nur ein kurzer Beitrag.</p>');
+  const taken = stub('https://www.reddit.com/r/prog/comments/a2/post/', redditBody('a2', 'https://kuehn.test/schon-da'));
+  store.addDocument({ url: 'https://kuehn.test/schon-da', title: 'Schon da' });
+  pages['https://kuehn.test/ambitious/'] = ARTICLE;
+
+  assert.equal(await poller.resolveOld(), 2);
+  const h = store.get(hn.id);
+  assert.equal(h.comments_url, 'https://news.ycombinator.com/item?id=7');
+  assert.match(h.content_text, /Der volle Artikel/);
+  assert.ok(h.word_count > 150);
+  assert.deepEqual([h.progress, h.scroll_anchor], [0, null], 'neuer Text, Fortschritt von vorn');
+  const r = store.get(reddit.id);
+  assert.deepEqual([r.url, r.comments_url], ['https://kuehn.test/artikel', 'https://www.reddit.com/r/prog/comments/a1/post/']);
+  assert.equal(r.word_count, 12, 'Seite nicht erreichbar: Kurztext bleibt');
+  for (const d of [marked, archived, blog]) assert.equal(store.get(d.id).comments_url, null, d.url);
+  assert.equal(store.get(taken.id).url, 'https://www.reddit.com/r/prog/comments/a2/post/', 'Artikel gibt es schon: bleibt');
+
+  // Zweiter Durchgang: nichts mehr zu tun, keine Seite noch einmal geholt.
+  const before = pageCalls.length;
+  assert.equal(await poller.resolveOld(), 0);
+  assert.equal(pageCalls.length, before);
+});
+
 test('Feeds: Hacker-News- und Reddit-Einträge holen den Artikel und behalten den Kommentar-Link', async () => {
   const { store, routes, pages, pageCalls, poller } = setup({ rssItems: [HN_ITEM] });
   routes['https://reddit.test/r/prog/.rss'] = REDDIT;
