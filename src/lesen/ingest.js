@@ -225,6 +225,8 @@ function brief(draft) {
     digest: { kernaussagen: draft.digest?.kernaussagen ?? [], neu: draft.digest?.neu ?? [] },
     source: { slug: draft.source?.slug, title: draft.source?.title, summary: draft.source?.summary, confidence: draft.source?.confidence, tags: draft.source?.tags ?? [] },
     hinweise: draft.hinweise ?? [],
+    // Ohne Body und Begründung: genug für Zählung und Gruppen auf den Karten der Übersicht.
+    items: (draft.items ?? []).map(({ id, kind, action, title, entity_type, art, default: def }) => ({ id, kind, action, title, entity_type, art, default: def })),
   };
 }
 

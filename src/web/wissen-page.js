@@ -50,7 +50,7 @@ const item = (n) => `<li><a href="${esc(noteHref(n.path))}">${esc(n.title)}</a>$
     ${synthesisChips(n)}${n.summary ? `<p class="snippet">${esc(n.summary)}</p>` : ''}</li>`;
 
 /** Seite `/wissen`: Fragesuche über die Synthesen, ohne JavaScript über ein GET-Formular. */
-export function renderWissen(m, { user = null } = {}) {
+export function renderWissen(m, { user = null, nav = null } = {}) {
   const list = (items, empty) => (items.length ? `<ul class="results">${items.map(item).join('')}</ul>` : `<p class="empty">${empty}</p>`);
   const hits = m.hits ? `<section><h2>Treffer</h2>${list(m.hits, `Keine Synthese passt zu „${esc(m.q)}“.`)}</section>` : '';
   return `<!doctype html>
@@ -58,7 +58,7 @@ export function renderWissen(m, { user = null } = {}) {
 ${head(m.q ? `Wissen: ${m.q}` : 'Wissen')}
 <body class="page-wissen">
 ${appHeader({ current: 'lesen', user })}
-${readingNav('wissen')}
+${readingNav('wissen', nav)}
 <div class="page-head">
   <div><h1>Wissen</h1><p class="meta">${m.total} Synthesen · <a href="${esc(`/graph${m.q ? `?q=${encodeURIComponent(m.q)}` : ''}`)}">Ganzen Vault durchsuchen</a></p></div>
   <form method="get" action="/wissen" class="wissen-form" role="search">
@@ -79,7 +79,7 @@ ${hits}
 }
 
 /** `/wissen?q=…&art=…&status=…&lesen=1` als fertige Seite. */
-export async function wissenPage({ notes, search, evidence = null, url, user }) {
+export async function wissenPage({ notes, search, evidence = null, url, user, nav = null }) {
   const p = (k) => (url.searchParams.get(k) ?? '').trim().slice(0, 500);
-  return renderWissen(await wissenView({ notes, search, evidence }, { q: p('q'), art: p('art'), status: p('status'), lesen: p('lesen') === '1' }), { user });
+  return renderWissen(await wissenView({ notes, search, evidence }, { q: p('q'), art: p('art'), status: p('status'), lesen: p('lesen') === '1' }), { user, nav });
 }

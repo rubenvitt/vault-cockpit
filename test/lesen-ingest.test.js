@@ -179,7 +179,8 @@ test('Entwurf: Text, Markierungen und Kandidaten gehen an Claude; die Antwort wi
 
   const ingest = make();
   const [listed] = ingest.list({ status: 'bereit' });
-  assert.equal(listed.draft.items, undefined);
+  assert.ok(listed.draft.items.every((i) => !('body' in i) && !('warum' in i)), 'Liste ohne Body und Begründung');
+  assert.equal(listed.draft.items.length, ingest.get(doc.id).draft.items.length);
   assert.deepEqual(listed.draft.digest.kernaussagen, ['Backpressure macht lange Loops möglich.']);
   assert.deepEqual(listed.item_counts, { total: 8, default: 4, neu: 4, verknuepfen: 2, bestaetigung: 1, relation: 1 });
   assert.deepEqual(ingest.counts(), { wartet: 0, entwirft: 0, bereit: 1, fehler: 0 });

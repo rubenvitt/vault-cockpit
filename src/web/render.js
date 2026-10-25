@@ -392,7 +392,9 @@ export function flashToast(flash, ctx) {
       ? `<form method="post" action="${esc(flash.undo.action)}" class="act">${hidden({ csrf: ctx.write.csrf, back: ctx.back, ...flash.undo.fields })}<button type="submit" class="toast-action">Rückgängig</button></form>`
       : '';
   const kind = flash.kind === 'error' ? 'error' : 'ok';
-  return `<div class="toast ${kind}" role="${kind === 'error' ? 'alert' : 'status'}"><span class="toast-text">${esc(flash.message)}</span>${undo}<button type="button" class="toast-close" aria-label="Schließen">×</button></div>`;
+  // Weiter-Link (etwa „Source-Page öffnen“ nach dem Ingest): nur Pfade dieses Cockpits.
+  const link = typeof flash.link?.href === 'string' && /^\/(?!\/)[^\\\s]*$/.test(flash.link.href) && flash.link.label ? `<a href="${esc(flash.link.href)}" class="toast-action">${esc(flash.link.label)}</a>` : '';
+  return `<div class="toast ${kind}" role="${kind === 'error' ? 'alert' : 'status'}"><span class="toast-text">${esc(flash.message)}</span>${link}${undo}<button type="button" class="toast-close" aria-label="Schließen">×</button></div>`;
 }
 
 /**
