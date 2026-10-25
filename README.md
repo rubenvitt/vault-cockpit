@@ -686,6 +686,13 @@ des Zeitfensters zum Abhaken, die Art und die geschätzten Zeichen bei ElevenLab
   Kernaussagen je Text, Querverbindungen und offenen Fragen, dazu eine
   Sprechfassung; eine Stimme liest sie.
 
+Podcast und Report schreibt Claude in der **Sprache** unter **Einstellungen →
+Vorlesen → Folgen** (Standard Deutsch; außerdem Englisch, Französisch, Spanisch,
+Italienisch, Niederländisch), auch wenn die Texte in einer anderen Sprache sind.
+ElevenLabs erkennt die Sprache am Text. Jede Folge merkt sich die Sprache beim
+Anlegen; im Transkript steht sie als `sprache` (nur, wenn nicht Deutsch), die
+Abschnittsüberschriften bleiben deutsch.
+
 Podcast und Report lassen sich weiter einstellen:
 
 - **Ton**: Ausgewogen (Standard), Locker, Kritisch (Argumente prüfen, Lücken und

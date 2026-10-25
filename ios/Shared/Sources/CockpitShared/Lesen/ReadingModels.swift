@@ -861,6 +861,8 @@ public struct Episode: Decodable, Equatable, Identifiable, Sendable {
     public let note: String?
     /// false: erst nur das Transkript, Audio auf Knopfdruck (`speak`).
     public let audio: Bool
+    /// Sprache, in der Claude geschrieben hat (`de`, `en` …), nil beim Vorlesen.
+    public let language: String?
     /// Ton (`kritisch` …) und sein Name, nil beim Vorlesen.
     public let style: String?
     public let styleLabel: String?
@@ -898,7 +900,7 @@ public struct Episode: Decodable, Equatable, Identifiable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, kindLabel, title, minutes, status, busy, docs, chars, createdAt, updatedAt, finishedAt, seconds, bytes, note, audio, style, styleLabel, topics, focus, wishes, speak, error, resumable, retry, progress
+        case id, kind, kindLabel, title, minutes, status, busy, docs, chars, createdAt, updatedAt, finishedAt, seconds, bytes, note, audio, language, style, styleLabel, topics, focus, wishes, speak, error, resumable, retry, progress
     }
 
     public init(from decoder: Decoder) throws {
@@ -919,6 +921,7 @@ public struct Episode: Decodable, Equatable, Identifiable, Sendable {
         bytes = try c.decodeIfPresent(Int.self, forKey: .bytes)
         note = try c.decodeIfPresent(String.self, forKey: .note)
         audio = try c.decodeIfPresent(Bool.self, forKey: .audio) ?? true
+        language = try c.decodeIfPresent(String.self, forKey: .language)
         style = try c.decodeIfPresent(String.self, forKey: .style)
         styleLabel = try c.decodeIfPresent(String.self, forKey: .styleLabel)
         topics = try c.decodeIfPresent([String].self, forKey: .topics) ?? []
@@ -1036,11 +1039,13 @@ public struct NewEpisodeModel: Decodable, Equatable, Sendable {
     public let maxTopics: Int
     public let maxFocus: Int
     public let transcriptOnly: Bool
+    /// Sprache aus den Einstellungen, in der Claude schreibt („Deutsch“), nil bei älteren Servern.
+    public let languageLabel: String?
     public let summary: EpisodeSummary?
     public let summaries: [String: EpisodeSummary]
 
     enum CodingKeys: String, CodingKey {
-        case enabled, zeit, windows, docs, chars, availability, kinds, defaultKind, lengths, defaultLength, maxDocs, spokenCharsPerMinute, styles, defaultStyle, topics, maxTopics, maxFocus, transcriptOnly, summary, summaries
+        case enabled, zeit, windows, docs, chars, availability, kinds, defaultKind, lengths, defaultLength, maxDocs, spokenCharsPerMinute, styles, defaultStyle, topics, maxTopics, maxFocus, transcriptOnly, languageLabel, summary, summaries
     }
 
     public init(from decoder: Decoder) throws {
@@ -1063,6 +1068,7 @@ public struct NewEpisodeModel: Decodable, Equatable, Sendable {
         maxTopics = try c.decodeIfPresent(Int.self, forKey: .maxTopics) ?? 5
         maxFocus = try c.decodeIfPresent(Int.self, forKey: .maxFocus) ?? 200
         transcriptOnly = try c.decodeIfPresent(Bool.self, forKey: .transcriptOnly) ?? false
+        languageLabel = try c.decodeIfPresent(String.self, forKey: .languageLabel)
         summary = try c.decodeIfPresent(EpisodeSummary.self, forKey: .summary)
         summaries = try c.decodeIfPresent([String: EpisodeSummary].self, forKey: .summaries) ?? [:]
     }

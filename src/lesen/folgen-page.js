@@ -6,6 +6,7 @@ import { readingPage } from './pages.js';
 import { WINDOWS, fitToWindow, stackItemJson } from './stack.js';
 import { EpisodeError, KINDS, LENGTHS, MAX_DOCS, BYTES_PER_SECOND, STYLES, DEFAULT_STYLE, MAX_TOPICS, MAX_FOCUS } from './folgen.js';
 import { jsonReply } from './json.js';
+import { EPISODE_LANGUAGES, DEFAULT_EPISODE_LANGUAGE } from './languages.js';
 
 /**
  * Seiten der Folgen (src/lesen/folgen.js), ohne JavaScript bedienbar:
@@ -127,6 +128,7 @@ export function topicsOf(docs, max = 12) {
 /** Ton und Schwerpunkt einer Folge in einer Zeile, ohne Wünsche null. */
 export function wishesOf(ep) {
   const parts = [
+    ep.language && ep.language !== DEFAULT_EPISODE_LANGUAGE ? (EPISODE_LANGUAGES[ep.language] ?? ep.language) : null,
     ep.style && ep.style !== DEFAULT_STYLE ? (STYLES[ep.style]?.label ?? ep.style) : null,
     ep.topics?.length || ep.focus ? `Schwerpunkt: ${[...(ep.topics ?? []), ...(ep.focus ? [ep.focus] : [])].join(', ')}` : null,
   ].filter(Boolean);
@@ -159,11 +161,12 @@ export function newEpisodeModel(episodes, store, zeitParam) {
   const full = docs.reduce((sum, x) => sum + x.chars, 0);
   const first = Object.keys(KINDS).find((k) => !missing[k]) ?? null;
   const summary = first ? newSummary({ kind: first, texts: docs.length, chars: full, minutes: 10 }) : { main: 'Folgen brauchen ElevenLabs', cost: 'Einstellungen → Vorlesen' };
-  return { zeit, docs, full, missing, first, summary, topics: topicsOf(items) };
+  const language = episodes.language?.() ?? DEFAULT_EPISODE_LANGUAGE;
+  return { zeit, docs, full, missing, first, summary, topics: topicsOf(items), language, languageLabel: EPISODE_LANGUAGES[language] ?? language };
 }
 
 function newPage(episodes, store, ctx) {
-  const { zeit, docs, missing, first, summary, topics } = newEpisodeModel(episodes, store, ctx.url.searchParams.get('zeit'));
+  const { zeit, docs, missing, first, summary, topics, languageLabel } = newEpisodeModel(episodes, store, ctx.url.searchParams.get('zeit'));
   const picker = `<nav class="chips folge-zeit" aria-label="Zeitfenster">${WINDOWS.map((m) => `<a href="/lesen/folgen/neu?zeit=${m}" class="chip"${m === zeit ? ' aria-current="true"' : ''}>${m} Min.</a>`).join('')}</nav>`;
   const step = (nr, title, hint = '') => `<div class="folge-schritt-kopf"><span class="folge-nr" aria-hidden="true">${nr}</span><div><h2>${title}</h2>${hint ? `<p class="meta">${hint}</p>` : ''}</div></div>`;
   if (!docs.length) return `<section class="folge-schritt">${step(1, 'Welche Texte?', 'Aus dem Stapel, passend zur Zeit, die du hast.')}${picker}<p class="empty">Für dieses Zeitfenster passt nichts vom Stapel.</p></section>`;
@@ -211,7 +214,7 @@ function newPage(episodes, store, ctx) {
       <div class="folge-segmente" role="radiogroup" aria-label="Länge">${lengths}</div>
     </section>
     <section class="folge-schritt folge-claude">
-      ${step(4, 'Ton und Schwerpunkt', 'Für Claude, bei Podcast und Report. Ohne Schwerpunkt geht es um alles in den Texten.')}
+      ${step(4, 'Ton und Schwerpunkt', `Für Claude, bei Podcast und Report, auf ${languageLabel} (Sprache unter Einstellungen → Vorlesen → Folgen). Ohne Schwerpunkt geht es um alles in den Texten.`)}
       <div class="folge-feld">
         <h3>Ton</h3>
         <div class="folge-pillen" role="radiogroup" aria-label="Ton">${styles}</div>
@@ -270,6 +273,7 @@ export function episodeJson(ep, { resumable = false, at = Date.now() } = {}) {
     note: ep.note ?? null,
     /** false: erst nur das Transkript (Status `transkript`), Audio auf Knopfdruck. */
     audio: ep.audio !== false,
+    language: ep.language ?? null,
     style: ep.style ?? null,
     styleLabel: ep.style ? (STYLES[ep.style]?.label ?? ep.style) : null,
     topics: ep.topics ?? [],
@@ -430,7 +434,7 @@ function episodeApi({ store, episodes }) {
     /** Vorschau für „Neue Folge“: Texte des Zeitfensters mit Zeichen, Arten, Längen und die Zusammenfassung je Art. */
     async '/api/lesen/folgen/neu'(ctx) {
       if (!episodes) return jsonReply(200, { ...off, docs: [], kinds: kinds(null) });
-      const { zeit, docs, full, missing, first, summary, topics } = newEpisodeModel(episodes, store, ctx.url.searchParams.get('zeit'));
+      const { zeit, docs, full, missing, first, summary, topics, language, languageLabel } = newEpisodeModel(episodes, store, ctx.url.searchParams.get('zeit'));
       const summaries = Object.fromEntries(Object.keys(KINDS).filter((k) => !missing[k]).map((kind) => [kind, newSummary({ kind, texts: docs.length, chars: full, minutes: 10 })]));
       return jsonReply(200, {
         ok: true,
@@ -453,6 +457,9 @@ function episodeApi({ store, episodes }) {
         maxTopics: MAX_TOPICS,
         maxFocus: MAX_FOCUS,
         transcriptOnly: true,
+        // Sprache aus den Einstellungen, in der Claude schreibt.
+        language,
+        languageLabel,
         summary,
         summaries,
       });

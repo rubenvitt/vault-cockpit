@@ -350,6 +350,46 @@
           "placeholder": "sonnet",
           "group": "Folgen",
           "collapsed": false
+        },
+        {
+          "name": "episodes.language",
+          "label": "Sprache",
+          "hint": "Podcast und Report",
+          "kind": "select",
+          "value": "",
+          "placeholder": "",
+          "options": [
+            {
+              "value": "",
+              "label": "Standard (Deutsch)"
+            },
+            {
+              "value": "de",
+              "label": "Deutsch"
+            },
+            {
+              "value": "en",
+              "label": "Englisch"
+            },
+            {
+              "value": "fr",
+              "label": "Französisch"
+            },
+            {
+              "value": "es",
+              "label": "Spanisch"
+            },
+            {
+              "value": "it",
+              "label": "Italienisch"
+            },
+            {
+              "value": "nl",
+              "label": "Niederländisch"
+            }
+          ],
+          "group": "Folgen",
+          "collapsed": false
         }
       ],
       "groups": {

@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from '
 import { dirname } from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { ELEVENLABS_VOICE, ELEVENLABS_MODEL, ELEVENLABS_GUEST_VOICE } from '../lesen/tts.js';
+import { EPISODE_LANGUAGES, DEFAULT_EPISODE_LANGUAGE } from '../lesen/languages.js';
 
 /**
  * Einstellungen des Web-Cockpits, gepflegt auf der Seite `/einstellungen` und
@@ -49,7 +50,7 @@ const EMPTY = {
   mail: { token: null, senders: [], mailbox: null, doneMailbox: null, pollMinutes: null },
   embed: { url: null, model: null },
   tts: { provider: null, key: null, voice: null, model: null },
-  episodes: { host: null, guest: null, model: null },
+  episodes: { host: null, guest: null, model: null, language: null },
   ingest: { nightly: null, hour: null, model: null, limit: null },
   calendars: [],
   hiddenEvents: null,
@@ -144,7 +145,7 @@ export function validateSettings(input) {
   if (ttsModel && !MODEL_ID.test(ttsModel)) throw new SettingsError('Sprachmodell: die Model-ID aus ElevenLabs, z. B. eleven_multilingual_v2', 'tts.model');
   const tts = { provider, key: text(input.tts?.key, 200, 'ElevenLabs-API-Key', 'tts.key'), voice, model: ttsModel };
 
-  // Folgen: Stimmen im Podcast und Claude-Modell (Alias wie sonnet oder ein voller Name).
+  // Folgen: Stimmen im Podcast, Claude-Modell (Alias wie sonnet oder ein voller Name) und Sprache (`null` = Deutsch).
   const voiceOf = (v, what, field) => {
     const s = text(v, 64, what, field);
     if (s && !VOICE_ID.test(s)) throw new SettingsError(`${what}: die Voice-ID aus ElevenLabs (nur Buchstaben und Ziffern)`, field);
@@ -152,7 +153,9 @@ export function validateSettings(input) {
   };
   const claudeModel = text(input.episodes?.model, 64, 'Claude-Modell', 'episodes.model');
   if (claudeModel && !MODEL_ID.test(claudeModel)) throw new SettingsError('Claude-Modell: ein Alias wie sonnet oder opus oder ein voller Modellname', 'episodes.model');
-  const episodes = { host: voiceOf(input.episodes?.host, 'Moderation', 'episodes.host'), guest: voiceOf(input.episodes?.guest, 'Gast', 'episodes.guest'), model: claudeModel };
+  const language = text(input.episodes?.language, 8, 'Sprache', 'episodes.language');
+  if (language && !EPISODE_LANGUAGES[language]) throw new SettingsError(`Sprache: ${Object.values(EPISODE_LANGUAGES).join(', ')}`, 'episodes.language');
+  const episodes = { host: voiceOf(input.episodes?.host, 'Moderation', 'episodes.host'), guest: voiceOf(input.episodes?.guest, 'Gast', 'episodes.guest'), model: claudeModel, language };
 
   // Ingest ins Wiki (src/lesen/ingest.js): Nachtlauf, Stunde, Claude-Modell, Höchstzahl je Nacht; `null` = Standard.
   const whole = (v, min, max, what, field) => {
@@ -262,6 +265,7 @@ export function createSettingsStore({ file = null, defaults = {}, logger = conso
     elevenlabsModel: ELEVENLABS_MODEL,
     episodeGuestVoice: ELEVENLABS_GUEST_VOICE,
     episodeModel: 'sonnet',
+    episodeLanguage: DEFAULT_EPISODE_LANGUAGE,
     ingestNightly: true,
     ingestHour: 3,
     ingestModel: 'sonnet',
@@ -319,6 +323,7 @@ export function createSettingsStore({ file = null, defaults = {}, logger = conso
           host: stored.episodes?.host ?? tts.voice ?? d.elevenlabsVoice,
           guest: stored.episodes?.guest ?? d.episodeGuestVoice,
           model: stored.episodes?.model ?? d.episodeModel,
+          language: stored.episodes?.language ?? d.episodeLanguage,
         },
         // Ingest ins Wiki: Entwürfe nachts um `hour` (Zeitzone oben), höchstens `limit` Dokumente.
         ingest: {

@@ -7,6 +7,7 @@ import { createElevenLabs, DIALOGUE_CHARS } from './tts.js';
 import { slugOf } from './vault-export.js';
 import { breakTemplater, safeWikiMarkdown } from './wiki-markdown.js';
 import { localDate } from '../cockpit/week.js';
+import { EPISODE_LANGUAGES, DEFAULT_EPISODE_LANGUAGE, episodeLanguage } from './languages.js';
 
 /**
  * Folgen aus dem Lesestapel: eine MP3, im Hintergrund erzeugt, auf Knopfdruck.
@@ -32,7 +33,9 @@ import { localDate } from '../cockpit/week.js';
  * das sind die Texte selbst. Ist eine Folge fertig (jede Art), bekommen ihre
  * Texte über `heard` den Vermerk „gehört“.
  *
- * Podcast und Report lassen sich einstellen: `style` (Ton, `STYLES`),
+ * Podcast und Report schreibt Claude in der Sprache aus den Einstellungen
+ * (`language`, Standard Deutsch; die Folge merkt sie sich beim Anlegen, die
+ * Überschriften der Notiz bleiben deutsch). Dazu lassen sie sich einstellen: `style` (Ton, `STYLES`),
  * `topics` und `focus` (Schwerpunkt: Themen der Texte bzw. eigener Satz) gehen
  * in Claudes Auftrag. Mit `audio: false` entsteht erst nur das Transkript
  * (Status `transkript`, kostet bei ElevenLabs nichts); `speak` macht später
@@ -243,8 +246,8 @@ function sourceInput(docs) {
  * keine. Der Schwerpunkt ist ein Wunsch, kein Ersatz: Was die Texte dazu nicht
  * hergeben, soll Claude sagen statt erfinden.
  */
-function wishes({ style, topics = [], focus = '' } = {}) {
-  const lines = [];
+function wishes({ style, topics = [], focus = '', language = null } = {}) {
+  const lines = [...languageLine(language)];
   const tone = STYLES[style]?.prompt;
   if (tone) lines.push(tone);
   const parts = [...(topics.length ? [`Themen: ${topics.join(', ')}`] : []), ...(focus ? [`Wunsch: ${focus}`] : [])];
@@ -252,12 +255,20 @@ function wishes({ style, topics = [], focus = '' } = {}) {
   return lines;
 }
 
-const SYSTEM = 'Du schreibst auf Deutsch für einen Menschen, der seinen Lesestapel unterwegs hört. Du arbeitest nur mit den Texten, die du bekommst, erfindest nichts dazu und sagst, wenn die Texte etwas offenlassen. Du lieferst ausschließlich das verlangte JSON.';
+const system = (language) =>
+  `Du schreibst auf ${EPISODE_LANGUAGES[episodeLanguage(language)]} für einen Menschen, der seinen Lesestapel unterwegs hört. Du arbeitest nur mit den Texten, die du bekommst, erfindest nichts dazu und sagst, wenn die Texte etwas offenlassen. Du lieferst ausschließlich das verlangte JSON.`;
+
+/** Andere Sprache als Deutsch: alles Gesprochene und Gelesene darin, auch wenn die Texte anders sind. */
+function languageLine(language) {
+  const code = episodeLanguage(language);
+  if (code === DEFAULT_EPISODE_LANGUAGE) return [];
+  return [`Sprache: Schreib Titel, Gespräch bzw. Bericht und Sprechfassung auf ${EPISODE_LANGUAGES[code]}, auch wo die Texte in einer anderen Sprache sind. Vorgegebene Abschnittsüberschriften bleiben, wie sie sind.`];
+}
 
 function podcastJob(docs, minutes, options) {
   const chars = minutes * CHARS_PER_MINUTE;
   return {
-    system: SYSTEM,
+    system: system(options?.language),
     prompt: [
       `Schreib ein Podcast-Gespräch über die Texte auf stdin, etwa ${minutes} Minuten lang, also rund ${chars} Zeichen gesprochener Text insgesamt.`,
       'Zwei Stimmen: A moderiert, führt durch, fragt nach und fasst zusammen. B ordnet ein, erklärt Zusammenhänge und widerspricht, wo die Texte das hergeben.',
@@ -285,7 +296,7 @@ function podcastJob(docs, minutes, options) {
 function reportJob(docs, minutes, options) {
   const chars = minutes * CHARS_PER_MINUTE;
   return {
-    system: SYSTEM,
+    system: system(options?.language),
     prompt: [
       'Schreib einen Report über die Texte auf stdin, in zwei Fassungen.',
       '`note`: Markdown für eine Notiz im Obsidian-Vault mit den Abschnitten „## Überblick“, „## Kernaussagen“ (je Text eine Unterüberschrift mit dem Titel und die Quelle als Link), „## Querverbindungen“ und „## Offene Fragen“. Keine Überschrift erster Ordnung.',
@@ -334,7 +345,9 @@ const cleanTitle = (t, fallback) => String(t ?? '').replace(/[\\/\r\n]+/g, ' ').
  * - `sourceNote(docId)`: Vault-Pfad der Lesestapel-Notiz eines Textes oder null.
  * - `heard(docIds)`: Vermerk „gehört“, sobald eine Folge fertig ist.
  * - `noteFolder`: Ordner der Transkripte; `tz`: Zeitzone fürs Datum (sonst UTC),
- *   als Wert oder Funktion (dann gilt eine geänderte Einstellung sofort).
+ *   als Wert oder Funktion (dann gilt eine geänderte Einstellung sofort);
+ *   `language`: Sprache von Podcast und Report (`EPISODE_LANGUAGES`, sonst
+ *   Deutsch), ebenso als Wert oder Funktion.
  * - `provider(cfg)`: ElevenLabs-Client (Tests ersetzen ihn).
  *
  * `createNote`, `sourceNote` und `heard` sind optional: Ohne sie gibt es keine
@@ -352,6 +365,7 @@ export function createEpisodes({
   heard = null,
   noteFolder = DEFAULT_NOTE_FOLDER,
   tz = null,
+  language = null,
   provider = (cfg) => createElevenLabs(cfg),
   logger = console,
   now = () => new Date(),
@@ -425,6 +439,9 @@ export function createEpisodes({
     return minutes * CHARS_PER_MINUTE;
   }
 
+  /** Sprache für neue Folgen aus den Einstellungen. */
+  const currentLanguage = () => episodeLanguage(typeof language === 'function' ? language() : language);
+
   const today = () => {
     const zone = typeof tz === 'function' ? tz() : tz;
     return zone ? localDate(now(), zone) : now().toISOString().slice(0, 10);
@@ -438,9 +455,10 @@ export function createEpisodes({
    * wie geliefert. Scheitert das Anlegen ganz, nur eine Warnung: `ep.note` bleibt
    * leer, die Folge läuft weiter.
    */
-  /** Ton und Schwerpunkt in einem Satz fürs Transkript, ohne Wünsche leer. */
+  /** Sprache (außer Deutsch), Ton und Schwerpunkt in einem Satz fürs Transkript, ohne Wünsche leer. */
   const wished = (ep) =>
     [
+      ep.language && ep.language !== DEFAULT_EPISODE_LANGUAGE ? (EPISODE_LANGUAGES[ep.language] ?? ep.language) : null,
       ep.style && ep.style !== DEFAULT_STYLE ? `Ton: ${STYLES[ep.style]?.label ?? ep.style}` : null,
       ep.topics?.length || ep.focus ? `Schwerpunkt: ${[...(ep.topics ?? []), ...(ep.focus ? [ep.focus] : [])].join(', ')}` : null,
     ]
@@ -462,6 +480,7 @@ export function createEpisodes({
       `folge_id: ${str(ep.id)}`,
       `erzeugt: ${date}`,
       `minuten: ${ep.minutes}`,
+      ...(ep.language && ep.language !== DEFAULT_EPISODE_LANGUAGE ? [`sprache: ${ep.language}`] : []),
       ...(ep.style && ep.style !== DEFAULT_STYLE ? [`stil: ${ep.style}`] : []),
       ...(ep.topics?.length ? ['themen:', ...ep.topics.map((t) => `  - ${str(breakTemplater(t))}`)] : []),
       ...(ep.focus ? [`schwerpunkt: ${str(breakTemplater(ep.focus))}`] : []),
@@ -523,7 +542,7 @@ export function createEpisodes({
       let script = loadScript(ep.id);
       if (!script) {
         update(ep, { status: 'schreibt', writing_at: now().toISOString() });
-        const options = { style: ep.style, topics: ep.topics, focus: ep.focus };
+        const options = { style: ep.style, topics: ep.topics, focus: ep.focus, language: ep.language };
         script = await writer.write({ ...(ep.kind === 'podcast' ? podcastJob(docs, ep.minutes, options) : reportJob(docs, ep.minutes, options)), input: sourceInput(docs) });
         saveScript(ep.id, script);
       }
@@ -636,6 +655,7 @@ export function createEpisodes({
     STATES,
     availability,
     missingFor,
+    language: currentLanguage,
     list: () => [...episodes].reverse(),
     get: find,
     /** Nach einem Fehler: setzt fort, ohne Claude noch einmal zu fragen, wenn das Skript schon da ist. */
@@ -676,7 +696,7 @@ export function createEpisodes({
         docs: docs.map((d) => d.id),
         status: 'wartet',
         chars: estimate({ kind, docs, minutes: m, audio: speaks }),
-        ...(writes ? { audio: speaks, style: tone, topics: cleanTopics(topics), focus: cleanFocus(focus) } : {}),
+        ...(writes ? { audio: speaks, style: tone, topics: cleanTopics(topics), focus: cleanFocus(focus), language: currentLanguage() } : {}),
         created_at: at,
         updated_at: at,
       };

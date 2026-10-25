@@ -1,6 +1,7 @@
 import { DEFAULT_HIDDEN_EVENTS, MAX_CALENDARS, SettingsError } from '../cockpit/settings.js';
 import { MIN_PASSPHRASE } from '../cockpit/backup.js';
 import { maskSecrets } from '../health/mask.js';
+import { EPISODE_LANGUAGES, DEFAULT_EPISODE_LANGUAGE } from '../lesen/languages.js';
 
 /**
  * Einstellungen als JSON für die native App (`/api/einstellungen…`, src/web/http.js):
@@ -114,6 +115,11 @@ const onOff = (stdOn) => [
   { value: 'an', label: 'an' },
   { value: 'aus', label: 'aus' },
 ];
+/** Sprache der Folgen: Standard (Deutsch) und die übrigen. */
+export const languageOptions = (d) => [
+  { value: '', label: `Standard (${EPISODE_LANGUAGES[d.episodeLanguage] ?? EPISODE_LANGUAGES[DEFAULT_EPISODE_LANGUAGE]})` },
+  ...Object.entries(EPISODE_LANGUAGES).map(([value, label]) => ({ value, label })),
+];
 
 /** Felder und Einleitung je Abschnitt des großen Formulars. */
 function formSections(stored, d) {
@@ -190,6 +196,7 @@ function formSections(stored, d) {
           field('episodes.host', 'Moderation', { hint: 'Voice-ID', value: stored.episodes?.host, placeholder: tts.voice ?? d.elevenlabsVoice }),
           field('episodes.guest', 'Gast', { hint: 'Voice-ID', value: stored.episodes?.guest, placeholder: d.episodeGuestVoice }),
           field('episodes.model', 'Claude-Modell', { hint: 'sonnet schont das Abo', value: stored.episodes?.model, placeholder: d.episodeModel ?? 'sonnet' }),
+          field('episodes.language', 'Sprache', { kind: 'select', hint: 'Podcast und Report', value: stored.episodes?.language, options: languageOptions(d) }),
         ].map((f) => ({ ...f, group: 'Folgen' })),
       ],
       groups: {
@@ -306,7 +313,7 @@ const FIELDS = new Set([
   'mail.token', 'mail.clear', 'mail.senders', 'mail.mailbox', 'mail.doneMailbox', 'mail.pollMinutes',
   'embed.url', 'embed.model',
   'tts.provider', 'tts.key', 'tts.clear', 'tts.voice', 'tts.model',
-  'episodes.host', 'episodes.guest', 'episodes.model',
+  'episodes.host', 'episodes.guest', 'episodes.model', 'episodes.language',
   'ingest.nightly', 'ingest.hour', 'ingest.model', 'ingest.limit',
   'hiddenEvents', 'session.idleDays', 'session.maxDays', 'cal.auth',
 ]);
@@ -343,6 +350,7 @@ export function formOfSettings(stored) {
   put('episodes.host', stored.episodes?.host);
   put('episodes.guest', stored.episodes?.guest);
   put('episodes.model', stored.episodes?.model);
+  put('episodes.language', stored.episodes?.language);
   put('ingest.nightly', choice(stored.ingest?.nightly ?? null));
   put('ingest.hour', stored.ingest?.hour);
   put('ingest.model', stored.ingest?.model);

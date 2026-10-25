@@ -199,7 +199,7 @@ struct NeueFolgeForm: View {
 
     private func wishes(_ form: NewEpisodeModel) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            NeueFolgeStepHead(number: 4, title: "Ton und Schwerpunkt", hint: "Für Claude. Ohne Schwerpunkt geht es um alles in den Texten.")
+            NeueFolgeStepHead(number: 4, title: "Ton und Schwerpunkt", hint: form.languageLabel.map { "Für Claude, auf \($0) (Sprache unter Einstellungen → Vorlesen → Folgen). Ohne Schwerpunkt geht es um alles in den Texten." } ?? "Für Claude. Ohne Schwerpunkt geht es um alles in den Texten.")
             VStack(alignment: .leading, spacing: 8) {
                 Text("Ton")
                     .font(.subheadline.weight(.semibold))
