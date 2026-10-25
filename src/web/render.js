@@ -3,6 +3,7 @@ import { DEFAULT_HIDDEN_EVENTS } from '../cockpit/settings.js';
 import { esc, head, appHeader, icon } from './layout.js';
 import { backupSection, backupHint } from './backup-render.js';
 import { sessionSection, revokeForm } from './session-render.js';
+import { sectionStates, sectionNav, maskUrl, hostOf, KIND_LABELS as KIND_LABEL, SCOPE_LABELS as SCOPE_LABEL } from './settings-json.js';
 
 export { esc };
 
@@ -440,28 +441,8 @@ ${inboxSection(model, tz, vaultName, ctx)}
 </html>`;
 }
 
-const KIND_LABEL = { ical: 'iCal-Abo', caldav: 'CalDAV' };
-
-/** Adresse ohne Pfad und Abfrage: iCal-Adressen enthalten oft ein Geheimnis. */
-const maskUrl = (url) => {
-  try {
-    const u = new URL(url);
-    return `${u.origin}/…`;
-  } catch {
-    return '…';
-  }
-};
-
 /** Kleines Schild für Zustände: `ok`, `warn`, `off` oder neutral. */
 const pill = (text, tone = '') => `<span class="pill${tone ? ` ${tone}` : ''}">${text}</span>`;
-
-const hostOf = (url) => {
-  try {
-    return new URL(url).host;
-  } catch {
-    return '';
-  }
-};
 
 /**
  * Ein Kalender: kompakte Zeile (Name, Art, Erreichbarkeit), „Bearbeiten“
@@ -509,7 +490,6 @@ function calendarRow(c, i, check) {
 }
 
 /** Abschnitt „API-Tokens“: eigene Formulare, damit „Speichern“ oben die Tokens nie berührt. */
-const SCOPE_LABEL = { search: 'Suche', capture: 'Capture', lesestapel: 'Lesestapel', app: 'App' };
 
 function tokenSection(tokens, created, tz, token) {
   const date = (iso) => new Date(iso).toLocaleDateString('de-DE', { timeZone: tz });
@@ -555,52 +535,13 @@ function shortcutSection(shortcuts, captureEnabled) {
 export function renderSettings({ stored, defaults, checks = {}, notice = null, error = null, tokens = null, created = null, shortcuts = [], captureEnabled = false, tz = 'Europe/Berlin', user = null, csrf = '', backup = null }) {
   const d = defaults;
   const token = `<input type="hidden" name="csrf" value="${esc(csrf)}">`;
-  const zunder = stored.zunder.url && stored.zunder.token
-    ? ['eigener Zugang', 'ok']
-    : d.zunderUrl && d.zunderToken
-      ? [`aus der Umgebung (${esc(d.zunderUrl)})`, 'ok']
-      : ['nicht eingerichtet', 'off'];
-  const mail = stored.mail.token
-    ? (stored.mail.senders.length || d.mailSenders.length) ? ['eigener Token', 'ok'] : ['es fehlen freigegebene Absender', 'warn']
-    : d.mailToken
-      ? ['Token aus der Umgebung', 'ok']
-      : ['nicht eingerichtet', 'off'];
-  const embed = stored.embed.url ? ['eigener Server', 'ok'] : d.embedUrl ? [`aus der Umgebung (${esc(d.embedUrl)})`, 'ok'] : ['aus, nur Volltextsuche', 'off'];
+  // Stand je Abschnitt (Text ohne HTML), derselbe wie in `/api/einstellungen`.
+  const states = Object.fromEntries(Object.entries(sectionStates({ stored, defaults: d, checks })).map(([k, v]) => [k, v && [esc(v[0]), v[1]]]));
+  const { kalender: cal, zunder, mail, embeddings: embed, vorlesen: voice, bruecke: bridge, 'feuer-notiz': flameNote } = states;
   const tts = stored.tts ?? { provider: null, key: null, voice: null, model: null };
-  const ttsKey = tts.key ?? d.elevenlabsKey;
-  const ttsChoice = tts.provider ?? d.ttsProvider ?? (ttsKey ? 'elevenlabs' : 'geraet');
-  const voice = ttsChoice !== 'elevenlabs'
-    ? ['Gerätestimme', 'off']
-    : !ttsKey
-      ? ['ElevenLabs, es fehlt der API-Key', 'warn']
-      : [tts.key ? 'ElevenLabs' : 'ElevenLabs, Key aus der Umgebung', 'ok'];
   const ttsDefault = (d.ttsProvider ?? (d.elevenlabsKey ? 'elevenlabs' : 'geraet')) === 'elevenlabs' ? 'ElevenLabs' : 'Gerät';
-  const bridgeOn = stored.bridge.enabled ?? d.bridgeEnabled;
-  const bridge = bridgeOn ? ['an', 'ok'] : ['aus', 'off'];
-  const flameNoteOn = stored.flameNote?.enabled ?? d.flameNoteEnabled ?? true;
-  const flameNote = flameNoteOn ? ['an', 'ok'] : ['aus', 'off'];
-  const problems = stored.calendars.filter((c) => checks[c.id] && !checks[c.id].ok).length;
-  const cal = !stored.calendars.length
-    ? ['keine', 'off']
-    : problems
-      ? [`${problems} von ${stored.calendars.length} nicht erreichbar`, 'warn']
-      : [`${stored.calendars.length} verbunden`, 'ok'];
   const rows = stored.calendars.map((c, i) => calendarRow(c, i, checks[c.id])).join('');
-  const nav = [
-    ['kalender', 'Kalender', cal],
-    ['zunder', 'Zunder', zunder],
-    ['bruecke', 'Zunder-Brücke', bridge],
-    ['feuer-notiz', 'Feuer-Notiz', flameNote],
-    ['mail', 'Mail', mail],
-    ['lesestapel', 'Lesestapel', null],
-    ['embeddings', 'Embeddings', embed],
-    ['vorlesen', 'Vorlesen', voice],
-    ['anzeige', 'Anzeige', null],
-    ['anmeldung', 'Anmeldung', null],
-    ...(tokens ? [['tokens', 'API-Tokens', null]] : []),
-    ...(shortcuts.length ? [['kurzbefehle', 'Kurzbefehle', null]] : []),
-    ...(backup ? [['sicherung', 'Sicherung', null]] : []),
-  ];
+  const nav = sectionNav({ tokens: Boolean(tokens), shortcuts: shortcuts.length > 0, backup: Boolean(backup) }).map(([id, label]) => [id, label, states[id] ?? null]);
   const head2 = (title, state) => `<h2>${title}${state ? ` ${pill(state[0], state[1])}` : ''}</h2>`;
   return `<!doctype html>
 <html lang="de">

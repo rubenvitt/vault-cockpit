@@ -19,7 +19,16 @@ import { ELEVENLABS_VOICE, ELEVENLABS_MODEL, ELEVENLABS_GUEST_VOICE } from '../l
  * Generation („Überall abmelden“) stehen hier, siehe `src/web/sessions.js`.
  */
 
-export class SettingsError extends Error {}
+/**
+ * Ungültige Eingabe. `field`: Name des Formularfelds, an dem es liegt (wie in
+ * `fromForm`, src/web/http.js, z. B. `tz` oder `cal.0.url`), sonst null.
+ */
+export class SettingsError extends Error {
+  constructor(message, field = null) {
+    super(message);
+    this.field = field;
+  }
+}
 
 export const MAX_CALENDARS = 20;
 const KINDS = ['ical', 'caldav'];
@@ -61,146 +70,148 @@ function validZone(tz) {
   }
 }
 
-const text = (v, max, what) => {
+const text = (v, max, what, field = null) => {
   const s = String(v ?? '').trim();
-  if (s.length > max) throw new SettingsError(`${what} ist zu lang (höchstens ${max} Zeichen)`);
+  if (s.length > max) throw new SettingsError(`${what} ist zu lang (höchstens ${max} Zeichen)`, field);
   return s || null;
 };
 
-function httpUrl(v, what, { webcal = false } = {}) {
-  const s = text(v, 2000, what);
+function httpUrl(v, what, { webcal = false, field = null } = {}) {
+  const s = text(v, 2000, what, field);
   if (!s) return null;
   let u;
   try {
     u = new URL(webcal ? s.replace(/^webcal:/i, 'https:') : s);
   } catch {
-    throw new SettingsError(`${what} ist keine gültige Adresse`);
+    throw new SettingsError(`${what} ist keine gültige Adresse`, field);
   }
-  if (!['https:', 'http:'].includes(u.protocol)) throw new SettingsError(`${what} muss mit https:// beginnen`);
+  if (!['https:', 'http:'].includes(u.protocol)) throw new SettingsError(`${what} muss mit https:// beginnen`, field);
   return u.href;
 }
 
 /** Prüft und normalisiert einen vollständigen Einstellungsstand. */
 export function validateSettings(input) {
-  const tz = text(input.tz, 100, 'Zeitzone');
-  if (tz && !validZone(tz)) throw new SettingsError(`Unbekannte Zeitzone „${tz}“ (z. B. Europe/Berlin)`);
+  const tz = text(input.tz, 100, 'Zeitzone', 'tz');
+  if (tz && !validZone(tz)) throw new SettingsError(`Unbekannte Zeitzone „${tz}“ (z. B. Europe/Berlin)`, 'tz');
 
-  const inboxFolder = text(input.inboxFolder, 200, 'Inbox-Ordner')?.replace(/^\/+|\/+$/g, '') || null;
+  const inboxFolder = text(input.inboxFolder, 200, 'Inbox-Ordner', 'inboxFolder')?.replace(/^\/+|\/+$/g, '') || null;
   if (inboxFolder && inboxFolder.split('/').some((p) => p === '..' || p === '.')) {
-    throw new SettingsError('Inbox-Ordner muss ein Pfad im Vault sein');
+    throw new SettingsError('Inbox-Ordner muss ein Pfad im Vault sein', 'inboxFolder');
   }
 
   // Ordner der Lesestapel-Notizen (VCP-75); vertraulich oder Readwise prüft der Export.
-  const readingFolder = text(input.readingNotes?.folder, 200, 'Lesestapel-Ordner')?.replace(/^\/+|\/+$/g, '') || null;
+  const readingFolder = text(input.readingNotes?.folder, 200, 'Lesestapel-Ordner', 'readingNotes.folder')?.replace(/^\/+|\/+$/g, '') || null;
   if (readingFolder && readingFolder.split('/').some((p) => p.startsWith('.') || !p.trim())) {
-    throw new SettingsError('Lesestapel-Ordner muss ein Pfad im Vault sein');
+    throw new SettingsError('Lesestapel-Ordner muss ein Pfad im Vault sein', 'readingNotes.folder');
   }
 
-  const zunderUrl = httpUrl(input.zunder?.url, 'Zunder-Adresse');
-  const zunderToken = text(input.zunder?.token, 500, 'Zunder-Token');
+  const zunderUrl = httpUrl(input.zunder?.url, 'Zunder-Adresse', { field: 'zunder.url' });
+  const zunderToken = text(input.zunder?.token, 500, 'Zunder-Token', 'zunder.token');
 
   // `null` heißt jeweils „Standard“ (Umgebung oder fester Wert).
   const enabled = input.bridge?.enabled;
-  const bridgeTag = text(input.bridge?.tag, 60, 'Brücken-Tag')?.replace(/^#/, '') || null;
-  if (bridgeTag && !TAG.test(bridgeTag)) throw new SettingsError(`Brücken-Tag „${bridgeTag}“: nur Buchstaben, Ziffern, _, - und /`);
+  const bridgeTag = text(input.bridge?.tag, 60, 'Brücken-Tag', 'bridge.tag')?.replace(/^#/, '') || null;
+  if (bridgeTag && !TAG.test(bridgeTag)) throw new SettingsError(`Brücken-Tag „${bridgeTag}“: nur Buchstaben, Ziffern, _, - und /`, 'bridge.tag');
   const bridge = { enabled: typeof enabled === 'boolean' ? enabled : null, tag: bridgeTag };
   // Flammen in der Feuer-Notiz (VCP-52); `null` = Standard (an).
   const flameNote = { enabled: typeof input.flameNote?.enabled === 'boolean' ? input.flameNote.enabled : null };
 
-  const senders = [...new Set((input.mail?.senders ?? []).map((s) => text(s, 200, 'Absender')?.toLowerCase()).filter(Boolean))].slice(0, 50);
+  const senders = [...new Set((input.mail?.senders ?? []).map((s) => text(s, 200, 'Absender', 'mail.senders')?.toLowerCase()).filter(Boolean))].slice(0, 50);
   for (const s of senders) {
-    if (!SENDER.test(s)) throw new SettingsError(`Absender „${s}“: Adresse oder @domain erwartet`);
+    if (!SENDER.test(s)) throw new SettingsError(`Absender „${s}“: Adresse oder @domain erwartet`, 'mail.senders');
   }
   const poll = input.mail?.pollMinutes;
   const pollMinutes = poll === null || poll === undefined || poll === '' ? null : Number(poll);
   if (pollMinutes !== null && !(Number.isInteger(pollMinutes) && pollMinutes >= 1 && pollMinutes <= 1440)) {
-    throw new SettingsError('Mail-Abruf: Abstand in ganzen Minuten zwischen 1 und 1440');
+    throw new SettingsError('Mail-Abruf: Abstand in ganzen Minuten zwischen 1 und 1440', 'mail.pollMinutes');
   }
   const mail = {
-    token: text(input.mail?.token, 500, 'Mail-Token'),
+    token: text(input.mail?.token, 500, 'Mail-Token', 'mail.token'),
     senders,
-    mailbox: text(input.mail?.mailbox, 100, 'Mail-Ordner'),
-    doneMailbox: text(input.mail?.doneMailbox, 100, 'Ablage-Ordner'),
+    mailbox: text(input.mail?.mailbox, 100, 'Mail-Ordner', 'mail.mailbox'),
+    doneMailbox: text(input.mail?.doneMailbox, 100, 'Ablage-Ordner', 'mail.doneMailbox'),
     pollMinutes,
   };
 
-  const embed = { url: httpUrl(input.embed?.url, 'Embedding-Server'), model: text(input.embed?.model, 100, 'Embedding-Modell') };
+  const embed = { url: httpUrl(input.embed?.url, 'Embedding-Server', { field: 'embed.url' }), model: text(input.embed?.model, 100, 'Embedding-Modell', 'embed.model') };
 
   // `null` = Standard: ElevenLabs, sobald ein Key da ist, sonst das Gerät.
   const provider = input.tts?.provider ?? null;
-  if (provider !== null && !TTS_PROVIDERS.includes(provider)) throw new SettingsError(`Unbekannter Anbieter fürs Vorlesen „${provider}“`);
-  const voice = text(input.tts?.voice, 64, 'Stimme');
-  if (voice && !VOICE_ID.test(voice)) throw new SettingsError('Stimme: die Voice-ID aus ElevenLabs (nur Buchstaben und Ziffern)');
-  const ttsModel = text(input.tts?.model, 64, 'Sprachmodell');
-  if (ttsModel && !MODEL_ID.test(ttsModel)) throw new SettingsError('Sprachmodell: die Model-ID aus ElevenLabs, z. B. eleven_multilingual_v2');
-  const tts = { provider, key: text(input.tts?.key, 200, 'ElevenLabs-API-Key'), voice, model: ttsModel };
+  if (provider !== null && !TTS_PROVIDERS.includes(provider)) throw new SettingsError(`Unbekannter Anbieter fürs Vorlesen „${provider}“`, 'tts.provider');
+  const voice = text(input.tts?.voice, 64, 'Stimme', 'tts.voice');
+  if (voice && !VOICE_ID.test(voice)) throw new SettingsError('Stimme: die Voice-ID aus ElevenLabs (nur Buchstaben und Ziffern)', 'tts.voice');
+  const ttsModel = text(input.tts?.model, 64, 'Sprachmodell', 'tts.model');
+  if (ttsModel && !MODEL_ID.test(ttsModel)) throw new SettingsError('Sprachmodell: die Model-ID aus ElevenLabs, z. B. eleven_multilingual_v2', 'tts.model');
+  const tts = { provider, key: text(input.tts?.key, 200, 'ElevenLabs-API-Key', 'tts.key'), voice, model: ttsModel };
 
   // Folgen: Stimmen im Podcast und Claude-Modell (Alias wie sonnet oder ein voller Name).
-  const voiceOf = (v, what) => {
-    const s = text(v, 64, what);
-    if (s && !VOICE_ID.test(s)) throw new SettingsError(`${what}: die Voice-ID aus ElevenLabs (nur Buchstaben und Ziffern)`);
+  const voiceOf = (v, what, field) => {
+    const s = text(v, 64, what, field);
+    if (s && !VOICE_ID.test(s)) throw new SettingsError(`${what}: die Voice-ID aus ElevenLabs (nur Buchstaben und Ziffern)`, field);
     return s;
   };
-  const claudeModel = text(input.episodes?.model, 64, 'Claude-Modell');
-  if (claudeModel && !MODEL_ID.test(claudeModel)) throw new SettingsError('Claude-Modell: ein Alias wie sonnet oder opus oder ein voller Modellname');
-  const episodes = { host: voiceOf(input.episodes?.host, 'Moderation'), guest: voiceOf(input.episodes?.guest, 'Gast'), model: claudeModel };
+  const claudeModel = text(input.episodes?.model, 64, 'Claude-Modell', 'episodes.model');
+  if (claudeModel && !MODEL_ID.test(claudeModel)) throw new SettingsError('Claude-Modell: ein Alias wie sonnet oder opus oder ein voller Modellname', 'episodes.model');
+  const episodes = { host: voiceOf(input.episodes?.host, 'Moderation', 'episodes.host'), guest: voiceOf(input.episodes?.guest, 'Gast', 'episodes.guest'), model: claudeModel };
 
   // Ingest ins Wiki (src/lesen/ingest.js): Nachtlauf, Stunde, Claude-Modell, Höchstzahl je Nacht; `null` = Standard.
-  const whole = (v, min, max, what) => {
+  const whole = (v, min, max, what, field) => {
     if (v === null || v === undefined || v === '') return null;
     const n = Number(v);
-    if (!(Number.isInteger(n) && n >= min && n <= max)) throw new SettingsError(`${what}: ganze Zahl zwischen ${min} und ${max}`);
+    if (!(Number.isInteger(n) && n >= min && n <= max)) throw new SettingsError(`${what}: ganze Zahl zwischen ${min} und ${max}`, field);
     return n;
   };
-  const ingestModel = text(input.ingest?.model, 64, 'Ingest-Modell');
-  if (ingestModel && !MODEL_ID.test(ingestModel)) throw new SettingsError('Ingest-Modell: ein Alias wie sonnet oder opus oder ein voller Modellname');
+  const ingestModel = text(input.ingest?.model, 64, 'Ingest-Modell', 'ingest.model');
+  if (ingestModel && !MODEL_ID.test(ingestModel)) throw new SettingsError('Ingest-Modell: ein Alias wie sonnet oder opus oder ein voller Modellname', 'ingest.model');
   const ingest = {
     nightly: typeof input.ingest?.nightly === 'boolean' ? input.ingest.nightly : null,
-    hour: whole(input.ingest?.hour, 0, 23, 'Ingest-Uhrzeit'),
+    hour: whole(input.ingest?.hour, 0, 23, 'Ingest-Uhrzeit', 'ingest.hour'),
     model: ingestModel,
-    limit: whole(input.ingest?.limit, 1, 100, 'Ingest-Höchstzahl je Nacht'),
+    limit: whole(input.ingest?.limit, 1, 100, 'Ingest-Höchstzahl je Nacht', 'ingest.limit'),
   };
 
+  // `formIndex` (aus `fromForm`): Nummer im Formular, damit ein Fehler das richtige Feld `cal.N.…` nennt.
+  const calField = (c, i, k) => `cal.${Number.isInteger(c.formIndex) ? c.formIndex : i}.${k}`;
   const calendars = (input.calendars ?? []).map((c, i) => {
     const label = `Kalender ${i + 1}`;
-    const name = text(c.name, 80, `Name von ${label}`);
-    if (!name) throw new SettingsError(`${label} braucht einen Namen`);
-    if (!KINDS.includes(c.kind)) throw new SettingsError(`${name}: Art muss iCal oder CalDAV sein`);
-    const url = httpUrl(c.url, `Adresse von „${name}“`, { webcal: true });
-    if (!url) throw new SettingsError(`„${name}“ braucht eine Adresse`);
-    const username = text(c.username, 200, `Benutzer von „${name}“`);
-    const password = text(c.password, 500, `Passwort von „${name}“`);
-    if (password && !username) throw new SettingsError(`„${name}“: zum Passwort fehlt der Benutzer`);
+    const name = text(c.name, 80, `Name von ${label}`, calField(c, i, 'name'));
+    if (!name) throw new SettingsError(`${label} braucht einen Namen`, calField(c, i, 'name'));
+    if (!KINDS.includes(c.kind)) throw new SettingsError(`${name}: Art muss iCal oder CalDAV sein`, calField(c, i, 'kind'));
+    const url = httpUrl(c.url, `Adresse von „${name}“`, { webcal: true, field: calField(c, i, 'url') });
+    if (!url) throw new SettingsError(`„${name}“ braucht eine Adresse`, calField(c, i, 'url'));
+    const username = text(c.username, 200, `Benutzer von „${name}“`, calField(c, i, 'username'));
+    const password = text(c.password, 500, `Passwort von „${name}“`, calField(c, i, 'password'));
+    if (password && !username) throw new SettingsError(`„${name}“: zum Passwort fehlt der Benutzer`, calField(c, i, 'username'));
     const filter = c.kind === 'caldav' ? (c.filter ?? []).map((f) => String(f).trim()).filter(Boolean).slice(0, 50) : [];
     return { id: typeof c.id === 'string' && /^[\w-]{1,64}$/.test(c.id) ? c.id : randomUUID(), name, kind: c.kind, url, username, password, filter };
   });
   if (calendars.length > MAX_CALENDARS) throw new SettingsError(`Höchstens ${MAX_CALENDARS} Kalender`);
   const names = new Set();
-  for (const c of calendars) {
-    if (names.has(c.name.toLowerCase())) throw new SettingsError(`Der Name „${c.name}“ ist doppelt`);
+  calendars.forEach((c, i) => {
+    if (names.has(c.name.toLowerCase())) throw new SettingsError(`Der Name „${c.name}“ ist doppelt`, calField(input.calendars[i], i, 'name'));
     names.add(c.name.toLowerCase());
-  }
+  });
 
   // `null` heißt „Standard“, eine leere Liste blendet nichts aus.
   const hiddenEvents = Array.isArray(input.hiddenEvents)
-    ? [...new Set(input.hiddenEvents.map((t) => text(t, 200, 'Ausgeblendeter Termin')).filter(Boolean))].slice(0, 50)
+    ? [...new Set(input.hiddenEvents.map((t) => text(t, 200, 'Ausgeblendeter Termin', 'hiddenEvents')).filter(Boolean))].slice(0, 50)
     : null;
 
-  return { tz, vaultName: text(input.vaultName, 200, 'Vault-Name'), inboxFolder, zunder: { url: zunderUrl, token: zunderToken }, bridge, flameNote, readingNotes: { folder: readingFolder }, mail, embed, tts, episodes, ingest, calendars, hiddenEvents, session: validateSession(input.session) };
+  return { tz, vaultName: text(input.vaultName, 200, 'Vault-Name', 'vaultName'), inboxFolder, zunder: { url: zunderUrl, token: zunderToken }, bridge, flameNote, readingNotes: { folder: readingFolder }, mail, embed, tts, episodes, ingest, calendars, hiddenEvents, session: validateSession(input.session) };
 }
 
-const days = (v, what) => {
+const days = (v, what, field) => {
   if (v === null || v === undefined || v === '') return null;
   const n = Number(v);
-  if (!(Number.isInteger(n) && n >= 1 && n <= 365)) throw new SettingsError(`${what}: ganze Tage zwischen 1 und 365`);
+  if (!(Number.isInteger(n) && n >= 1 && n <= 365)) throw new SettingsError(`${what}: ganze Tage zwischen 1 und 365`, field);
   return n;
 };
 
 /** Sitzungsdauer in Tagen (`null` = Standard) und die Generation, die „Überall abmelden“ hochzählt. */
 function validateSession(input) {
-  const idleDays = days(input?.idleDays, 'Abmelden nach Inaktivität');
-  const maxDays = days(input?.maxDays, 'Längste Sitzung');
-  if (idleDays && maxDays && maxDays < idleDays) throw new SettingsError('Die längste Sitzung darf nicht kürzer sein als die Zeit bis zum Abmelden ohne Nutzung');
+  const idleDays = days(input?.idleDays, 'Abmelden nach Inaktivität', 'session.idleDays');
+  const maxDays = days(input?.maxDays, 'Längste Sitzung', 'session.maxDays');
+  if (idleDays && maxDays && maxDays < idleDays) throw new SettingsError('Die längste Sitzung darf nicht kürzer sein als die Zeit bis zum Abmelden ohne Nutzung', 'session.maxDays');
   const g = input?.generation;
   return { idleDays, maxDays, generation: Number.isInteger(g) && g >= 0 ? g : 0 };
 }

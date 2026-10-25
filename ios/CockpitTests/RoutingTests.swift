@@ -1,39 +1,44 @@
 @testable import Cockpit
 import CockpitShared
-import WebKit
 import XCTest
 
-final class WebShellTests: XCTestCase {
+/// Links aus nativen Bildschirmen (`NavigationDecision`, `AppModel.open(path:)`): jede Seite des
+/// Cockpits hat einen nativen Bildschirm, es gibt keinen WKWebView mehr.
+final class RoutingTests: XCTestCase {
     private let server = URL(string: "https://vault.test")!
 
-    private func decide(_ url: String, method: String = "GET", mainFrame: Bool = true) -> NavigationDecision {
-        NavigationDecision.decide(URL(string: url)!, method: method, server: server, isMainFrame: mainFrame)
+    private func decide(_ url: String) -> NavigationDecision {
+        NavigationDecision.decide(URL(string: url)!, server: server)
     }
 
-    func testOwnPagesStayInWebView() {
-        XCTAssertEqual(decide("https://vault.test/lesen/feeds"), .allow, "Feeds bleiben Web")
-        XCTAssertEqual(decide("https://vault.test/wissen?q=lesen"), .allow, "Wissen bleibt Web")
-        XCTAssertEqual(decide("https://vault.test/einstellungen"), .allow)
-        XCTAssertEqual(decide("https://vault.test/logout"), .allow, "nur POST meldet ab")
-        XCTAssertEqual(decide("about:blank"), .allow)
+    @MainActor
+    private func app() -> AppModel {
+        AppModel(config: AppConfiguration(info: ["CockpitServerURL": "https://vault.test"]))
     }
 
-    func testLoginStartsNativeLogin() {
-        XCTAssertEqual(decide("https://vault.test/login?next=%2Flesen%2Fstapel"), .login(next: "/lesen/stapel"))
-        XCTAssertEqual(decide("https://vault.test/login"), .login(next: "/"))
-        XCTAssertEqual(decide("https://vault.test/login?next=%2F%2Fevil.test"), .login(next: "/"))
-        XCTAssertEqual(decide("https://vault.test/login?next=https%3A%2F%2Fevil.test"), .login(next: "/"))
-        XCTAssertEqual(decide("https://vault.test/logout", method: "POST"), .logout)
+    func testOwnPagesOpenNatively() {
+        XCTAssertEqual(decide("https://vault.test/lesen/feeds"), .page(.feeds))
+        XCTAssertEqual(decide("https://vault.test/wissen?q=lesen"), .page(.wissen(WissenQuery(q: "lesen"))))
+        XCTAssertEqual(decide("https://vault.test/einstellungen"), .page(.settings(section: nil)))
+        XCTAssertEqual(decide("https://vault.test/einstellungen#tokens"), .page(.settings(section: "tokens")))
+        XCTAssertEqual(decide("https://vault.test/zustand"), .page(.health))
+        XCTAssertEqual(decide("https://vault.test/notiz?pfad=inbox%2Fa.md#h-idee"), .page(.note(path: "inbox/a.md", anchor: "h-idee")))
+        XCTAssertEqual(decide("https://vault.test/graph?pfad=a.md"), .page(.graph(path: "a.md")))
+        XCTAssertEqual(decide("https://vault.test/graph?q=Hund"), .page(.search("Hund")))
+        XCTAssertEqual(decide("https://VAULT.test/zustand"), .page(.health), "Host ohne Groß und klein")
+        // Ohne nativen Bildschirm: im SFSafariViewController.
+        XCTAssertEqual(decide("https://vault.test/static/app.css"), .browser(URL(string: "https://vault.test/static/app.css")!))
+        XCTAssertEqual(decide("https://vault.test/notiz"), .browser(URL(string: "https://vault.test/notiz")!), "Notiz ohne Pfad")
     }
 
     func testForeignHostsLeaveTheApp() {
         XCTAssertEqual(decide("https://blatt.test/a"), .external(URL(string: "https://blatt.test/a")!))
-        XCTAssertEqual(decide("https://vault.test.evil/login"), .external(URL(string: "https://vault.test.evil/login")!))
-        XCTAssertEqual(decide("https://blatt.test/a", mainFrame: false), .allow)
+        XCTAssertEqual(decide("https://vault.test.evil/zustand"), .external(URL(string: "https://vault.test.evil/zustand")!))
         XCTAssertEqual(decide("mailto:ich@example.org"), .system(URL(string: "mailto:ich@example.org")!))
+        XCTAssertEqual(decide("obsidian://open?vault=V&file=a"), .system(URL(string: "obsidian://open?vault=V&file=a")!))
         let local = URL(string: "http://localhost:3000")!
-        XCTAssertEqual(NavigationDecision.decide(URL(string: "http://localhost:3000/login")!, method: "GET", server: local, isMainFrame: true), .login(next: "/"))
-        XCTAssertEqual(NavigationDecision.decide(URL(string: "http://localhost:8080/")!, method: "GET", server: local, isMainFrame: true), .external(URL(string: "http://localhost:8080/")!))
+        XCTAssertEqual(NavigationDecision.decide(URL(string: "http://localhost:3000/zustand")!, server: local), .page(.health))
+        XCTAssertEqual(NavigationDecision.decide(URL(string: "http://localhost:8080/")!, server: local), .external(URL(string: "http://localhost:8080/")!))
     }
 
     func testNativePagesSwitchTabs() {
@@ -42,14 +47,6 @@ final class WebShellTests: XCTestCase {
         XCTAssertEqual(decide("https://vault.test/?woche=2026-W42"), .native(.week("2026-W42")))
         XCTAssertEqual(decide("https://vault.test/rueckblick?woche=2026-W41"), .native(.review("2026-W41")))
         XCTAssertEqual(decide("https://vault.test/planen?woche=2026-W42&aus=t1#flamme"), .native(.plan("2026-W42", PlanQuery(from: "t1"))))
-        XCTAssertEqual(decide("https://vault.test/", method: "POST"), .allow, "nur Seitenaufrufe")
-        XCTAssertEqual(decide("https://vault.test/", mainFrame: false), .allow)
-        XCTAssertEqual(decide("https://vault.test/notiz?pfad=inbox%2Fa.md"), .allow)
-        // Die Web-Ansicht, die einen nativen Bildschirm vertritt, blättert in sich selbst.
-        let review = NavigationDecision.decide(URL(string: "https://vault.test/rueckblick?woche=2026-W40")!, method: "GET", server: server, isMainFrame: true, webOnly: "/rueckblick")
-        XCTAssertEqual(review, .allow)
-        let week = NavigationDecision.decide(URL(string: "https://vault.test/?woche=2026-W40")!, method: "GET", server: server, isMainFrame: true, webOnly: "/rueckblick")
-        XCTAssertEqual(week, .native(.week("2026-W40")))
     }
 
     func testReadingPagesOpenNatively() {
@@ -65,16 +62,20 @@ final class WebShellTests: XCTestCase {
         XCTAssertEqual(decide("https://vault.test/lesen/folgen/neu?zeit=15"), .reading(.newEpisode(zeit: 15)))
         XCTAssertEqual(decide("https://vault.test/lesen/hinzufuegen"), .reading(.add))
         XCTAssertEqual(decide("https://vault.test/lesen/hoeren?zeit=30"), .reading(.listen(zeit: 30)))
-        // Ohne ID keine Leseansicht; Formulare und Rahmen bleiben in der Seite.
-        XCTAssertEqual(decide("https://vault.test/lesen/doc"), .allow)
-        XCTAssertEqual(decide("https://vault.test/lesen/stapel", method: "POST"), .allow)
-        XCTAssertEqual(decide("https://vault.test/lesen/stapel", mainFrame: false), .allow)
         XCTAssertEqual(decide("https://blatt.test/lesen/stapel"), .external(URL(string: "https://blatt.test/lesen/stapel")!))
+    }
+
+    func testPaths() {
+        XCTAssertEqual(NavigationDecision.decide(path: "/notiz?pfad=00-inbox%2FIdee.md", server: server), .page(.note(path: "00-inbox/Idee.md", anchor: nil)))
+        XCTAssertEqual(NavigationDecision.decide(path: "/planen?woche=2026-W42", server: server), .native(.plan("2026-W42", PlanQuery())))
+        XCTAssertEqual(NavigationDecision.decide(path: "/static/x", server: server), .browser(URL(string: "https://vault.test/static/x")!))
+        XCTAssertNil(NavigationDecision.decide(path: "//evil.test/notiz", server: server), "nur eigene Pfade")
+        XCTAssertNil(NavigationDecision.decide(path: "https://evil.test/", server: server))
     }
 
     @MainActor
     func testReadingLinksSwitchToTheReadingTab() {
-        let model = AppModel(config: AppConfiguration(info: ["CockpitServerURL": "https://vault.test"]))
+        let model = app()
         model.open(path: "/lesen/stapel?zeit=15")
         XCTAssertEqual(model.tab, .reading)
         XCTAssertEqual(model.readingSection, .stapel)
@@ -102,9 +103,12 @@ final class WebShellTests: XCTestCase {
         model.open(path: "/lesen/hinzufuegen")
         XCTAssertTrue(model.showsAdd)
         model.open(path: "/lesen/feeds")
-        XCTAssertEqual(model.webSheet?.path, "/lesen/feeds", "Feeds als Blatt")
+        XCTAssertEqual(model.readingSection, .feeds, "Feeds als Bereich des Lesens")
+        XCTAssertNil(model.pageSheet)
+        model.open(path: "/wissen?q=Lesen&lesen=1")
+        XCTAssertEqual(model.readingSection, .wissen)
+        XCTAssertEqual(model.wissenQuery, WissenQuery(q: "Lesen", lesen: true))
         model.open(path: "/lesen/folgen/neu?zeit=15")
-        XCTAssertNil(model.webSheet)
         XCTAssertEqual(model.newEpisodeZeit, 15)
         XCTAssertEqual(model.readingPath.last, .newEpisode(zeit: 15))
         model.open(path: "/lesen/markiert?thema=Technik")
@@ -112,11 +116,57 @@ final class WebShellTests: XCTestCase {
         XCTAssertEqual(model.highlightQuery, HighlightQuery(topic: "Technik"))
     }
 
+    @MainActor
+    func testPagesOpenAsSheetWithOwnStack() {
+        let model = app()
+        model.open(path: "/notiz?pfad=inbox%2Fa.md")
+        XCTAssertEqual(model.pageSheet?.root, .note(path: "inbox/a.md", anchor: nil))
+        XCTAssertEqual(model.pageSheetPath, [])
+        model.open(path: "/graph?pfad=b.md")
+        XCTAssertEqual(model.pageSheetPath, [.graph(path: "b.md")], "im offenen Blatt obendrauf")
+        model.open(path: "/graph?pfad=b.md")
+        XCTAssertEqual(model.pageSheetPath.count, 1, "dieselbe Seite nicht zweimal")
+        model.open(path: "/zustand")
+        XCTAssertEqual(model.pageSheetPath.last, .health)
+
+        model.open(path: "/")
+        XCTAssertNil(model.pageSheet, "ein Reiter schließt das Blatt")
+        XCTAssertEqual(model.pageSheetPath, [])
+        XCTAssertEqual(model.tab, .week)
+
+        model.open(page: .health)
+        XCTAssertEqual(model.pageSheet?.root, .health, "Störung aus der Woche: Zustand als Blatt")
+        model.closePageSheet()
+        XCTAssertNil(model.pageSheet)
+
+        model.open(page: .search(""))
+        XCTAssertEqual(model.pageSheet?.root, .search(""), "Suche aus der Woche als Blatt")
+        XCTAssertEqual(model.tab, .week)
+    }
+
+    @MainActor
+    func testSettingsLinks() {
+        let model = app()
+        model.open(path: "/einstellungen#tokens")
+        XCTAssertEqual(model.tab, .settings)
+        XCTAssertEqual(model.settingsPath, [.section("tokens")])
+        model.open(page: .health)
+        XCTAssertNil(model.pageSheet, "aus den Einstellungen auf deren Stapel")
+        XCTAssertEqual(model.settingsPath, [.section("tokens"), .health])
+        model.open(page: .health)
+        XCTAssertEqual(model.settingsPath.count, 2)
+        model.open(path: "/einstellungen")
+        XCTAssertEqual(model.settingsPath, [], "zurück zur Übersicht")
+
+        model.open(path: "/notiz?pfad=a.md")
+        XCTAssertNotNil(model.pageSheet)
+        model.open(path: "/einstellungen#sicherung")
+        XCTAssertNil(model.pageSheet)
+        XCTAssertEqual(model.settingsPath, [.section("sicherung")])
+    }
+
     func testReadingSections() {
         XCTAssertEqual(LesenSection.allCases.map(\.label), ["Eingang", "Stapel", "Folgen", "Markiert", "Wiedersehen", "Wissen", "Feeds"])
-        XCTAssertEqual(LesenSection.wissen.webPath, "/wissen")
-        XCTAssertEqual(LesenSection.feeds.webPath, "/lesen/feeds")
-        XCTAssertNil(LesenSection.stapel.webPath, "nativ")
     }
 
     func testInboxSwipe() {
@@ -153,39 +203,18 @@ final class WebShellTests: XCTestCase {
         XCTAssertTrue(EingangSwipe(startX: 380, width: 390).isRejected)
     }
 
-    @MainActor
-    func testWebTabsHideTheirOwnTabBar() {
-        XCTAssertTrue(WebViewController.hideTabBarScript.contains("nav.tabbar"))
-        XCTAssertTrue(WebViewController.hideTabBarScript.contains("--tabbar"))
-    }
-
-    func testBridgeMessage() {
-        XCTAssertEqual(BridgeMessage(["type": "hoeren", "zeit": NSNumber(value: 30)]), .listen(minutes: 30))
-        XCTAssertEqual(BridgeMessage(["type": "hoeren"]), .listen(minutes: 15))
-        XCTAssertEqual(
-            BridgeMessage(["type": "folge", "id": "f1", "titel": "Podcast: Vom Lesen", "art": "Podcast", "dauer": NSNumber(value: 642), "groesse": NSNumber(value: 10_272_000)]),
-            .episode(id: "f1", title: "Podcast: Vom Lesen", kind: "Podcast", seconds: 642, bytes: 10_272_000)
-        )
-        XCTAssertEqual(BridgeMessage(["type": "folge", "id": "f1"]), .episode(id: "f1", title: "Folge", kind: "Folge", seconds: 0, bytes: 0))
-        XCTAssertNil(BridgeMessage(["type": "folge"]), "ohne ID nichts abzuspielen")
-        XCTAssertEqual(BridgeMessage(["type": "haptik", "art": "auswahl"]), .haptic(.selection))
-        XCTAssertEqual(BridgeMessage(["type": "haptik", "art": "erfolg"]), .haptic(.success))
-        XCTAssertNil(BridgeMessage(["type": "haptik", "art": "laut"]), "unbekannte Art")
-        XCTAssertNil(BridgeMessage(["type": "haptik"]))
-        XCTAssertNil(BridgeMessage(["type": "anders"]))
-        XCTAssertNil(BridgeMessage("hoeren"))
-    }
-
-    func testHandlesJavaScriptDialogs() {
-        // Fehlt eine dieser Methoden, gilt confirm()/prompt() in WebKit als abgebrochen.
-        let selectors = [
-            #selector(WKUIDelegate.webView(_:runJavaScriptAlertPanelWithMessage:initiatedByFrame:completionHandler:)),
-            #selector(WKUIDelegate.webView(_:runJavaScriptConfirmPanelWithMessage:initiatedByFrame:completionHandler:)),
-            #selector(WKUIDelegate.webView(_:runJavaScriptTextInputPanelWithPrompt:defaultText:initiatedByFrame:completionHandler:)),
-        ]
-        for selector in selectors {
-            XCTAssertTrue(WebViewController.instancesRespond(to: selector), "\(selector)")
-        }
+    func testHealthFacts() {
+        let now = Date(timeIntervalSince1970: 1_761_380_000)
+        let berlin = TimeZone(identifier: "Europe/Berlin")!
+        let json = """
+        {"id":"kalender","name":"Kalender","state":"error","summary":"1 von 2","lastOkAt":"2025-10-25T08:00:00.000Z","lastErrorAt":"2025-10-25T08:10:00.000Z","lastError":"401",
+         "facts":[{"label":"Kalender","value":2},{"label":"Letzter Abruf","at":"2025-10-25T08:00:00.000Z"}]}
+        """
+        let service = try! JSONDecoder().decode(HealthService.self, from: Data(json.utf8))
+        let facts = HealthServiceCard.facts(of: service, timeZone: berlin, now: now)
+        XCTAssertEqual(facts.map(\.label), ["Kalender", "Letzter Abruf"], "„Letzter Erfolg“ steht schon als Angabe da")
+        XCTAssertEqual(facts.first?.value, "2")
+        XCTAssertTrue(facts[1].value.hasPrefix("25.10. 10:00 · vor "), facts[1].value)
     }
 
     func testEpisodeFileAndClock() {

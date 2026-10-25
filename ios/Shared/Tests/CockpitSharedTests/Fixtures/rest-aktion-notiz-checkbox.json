@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "message": "Abgehakt",
+  "path": "00-inbox/Idee.md",
+  "n": 0,
+  "line": "- [x] Preise vergleichen",
+  "done": true,
+  "undo": {
+    "action": "/aktion/notiz/checkbox",
+    "fields": {
+      "pfad": "00-inbox/Idee.md",
+      "n": "0",
+      "line": "- [x] Preise vergleichen",
+      "erledigt": "0"
+    }
+  }
+}

@@ -52,7 +52,7 @@ extension UIColor {
         }
     }
 
-    /// `--bg` aus cockpit.css (`THEME` in layout.js), auch Hintergrund der WKWebViews.
+    /// `--bg` aus cockpit.css (`THEME` in layout.js).
     static let cockpitBackground = UIColor(light: 0xF7F5F1, dark: 0x141311)
     /// `--accent`
     static let cockpitAccent = UIColor(light: 0xC2410C, dark: 0xFB923C)

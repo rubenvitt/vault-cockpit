@@ -1,0 +1,38 @@
+{
+  "q": "",
+  "art": "",
+  "status": "",
+  "lesen": false,
+  "reading": true,
+  "arts": [
+    "Brücke",
+    "Vertiefung"
+  ],
+  "statuses": [
+    "entwurf",
+    "stabil"
+  ],
+  "hits": null,
+  "recent": [
+    {
+      "path": "wiki/synthesis/Selbstkontrolle.md",
+      "title": "Selbstkontrolle",
+      "art": "Brücke",
+      "status": "entwurf",
+      "confidence": "mittel",
+      "summary": "Willenskraft ist kein Muskel, sagt [[Hund]]",
+      "updated": "2026-10-20"
+    },
+    {
+      "path": "wiki/synthesis/Gewohnheit.md",
+      "title": "Gewohnheit",
+      "art": "Vertiefung",
+      "status": "stabil",
+      "confidence": null,
+      "summary": "Kleine Schritte",
+      "updated": "2026-10-01"
+    }
+  ],
+  "degraded": null,
+  "total": 2
+}

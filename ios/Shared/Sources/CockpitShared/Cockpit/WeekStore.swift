@@ -76,6 +76,8 @@ public final class WeekStore {
 
     public var model: WeekModel? { remote.model }
     public var state: LoadState { remote.state }
+    /// Gestörte Dienste für den Hinweis „Störung“ (leer = keiner); Tipp führt zu `PageRoute.health`.
+    public var alert: [ServiceAlert] { remote.model?.failingServices ?? [] }
 
     // MARK: Laden und Blättern
 

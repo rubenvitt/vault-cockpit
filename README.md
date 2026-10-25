@@ -1016,12 +1016,13 @@ Der Kurzbefehl muss wie die anderen auf einem Mac signiert werden
 
 ### iOS-App: Login und App-API
 
-Die iOS-App (`dev.rubeen.cockpit`, Ordner `ios/`) zeigt das Cockpit in einem
-WKWebView. Passkeys gehen dort nicht, deshalb meldet sie sich über das
-Login-Blatt des Systems an (`ASWebAuthenticationSession`, Callback über den
-Universal Link `<PUBLIC_URL>/app/angemeldet`) und bekommt danach ein Sitzungs-Cookie für den WKWebView und einen
-**Geräte-Token** für Share Extension und Vorlese-Player (VCP-91, Code in
-`src/web/app-access.js`). Dafür muss das Web-Cockpit eingerichtet sein
+Die iOS-App (`dev.rubeen.cockpit`, Ordner `ios/`) zeigt das ganze Cockpit nativ in
+SwiftUI (docs/ios-nativ.md). Sie meldet sich über das Login-Blatt des Systems an
+(`ASWebAuthenticationSession`, damit Passkeys gehen; Callback über den Universal
+Link `<PUBLIC_URL>/app/angemeldet`) und bekommt danach einen **Geräte-Token**, mit
+dem sie alle JSON-Endpunkte unter `/api/…`, die Aktionen unter `/aktion/…`,
+Einstellungen, API-Tokens und Sicherung nutzt, dazu Share Extension und
+Vorlese-Player (VCP-91, Code in `src/web/app-access.js`). Dafür muss das Web-Cockpit eingerichtet sein
 (`WEB_CLIENT_ID`); in Pocket ID ändert sich nichts, der Callback bleibt
 `<PUBLIC_URL>/auth/callback`.
 
@@ -1077,15 +1078,13 @@ leerer oder zu langer Gerätename (höchstens 80 Zeichen) und mehr als 20 Tokens
 zusammen) geben `429`. Jeder Login legt einen neuen Geräte-Token an; alte
 widerruft man unter **Einstellungen → API-Tokens**.
 
-Das Cookie setzt die App mit diesen Werten in den `WKHTTPCookieStore`
-(`domain` ohne Punkt: nur dieser Host). Es ist dieselbe Sitzung wie im Browser:
-Sie verlängert sich bei Nutzung (der Server schickt höchstens stündlich ein
-frisches `Set-Cookie`, das der WKWebView selbst übernimmt), endet nach den
-Tagen ohne Nutzung und spätestens nach der längsten Sitzung aus
-**Einstellungen → Anmeldung** (Standard 30 und 90 Tage). „Überall abmelden“
-beendet sie auch in der App, den Geräte-Token nicht. Ist sie abgelaufen, leitet
-das Cockpit im WKWebView auf `/login`; die App fängt diese Navigation ab und
-startet den Login oben neu.
+Das Cookie ist dieselbe Sitzung wie im Browser (`domain` ohne Punkt: nur dieser
+Host); die native App braucht es nicht mehr und arbeitet nur mit dem Geräte-Token.
+Die Sitzung verlängert sich bei Nutzung, endet nach den Tagen ohne Nutzung und
+spätestens nach der längsten Sitzung aus **Einstellungen → Anmeldung** (Standard
+30 und 90 Tage); „Überall abmelden“ beendet alle Browser-Sitzungen, Geräte-Tokens
+nicht. Lehnt der Server den Geräte-Token ab (`401`, z. B. widerrufen), startet die
+App den Login oben neu.
 
 Den Geräte-Token legt die App sicher ab (Keychain, mit der Share Extension
 geteilt). Er steht unter **Einstellungen → API-Tokens** mit dem Recht **App**

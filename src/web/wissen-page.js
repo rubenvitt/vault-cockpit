@@ -78,8 +78,13 @@ ${hits}
 </html>`;
 }
 
+/** Filter aus `?q=…&art=…&status=…&lesen=1`, gleich für `/wissen` und `/api/wissen`. */
+export function wissenQuery(url) {
+  const p = (k) => (url.searchParams.get(k) ?? '').trim().slice(0, 500);
+  return { q: p('q'), art: p('art'), status: p('status'), lesen: p('lesen') === '1' };
+}
+
 /** `/wissen?q=…&art=…&status=…&lesen=1` als fertige Seite. */
 export async function wissenPage({ notes, search, evidence = null, url, user, nav = null }) {
-  const p = (k) => (url.searchParams.get(k) ?? '').trim().slice(0, 500);
-  return renderWissen(await wissenView({ notes, search, evidence }, { q: p('q'), art: p('art'), status: p('status'), lesen: p('lesen') === '1' }), { user, nav });
+  return renderWissen(await wissenView({ notes, search, evidence }, wissenQuery(url)), { user, nav });
 }

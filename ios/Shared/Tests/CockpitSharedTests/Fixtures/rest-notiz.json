@@ -1,0 +1,252 @@
+{
+  "path": "00-inbox/Idee.md",
+  "title": "Idee",
+  "folder": "00-inbox",
+  "tags": [
+    "idee"
+  ],
+  "inInbox": true,
+  "type": null,
+  "obsidian": "obsidian://open?vault=Vault&file=00-inbox%2FIdee",
+  "frontmatter": [
+    {
+      "key": "projekt",
+      "text": "Hund",
+      "content": [
+        {
+          "type": "wikilink",
+          "target": "Hund",
+          "heading": null,
+          "alias": null,
+          "embed": false,
+          "path": "wiki/Hund.md",
+          "self": false,
+          "anchor": null,
+          "status": "note",
+          "text": "Hund"
+        }
+      ]
+    }
+  ],
+  "synthesis": null,
+  "evidence": null,
+  "blocks": [
+    {
+      "type": "heading",
+      "level": 1,
+      "id": "h-idee",
+      "content": [
+        {
+          "type": "text",
+          "text": "Idee"
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "text": "Mit "
+        },
+        {
+          "type": "wikilink",
+          "target": "Hund",
+          "heading": null,
+          "alias": null,
+          "embed": false,
+          "path": "wiki/Hund.md",
+          "self": false,
+          "anchor": null,
+          "status": "note",
+          "text": "Hund"
+        },
+        {
+          "type": "text",
+          "text": ", "
+        },
+        {
+          "type": "wikilink",
+          "target": "Gibts nicht",
+          "heading": null,
+          "alias": null,
+          "embed": false,
+          "path": null,
+          "self": false,
+          "anchor": null,
+          "status": "missing",
+          "text": "Gibts nicht"
+        },
+        {
+          "type": "text",
+          "text": " und "
+        },
+        {
+          "type": "mark",
+          "children": [
+            {
+              "type": "text",
+              "text": "markiert"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "."
+        }
+      ]
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "items": [
+        {
+          "depth": 0,
+          "task": {
+            "done": false,
+            "n": 0,
+            "line": "- [ ] Preise vergleichen"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Preise vergleichen"
+            }
+          ]
+        },
+        {
+          "depth": 0,
+          "task": {
+            "done": true,
+            "n": 1,
+            "line": "- [x] Termin machen"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Termin machen"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "image",
+      "path": "00-inbox/foto.png",
+      "src": "/notiz/bild?pfad=00-inbox%2Ffoto.png",
+      "alt": "foto.png",
+      "width": 120,
+      "height": null
+    },
+    {
+      "type": "callout",
+      "kind": "tip",
+      "family": "ok",
+      "label": "Tipp",
+      "title": [
+        {
+          "type": "text",
+          "text": "Merken"
+        }
+      ],
+      "foldable": false,
+      "open": true,
+      "children": [
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            {
+              "depth": 0,
+              "task": {
+                "done": false,
+                "n": null,
+                "line": null
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "nur Anzeige"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "related": {
+    "backlinks": [],
+    "similar": [
+      {
+        "path": "wiki/Training.md",
+        "title": "Training",
+        "type": null,
+        "folder": "wiki",
+        "score": null,
+        "linked": false
+      },
+      {
+        "path": "wiki/Alles.md",
+        "title": "Alles, was die Vorschau kann",
+        "type": null,
+        "folder": "wiki",
+        "score": null,
+        "linked": false
+      },
+      {
+        "path": "wiki/Hund.md",
+        "title": "Hund",
+        "type": null,
+        "folder": "wiki",
+        "score": null,
+        "linked": true
+      }
+    ],
+    "source": "text",
+    "problem": "Ohne Embeddings (Einstellungen → Embeddings) ähnlich nach Volltext"
+  },
+  "suggestions": {
+    "of": 3,
+    "source": "text",
+    "problem": "Ohne Embeddings (Einstellungen → Embeddings) ähnlich nach Volltext",
+    "tags": [
+      {
+        "tag": "hund",
+        "count": 2
+      },
+      {
+        "tag": "tag",
+        "count": 1
+      }
+    ],
+    "folders": [
+      {
+        "folder": "wiki",
+        "count": 3
+      }
+    ],
+    "unlinked": [
+      {
+        "path": "wiki/Training.md",
+        "title": "Training",
+        "score": null
+      },
+      {
+        "path": "wiki/Alles.md",
+        "title": "Alles, was die Vorschau kann",
+        "score": null
+      }
+    ]
+  },
+  "targets": [
+    "40-archiv",
+    "wiki",
+    "wiki/synthesis"
+  ],
+  "archive": "40-archiv",
+  "can": {
+    "write": true,
+    "graph": true
+  }
+}

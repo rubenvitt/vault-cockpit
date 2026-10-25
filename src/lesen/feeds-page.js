@@ -8,6 +8,7 @@ import { ReadingError } from './store.js';
 import { readingPage } from './pages.js';
 import { discoverFeed, fetchFeedDefault, DEFAULT_INTERVAL } from './feeds.js';
 import { parseOpml, toOpml } from './opml.js';
+import { jsonReply } from './json.js';
 
 /**
  * Seite „Feeds“ unter Lesen (VCP-78): abonnieren (Feed- oder Website-Adresse),
@@ -21,6 +22,11 @@ import { parseOpml, toOpml } from './opml.js';
  * Leiste unten, so geht es auch ohne JavaScript; Entfernen fragt vorher nach
  * (mit JavaScript im Dialog, sonst auf `/lesen/feeds/entfernen`).
  * src/web/static/lesen-feeds.js ergänzt Suche, „Alle auswählen“ und Zähler.
+ *
+ * Für die App: `/api/lesen/feeds` liefert Gruppen (Reihenfolge, Flags, neue
+ * Einträge) mit ihren Feeds und die ohne Gruppe als JSON (`feedsJson`),
+ * `/api/lesen/feeds.opml` den Export; die Aktionen gelten mit Geräte-Token und
+ * antworten mit `Accept: application/json` als JSON (src/web/http.js).
  */
 
 const back = '/lesen/feeds';
@@ -57,11 +63,73 @@ const iconOf = (f) =>
     ? `<img src="${esc(f.icon)}" alt="" class="feed-icon" width="20" height="20">`
     : `<span class="feed-icon feed-letter" aria-hidden="true">${esc((f.title || host(f.url)).slice(0, 1).toUpperCase())}</span>`;
 
-function status(f, tz) {
-  if (f.paused) return 'pausiert';
-  if (f.group_paused) return 'pausiert (Gruppe)';
-  if (f.error_count) return `Fehler (${f.error_count}×): ${maskSecrets(f.last_error, { max: 160 })}`;
-  return f.last_fetch_at ? `abgerufen ${when(f.last_fetch_at, tz)}` : 'noch nicht abgerufen';
+/** Zustand eines Feeds: `kind` (`paused`, `groupPaused`, `error`, `ok`, `new`) und der Text der Seite. */
+function feedState(f, tz, now = Date.now()) {
+  if (f.paused) return { kind: 'paused', text: 'pausiert' };
+  if (f.group_paused) return { kind: 'groupPaused', text: 'pausiert (Gruppe)' };
+  if (f.error_count) return { kind: 'error', text: `Fehler (${f.error_count}×): ${maskSecrets(f.last_error, { max: 160 })}` };
+  return f.last_fetch_at ? { kind: 'ok', text: `abgerufen ${when(f.last_fetch_at, tz, now)}` } : { kind: 'new', text: 'noch nicht abgerufen' };
+}
+const status = (f, tz) => feedState(f, tz).text;
+
+/** Kurzinfo unter dem Titel: Host, Abstand, „direkt auf den Stapel“, Filter. */
+const metaOf = (f) => [host(f.url), `alle ${f.interval_minutes} min`, f.to_stack ? 'direkt auf den Stapel' : f.group_to_stack ? 'direkt auf den Stapel (Gruppe)' : null, f.keyword_filter ? `nur „${f.keyword_filter}“` : null].filter(Boolean).join(' · ');
+
+/** Ein Feed für die App; Fehler maskiert wie auf der Seite, Icon nur als data:-Adresse. */
+export function feedJson(f, tz, now = Date.now()) {
+  const state = feedState(f, tz, now);
+  return {
+    id: f.id,
+    url: f.url,
+    host: host(f.url),
+    siteUrl: /^https?:\/\//i.test(f.site_url ?? '') ? f.site_url : null,
+    title: f.title || host(f.url),
+    icon: /^data:image\/[\w.+-]+;base64,/.test(f.icon ?? '') ? f.icon : null,
+    letter: (f.title || host(f.url)).slice(0, 1).toUpperCase(),
+    paused: f.paused,
+    toStack: f.to_stack,
+    keywordFilter: f.keyword_filter ?? null,
+    intervalMinutes: f.interval_minutes,
+    groupId: f.group_id ?? null,
+    groupPaused: f.group_paused,
+    groupToStack: f.group_to_stack,
+    lastFetchAt: f.last_fetch_at ?? null,
+    nextFetchAt: f.next_fetch_at ?? null,
+    errorCount: f.error_count ?? 0,
+    lastError: f.error_count ? maskSecrets(f.last_error, { max: 160 }) : null,
+    state: state.kind,
+    status: state.text,
+    meta: metaOf(f),
+  };
+}
+
+/**
+ * Seite „Feeds“ als JSON: `groups` in ihrer Reihenfolge, je mit `inbox` (neue Einträge
+ * im Eingang), Flags und ihren Feeds; `ungrouped` die Feeds ohne Gruppe; `limits` für
+ * den Abstand in Minuten; `opml` die Adresse des Exports; `bulk` das Sammeln (VCP-110):
+ * Weg der Aktion, die Werte von `tun` und der Wert von `ziel` für „neue Gruppe“.
+ */
+export function feedsJson({ feeds, groups = [], inbox = {} }, tz, now = Date.now()) {
+  const items = feeds.map((f) => feedJson(f, tz, now));
+  return {
+    groups: groups.map((g, i) => ({
+      id: g.id,
+      name: g.name,
+      position: i,
+      paused: g.paused,
+      toStack: g.to_stack,
+      flags: [g.paused ? 'pausiert' : null, g.to_stack ? 'direkt auf den Stapel' : null].filter(Boolean).join(' · ') || null,
+      inbox: inbox[g.id] ?? 0,
+      canMoveUp: i > 0,
+      canMoveDown: i < groups.length - 1,
+      feeds: items.filter((f) => f.groupId === g.id),
+    })),
+    ungrouped: items.filter((f) => !f.groupId || !groups.some((g) => g.id === f.groupId)),
+    total: items.length,
+    limits: { minInterval: MIN_INTERVAL, maxInterval: MAX_INTERVAL, defaultInterval: DEFAULT_INTERVAL, maxOpmlBytes: MAX_OPML },
+    opml: '/api/lesen/feeds.opml',
+    bulk: { action: '/aktion/lesen/feeds/auswahl', actions: ACTIONS.map(([v]) => v), newGroup: NEW_GROUP },
+  };
 }
 
 /** Auswahl der Gruppe; ohne Gruppen gibt es nichts zu wählen. */
@@ -76,7 +144,7 @@ function feedItem(f, ctx, groups) {
   const group = groups.find((g) => g.id === f.group_id)?.name ?? '';
   const search = [title, host(f.url), group].join(' ').toLocaleLowerCase('de');
   const link = /^https?:\/\//i.test(f.site_url ?? '') ? `<a href="${esc(f.site_url)}" class="lesen-title" rel="noopener noreferrer" target="_blank">${esc(title)}</a>` : `<span class="lesen-title">${esc(title)}</span>`;
-  const meta = [host(f.url), `alle ${f.interval_minutes} min`, f.to_stack ? 'direkt auf den Stapel' : f.group_to_stack ? 'direkt auf den Stapel (Gruppe)' : null, f.keyword_filter ? `nur „${f.keyword_filter}“` : null].filter(Boolean).map(esc).join(' · ');
+  const meta = esc(metaOf(f));
   return `<li class="lesen-item feed${f.error_count ? ' feed-failing' : ''}" data-suche="${esc(search)}"${f.error_count ? ' data-fehler' : ''}>
     <div class="feed-head"><input type="checkbox" name="feed" value="${esc(f.id)}" form="${BULK}" class="feed-pick" aria-label="Auswählen: ${esc(title)}">${iconOf(f)}${link}</div>
     <span class="meta">${meta}</span>
@@ -223,7 +291,7 @@ export function renderRemove(feeds, ctx) {
 }
 
 /** Seiten und Aktionen für `readingRoutes` (src/lesen/http.js). */
-export function feedRoutes({ store, fetchFeed = fetchFeedDefault, logger = console }) {
+export function feedRoutes({ store, fetchFeed = fetchFeedDefault, logger = console, now = () => Date.now() }) {
   const feedOf = (form) => {
     const feed = store.getFeed(form.get('id'));
     if (!feed) throw new ActionError('Diesen Feed gibt es nicht mehr', 404);
@@ -234,15 +302,19 @@ export function feedRoutes({ store, fetchFeed = fetchFeedDefault, logger = conso
     if (!group) throw new ActionError('Diese Gruppe gibt es nicht mehr', 404);
     return group;
   };
+  const opml = async () => ({
+    body: toOpml(store.listFeeds(), { groups: store.listGroups() }),
+    headers: { 'content-type': 'text/x-opml; charset=utf-8', 'content-disposition': 'attachment; filename="feeds.opml"', 'cache-control': 'no-store' },
+  });
   return {
     uploads: { '/aktion/lesen/feeds/import': MAX_OPML },
     pages: {
       '/lesen/feeds': async (ctx) => ({ html: renderFeeds({ feeds: store.listFeeds(), groups: store.listGroups(), inbox: store.inboxByGroup() }, ctx) }),
       '/lesen/feeds/entfernen': async (ctx) => ({ html: renderRemove([...new Set(ctx.url.searchParams.getAll('feed'))].map((id) => store.getFeed(id)).filter(Boolean), ctx) }),
-      '/lesen/feeds.opml': async () => ({
-        body: toOpml(store.listFeeds(), { groups: store.listGroups() }),
-        headers: { 'content-type': 'text/x-opml; charset=utf-8', 'content-disposition': 'attachment; filename="feeds.opml"', 'cache-control': 'no-store' },
-      }),
+      '/lesen/feeds.opml': opml,
+      '/api/lesen/feeds': async (ctx) => jsonReply(200, feedsJson({ feeds: store.listFeeds(), groups: store.listGroups(), inbox: store.inboxByGroup() }, ctx.tz, now())),
+      // Derselbe Export für die App (mit Geräte-Token, `/lesen/…` bleibt beim Cookie).
+      '/api/lesen/feeds.opml': opml,
     },
     actions: {
       async '/aktion/lesen/feed/abonnieren'(form, session) {

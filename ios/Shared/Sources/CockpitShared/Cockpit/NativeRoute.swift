@@ -1,7 +1,7 @@
 import Foundation
 
-/// Seiten des Cockpits, die die App nativ zeigt. Links im WKWebView auf diese Pfade wechseln den
-/// Reiter statt HTML zu laden; `redirect` aus Aktionen landet ebenfalls hier.
+/// Seiten des Cockpits mit eigenem Reiter (Woche, Rückblick, Planen). Links auf diese Pfade
+/// wechseln den Reiter; `redirect` aus Aktionen landet ebenfalls hier.
 public enum NativeRoute: Equatable, Hashable, Sendable {
     /// `/?woche=…`, nil = laufende Woche. `focusCapture`: `?erfassen=1` (Kurzbefehl „Schnelleingabe“).
     case week(String?, focusCapture: Bool = false)

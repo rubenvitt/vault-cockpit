@@ -429,6 +429,12 @@ public struct WeekModel: Decodable, Equatable, Sendable {
     public var inbox: Inbox
     /// Fehlt bei Servern vor der nativen Woche; `capabilities` setzt dann alles.
     public let can: WeekCapabilities?
+    /// Dienste mit Fehler (roter Hinweis „Störung“ im Kopf, führt zum Zustand); fehlt bei
+    /// älteren Servern.
+    public let alert: [ServiceAlert]?
+
+    /// Gestörte Dienste, leer wenn alles läuft.
+    public var failingServices: [ServiceAlert] { alert ?? [] }
 
     public var timeZone: TimeZone { TimeZone(identifier: tz) ?? .current }
     /// Wie `writeContext` im Web: Notizen und Planen gibt es nur zusammen mit den Aktionen.

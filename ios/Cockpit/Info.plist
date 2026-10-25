@@ -45,9 +45,5 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
-	<key>WKAppBoundDomains</key>
-	<array>
-		<string>$(COCKPIT_SERVER_HOST)</string>
-	</array>
 </dict>
 </plist>
