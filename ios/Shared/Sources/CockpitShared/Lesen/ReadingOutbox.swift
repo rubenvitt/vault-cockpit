@@ -110,6 +110,12 @@ public enum ReadingAction {
     public static let episodeSpeak = "/aktion/lesen/folge/sprechen"
     public static let episodeIngest = "/aktion/lesen/folge/ingest"
     public static let episodeDelete = "/aktion/lesen/folge/loeschen"
+    /// `id`, `gehoert` (`1` gehört, `0` doch nicht), mit Rückgängig.
+    public static let episodeHeard = "/aktion/lesen/folge/gehoert"
+    /// `id`, `stelle` und `dauer` in Sekunden (der Player, still); kurz vor Schluss gehört.
+    public static let episodeSpot = "/aktion/lesen/folge/stelle"
+    /// Ingest für alle gelesenen Texte unter „Weiter → Entscheiden“ ohne Entwurf.
+    public static let draftAllRead = "/aktion/lesen/weiter/entwerfen"
 
     /// Aktionen, die ohne Netz in den Puffer gehen, mit ihrem Namen (`BUFFERED` in lesen-doc.js).
     public static let buffered: [String: String] = [

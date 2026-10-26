@@ -91,6 +91,35 @@ struct StapelScreen: View {
                     }
                 }
                 .padding(.horizontal, 16)
+                // Gelesenes und Gehörtes steht nicht mehr hier, sondern unter „Weiter“ (wie `.stapel-weiter` im Web).
+                if let decide = stack.decide, decide > 0 {
+                    Button {
+                        toasts.signal(.selection)
+                        model.readingPath = []
+                        model.readingSection = .weiter
+                    } label: {
+                        HStack(spacing: 8) {
+                            Text(decide == 1 ? "Ein Text ist gelesen oder gehört – wie weiter?" : "\(decide) Texte sind gelesen oder gehört – wie weiter?")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Theme.accent)
+                                .multilineTextAlignment(.leading)
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(Theme.accent)
+                                .accessibilityHidden(true)
+                        }
+                        .padding(12)
+                        .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: Theme.radius, style: .continuous)
+                                .strokeBorder(Theme.accentLine)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 16)
+                }
                 if store.query.zeit == nil {
                     LesenChipScroller("Sortierung") {
                         ForEach(stack.sorts, id: \.key) { sort in

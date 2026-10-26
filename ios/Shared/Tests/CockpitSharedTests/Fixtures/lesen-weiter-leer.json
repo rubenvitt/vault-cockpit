@@ -1,0 +1,63 @@
+{
+  "ok": true,
+  "next": {
+    "stage": null,
+    "text": "Alles erledigt. Nichts wartet auf dich.",
+    "href": null,
+    "label": null
+  },
+  "counts": {
+    "pruefen": 0,
+    "anhoeren": 0,
+    "entscheiden": 0,
+    "fehler": 0,
+    "weiterlesen": 0,
+    "laeuft": 0,
+    "eingang": 0,
+    "stapel": 0,
+    "stapelMinutes": 0
+  },
+  "stages": [
+    {
+      "key": "pruefen",
+      "label": "Prüfen",
+      "hint": "Claude hat einen Entwurf fürs Wiki geschrieben. Abhaken, was hinein soll, dauert ein, zwei Minuten.",
+      "items": []
+    },
+    {
+      "key": "anhoeren",
+      "label": "Anhören",
+      "hint": "Fertige Folgen, noch nicht gehört. Danach stehen ihre Texte unter „Entscheiden“.",
+      "items": []
+    },
+    {
+      "key": "entscheiden",
+      "label": "Entscheiden",
+      "hint": "Gelesen oder gehört. Ins Wiki (Claude entwirft), nur als Rohquelle in den Vault oder fertig, weg.",
+      "items": []
+    },
+    {
+      "key": "fehler",
+      "label": "Fehler",
+      "hint": "Hier hakt es. Erneut versuchen oder ansehen.",
+      "items": []
+    },
+    {
+      "key": "weiterlesen",
+      "label": "Weiterlesen",
+      "hint": "Angefangen, noch nicht zu Ende.",
+      "items": []
+    },
+    {
+      "key": "laeuft",
+      "label": "Läuft",
+      "hint": "Claude arbeitet daran. Die Seite aktualisiert sich von selbst.",
+      "items": []
+    }
+  ],
+  "ingestAvailable": false,
+  "plantAvailable": false,
+  "draftable": 0,
+  "vault": false,
+  "episodes": false
+}

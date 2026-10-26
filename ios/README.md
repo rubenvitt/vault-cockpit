@@ -53,6 +53,25 @@ make test      # Unit-Tests auf dem ersten verfügbaren iPhone-Simulator
   geschoben: Suche mit Bereich, „Holen“ als Phönix-Schritt oder an einem Tag, „Als Flamme“,
   Vorschläge aus den Bereichen, „Flamme einplanen“ und „In KW n“. „Holen“ und „Aus der Woche“ zeigen
   das Ergebnis sofort (`PlanStore.pending`), danach lädt die Seite neu.
+- **Lesen-Navigation** (`Cockpit/Native/Lesen/LesenScreen.swift`, `LesenSubnav`): wie im Web vier
+  Reiter **Weiter · Eingang · Stapel · Folgen** mit Unterstrich und das Menü **Mehr** (Ingest,
+  Markiert, Wiedersehen, Wissen, Feeds; auf einem dieser Bereiche trägt es dessen Namen). Die Zahl
+  bereiter Ingest-Entwürfe steht an „Weiter“. Das Lesen beginnt bei „Weiter“, `/lesen` führt dorthin.
+- **Weiter** (`Cockpit/Native/Lesen/WeiterScreen.swift`, `WeiterStore`, `GET /api/lesen/weiter`):
+  oben „Als Nächstes“ (ein Knopf: Prüfen, Anhören spielt die Folge im nativen Player, „Alle
+  entwerfen lassen“ oder Sprung auf eine Stufe), darunter Prüfen · Anhören · Entscheiden · Fehler ·
+  Weiterlesen · Läuft mit der Spur je Text (Gelesen/Gehört · Entwurf · Im Wiki · Eingepflanzt) und
+  den Knöpfen der Stufe (Ins Wiki: entwerfen, Nur in den Vault, Fertig, weg, Als gehört markieren,
+  Erneut entwerfen bzw. einpflanzen). „Fertig, weg“, „Nur in den Vault“ und „Als gehört markieren“
+  nehmen den Eintrag sofort heraus (bei Ablehnung zurück, Meldung mit „Rückgängig“). Läuft etwas,
+  lädt der Bildschirm alle 5 s neu. Der Stapel zeigt oben „n Texte sind gelesen oder gehört – wie
+  weiter?“ (`decide`). Fixtures: `lesen-weiter*.json`, `lesen-folgen-gehoert.json`,
+  `lesen-stapel-weiter.json`, erzeugt aus src/lesen/weiter.js und folgen-page.js.
+- **Folgen gehört** (`FolgenScreen.swift`, `EpisodesStore`, `EpisodePlayer.swift`): Gruppen Zum Hören
+  (angefangene zuerst) · Entsteht · Nur Transkript · Gehört (eingeklappt, kleinere Karten), je fertiger
+  Folge „angefangen, bei 3:05“ bzw. „gehört am …“ und „Als gehört markieren“ / „Doch nicht gehört“
+  (mit Rückgängig). Der native Player meldet die Stelle (`APIClient.reportListening`, höchstens
+  alle 30 s, beim Anhalten und am Ende); kurz vor Schluss vermerkt der Server die Folge als gehört.
 - **Ingest** (`Cockpit/Native/Lesen/IngestScreen.swift`, `IngestReviewScreen.swift`,
   `IngestReviewScreenParts.swift`; Stores `IngestStore`, `IngestReviewStore` in `CockpitShared`):
   Bereich „Ingest“ im Lesen mit der Zahl bereiter Entwürfe (nur, wenn der Server ihn kennt),

@@ -96,6 +96,22 @@ public struct APIClient: Sendable {
         return result.progress
     }
 
+    /// Stand einer Folge an den Server (`/aktion/lesen/folge/stelle`, Formular wie im Web): Stelle
+    /// und Länge in Sekunden. Kurz vor Schluss vermerkt er die Folge als gehört; liefert, ob sie
+    /// es jetzt ist.
+    @discardableResult
+    public func reportListening(episodeID: String, position: Double, duration: Double) async throws -> Bool {
+        struct Result: Decodable { let heard: Bool? }
+        var request = URLRequest(url: baseURL.appending(path: "aktion/lesen/folge/stelle"))
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        let fields = ["id": episodeID, "stelle": String(Int(max(0, position))), "dauer": String(Int(max(0, duration)))]
+        request.httpBody = Data(CockpitAPI.formBody(fields).utf8)
+        let result: Result = try await Self.perform(request, session: session)
+        return result.heard ?? false
+    }
+
     public func addHighlight(_ highlight: NewHighlight) async throws -> HighlightResult {
         try await send("api/app/markierung", body: highlight)
     }

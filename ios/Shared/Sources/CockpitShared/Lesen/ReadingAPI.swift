@@ -119,7 +119,9 @@ extension CockpitAPI {
 /// Seiten des Lesens im Reiter „Lesen“. Wie `NativeRoute` für Links (aus Notizen, Wissen, Feeds)
 /// und `redirect` aus Aktionen (`/lesen/doc?id=…` nach „Jetzt lesen“).
 public enum ReadingRoute: Equatable, Hashable, Sendable {
-    /// `/lesen`, `/lesen/eingang?gruppe=`
+    /// `/lesen`, `/lesen/weiter`: wo jeder Text steht und was als Nächstes geht.
+    case weiter
+    /// `/lesen/eingang?gruppe=`
     case inbox(group: String?)
     /// `/lesen/stapel?zeit=&sort=&gruppe=`
     case stack(StackQuery)
@@ -159,7 +161,9 @@ public enum ReadingRoute: Equatable, Hashable, Sendable {
         }
         let path = path.count > 1 && path.hasSuffix("/") ? String(path.dropLast()) : path
         switch path {
-        case "/lesen", "/lesen/eingang":
+        case "/lesen", "/lesen/weiter":
+            self = .weiter
+        case "/lesen/eingang":
             self = .inbox(group: value("gruppe"))
         case "/lesen/stapel":
             self = .stack(StackQuery(zeit: value("zeit").flatMap { Int($0) }, sort: value("sort"), group: value("gruppe")))
@@ -194,6 +198,8 @@ public enum ReadingRoute: Equatable, Hashable, Sendable {
         var components = URLComponents()
         var items: [URLQueryItem] = []
         switch self {
+        case .weiter:
+            components.path = "/lesen/weiter"
         case .inbox(let group):
             components.path = "/lesen/eingang"
             items = CockpitAPI.groupQuery(group)

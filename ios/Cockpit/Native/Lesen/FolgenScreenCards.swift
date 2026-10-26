@@ -4,28 +4,33 @@ import UIKit
 
 // MARK: Karten
 
-/// Fertige Folge (`.folge.is-ready`): Abspielen, Art, Titel, „5:12 · 25.10.2026, 09:07 · 8.642
-/// Zeichen“, darunter „Report-Notiz“, „Herunterladen“ und „Löschen“.
+/// Fertige Folge (`.folge.is-ready`): Abspielen, Art, Titel, „5:12 · angefangen, bei 3:05 ·
+/// 25.10.2026, 09:07“, darunter „Als gehört markieren“ (bzw. „Doch nicht gehört“), „Report-Notiz“,
+/// „Herunterladen“ und „Löschen“. Gehörte (`.folge.is-gehoert`) sind kleiner und leiser.
 struct FolgenDoneCard: View {
     let episode: Episode
     let isBusy: Bool
     let isDownloading: Bool
     let play: () -> Void
+    /// „Als gehört markieren“ bzw. „Doch nicht gehört“; nil bei Servern ohne Hörstand.
+    var markHeard: (() -> Void)?
     let openNote: (String) -> Void
     let ingest: () -> Void
     let openIngest: () -> Void
     let download: () -> Void
     let delete: () -> Void
 
+    private var compact: Bool { episode.isHeard }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: compact ? 8 : 12) {
             HStack(alignment: .top, spacing: 12) {
                 Button(action: play) {
                     Image(systemName: "play.fill")
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(Theme.onAccent)
-                        .frame(width: 48, height: 48)
-                        .background(Theme.accent, in: Circle())
+                        .font(compact ? .body.weight(.semibold) : .title3.weight(.semibold))
+                        .foregroundStyle(compact ? Theme.text2 : Theme.onAccent)
+                        .frame(width: compact ? 36 : 48, height: compact ? 36 : 48)
+                        .background(compact ? Theme.surface2 : Theme.accent, in: Circle())
                         .contentShape(Circle())
                 }
                 .buttonStyle(FolgenPressStyle())
@@ -36,6 +41,12 @@ struct FolgenDoneCard: View {
                     .onTapGesture(perform: play)
             }
             FolgenActions {
+                if let markHeard {
+                    Button(action: markHeard) {
+                        Label(episode.isHeard ? "Doch nicht gehört" : "Als gehört markieren", systemImage: episode.isHeard ? "arrow.uturn.backward" : "checkmark")
+                    }
+                    .buttonStyle(LesenQuietButtonStyle())
+                }
                 if let note = episode.note, !note.isEmpty {
                     Button {
                         openNote(note)
@@ -68,7 +79,13 @@ struct FolgenDoneCard: View {
             }
             FolgenIngestLine(episode: episode, open: openIngest)
         }
-        .cardStyle()
+        .cardStyle(padding: compact ? 12 : 16)
+        .overlay {
+            if episode.listen == EpisodeListen.new {
+                RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                    .strokeBorder(Theme.accentLine)
+            }
+        }
         .opacity(isBusy ? 0.5 : 1)
         .disabled(isBusy)
         .accessibilityElement(children: .contain)
@@ -435,8 +452,12 @@ enum FolgenKind {
 /// Meta-Zeilen der Karten wie `episodeCard` in src/lesen/folgen-page.js.
 @MainActor
 enum FolgenFormat {
-    /// Fertig: „5:12 · 25.10.2026, 09:07 · 8.642 Zeichen“; sonst „10 Min. · 25.10.2026, 09:07“.
+    /// Fertig: „5:12 · angefangen, bei 3:05 · 25.10.2026, 09:07“ (ältere Server ohne Hörstand:
+    /// „5:12 · 25.10.2026, 09:07 · 8.642 Zeichen“); sonst „10 Min. · 25.10.2026, 09:07“.
     static func meta(_ episode: Episode, withChars: Bool) -> String {
+        if withChars, let listen = episode.listenLabel() {
+            return CockpitFormat.meta([episode.durationLabel, listen, created(episode.createdAt)])
+        }
         let length = withChars ? episode.durationLabel : episode.minutes.map { "\($0) Min." }
         return CockpitFormat.meta([
             length,

@@ -229,5 +229,5 @@ test('Weiter: ungehörte Folge steht unter „Anhören“, ihre Texte erst nach 
   assert.equal(m.counts.anhoeren, 0);
   assert.deepEqual(titles(m.stages.entscheiden).sort(), ['Im Podcast A', 'Im Podcast B']);
   const json = JSON.parse((await weiterRoutes({ store, episodes: { list: () => [{ ...ep, heard_at: null }] } }).pages['/api/lesen/weiter'](ctx('/api/lesen/weiter'))).body);
-  assert.deepEqual(json.stages[1].items[0].episode, { id: 'ep', kind: 'podcast', kindLabel: 'Podcast', title: 'Podcast: A und 1 weitere', seconds: 600, position: 120, finishedAt: null });
+  assert.deepEqual(json.stages[1].items[0].episode, { id: 'ep', kind: 'podcast', kindLabel: 'Podcast', title: 'Podcast: A und 1 weitere', seconds: 600, position: 120, bytes: 16_000 * 600, finishedAt: null });
 });
