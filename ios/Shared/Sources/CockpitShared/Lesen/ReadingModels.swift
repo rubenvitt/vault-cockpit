@@ -259,6 +259,8 @@ public struct ReadingStackModel: Decodable, Equatable, Sendable {
     public let ingest: Bool?
     /// Claude ist angebunden: „Ingest entwerfen“ geht.
     public let ingestAvailable: Bool?
+    /// Gelesen oder gehört, wartet unter „Weiter“ auf die Entscheidung (nicht in `items`).
+    public let decide: Int?
 }
 
 // MARK: Leseansicht
@@ -894,8 +896,27 @@ public struct Episode: Decodable, Equatable, Identifiable, Sendable {
     public let resumable: Bool
     public let retry: EpisodeRetry?
     public let progress: EpisodeProgress?
+    /// Hörstand einer fertigen Folge: `neu`, `angefangen` oder `gehoert`; nil, solange sie entsteht
+    /// (und bei älteren Servern).
+    public var listen: String?
+    /// Wann die Folge gehört wurde (zu Ende gespielt oder von Hand markiert).
+    public var heardAt: String?
+    /// Gemeldete Stelle in Sekunden („angefangen, bei 3:05“).
+    public var position: Int?
 
     public var isDone: Bool { status == EpisodeStatus.done }
+    /// Fertig und gehört: steht unter „Gehört“, eingeklappt.
+    public var isHeard: Bool { isDone && (listen == EpisodeListen.heard || (listen == nil && heardAt != nil)) }
+    /// Fertig, angefangen, aber nicht zu Ende.
+    public var isStarted: Bool { isDone && !isHeard && (position ?? 0) > 0 }
+
+    /// Hörstand als Satz: „noch nicht gehört“, „angefangen, bei 3:05“, „gehört am 24. Okt.“.
+    public func listenLabel(timeZone: TimeZone = .current) -> String? {
+        guard isDone, listen != nil || heardAt != nil else { return nil }
+        if isHeard { return heardAt.flatMap { WeiterFormat.day($0, timeZone: timeZone) }.map { "gehört am \($0)" } ?? "gehört" }
+        if let position, position > 0 { return "angefangen, bei \(Self.clock(position))" }
+        return "noch nicht gehört"
+    }
     public var isFailed: Bool { status == EpisodeStatus.failed }
     /// Erst nur das Transkript ist fertig; Audio entsteht auf Knopfdruck.
     public var isTranscript: Bool { status == EpisodeStatus.transcript }
@@ -917,7 +938,7 @@ public struct Episode: Decodable, Equatable, Identifiable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, kindLabel, title, minutes, status, busy, docs, chars, createdAt, updatedAt, finishedAt, seconds, bytes, note, audio, language, style, styleLabel, topics, focus, wishes, speak, ingest, error, resumable, retry, progress
+        case id, kind, kindLabel, title, minutes, status, busy, docs, chars, createdAt, updatedAt, finishedAt, seconds, bytes, note, audio, language, style, styleLabel, topics, focus, wishes, speak, ingest, error, resumable, retry, progress, listen, heardAt, position
     }
 
     public init(from decoder: Decoder) throws {
@@ -950,6 +971,34 @@ public struct Episode: Decodable, Equatable, Identifiable, Sendable {
         resumable = try c.decodeIfPresent(Bool.self, forKey: .resumable) ?? false
         retry = try c.decodeIfPresent(EpisodeRetry.self, forKey: .retry)
         progress = try c.decodeIfPresent(EpisodeProgress.self, forKey: .progress)
+        listen = try c.decodeIfPresent(String.self, forKey: .listen)
+        heardAt = try c.decodeIfPresent(String.self, forKey: .heardAt)
+        position = try c.decodeIfPresent(Int.self, forKey: .position)
+    }
+}
+
+/// Hörstand einer fertigen Folge (`listenOf` in src/lesen/folgen-page.js).
+public enum EpisodeListen {
+    public static let new = "neu"
+    public static let started = "angefangen"
+    public static let heard = "gehoert"
+}
+
+/// Folgen in Gruppen wie im Web (`episodeGroups`): Zum Hören (angefangene zuerst), Entsteht (auch
+/// fehlgeschlagene), Nur Transkript und Gehört.
+public struct EpisodeGroups: Equatable, Sendable {
+    public let toHear: [Episode]
+    public let inProgress: [Episode]
+    public let transcripts: [Episode]
+    public let heard: [Episode]
+
+    public init(_ items: [Episode]) {
+        let done = items.filter(\.isDone)
+        let open = done.filter { !$0.isHeard }
+        toHear = open.filter(\.isStarted) + open.filter { !$0.isStarted }
+        inProgress = items.filter { $0.busy || $0.isFailed }
+        transcripts = items.filter(\.isTranscript)
+        heard = done.filter(\.isHeard)
     }
 }
 

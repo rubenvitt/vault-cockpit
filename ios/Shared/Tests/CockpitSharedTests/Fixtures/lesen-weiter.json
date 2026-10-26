@@ -1,0 +1,398 @@
+{
+  "ok": true,
+  "next": {
+    "stage": "pruefen",
+    "text": "Einen Entwurf prüfen: Context Engineering",
+    "href": "/lesen/ingest/doc?id=8341bffc-4de7-43f7-996f-0bf8218ed0e0",
+    "label": "Prüfen"
+  },
+  "counts": {
+    "pruefen": 1,
+    "anhoeren": 2,
+    "entscheiden": 2,
+    "fehler": 1,
+    "weiterlesen": 1,
+    "laeuft": 0,
+    "eingang": 1,
+    "stapel": 1,
+    "stapelMinutes": 12
+  },
+  "stages": [
+    {
+      "key": "pruefen",
+      "label": "Prüfen",
+      "hint": "Claude hat einen Entwurf fürs Wiki geschrieben. Abhaken, was hinein soll, dauert ein, zwei Minuten.",
+      "items": [
+        {
+          "id": "8341bffc-4de7-43f7-996f-0bf8218ed0e0",
+          "url": "https://anthropic.com/Context%20Engineering",
+          "canonicalUrl": null,
+          "commentsUrl": null,
+          "title": "Context Engineering",
+          "author": null,
+          "site": "anthropic.com",
+          "kind": "artikel",
+          "kindLabel": "Artikel",
+          "origin": "formular",
+          "excerpt": null,
+          "wordCount": 0,
+          "readingMinutes": 11,
+          "status": "stapel",
+          "previousStatus": null,
+          "progress": 0,
+          "scrollAnchor": 0,
+          "topics": [],
+          "savedAt": "2026-10-26T08:10:58.625Z",
+          "statusChangedAt": "2026-10-26T08:10:58.625Z",
+          "readAt": null,
+          "heardAt": null,
+          "archivedAt": null,
+          "updatedAt": "2026-10-26T08:10:58.625Z",
+          "stage": "pruefen",
+          "remaining": null,
+          "read": null,
+          "ingest": {
+            "status": "bereit",
+            "error": null,
+            "plant": null
+          },
+          "state": null,
+          "track": [
+            {
+              "key": "gelesen",
+              "label": "Gelesen",
+              "state": "todo"
+            },
+            {
+              "key": "entwurf",
+              "label": "Entwurf",
+              "state": "done"
+            },
+            {
+              "key": "wiki",
+              "label": "Im Wiki",
+              "state": "todo"
+            },
+            {
+              "key": "eingepflanzt",
+              "label": "Eingepflanzt",
+              "state": "todo"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "anhoeren",
+      "label": "Anhören",
+      "hint": "Fertige Folgen, noch nicht gehört. Danach stehen ihre Texte unter „Entscheiden“.",
+      "items": [
+        {
+          "stage": "anhoeren",
+          "episode": {
+            "id": "ep-neu",
+            "kind": "podcast",
+            "kindLabel": "Podcast",
+            "title": "Podcast: Agenten und 1 weitere",
+            "seconds": 612,
+            "position": 185,
+            "bytes": 9792000,
+            "finishedAt": "2026-10-24T08:00:00.000Z"
+          },
+          "docs": [
+            {
+              "id": "00508912-613f-4c0a-b650-9190127732ba",
+              "title": "Warum Agenten ein Gedächtnis brauchen",
+              "url": "https://innoq.com/Warum%20Agenten%20ein%20Ged%C3%A4chtnis%20brauchen"
+            },
+            {
+              "id": "66b5c0e7-75a7-4e0d-a6b3-82948405df82",
+              "title": "Local-first Software",
+              "url": "https://inkandswitch.com/Local-first%20Software"
+            }
+          ]
+        },
+        {
+          "stage": "anhoeren",
+          "episode": {
+            "id": "ep-vor",
+            "kind": "vorlesen",
+            "kindLabel": "Vorlesen",
+            "title": "Vorlesen: Hundetraining ohne Druck",
+            "seconds": 380,
+            "position": null,
+            "bytes": 6080000,
+            "finishedAt": "2026-10-25T08:00:00.000Z"
+          },
+          "docs": [
+            {
+              "id": "777adccd-4f7e-47a5-bf42-508f9d4bd5df",
+              "title": "Hundetraining ohne Druck",
+              "url": "https://hundeschule.de/Hundetraining%20ohne%20Druck"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "entscheiden",
+      "label": "Entscheiden",
+      "hint": "Gelesen oder gehört. Ins Wiki (Claude entwirft), nur als Rohquelle in den Vault oder fertig, weg.",
+      "items": [
+        {
+          "id": "c8785edb-181a-42d0-aaf4-b4dc715ced81",
+          "url": "https://zeit.de/Die%20Kunst%20des%20langsamen%20Lesens",
+          "canonicalUrl": null,
+          "commentsUrl": null,
+          "title": "Die Kunst des langsamen Lesens",
+          "author": null,
+          "site": "zeit.de",
+          "kind": "artikel",
+          "kindLabel": "Artikel",
+          "origin": "formular",
+          "excerpt": null,
+          "wordCount": 0,
+          "readingMinutes": 9,
+          "status": "stapel",
+          "previousStatus": null,
+          "progress": 1,
+          "scrollAnchor": 0,
+          "topics": [],
+          "savedAt": "2026-10-26T08:10:58.624Z",
+          "statusChangedAt": "2026-10-26T08:10:58.624Z",
+          "readAt": null,
+          "heardAt": null,
+          "archivedAt": null,
+          "updatedAt": "2026-10-26T08:10:58.624Z",
+          "stage": "entscheiden",
+          "remaining": null,
+          "read": {
+            "how": "gelesen",
+            "at": null,
+            "episode": null
+          },
+          "ingest": null,
+          "state": null,
+          "track": [
+            {
+              "key": "gelesen",
+              "label": "Gelesen",
+              "state": "done"
+            },
+            {
+              "key": "entwurf",
+              "label": "Entwurf",
+              "state": "todo"
+            },
+            {
+              "key": "wiki",
+              "label": "Im Wiki",
+              "state": "todo"
+            },
+            {
+              "key": "eingepflanzt",
+              "label": "Eingepflanzt",
+              "state": "todo"
+            }
+          ]
+        },
+        {
+          "id": "696755f4-6b68-4c49-9a82-7c5ef70a8d62",
+          "url": "https://blog.test/Geh%C3%B6rt%20im%20alten%20Podcast",
+          "canonicalUrl": null,
+          "commentsUrl": null,
+          "title": "Gehört im alten Podcast",
+          "author": null,
+          "site": "blog.test",
+          "kind": "artikel",
+          "kindLabel": "Artikel",
+          "origin": "formular",
+          "excerpt": null,
+          "wordCount": 0,
+          "readingMinutes": 8,
+          "status": "stapel",
+          "previousStatus": null,
+          "progress": 0,
+          "scrollAnchor": 0,
+          "topics": [],
+          "savedAt": "2026-10-26T08:10:58.626Z",
+          "statusChangedAt": "2026-10-26T08:10:58.626Z",
+          "readAt": null,
+          "heardAt": "2026-10-24T08:00:00.000Z",
+          "archivedAt": null,
+          "updatedAt": "2026-10-26T08:10:58.626Z",
+          "stage": "entscheiden",
+          "remaining": null,
+          "read": {
+            "how": "gehoert",
+            "at": "2026-10-24T08:00:00.000Z",
+            "episode": {
+              "id": "ep-alt",
+              "title": "Report: Gehört im alten Podcast",
+              "kind": "report"
+            }
+          },
+          "ingest": null,
+          "state": null,
+          "track": [
+            {
+              "key": "gelesen",
+              "label": "Gehört",
+              "state": "done"
+            },
+            {
+              "key": "entwurf",
+              "label": "Entwurf",
+              "state": "todo"
+            },
+            {
+              "key": "wiki",
+              "label": "Im Wiki",
+              "state": "todo"
+            },
+            {
+              "key": "eingepflanzt",
+              "label": "Eingepflanzt",
+              "state": "todo"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "fehler",
+      "label": "Fehler",
+      "hint": "Hier hakt es. Erneut versuchen oder ansehen.",
+      "items": [
+        {
+          "id": "88e39d2c-cd50-4440-9175-e9bd48fddbbd",
+          "url": "https://simonwillison.net/Retrieval%20ist%20nicht%20tot",
+          "canonicalUrl": null,
+          "commentsUrl": null,
+          "title": "Retrieval ist nicht tot",
+          "author": null,
+          "site": "simonwillison.net",
+          "kind": "artikel",
+          "kindLabel": "Artikel",
+          "origin": "formular",
+          "excerpt": null,
+          "wordCount": 0,
+          "readingMinutes": 7,
+          "status": "stapel",
+          "previousStatus": null,
+          "progress": 0,
+          "scrollAnchor": 0,
+          "topics": [],
+          "savedAt": "2026-10-26T08:10:58.625Z",
+          "statusChangedAt": "2026-10-26T08:10:58.625Z",
+          "readAt": null,
+          "heardAt": null,
+          "archivedAt": null,
+          "updatedAt": "2026-10-26T08:10:58.625Z",
+          "stage": "fehler",
+          "remaining": null,
+          "read": null,
+          "ingest": {
+            "status": "fehler",
+            "error": "Claude hat nicht rechtzeitig geantwortet",
+            "plant": null
+          },
+          "state": "Entwurf fehlgeschlagen: Claude hat nicht rechtzeitig geantwortet",
+          "track": [
+            {
+              "key": "gelesen",
+              "label": "Gelesen",
+              "state": "todo"
+            },
+            {
+              "key": "entwurf",
+              "label": "Entwurf",
+              "state": "failed"
+            },
+            {
+              "key": "wiki",
+              "label": "Im Wiki",
+              "state": "todo"
+            },
+            {
+              "key": "eingepflanzt",
+              "label": "Eingepflanzt",
+              "state": "todo"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "weiterlesen",
+      "label": "Weiterlesen",
+      "hint": "Angefangen, noch nicht zu Ende.",
+      "items": [
+        {
+          "id": "e70fbe32-8fec-4fd5-915f-09c6a39e21f0",
+          "url": "https://paulgraham.com/How%20to%20Do%20Great%20Work",
+          "canonicalUrl": null,
+          "commentsUrl": null,
+          "title": "How to Do Great Work",
+          "author": null,
+          "site": "paulgraham.com",
+          "kind": "artikel",
+          "kindLabel": "Artikel",
+          "origin": "formular",
+          "excerpt": null,
+          "wordCount": 0,
+          "readingMinutes": 45,
+          "status": "stapel",
+          "previousStatus": null,
+          "progress": 0.4,
+          "scrollAnchor": 0,
+          "topics": [],
+          "savedAt": "2026-10-26T08:10:58.625Z",
+          "statusChangedAt": "2026-10-26T08:10:58.625Z",
+          "readAt": null,
+          "heardAt": null,
+          "archivedAt": null,
+          "updatedAt": "2026-10-26T08:10:58.625Z",
+          "stage": "weiterlesen",
+          "remaining": 27,
+          "read": null,
+          "ingest": null,
+          "state": null,
+          "track": [
+            {
+              "key": "gelesen",
+              "label": "Gelesen",
+              "state": "busy"
+            },
+            {
+              "key": "entwurf",
+              "label": "Entwurf",
+              "state": "todo"
+            },
+            {
+              "key": "wiki",
+              "label": "Im Wiki",
+              "state": "todo"
+            },
+            {
+              "key": "eingepflanzt",
+              "label": "Eingepflanzt",
+              "state": "todo"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "laeuft",
+      "label": "Läuft",
+      "hint": "Claude arbeitet daran. Die Seite aktualisiert sich von selbst.",
+      "items": []
+    }
+  ],
+  "ingestAvailable": true,
+  "plantAvailable": true,
+  "draftable": 2,
+  "vault": true,
+  "episodes": true
+}

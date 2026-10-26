@@ -322,7 +322,7 @@ function unreadSection({ counts }, folgen) {
 
 const episodeItemJson = (x) => ({
   stage: 'anhoeren',
-  episode: { id: x.episode.id, kind: x.episode.kind, kindLabel: KINDS[x.episode.kind] ?? x.episode.kind, title: x.episode.title, seconds: x.episode.bytes ? Math.round(x.episode.bytes / BYTES_PER_SECOND) : null, position: x.episode.position ?? null, finishedAt: x.episode.finished_at ?? null },
+  episode: { id: x.episode.id, kind: x.episode.kind, kindLabel: KINDS[x.episode.kind] ?? x.episode.kind, title: x.episode.title, seconds: x.episode.bytes ? Math.round(x.episode.bytes / BYTES_PER_SECOND) : null, position: x.episode.position ?? null, bytes: x.episode.bytes ?? null, finishedAt: x.episode.finished_at ?? null },
   docs: x.docs.map((d) => ({ id: d.id, title: d.title ?? null, url: d.url })),
 });
 

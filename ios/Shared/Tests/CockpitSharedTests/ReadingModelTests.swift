@@ -327,7 +327,7 @@ final class ReadingModelTests: XCTestCase {
     // MARK: Wege
 
     func testReadingRoutes() {
-        XCTAssertEqual(ReadingRoute(webPath: "/lesen"), .inbox(group: nil))
+        XCTAssertEqual(ReadingRoute(webPath: "/lesen"), .weiter, "wie im Web: /lesen führt zu „Weiter“")
         XCTAssertEqual(ReadingRoute(webPath: "/lesen/eingang?gruppe=ohne"), .inbox(group: "ohne"))
         XCTAssertEqual(ReadingRoute(webPath: "/lesen/stapel?zeit=15&gruppe=g1"), .stack(StackQuery(zeit: 15, group: "g1")))
         XCTAssertEqual(ReadingRoute(webPath: "/lesen/doc?id=abc#weiter"), .reader(id: "abc", highlight: nil, resume: true))

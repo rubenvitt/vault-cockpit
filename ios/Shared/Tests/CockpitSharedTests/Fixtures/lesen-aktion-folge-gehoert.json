@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "message": "Gehört: Vorlesen: Hundetraining ohne Druck",
+  "undo": {
+    "action": "/aktion/lesen/folge/gehoert",
+    "fields": {
+      "id": "ep-vor",
+      "gehoert": "0"
+    }
+  },
+  "listen": "gehoert"
+}

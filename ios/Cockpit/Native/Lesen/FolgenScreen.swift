@@ -1,7 +1,8 @@
 import CockpitShared
 import SwiftUI
 
-/// Folgen nativ (`/lesen/folgen` im Web): „Neue Folge“, darunter die Folgen als Karten. Fertige
+/// Folgen nativ (`/lesen/folgen` im Web): „Neue Folge“, darunter die Folgen als Karten in Gruppen:
+/// Zum Hören (angefangene zuerst), Entsteht, Nur Transkript und eingeklappt Gehört. Fertige
 /// spielen im nativen Player (`EpisodePlayerView`), entstehende zeigen Schritte und Fortschritt
 /// und fragen alle 3 s nach, solange die Liste sichtbar und die App vorne ist; wird eine fertig,
 /// meldet der Store „Fertig: …“ mit „Abspielen“.
@@ -27,6 +28,8 @@ struct FolgenList: View {
     @State private var downloads = FolgenDownloads()
     /// Folge, deren Löschen gerade bestätigt werden soll.
     @State private var deleting: Episode?
+    /// „Gehört“ aufgeklappt.
+    @State private var showsHeard = false
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -123,10 +126,7 @@ struct FolgenList: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .cardStyle()
             } else {
-                ForEach(list.items) { episode in
-                    card(episode)
-                        .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.asymmetric(insertion: .move(edge: .top).combined(with: .opacity), removal: .scale(scale: 0.95).combined(with: .opacity)))
-                }
+                groups(store.groups)
             }
         } else if let error = store.state.error, !store.state.isRefreshing {
             LoadFailedView(title: "Folgen nicht geladen", error: error) {
@@ -135,6 +135,70 @@ struct FolgenList: View {
         } else {
             LesenSkeleton(label: "Folgen werden geladen", rows: 3)
                 .padding(.top, 8)
+        }
+    }
+
+    /// Gruppen wie `listPage` im Web; leere fehlen, „Gehört“ ist eingeklappt.
+    @ViewBuilder
+    private func groups(_ groups: EpisodeGroups) -> some View {
+        if groups.toHear.isEmpty {
+            Text("Alles gehört. Neue Folgen entstehen aus dem Stapel.")
+                .font(.subheadline)
+                .foregroundStyle(Theme.text3)
+        } else {
+            IngestSectionHeader(title: "Zum Hören", count: groups.toHear.count)
+            cards(groups.toHear)
+        }
+        if !groups.inProgress.isEmpty {
+            IngestSectionHeader(title: "Entsteht", count: groups.inProgress.count)
+            cards(groups.inProgress)
+        }
+        if !groups.transcripts.isEmpty {
+            IngestSectionHeader(title: "Nur Transkript", count: groups.transcripts.count)
+            Text("Audio auf Knopfdruck, aus demselben Skript.")
+                .font(.footnote)
+                .foregroundStyle(Theme.text3)
+            cards(groups.transcripts)
+        }
+        if !groups.heard.isEmpty {
+            Button {
+                toasts.signal(.selection)
+                withAnimation(reduceMotion ? nil : .snappy) { showsHeard.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Text("Gehört")
+                        .font(.headline)
+                        .foregroundStyle(Theme.text2)
+                    Text("\(groups.heard.count)")
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(Theme.text3)
+                    Text(showsHeard ? "verbergen" : "zeigen")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.text3)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.down")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Theme.text3)
+                        .rotationEffect(.degrees(showsHeard ? 180 : 0))
+                        .accessibilityHidden(true)
+                }
+                .padding(.top, 8)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Gehört, \(groups.heard.count)")
+            .accessibilityValue(showsHeard ? "aufgeklappt" : "eingeklappt")
+            .accessibilityAddTraits(.isHeader)
+            if showsHeard {
+                cards(groups.heard)
+            }
+        }
+    }
+
+    private func cards(_ episodes: [Episode]) -> some View {
+        ForEach(episodes) { episode in
+            card(episode)
+                .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.asymmetric(insertion: .move(edge: .top).combined(with: .opacity), removal: .scale(scale: 0.95).combined(with: .opacity)))
         }
     }
 
@@ -147,6 +211,7 @@ struct FolgenList: View {
                 isBusy: busy,
                 isDownloading: downloads.loading.contains(episode.id),
                 play: { play(episode) },
+                markHeard: heardAction(episode),
                 openNote: { path in
                     toasts.signal(.selection)
                     model.open(path: CockpitFormat.notePath(path))
@@ -191,6 +256,13 @@ struct FolgenList: View {
     /// Wunsch an den nativen Player, wie `{type: 'folge', id, titel, art, dauer, groesse}` im Web.
     static func request(for episode: Episode) -> AppModel.EpisodeRequest {
         AppModel.EpisodeRequest(episodeID: episode.id, title: episode.title, kind: episode.kindLabel, seconds: Double(episode.seconds ?? 0), bytes: episode.bytes ?? 0)
+    }
+
+    /// „Als gehört markieren“ bzw. „Doch nicht gehört“; ältere Server kennen keinen Hörstand.
+    private func heardAction(_ episode: Episode) -> (() -> Void)? {
+        guard episode.listen != nil || episode.heardAt != nil else { return nil }
+        let store = store
+        return { Task { await store.markHeard(episode, !episode.isHeard) } }
     }
 
     private func confirmDelete(_ episode: Episode) {

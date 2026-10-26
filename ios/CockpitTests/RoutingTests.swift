@@ -53,7 +53,7 @@ final class RoutingTests: XCTestCase {
     }
 
     func testReadingPagesOpenNatively() {
-        XCTAssertEqual(decide("https://vault.test/lesen"), .reading(.inbox(group: nil)))
+        XCTAssertEqual(decide("https://vault.test/lesen/eingang"), .reading(.inbox(group: nil)))
         XCTAssertEqual(decide("https://vault.test/lesen/eingang?gruppe=ohne"), .reading(.inbox(group: "ohne")))
         XCTAssertEqual(decide("https://vault.test/lesen/stapel?zeit=15"), .reading(.stack(StackQuery(zeit: 15))))
         XCTAssertEqual(decide("https://vault.test/lesen/stapel?sort=kurz&gruppe=g1"), .reading(.stack(StackQuery(sort: "kurz", group: "g1"))))
@@ -66,6 +66,8 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(decide("https://vault.test/lesen/hinzufuegen"), .reading(.add))
         XCTAssertEqual(decide("https://vault.test/lesen/hoeren?zeit=30"), .reading(.listen(zeit: 30)))
         XCTAssertEqual(decide("https://vault.test/lesen/ingest"), .reading(.ingest))
+        XCTAssertEqual(decide("https://vault.test/lesen/weiter"), .reading(.weiter))
+        XCTAssertEqual(decide("https://vault.test/lesen"), .reading(.weiter))
         XCTAssertEqual(decide("https://vault.test/lesen/ingest/doc?id=d1"), .reading(.ingestReview(id: "d1")))
         XCTAssertEqual(decide("https://blatt.test/lesen/stapel"), .external(URL(string: "https://blatt.test/lesen/stapel")!))
     }
@@ -81,6 +83,7 @@ final class RoutingTests: XCTestCase {
     @MainActor
     func testReadingLinksSwitchToTheReadingTab() {
         let model = app()
+        XCTAssertEqual(model.readingSection, .weiter, "Lesen beginnt bei „Weiter“")
         model.open(path: "/lesen/stapel?zeit=15")
         XCTAssertEqual(model.tab, .reading)
         XCTAssertEqual(model.readingSection, .stapel)
@@ -176,7 +179,9 @@ final class RoutingTests: XCTestCase {
     }
 
     func testReadingSections() {
-        XCTAssertEqual(LesenSection.allCases.map(\.label), ["Eingang", "Stapel", "Ingest", "Folgen", "Markiert", "Wiedersehen", "Wissen", "Feeds"])
+        XCTAssertEqual(LesenSection.tabs.map(\.label), ["Weiter", "Eingang", "Stapel", "Folgen"])
+        XCTAssertEqual(LesenSection.more.map(\.label), ["Ingest", "Markiert", "Wiedersehen", "Wissen", "Feeds"])
+        XCTAssertEqual(Set(LesenSection.tabs + LesenSection.more), Set(LesenSection.allCases), "jeder Bereich hat einen Platz")
     }
 
     func testInboxSwipe() {

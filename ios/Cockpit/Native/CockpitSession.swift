@@ -20,6 +20,8 @@ final class CockpitSession {
     let stack: StackStore
     /// Ingest-Übersicht: Zähler der Unternavigation und Stand der Abzeichen in Stapel und Leseansicht.
     let ingest: IngestStore
+    /// „Weiter“: wo jeder Text steht und was als Nächstes geht.
+    let weiter: WeiterStore
     /// Einstellungen mit API-Tokens, Kurzbefehlen und Sicherung; Zustand der Dienste.
     let settings: SettingsStore
     let tokens: TokensStore
@@ -43,6 +45,7 @@ final class CockpitSession {
         inbox = InboxStore(context: context)
         stack = StackStore(context: context)
         ingest = IngestStore(context: context)
+        weiter = WeiterStore(context: context)
         settings = SettingsStore(context: context)
         tokens = TokensStore(context: context)
         shortcuts = ShortcutsStore(context: context)
@@ -100,6 +103,7 @@ final class CockpitSession {
             if inbox.model != nil, inbox.state.isStale || inbox.state.isOffline { await inbox.refresh() }
             if stack.model != nil, stack.state.isStale || stack.state.isOffline { await stack.refresh() }
             if ingest.model != nil, ingest.state.isStale || ingest.state.isOffline { await ingest.refresh() }
+            if weiter.model != nil, weiter.state.isStale || weiter.state.isOffline { await weiter.refresh() }
             if settings.model != nil, settings.state.isStale || settings.state.isOffline { await settings.refresh() }
             if health.model != nil, health.state.isStale || health.state.isOffline { await health.recheck() }
         }

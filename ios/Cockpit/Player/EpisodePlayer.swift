@@ -8,7 +8,8 @@ import UIKit
 /// Spielt eine fertige Folge (`/lesen/folgen`, Podcast, Report, Vorlesen) als MP3 mit `AVPlayer`:
 /// Sperrbildschirm und Kontrollzentrum (Titel, Stelle, Tempo), Fernbedienung (AirPods, CarPlay),
 /// läuft bei gesperrtem Gerät weiter. Die MP3 kommt einmal über `/api/app/folge` in den Cache und
-/// spielt danach auch ohne Netz; die Stelle bleibt je Folge gemerkt.
+/// spielt danach auch ohne Netz; die Stelle bleibt je Folge gemerkt. Dem Server meldet er die Stelle
+/// (höchstens alle 30 s, beim Anhalten und am Ende): Kurz vor Schluss gilt die Folge dort als gehört.
 @MainActor
 @Observable
 final class EpisodePlayer {
@@ -27,6 +28,8 @@ final class EpisodePlayer {
     var position: Double = 0
     var isScrubbing = false
     var message: String?
+    /// Der Server hat die Folge als gehört vermerkt (am Ende oder kurz davor gemeldet).
+    private(set) var isHeard = false
     var tempo: Double {
         didSet {
             defaults.set(tempo, forKey: Player.tempoKey)
@@ -46,6 +49,7 @@ final class EpisodePlayer {
     @ObservationIgnored private var commandTargets: [(MPRemoteCommand, Any)] = []
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
     @ObservationIgnored private var lastSaved = Date.distantPast
+    @ObservationIgnored private var lastReported = Date.distantPast
     @ObservationIgnored private var interrupted = false
     private let log = Logger(subsystem: "dev.rubeen.cockpit", category: "folge")
 
@@ -155,6 +159,7 @@ final class EpisodePlayer {
         player?.pause()
         isPlaying = false
         saveSpot(force: true)
+        report(force: true)
         updateNowPlaying()
     }
 
@@ -198,9 +203,11 @@ final class EpisodePlayer {
             updateNowPlaying()
         }
         saveSpot()
+        report()
     }
 
     private func finished() {
+        report(force: true, ended: true)
         isPlaying = false
         position = 0
         defaults.removeObject(forKey: spotKey)
@@ -216,6 +223,25 @@ final class EpisodePlayer {
             defaults.set(position, forKey: spotKey)
         } else {
             defaults.removeObject(forKey: spotKey)
+        }
+    }
+
+    /// Stand an den Server (`/aktion/lesen/folge/stelle`), höchstens alle 30 s; `force` sofort.
+    /// Still: Ohne Netz oder Anmeldung bleibt es bei der Stelle auf dem Gerät.
+    private func report(force: Bool = false, ended: Bool = false) {
+        guard let api, ended || position > 3 else { return }
+        guard force || Date.now.timeIntervalSince(lastReported) > 30 else { return }
+        lastReported = .now
+        let at = ended ? max(duration, position) : position
+        let length = duration
+        let episodeID = id
+        Task { [weak self] in
+            do {
+                let heard = try await api.reportListening(episodeID: episodeID, position: at, duration: length)
+                if heard { self?.isHeard = true }
+            } catch {
+                self?.log.info("Stelle nicht gemeldet: \(error.localizedDescription, privacy: .public)")
+            }
         }
     }
 

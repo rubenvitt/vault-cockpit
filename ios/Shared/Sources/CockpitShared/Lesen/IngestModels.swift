@@ -565,6 +565,8 @@ public enum IngestAction {
     public static let apply = "/aktion/lesen/ingest/uebernehmen"
     /// `id`, mit `done=1` „ohne Wiki erledigen“.
     public static let discard = "/aktion/lesen/ingest/verwerfen"
+    /// `id`: Einpflanzen (noch einmal) anstoßen.
+    public static let plant = "/aktion/lesen/ingest/einpflanzen"
 }
 
 /// Stand des Ingests in der Leseansicht (`ingest` in `/api/lesen/doc`).

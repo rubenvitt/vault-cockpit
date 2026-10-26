@@ -32,6 +32,8 @@ public final class EpisodesStore {
 
     public var model: EpisodeListModel? { remote.model }
     public var state: LoadState { remote.state }
+    /// Folgen in Gruppen: Zum Hören, Entsteht, Nur Transkript, Gehört.
+    public var groups: EpisodeGroups { EpisodeGroups(model?.items ?? []) }
 
     // MARK: Laden
 
@@ -147,6 +149,40 @@ public final class EpisodesStore {
         busy.insert(episode.id)
         defer { busy.remove(episode.id) }
         guard await actions.run(ReadingAction.episodeIngest, ["id": episode.id]) != nil else { return false }
+        await refresh()
+        return true
+    }
+
+    /// „Als gehört markieren“ (`heard`) bzw. „Doch nicht gehört“: Die Karte wechselt sofort die
+    /// Gruppe, bei Ablehnung zurück. Mit Rückgängig.
+    @discardableResult
+    public func markHeard(_ episode: Episode, _ heard: Bool = true) async -> Bool {
+        guard episode.isDone, let before = remote.model, let index = before.items.firstIndex(where: { $0.id == episode.id }), !busy.contains(episode.id) else { return false }
+        busy.insert(episode.id)
+        defer { busy.remove(episode.id) }
+        remote.model?.items[index].listen = heard ? EpisodeListen.heard : EpisodeListen.new
+        remote.model?.items[index].heardAt = heard ? CockpitFormat.iso(context.now()) : nil
+        if heard { remote.model?.items[index].position = nil }
+        context.toasts.signal(.selection)
+        do {
+            let response = try await actions.send(ReadingAction.episodeHeard, ["id": episode.id, "gehoert": heard ? "1" : "0"])
+            context.toasts.signal(.success)
+            actions.show(response) { [weak self] undo in
+                Task { await self?.replay(undo) }
+            }
+            await refresh()
+            return true
+        } catch {
+            remote.model = before
+            context.report(error)
+            return false
+        }
+    }
+
+    /// Spielt ein Rückgängig ab und lädt neu.
+    @discardableResult
+    public func replay(_ undo: UndoAction) async -> Bool {
+        guard await actions.run(undo.action, undo.fields) != nil else { return false }
         await refresh()
         return true
     }

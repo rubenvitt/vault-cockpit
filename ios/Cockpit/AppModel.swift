@@ -98,7 +98,7 @@ final class AppModel {
     /// Stapel des Reiters „Woche“ (Planen).
     var weekPath: [WeekDestination] = []
     /// Bereich des Reiters „Lesen“ (Unternavigation) und sein Stapel (Leseansicht, Neue Folge).
-    var readingSection: LesenSection = .eingang
+    var readingSection: LesenSection = .weiter
     var readingPath: [ReadingRoute] = []
     /// Woche für „Wiedersehen“ (`/lesen/wiedersehen?woche=`), nil = laufende Woche.
     var reviewWeek: String?
@@ -274,6 +274,9 @@ final class AppModel {
             // Der Player liegt über allen Reitern; der Reiter bleibt.
             listening = ListenRequest(minutes: zeit ?? 15)
             return
+        case .weiter:
+            show(.weiter)
+            if let cockpit { Task { await cockpit.weiter.refresh() } }
         case .inbox(let group):
             show(.eingang)
             if let cockpit { Task { await cockpit.inbox.load(group: group) } }
@@ -431,7 +434,7 @@ final class AppModel {
         SnapshotStore.applicationSupport().removeAll()
         tab = .week
         weekPath = []
-        readingSection = .eingang
+        readingSection = .weiter
         readingPath = []
         reviewWeek = nil
         highlightQuery = HighlightQuery()
