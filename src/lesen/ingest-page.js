@@ -38,10 +38,10 @@ import { jsonReply } from './json.js';
 export const INGEST = '/lesen/ingest';
 export const ingestLink = (id) => `/lesen/ingest/doc?id=${encodeURIComponent(id)}`;
 const STAND = '/lesen/ingest/stand';
-const ENTWERFEN = '/aktion/lesen/ingest/entwerfen';
+export const ENTWERFEN = '/aktion/lesen/ingest/entwerfen';
 const UEBERNEHMEN = '/aktion/lesen/ingest/uebernehmen';
 const VERWERFEN = '/aktion/lesen/ingest/verwerfen';
-const EINPFLANZEN = '/aktion/lesen/ingest/einpflanzen';
+export const EINPFLANZEN = '/aktion/lesen/ingest/einpflanzen';
 const DOC_STATUS = '/aktion/lesen/doc/status';
 
 const BUSY = ['wartet', 'entwirft'];

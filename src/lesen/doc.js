@@ -6,6 +6,7 @@ import { markHighlights, placeHighlights, weiterAt } from './anchor.js';
 import { textBlocks } from './blocks.js';
 import { docJson, highlightJson, jsonReply } from './json.js';
 import { ingestBadge } from './ingest-page.js';
+import { toRead } from './stack.js';
 
 /**
  * Leseansicht `/lesen/doc?id=…` (VCP-71): Lesetext in Leseschrift mit den
@@ -228,7 +229,7 @@ export function docRoutes({ store, asAction, onChange = () => {}, exporter = nul
     const status = (m instanceof Map ? m.get(doc.id) : m?.[doc.id]) ?? null;
     return { status, available: Boolean(ingest.available()?.ok) && ['eingang', 'stapel'].includes(doc.status) };
   };
-  const model = (doc) => ({ highlights: store.listHighlights({ docId: doc.id }), stackDocs: store.list({ status: 'stapel', limit: 30 }), counts: store.counts(), vault: Boolean(exporter), ingest: ingestOf(doc) });
+  const model = (doc) => ({ highlights: store.listHighlights({ docId: doc.id }), stackDocs: toRead(store.list({ status: 'stapel', limit: -1 })).slice(0, 30), counts: store.counts(), vault: Boolean(exporter), ingest: ingestOf(doc) });
 
   return {
     pages: {

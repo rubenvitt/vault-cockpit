@@ -247,7 +247,7 @@ test('Ingest: Unternavigation mit Zahl der bereiten Entwürfe zwischen Stapel un
     ingest.put(a.id, 'bereit', { draft: draftFor('Bereit A') });
     const page = await html('/lesen/eingang');
     const nav = page.match(/<nav class="subnav"[^]*?<\/nav>/)[0];
-    assert.deepEqual([...nav.matchAll(/class="subnav-link"[^>]*>([^<]+)/g)].map((m) => m[1]), ['Eingang', 'Stapel', 'Ingest', 'Folgen', 'Markiert', 'Wiedersehen', 'Wissen', 'Feeds']);
+    assert.deepEqual([...nav.matchAll(/class="subnav-link"[^>]*>([^<]+)/g)].map((m) => m[1]), ['Weiter', 'Eingang', 'Stapel', 'Ingest', 'Folgen', 'Markiert', 'Wiedersehen', 'Wissen', 'Feeds']);
     assert.match(nav, /<a href="\/lesen\/ingest" class="subnav-link">Ingest<span class="subnav-count" data-ingest-count>1<\/span><\/a>/);
     // Ohne bereite Entwürfe bleibt die Zahl versteckt (für die Live-Aktualisierung aber da).
     ingest.rows.get(a.id).status = 'uebernommen';

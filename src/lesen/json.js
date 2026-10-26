@@ -35,6 +35,7 @@ export const docJson = (d) => ({
   savedAt: d.saved_at,
   statusChangedAt: d.status_changed_at ?? null,
   readAt: d.read_at ?? null,
+  heardAt: d.heard_at ?? null,
   archivedAt: d.archived_at ?? null,
   updatedAt: d.updated_at ?? null,
 });

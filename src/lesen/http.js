@@ -2,7 +2,7 @@ import { ActionError } from '../cockpit/actions.js';
 import { FetchError } from './fetch.js';
 import { ReadingError } from './store.js';
 import { saveUrl } from './save.js';
-import { stackRoutes, upNext } from './stack.js';
+import { stackRoutes, toRead, upNext } from './stack.js';
 import { inboxRoutes } from './inbox.js';
 import { feedRoutes } from './feeds-page.js';
 import { addRoutes } from './add.js';
@@ -14,6 +14,7 @@ import { connectionRoutes } from './connections.js';
 import { folgenRoutes } from './folgen-page.js';
 import { ingestRoutes } from './ingest-page.js';
 import { fragenRoutes } from '../fragen/page.js';
+import { weiterRoutes } from './weiter.js';
 
 /**
  * Routen des Bereichs „Lesen“, eingebunden in src/web/http.js (Sitzung, CSRF,
@@ -79,11 +80,13 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
   const folgen = folgenRoutes({ store, episodes, ingest });
   const ingestUi = ingestRoutes({ store, ingest, planter, logger });
   const ask = fragen ? fragenRoutes(fragen) : { pages: {}, actions: {} };
+  // „Weiter“: wo jeder Text steht und was als Nächstes geht; Einstieg in den Bereich.
+  const weiter = weiterRoutes({ store, ingest, planter, episodes, vault: Boolean(exporter) });
   const links = connections ? connectionRoutes({ store, embedCache, logger, ...connections }) : { pages: {}, actions: {} };
 
   return {
     nav: ingest || fragen ? () => ({ ...(ingest ? { ingest: ingest.counts()?.bereit ?? 0 } : {}), ...(fragen ? { fragen: true } : {}) }) : null,
-    offlineDocs: (n) => upNext(store.list({ status: 'stapel', limit: -1 }), n).map((d) => docLink(d.id)),
+    offlineDocs: (n) => upNext(toRead(store.list({ status: 'stapel', limit: -1 })), n).map((d) => docLink(d.id)),
     listen: {
       queue: (zeit) => listenQueue(store, zeit),
       text: (id) => listenText(store, id),
@@ -95,7 +98,8 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
     uploads: { ...add.uploads, ...feeds.uploads },
     pages: {
       ...add.pages,
-      '/lesen': async () => ({ redirect: '/lesen/eingang' }),
+      '/lesen': async () => ({ redirect: '/lesen/weiter' }),
+      ...weiter.pages,
       ...inbox.pages,
       ...stackRoutes({ store, vault: Boolean(exporter), folgen: Boolean(episodes), ingest }).pages,
       ...listenRoutes({ store, speech }).pages,
@@ -110,6 +114,7 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
     },
     actions: {
       ...folgen.actions,
+      ...weiter.actions,
       ...ingestUi.actions,
       ...inbox.actions,
       ...add.actions,

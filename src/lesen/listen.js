@@ -2,7 +2,7 @@ import { esc, assets } from '../web/layout.js';
 import { hidden } from '../web/render.js';
 import { readingPage } from './pages.js';
 import { htmlText } from './anchor.js';
-import { WINDOWS, fitToWindow } from './stack.js';
+import { WINDOWS, fitToWindow, toRead } from './stack.js';
 import { SpeechError } from './tts.js';
 
 /**
@@ -106,13 +106,13 @@ function listenBody(items, zeit, ctx, voice) {
 
 /**
  * Wiedergabeliste für `zeit` Minuten (ohne gültige Angabe 15), auch für die
- * iOS-App (`/api/app/stapel`). Zu Ende gehörte oder gelesene Texte fängt sie
- * nicht noch einmal an.
+ * iOS-App (`/api/app/stapel`). Gelesene oder schon in einer Folge gehörte Texte
+ * (`isRead`) fängt sie nicht noch einmal an.
  */
 export function listenQueue(store, zeit) {
   const n = Number(zeit);
   const minutes = WINDOWS.includes(n) ? n : 15;
-  return { zeit: minutes, items: fitToWindow(store.list({ status: 'stapel', limit: -1 }).filter((d) => d.progress < 1), minutes).items };
+  return { zeit: minutes, items: fitToWindow(toRead(store.list({ status: 'stapel', limit: -1 })), minutes).items };
 }
 
 /** Lesetext und Sätze eines Dokuments für die Sprachausgabe, null ohne Dokument; auch für `/api/app/text`. */
