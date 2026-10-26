@@ -41,6 +41,11 @@ import { EPISODE_LANGUAGES, DEFAULT_EPISODE_LANGUAGE } from './languages.js';
  */
 
 const fmt = new Intl.NumberFormat('de-DE');
+/**
+ * Zeitfenster für „Neue Folge“: wie im Stapel, dazu längere. Podcast und
+ * Report verdichten, also passen mehr Texte hinein, als ihre Länge Lesezeit hat.
+ */
+export const EPISODE_WINDOWS = [...WINDOWS, 120, 240];
 const DESCRIPTIONS = {
   vorlesen: 'Die ganzen Texte nacheinander, eine Erzählerstimme.',
   podcast: 'Claude schreibt ein Gespräch zweier Stimmen über die Texte; das Transkript kommt in den Vault.',
@@ -197,7 +202,7 @@ const kindCost = (kind) => (kind === 'vorlesen' ? 'Kosten nach Textlänge, Gehö
  */
 export function newEpisodeModel(episodes, store, zeitParam) {
   const n = Number(zeitParam);
-  const zeit = WINDOWS.includes(n) ? n : 30;
+  const zeit = EPISODE_WINDOWS.includes(n) ? n : 30;
   // Schon Gelesenes oder in einer Folge Gehörtes nicht noch einmal.
   const { items } = fitToWindow(toRead(store.list({ status: 'stapel', limit: -1 })), zeit);
   const missing = episodes.availability();
@@ -219,14 +224,14 @@ export function newEpisodeModel(episodes, store, zeitParam) {
 
 function newPage(episodes, store, ctx) {
   const { zeit, docs, missing, first, summary, topics, languageLabel } = newEpisodeModel(episodes, store, ctx.url.searchParams.get('zeit'));
-  const picker = `<nav class="chips folge-zeit" aria-label="Zeitfenster">${WINDOWS.map((m) => `<a href="/lesen/folgen/neu?zeit=${m}" class="chip"${m === zeit ? ' aria-current="true"' : ''}>${m} Min.</a>`).join('')}</nav>`;
+  const picker = `<nav class="chips folge-zeit" aria-label="Zeitfenster">${EPISODE_WINDOWS.map((m) => `<a href="/lesen/folgen/neu?zeit=${m}" class="chip"${m === zeit ? ' aria-current="true"' : ''}>${m} Min.</a>`).join('')}</nav>`;
   const step = (nr, title, hint = '') => `<div class="folge-schritt-kopf"><span class="folge-nr" aria-hidden="true">${nr}</span><div><h2>${title}</h2>${hint ? `<p class="meta">${hint}</p>` : ''}</div></div>`;
   if (!docs.length) return `<section class="folge-schritt">${step(1, 'Welche Texte?', 'Aus dem Stapel, passend zur Zeit, die du hast.')}${picker}<p class="empty">Für dieses Zeitfenster passt nichts vom Stapel.</p></section>`;
 
   const texts = docs
     .map(
-      ({ d, chars }) => `<li><label class="folge-textwahl">
-        <input type="checkbox" name="doc" value="${esc(d.id)}" checked data-chars="${chars}">
+      ({ d, chars }, i) => `<li><label class="folge-textwahl">
+        <input type="checkbox" name="doc" value="${esc(d.id)}"${i < MAX_DOCS ? ' checked' : ''} data-chars="${chars}">
         <span class="folge-textwahl-text"><span class="lesen-title">${esc(d.title || d.url)}</span><span class="meta">${esc([`${d.reading_minutes} Min. Lesezeit`, d.site].filter(Boolean).join(' · '))}</span></span>
       </label></li>`,
     )
@@ -250,7 +255,7 @@ function newPage(episodes, store, ctx) {
     ? `<div class="folge-pillen" role="group" aria-label="Themen der Texte">${topics.map((t) => `<label class="folge-pille"><input type="checkbox" name="thema" value="${esc(t.label)}"><span>${esc(t.label)}<span class="meta"> ${t.count}</span></span></label>`).join('')}</div>`
     : '';
 
-  return `<form method="post" action="/aktion/lesen/folge/neu" class="folge-neu" data-folge-neu>
+  return `<form method="post" action="/aktion/lesen/folge/neu" class="folge-neu" data-folge-neu data-max-docs="${MAX_DOCS}">
     ${hidden({ csrf: ctx.write.csrf, back: ctx.write.back })}
     <section class="folge-schritt">
       ${step(1, 'Welche Texte?', 'Aus dem Stapel, passend zur Zeit, die du hast. Abwählen, was nicht hinein soll.')}
@@ -634,7 +639,7 @@ function episodeApi({ store, episodes, ingestOf }) {
         ok: true,
         enabled: true,
         zeit,
-        windows: WINDOWS,
+        windows: EPISODE_WINDOWS,
         docs: docs.map(({ d, chars }) => ({ ...stackItemJson(d), chars })),
         chars: full,
         availability: missing,

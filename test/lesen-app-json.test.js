@@ -348,11 +348,13 @@ test('Lesen-JSON Folgen: Felder, Stand beim Sprechen, Fehler mit Fortsetzen; Neu
 
     ({ body } = await get('/api/lesen/folgen/neu?zeit=30'));
     assert.deepEqual(body.docs.map((d) => [d.id, d.chars]).sort(), [[one.id, 1000], [two.id, 0]].sort(), 'Gehörtes kostet nichts');
-    assert.deepEqual([body.zeit, body.chars, body.defaultKind, body.defaultLength, body.lengths, body.maxDocs, body.spokenCharsPerMinute], [30, 1000, 'vorlesen', 10, [5, 10, 20], 20, 900]);
+    assert.deepEqual([body.zeit, body.chars, body.defaultKind, body.defaultLength, body.lengths, body.maxDocs, body.spokenCharsPerMinute], [30, 1000, 'vorlesen', 10, [5, 10, 20, 30], 40, 900]);
     assert.deepEqual(body.summary, { main: 'Vorlesen · 2 Texte · etwa 1 Min.', cost: 'rund 1.000 Zeichen bei ElevenLabs' });
     assert.deepEqual(Object.keys(body.summaries), ['vorlesen']);
     ({ body } = await get('/api/lesen/folgen/neu?zeit=5'));
     assert.deepEqual([body.zeit, body.docs, body.chars], [5, [], 0]);
+    ({ body } = await get('/api/lesen/folgen/neu?zeit=240'));
+    assert.deepEqual([body.zeit, body.windows], [240, [5, 15, 30, 60, 120, 240]], 'Podcast und Report verdichten, also auch längere Zeitfenster');
   }, { episodes: fakeEpisodes({ list, heard }) });
 
   await withApp(async ({ get }) => {

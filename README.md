@@ -706,18 +706,21 @@ meldet die Seite das einmal und liest mit der Gerätestimme weiter.
 **Folgen** (`/lesen/folgen`, im Stapel „Folge erzeugen“): eine MP3 aus Texten des
 Stapels, im Hintergrund erzeugt. Auf `/lesen/folgen/neu?zeit=30` stehen die Texte
 des Zeitfensters zum Abhaken, die Art und die geschätzten Zeichen bei ElevenLabs.
+Neben den Fenstern des Stapels gibt es 120 und 240 Minuten: Podcast und Report
+verdichten, also passen mehr Texte hinein, als die Folge Minuten hat (höchstens
+40 Texte; Claude bekommt bis zu 300.000 Zeichen, gerecht auf die Texte verteilt).
 
 - **Vorlesen**: die ganzen Texte nacheinander mit der Stimme vom Vorlesen, je Text
   Titel und Quelle vorweg. Ohne Claude. Satz für Satz mit denselben Anfragen wie
   beim Streamen, also über denselben Cache: Was schon gehört oder in der App
   offline geladen wurde, kostet nichts mehr (die Schätzung rechnet es heraus),
   und was die Folge erzeugt, ist danach beim Streamen gratis.
-- **Podcast** (5, 10 oder 20 Minuten): Claude schreibt ein Gespräch, A moderiert,
+- **Podcast** (5, 10, 20 oder 30 Minuten): Claude schreibt ein Gespräch, A moderiert,
   B ordnet ein; ElevenLabs spricht es mit Text-to-Dialogue (`eleven_v3`, höchstens
   1800 Zeichen je Anfrage, die Abschnitte hängen in einer MP3 hintereinander).
   Stimmen unter **Einstellungen → Vorlesen → Folgen** (Standard: Moderation = Stimme
   vom Vorlesen, Gast „Sarah“ `EXAVITQu4vr4xnSDxMaL`).
-- **Report** (5, 10 oder 20 Minuten): Claude schreibt einen Bericht mit Überblick,
+- **Report** (5, 10, 20 oder 30 Minuten): Claude schreibt einen Bericht mit Überblick,
   Kernaussagen je Text, Querverbindungen und offenen Fragen, dazu eine
   Sprechfassung; eine Stimme liest sie.
 
