@@ -985,6 +985,16 @@ html[data-read-sans] .lesen-text :is(h1, h2, h3, h4, h5, h6) { font-family: var(
 .folge-pille input:disabled + span { opacity: .45; cursor: not-allowed; }
 .folge-pille .meta { font-weight: 400; }
 .folge-fokus input { width: 100%; }
+/* Folge zu einem Thema (/lesen/folgen/thema): Thema, Ziele, Internet, Minuten frei */
+.thema-feld { display: grid; gap: 6px; }
+.thema-feld > span { font-weight: 600; }
+.thema-feld textarea { resize: vertical; line-height: 1.45; }
+.folge-check { display: flex; align-items: flex-start; gap: var(--s-2); cursor: pointer; }
+.folge-check input { flex: none; width: 20px; height: 20px; margin: 2px 0 0; }
+.folge-minuten { grid-template-columns: auto 7em; align-items: center; justify-content: start; gap: var(--s-3); }
+.folge-minuten > span { font-weight: 500; color: var(--text-2); }
+.folge-thema .folge-segmente { display: flex; flex-wrap: wrap; border-radius: var(--r-lg); }
+.folge-thema .folge-segmente span { padding: 8px 14px; white-space: nowrap; }
 
 .folge-los { position: sticky; z-index: 4; bottom: calc(var(--unten) + var(--s-3) + env(safe-area-inset-bottom)); display: grid; grid-template-columns: 1fr auto; align-items: center;
   gap: var(--s-2) var(--s-4); padding: var(--s-4) var(--s-5); border: 1px solid var(--accent-line); border-radius: var(--r-lg);

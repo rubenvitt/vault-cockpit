@@ -33,6 +33,7 @@ import { createSynthesisEvidence } from './lesen/synthesis-evidence.js';
 import { createSpeech, createSpeechCache } from './lesen/tts.js';
 import { createClaudeWriter } from './lesen/claude.js';
 import { createEpisodes } from './lesen/folgen.js';
+import { createResearchVault } from './lesen/research-mcp.js';
 import { createIngest, createNightlyClock } from './lesen/ingest.js';
 import { createPlanter } from './lesen/einpflanzen.js';
 import { createOidcLogin } from './web/oidc.js';
@@ -342,6 +343,8 @@ const cockpitActions = createCockpitActions({
 // Einstellungen, Claude über die CLI mit CLAUDE_CODE_OAUTH_TOKEN; die MP3s und
 // der Stand liegen unter /data/folgen. Podcast und Report kommen als Transkript
 // unter 30-ressourcen/audio-reports in den Vault, die Texte bekommen „gehört“.
+// Zu einem Thema recherchiert Claude als Agent im ganzen Vault (eigener MCP-Server
+// je Lauf auf 127.0.0.1, nur lesend, ohne vertrauliche Ordner) und im Internet.
 const episodes = createEpisodes({
   dir: process.env.FOLGEN_DIR ?? '/data/folgen',
   store: reading,
@@ -357,6 +360,7 @@ const episodes = createEpisodes({
   },
   sourceNote: (docId) => readingExport.notePath(docId),
   heard: (docIds) => readingExport.heard(docIds),
+  research: createResearchVault({ index, semantic: currentSemantic, layoutHint: POLICY.layoutHint }),
   // Als Funktion: Eine geänderte Zeitzone oder Sprache gilt ohne Neustart.
   tz: () => cockpitSettings.get().tz,
   language: () => cockpitSettings.get().episodes.language,
@@ -525,7 +529,7 @@ app.listen(PORT, '0.0.0.0', () => {
   const e = cockpitSettings.get().embed;
   console.log(`  Semantik    : ${e ? `${e.model} über ${e.url}` : 'aus (Einstellungen → Embeddings)'}`);
   const t = cockpitSettings.get().tts;
-  console.log(`  Folgen      : ${process.env.CLAUDE_CODE_OAUTH_TOKEN ? 'Vorlesen, Podcast und Report' : 'nur Vorlesen (Podcast und Report brauchen CLAUDE_CODE_OAUTH_TOKEN)'}`);
+  console.log(`  Folgen      : ${process.env.CLAUDE_CODE_OAUTH_TOKEN ? 'Vorlesen, Podcast und Report, auch zu einem Thema mit Recherche im Vault und Internet' : 'nur Vorlesen (Podcast und Report brauchen CLAUDE_CODE_OAUTH_TOKEN)'}`);
   const ig = cockpitSettings.get().ingest;
   console.log(`  Ingest      : ${ingest.available().ok ? `Entwürfe per Knopf${ig.nightly ? `, nachts um ${ig.hour} Uhr (höchstens ${ig.limit})` : ''}, Modell ${ig.model}${ig.agent ? ', danach einpflanzen' : ''}` : 'aus (braucht CLAUDE_CODE_OAUTH_TOKEN)'}`);
   console.log(`  Vorlesen    : ${t ? `ElevenLabs (${t.model}, Stimme ${t.voice})` : 'Gerätestimme (Einstellungen → Vorlesen)'}`);

@@ -25,6 +25,13 @@ import { join } from 'node:path';
  * Befehle, ein frischer Konfigurationsordner (`CLAUDE_CONFIG_DIR`) statt
  * Einstellungen und CLAUDE.md des Nutzers. `--safe-mode` geht hier nicht: Es
  * schaltet auch Server aus `--mcp-config` ab.
+ *
+ * `write` mit `tools` oder `mcp` (Recherche für Themen-Folgen und Fragen,
+ * src/lesen/folgen.js, src/fragen/chat.js): wie `agent`, dazu die genannten
+ * eingebauten Werkzeuge (etwa WebSearch und WebFetch) und alle Werkzeuge des
+ * MCP-Servers (`mcp`: `{ name, config }`, der nur lesende Vault-Zugang aus
+ * src/lesen/research-mcp.js), keine Einstellungsdateien (`--setting-sources ""`)
+ * und auf Wunsch ein eigener Zeitrahmen (`timeoutMs`).
  */
 
 export class WriterError extends Error {}
@@ -47,9 +54,33 @@ export function createClaudeWriter({ token = process.env.CLAUDE_CODE_OAUTH_TOKEN
     return out;
   }
 
-  /** `{ system, prompt, input, schema }` → Objekt nach `schema` (JSON Schema). */
-  async function write({ system, prompt, input, schema }) {
-    return invoke({ input, args: () => [...common({ system, prompt, schema }), '--tools', '', '--safe-mode', '--strict-mcp-config'] });
+  /**
+   * `{ system, prompt, input, schema }` → Objekt nach `schema` (JSON Schema).
+   * Optional `tools` (eingebaute Werkzeuge), `mcp` (`{ name, config }`: ein
+   * Server wie in `mcpServers`) und `timeoutMs` für diesen Lauf.
+   */
+  async function write({ system, prompt, input, schema, tools = [], mcp = null, timeoutMs: limit = timeoutMs }) {
+    if (!tools.length && !mcp) return invoke({ input, limit, args: () => [...common({ system, prompt, schema }), '--tools', '', '--safe-mode', '--strict-mcp-config'] });
+    const name = String(mcp?.name ?? 'vault');
+    if (!/^[a-z][a-z0-9_-]*$/.test(name)) throw new WriterError(`Ungültiger Name des MCP-Servers „${name}“`);
+    return invoke({
+      input,
+      limit,
+      env: (cwd) => ({ CLAUDE_CONFIG_DIR: join(cwd, '.claude-config') }),
+      args: (cwd) => {
+        const config = join(cwd, 'mcp.json');
+        if (mcp) writeFileSync(config, JSON.stringify({ mcpServers: { [name]: mcp.config } }), { mode: 0o600 });
+        return [
+          ...common({ system, prompt, schema }),
+          '--tools', tools.join(','),
+          ...(mcp ? ['--mcp-config', config] : []),
+          '--strict-mcp-config',
+          '--allowedTools', [...tools, ...(mcp ? [`mcp__${name}`] : [])].join(','),
+          '--setting-sources', '',
+          '--disable-slash-commands',
+        ];
+      },
+    });
   }
 
   /**
@@ -82,7 +113,7 @@ export function createClaudeWriter({ token = process.env.CLAUDE_CODE_OAUTH_TOKEN
     return ['-p', prompt, '--output-format', 'json', '--json-schema', JSON.stringify(schema), '--system-prompt', system, '--permission-mode', 'dontAsk', '--no-session-persistence', ...(m ? ['--model', m] : [])];
   }
 
-  async function invoke({ input, args: argsFor, env: envFor = () => ({}) }) {
+  async function invoke({ input, args: argsFor, env: envFor = () => ({}), limit = timeoutMs }) {
     if (!token) throw new WriterError('Kein Claude-Zugang: CLAUDE_CODE_OAUTH_TOKEN fehlt (Token aus `claude setup-token`)');
     // Leeres Verzeichnis: kein Projekt, kein CLAUDE.md in der Nähe.
     const cwd = mkdtempSync(join(tmpdir(), 'cockpit-claude-'));
@@ -101,8 +132,8 @@ export function createClaudeWriter({ token = process.env.CLAUDE_CODE_OAUTH_TOKEN
         let size = 0;
         const timer = setTimeout(() => {
           child.kill('SIGKILL');
-          reject(new WriterError(`Claude hat nach ${Math.round(timeoutMs / 60_000)} Minuten nicht geantwortet`));
-        }, timeoutMs);
+          reject(new WriterError(`Claude hat nach ${Math.round(limit / 60_000)} Minuten nicht geantwortet`));
+        }, limit);
         child.stdout.on('data', (b) => {
           size += b.length;
           if (size <= LIMIT) out.push(b);

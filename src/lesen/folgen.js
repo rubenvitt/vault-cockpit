@@ -41,6 +41,17 @@ import { EPISODE_LANGUAGES, DEFAULT_EPISODE_LANGUAGE, episodeLanguage } from './
  * (Status `transkript`, kostet bei ElevenLabs nichts); `speak` macht später
  * aus Claudes gesichertem Skript das Audio, ohne Claude noch einmal zu fragen.
  *
+ * **Zu einem Thema** (Podcast oder Report, `createTopic`): statt Texten aus dem
+ * Stapel ein Thema, auf Wunsch Ziele oder Anlass, und eine Länge von 5 bis 240
+ * Minuten. Claude recherchiert erst als Agent im ganzen Vault (nur lesend, ohne
+ * Vertrauliches, src/lesen/research-mcp.js) und, wenn gewünscht, im Internet,
+ * und liefert ein Dossier mit Quellen und einen Kapitelplan
+ * (`<id>.recherche.json`). Dann schreibt Claude Kapitel für Kapitel, ohne
+ * Werkzeuge, nur aus dem Dossier; jedes fertige Kapitel liegt sofort im Skript.
+ * So gehen auch Folgen von Stunden, und nach einem Fehler schreibt Claude nur,
+ * was fehlt. Das Transkript bekommt Überblick, Kapitel, Dossier und Quellen
+ * (Wikilinks auf die gelesenen Notizen, Webseiten als Links).
+ *
  * Claude läuft über die CLI mit dem Abo (src/lesen/claude.js). Die Folgen
  * liegen unter `dir` (`folgen.json`, je Folge `<id>.mp3`), es läuft immer nur
  * eine. Nichts Bezahltes geht verloren: Claudes Skript liegt als
@@ -66,6 +77,20 @@ export const DEFAULT_STYLE = 'ausgewogen';
 export const MAX_TOPICS = 5;
 export const MAX_FOCUS = 200;
 const TOPIC_CHARS = 60;
+/** Themen-Folgen: Länge frei zwischen diesen Minuten, Vorschläge für die Auswahl. */
+export const TOPIC_MINUTES = { min: 5, max: 240 };
+export const TOPIC_LENGTHS = [15, 30, 60, 90, 120];
+/** Arten, die es zu einem Thema gibt. */
+export const TOPIC_KINDS = ['podcast', 'report'];
+// Kapitel einer Themen-Folge: so viele Minuten höchstens je Kapitel, so viele Kapitel höchstens.
+const CHAPTER_MINUTES = 20;
+const MAX_CHAPTERS = 30;
+// So viel vom Dossier geht in jedes Kapitel, so viel Ende des vorigen Kapitels für den Anschluss.
+const DOSSIER_INPUT = 150_000;
+const CARRY_CHARS = 1500;
+// Recherche als Agent im Vault und im Netz braucht länger als das Schreiben.
+const RESEARCH_TIMEOUT_MS = 45 * 60_000;
+const WEB_TOOLS = ['WebSearch', 'WebFetch'];
 // Gesprochenes Deutsch: rund 150 Wörter zu 6 Zeichen in der Minute.
 export const CHARS_PER_MINUTE = 900;
 export const MAX_DOCS = 20;
@@ -80,7 +105,7 @@ const TOTAL_INPUT = 300_000;
 export const DEFAULT_NOTE_FOLDER = '30-ressourcen/audio-reports';
 // Länge des Titels im Dateinamen.
 const SLUG_CHARS = 60;
-const STATES = { wartet: 'wartet', schreibt: 'Claude schreibt', spricht: 'wird gesprochen', transkript: 'Transkript fertig', fertig: 'fertig', fehler: 'Fehler' };
+const STATES = { wartet: 'wartet', recherchiert: 'Claude recherchiert', schreibt: 'Claude schreibt', spricht: 'wird gesprochen', transkript: 'Transkript fertig', fertig: 'fertig', fehler: 'Fehler' };
 /** `mp3_44100_128` (src/lesen/tts.js) hat eine feste Bitrate: 16 000 Bytes je Sekunde. */
 export const BYTES_PER_SECOND = 16_000;
 
@@ -316,6 +341,169 @@ function reportJob(docs, minutes, options) {
   };
 }
 
+const topicSystem = (language) =>
+  [
+    `Du arbeitest auf ${EPISODE_LANGUAGES[episodeLanguage(language)]} für den Menschen, dem dieser Obsidian-Vault gehört, und sprichst ihn mit du an. Er hört das Ergebnis unterwegs, etwa im Auto.`,
+    'Du erfindest nichts. Was nicht aus seinem Vault stammt, sondern aus dem Internet, kennzeichnest du als extern. Lücken und Widersprüche sprichst du offen an.',
+    'Du lieferst ausschließlich das verlangte JSON.',
+  ].join(' ');
+
+/** Ziele, Anlass, Schwerpunkte als Zeile für Claude, sonst nichts. */
+const goalLine = (goal) => (goal ? `Ziele, Anlass oder Schwerpunkte, die er dazu genannt hat: ${goal}` : 'Ziele oder Anlass hat er nicht genannt; finde selbst heraus, was ihn an dem Thema gerade beschäftigt.');
+
+/** Wie viele Kapitel ungefähr: eins bis zwölf Minuten, sonst eins je etwa zwölf Minuten. */
+export function chapterHint(minutes) {
+  if (minutes <= 12) return 'ein Kapitel';
+  const n = Math.min(MAX_CHAPTERS, Math.max(2, Math.round(minutes / 12)));
+  return `etwa ${n} Kapitel, keins länger als ${CHAPTER_MINUTES} Minuten`;
+}
+
+function researchJob(ep) {
+  const reads = Math.min(60, Math.max(8, Math.round(ep.minutes / 2)));
+  return {
+    system: topicSystem(ep.language),
+    prompt: [
+      `Recherchiere für einen ${KINDS[ep.kind]} von etwa ${ep.minutes} Minuten zum Thema: ${ep.topic}`,
+      goalLine(ep.goal),
+      'Arbeite zuerst seinen ganzen Vault durch, mit den Werkzeugen mcp__vault__vault_search, vault_read, vault_links, vault_similar und vault_list: Projekte, Lebensbereiche, Ressourcen, Wiki, Tagesnotizen, Reviews und Archiv.',
+      `Such mit mehreren Formulierungen und Synonymen, lies die einschlägigen Notizen ganz, folge ihren Links und ähnlichen Notizen. Je länger die Folge, desto gründlicher: lies rund ${reads} Notizen, wenn der Vault so viel hergibt.`,
+      ep.web
+        ? 'Ergänze danach mit WebSearch und WebFetch, was der Vault nicht hat: aktuelle Fakten, Forschung, Gegenpositionen, Beispiele. Suchanfragen ans Internet enthalten nie persönliche Details aus dem Vault (Namen, Gesundheit, Finanzen, Arbeitgeber, Beziehungen), nur das allgemeine Thema.'
+        : 'Nur der Vault, kein Internet.',
+      'Liefere:',
+      '- `title`: Titel der Folge, höchstens 100 Zeichen.',
+      '- `summary`: zwei bis vier Sätze Überblick für die Notiz.',
+      '- `dossier`: Markdown ohne Überschrift erster Ordnung: die Befunde nach Unterthemen, jede Aussage mit Quellenkürzel wie [V3] (Vault) oder [W2] (Web), kurze wörtliche Zitate, wo sie tragen, Widersprüche, Entwicklungen über die Zeit und offene Fragen. Ausführlich genug, dass sich daraus die ganze Folge schreiben lässt, ohne noch einmal nachzusehen.',
+      `- \`chapters\`: der Kapitelplan, ${chapterHint(ep.minutes)}, die Minuten zusammen etwa ${ep.minutes}; je Kapitel \`title\`, \`minutes\` und \`points\` (was drankommt, mit Quellenkürzeln). Das erste Kapitel eröffnet, das letzte schließt mit zwei oder drei Gedanken zum Mitnehmen.`,
+      '- `sources`: alle Quellen mit `id` (V1, V2 … für Notizen, W1, W2 … fürs Web), `title`, bei Notizen `path` genau wie im Vault, bei Webseiten `url`.',
+      ...languageLine(ep.language),
+    ].join('\n'),
+    schema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['title', 'summary', 'dossier', 'chapters', 'sources'],
+      properties: {
+        title: { type: 'string' },
+        summary: { type: 'string' },
+        dossier: { type: 'string' },
+        chapters: {
+          type: 'array',
+          minItems: 1,
+          items: { type: 'object', additionalProperties: false, required: ['title', 'minutes', 'points'], properties: { title: { type: 'string' }, minutes: { type: 'number' }, points: { type: 'string' } } },
+        },
+        sources: {
+          type: 'array',
+          items: { type: 'object', additionalProperties: false, required: ['id', 'title'], properties: { id: { type: 'string' }, title: { type: 'string' }, path: { type: 'string' }, url: { type: 'string' } } },
+        },
+      },
+    },
+  };
+}
+
+/**
+ * Claudes Recherche in feste Form: Kapitel mit Minuten, die zusammen die
+ * gewünschte Länge ergeben (je mindestens 2), höchstens `MAX_CHAPTERS`;
+ * Vault-Quellen nur, wenn Claude die Notiz auch gelesen hat (`read`), sonst
+ * alle gelesenen; Webquellen nur mit http(s)-Adresse und nur, wenn im Internet
+ * recherchiert werden durfte (`web`).
+ */
+export function normalizeResearch(raw, { minutes, topic, read = [], web: online = true }) {
+  const text = (v) => String(v ?? '').trim();
+  let chapters = (Array.isArray(raw?.chapters) ? raw.chapters : [])
+    .map((c) => ({ title: cleanTitle(c?.title, ''), minutes: Math.max(1, Number(c?.minutes) || 0), points: text(c?.points) }))
+    .filter((c) => c.title)
+    .slice(0, MAX_CHAPTERS);
+  if (!chapters.length) chapters = [{ title: cleanTitle(topic, 'Thema'), minutes, points: '' }];
+  const sum = chapters.reduce((n, c) => n + c.minutes, 0);
+  chapters = chapters.map((c) => ({ ...c, minutes: Math.max(2, Math.round((c.minutes / sum) * minutes)) }));
+  const known = new Set(read);
+  const strip = (p) => text(p).replace(/^\/+/, '');
+  const withMd = (p) => (/\.md$/i.test(p) ? p : `${p}.md`);
+  const all = Array.isArray(raw?.sources) ? raw.sources : [];
+  const vault = [];
+  const web = [];
+  for (const s of all) {
+    const id = text(s?.id).slice(0, 10);
+    const title = text(s?.title).slice(0, 200);
+    const path = strip(s?.path);
+    const hit = path && (known.has(path) ? path : known.has(withMd(path)) ? withMd(path) : null);
+    if (hit && !vault.some((v) => v.path === hit)) vault.push({ id, title: title || hit, path: hit });
+    else if (!path && online && /^https?:\/\/\S+$/i.test(text(s?.url)) && !web.some((w) => w.url === text(s.url))) web.push({ id, title: title || text(s.url), url: text(s.url) });
+  }
+  if (!vault.length) for (const p of read) vault.push({ id: '', title: p.replace(/^.*\//, '').replace(/\.md$/i, ''), path: p });
+  return {
+    title: cleanTitle(raw?.title, cleanTitle(topic, 'Thema')),
+    summary: text(raw?.summary),
+    dossier: text(raw?.dossier),
+    chapters,
+    sources: { vault, web },
+  };
+}
+
+/** Dossier und Quellen für jedes Kapitel über stdin. */
+function dossierInput(research) {
+  const src = [
+    ...research.sources.vault.map((s) => `${s.id ? `[${s.id}] ` : ''}${s.title} (Notiz im Vault)`),
+    ...research.sources.web.map((s) => `${s.id ? `[${s.id}] ` : ''}${s.title} (extern, ${s.url})`),
+  ].join('\n');
+  return `<dossier>\n${research.dossier.slice(0, DOSSIER_INPUT)}\n</dossier>\n\n<quellen>\n${src}\n</quellen>`;
+}
+
+/** Ein Kapitel schreiben, ohne Werkzeuge, aus dem Dossier; `before`: Ende des vorigen Kapitels. */
+function chapterJob(ep, research, i, before) {
+  const ch = research.chapters[i];
+  const n = research.chapters.length;
+  const chars = ch.minutes * CHARS_PER_MINUTE;
+  const plan = research.chapters.map((c, k) => `${k + 1}. ${c.title} (${c.minutes} Min.)${k === i ? '  ← jetzt' : ''}`).join('\n');
+  const place =
+    n === 1
+      ? 'Es ist die ganze Folge: Eröffne kurz, führe durch das Thema und schließ mit zwei oder drei Gedanken zum Mitnehmen.'
+      : i === 0
+        ? 'Es ist das erste Kapitel: Eröffne die Folge, sag kurz, worum es geht und was kommt. Keine Verabschiedung.'
+        : i === n - 1
+          ? 'Es ist das letzte Kapitel: Knüpf an das vorige an, führ zusammen und schließ mit zwei oder drei Gedanken zum Mitnehmen. Keine neue Begrüßung.'
+          : 'Es ist ein Kapitel mittendrin: Knüpf an das vorige an, keine Begrüßung, keine Verabschiedung.';
+  const common = [
+    `Folge „${research.title}“ zum Thema: ${ep.topic}`,
+    goalLine(ep.goal),
+    `Kapitelplan:\n${plan}`,
+    `Schreib jetzt Kapitel ${i + 1} von ${n}: „${ch.title}“, etwa ${ch.minutes} Minuten, also rund ${chars} Zeichen gesprochener Text.`,
+    ch.points && `Was drankommt: ${ch.points}`,
+    place,
+    before && `So endete das vorige Kapitel:\n${before}`,
+    'Grundlage ist allein das Dossier auf stdin. Sag beim Sprechen, woher etwas kommt (aus deinen Notizen, aus dem Wiki, aus einer Quelle im Netz), ohne Quellenkürzel vorzulesen.',
+    'Gesprochene Sprache: kurze Sätze, keine Aufzählungen, kein Markdown, keine Links.',
+    ...languageLine(ep.language),
+  ].filter(Boolean);
+  if (ep.kind === 'podcast') {
+    return {
+      system: topicSystem(ep.language),
+      prompt: [
+        ...common,
+        'Ein Gespräch zweier Stimmen: A moderiert, führt durch, fragt nach und fasst zusammen. B ordnet ein, erklärt Zusammenhänge und widerspricht, wo das Material es hergibt. Wechselt euch oft ab, kein Zug länger als etwa 600 Zeichen.',
+        'Erlaubt sind sparsam Regieanweisungen in eckigen Klammern auf Englisch, z. B. [laughs], [thoughtful], [curious]; sonst nichts in Klammern.',
+      ].join('\n\n'),
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['turns'],
+        properties: { turns: { type: 'array', minItems: 2, items: { type: 'object', additionalProperties: false, required: ['speaker', 'text'], properties: { speaker: { type: 'string', enum: ['A', 'B'] }, text: { type: 'string' } } } } },
+      },
+    };
+  }
+  return {
+    system: topicSystem(ep.language),
+    prompt: [...common, 'Eine Stimme erzählt, ruhig und klar, wie ein guter Radiobeitrag. Ohne den Kapiteltitel am Anfang, den sagt das Cockpit an.'].join('\n\n'),
+    schema: { type: 'object', additionalProperties: false, required: ['spoken'], properties: { spoken: { type: 'string' } } },
+  };
+}
+
+/** Ende eines Kapitels als Anschluss für das nächste. */
+function chapterTail(chapter) {
+  const text = chapter.turns ? chapter.turns.map((t) => `${t.speaker}: ${t.text}`).join('\n') : (chapter.spoken ?? '');
+  return text.length > CARRY_CHARS ? `…${text.slice(-CARRY_CHARS)}` : text;
+}
+
 /** Themen des Schwerpunkts: getrimmt, ohne Doppelte und Zeilenumbrüche, höchstens `MAX_TOPICS`. */
 export function cleanTopics(list) {
   const seen = new Set();
@@ -349,6 +537,8 @@ const cleanTitle = (t, fallback) => String(t ?? '').replace(/[\\/\r\n]+/g, ' ').
  *   `language`: Sprache von Podcast und Report (`EPISODE_LANGUAGES`, sonst
  *   Deutsch), ebenso als Wert oder Funktion.
  * - `provider(cfg)`: ElevenLabs-Client (Tests ersetzen ihn).
+ * - `research`: Vault-Zugang für Claudes Recherche (src/lesen/research-mcp.js,
+ *   `{ open() }`); ohne gibt es keine Folgen zu einem Thema.
  *
  * `createNote`, `sourceNote` und `heard` sind optional: Ohne sie gibt es keine
  * Notiz, keine Wikilinks bzw. keinen Vermerk.
@@ -367,6 +557,7 @@ export function createEpisodes({
   tz = null,
   language = null,
   provider = (cfg) => createElevenLabs(cfg),
+  research = null,
   logger = console,
   now = () => new Date(),
 }) {
@@ -389,22 +580,32 @@ export function createEpisodes({
   const find = (id) => episodes.find((e) => e.id === id) ?? null;
   const audioPath = (id) => join(dir, `${id}.mp3`);
   const scriptPath = (id) => join(dir, `${id}.skript.json`);
+  const researchPath = (id) => join(dir, `${id}.recherche.json`);
 
   /** Claudes Antwort, sobald sie da ist: Ein zweiter Versuch fragt Claude nicht noch einmal. */
-  function loadScript(id) {
+  function loadJson(path) {
     try {
-      return JSON.parse(readFileSync(scriptPath(id), 'utf8'));
+      return JSON.parse(readFileSync(path, 'utf8'));
     } catch {
       return null;
     }
   }
-  function saveScript(id, script) {
+  function saveJson(path, value) {
     mkdirSync(dir, { recursive: true });
-    writeFileSync(`${scriptPath(id)}.tmp`, JSON.stringify(script), { mode: 0o600 });
-    renameSync(`${scriptPath(id)}.tmp`, scriptPath(id));
+    writeFileSync(`${path}.tmp`, JSON.stringify(value), { mode: 0o600 });
+    renameSync(`${path}.tmp`, path);
   }
-  /** Lässt sich ohne Claude fortsetzen: Vorlesen immer, sonst mit gesichertem Skript. */
-  const resumable = (ep) => ep.kind === 'vorlesen' || existsSync(scriptPath(ep.id));
+  const loadScript = (id) => loadJson(scriptPath(id));
+  const saveScript = (id, script) => saveJson(scriptPath(id), script);
+  /**
+   * Lässt sich ohne Claude fortsetzen: Vorlesen immer, sonst mit gesichertem
+   * Skript; bei einem Thema erst, wenn alle Kapitel geschrieben sind.
+   */
+  const resumable = (ep) => {
+    if (ep.kind === 'vorlesen') return true;
+    if (ep.source === 'thema') return loadScript(ep.id)?.complete === true;
+    return existsSync(scriptPath(ep.id));
+  };
 
   function update(ep, fields) {
     Object.assign(ep, fields, { updated_at: now().toISOString() });
@@ -418,6 +619,8 @@ export function createEpisodes({
     const missingClaude = claude ? null : 'Podcast und Report brauchen Claude: CLAUDE_CODE_OAUTH_TOKEN im Deployment (Token aus `claude setup-token`)';
     return { vorlesen: missingVoice, podcast: missingVoice ?? missingClaude, report: missingVoice ?? missingClaude };
   }
+  /** Was einer Folge zu einem Thema fehlt, sonst null; erst nur das Transkript (`audio` false) braucht keine Stimme. */
+  const topicMissing = (audio = true) => missingFor('report', audio) ?? (research ? null : 'Folgen zu einem Thema brauchen den Vault-Zugang für die Recherche');
 
   /** Was fehlt, um `kind` anzulegen: Erst nur das Transkript braucht keine Stimme, nur Claude. */
   function missingFor(kind, audio = true) {
@@ -467,19 +670,52 @@ export function createEpisodes({
 
   async function writeNote(ep, docs, title, body) {
     if (ep.note || !createNote) return;
-    const str = (v) => JSON.stringify(String(v));
     const date = today();
-    const label = (d) => String(d.title || d.url).replace(/[[\]|\r\n]+/g, ' ').trim();
-    const sources = docs.map((d) => ({ d, path: sourceNote?.(d.id)?.replace(/\.md$/i, '') ?? null }));
-    const links = sources.filter((s) => s.path).map((s) => `  - ${str(`[[${s.path}]]`)}`);
+    const sources = docs.map((d) => ({ title: d.title || d.url, path: sourceNote?.(d.id) ?? null, url: d.url }));
+    const line = `${KINDS[ep.kind]} aus dem Lesestapel, ${date}, ${docs.length} ${docs.length === 1 ? 'Text' : 'Texte'} (Cockpit)`;
+    await saveNote(ep, { title, date, line, body, sources });
+  }
+
+  /**
+   * Transkript einer Themen-Folge: Thema, Ziele und Internet im Frontmatter,
+   * Überblick, Kapitel, das Dossier der Recherche und alle Quellen.
+   */
+  async function writeTopicNote(ep, research, chapters) {
+    if (ep.note || !createNote) return;
+    const date = today();
+    const { vault, web } = research.sources;
+    const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+    const line = `${KINDS[ep.kind]} zum Thema, ${date}, ${count(chapters.length, 'Kapitel', 'Kapitel')}, Recherche in ${count(vault.length, 'Notiz', 'Notizen')}${ep.web ? ` und ${count(web.length, 'Webquelle', 'Webquellen')}` : ''} (Cockpit)`;
+    const body = [
+      ep.goal && `> [!note] Ziele und Anlass\n${ep.goal.split(/\r?\n/).map((l) => `> ${l}`).join('\n')}`,
+      research.summary && `## Überblick\n\n${research.summary}`,
+      ...chapters,
+      research.dossier && `## Recherche\n\n${research.dossier}`,
+    ].filter(Boolean).join('\n\n');
+    const sources = [...vault.map((v) => ({ title: v.id ? `${v.id} ${v.title}` : v.title, path: v.path })), ...web.map((w) => ({ title: w.id ? `${w.id} ${w.title}` : w.title, url: w.url, external: true }))];
+    const front = [`thema: ${JSON.stringify(breakTemplater(ep.topic))}`, ...(ep.goal ? [`ziel: ${JSON.stringify(breakTemplater(ep.goal))}`] : []), `internet: ${ep.web ? 'true' : 'false'}`, ...(web.length ? ['web:', ...web.map((w) => `  - ${JSON.stringify(w.url)}`)] : [])];
+    await saveNote(ep, { title: research.title, date, line, body, sources, front, origin: 'thema' });
+  }
+
+  /**
+   * Legt das Transkript an: `sources` als `{ title, path?, url?, external? }`,
+   * Notizen als Wikilink (auch im Frontmatter unter `quellen`), sonst als Link.
+   */
+  async function saveNote(ep, { title, date, line, body, sources, front = [], origin = 'lesestapel' }) {
+    const str = (v) => JSON.stringify(String(v));
+    const label = (t) => String(t).replace(/[[\]|\r\n]+/g, ' ').trim();
+    const linked = sources.map((s) => ({ ...s, path: s.path?.replace(/\.md$/i, '') ?? null }));
+    const links = linked.filter((s) => s.path).map((s) => `  - ${str(`[[${s.path}]]`)}`);
     const content = [
       '---',
       'type: folge',
       `art: ${ep.kind}`,
+      `quelle: ${origin}`,
       `titel: ${str(breakTemplater(title))}`,
       `folge_id: ${str(ep.id)}`,
       `erzeugt: ${date}`,
       `minuten: ${ep.minutes}`,
+      ...front,
       ...(ep.language && ep.language !== DEFAULT_EPISODE_LANGUAGE ? [`sprache: ${ep.language}`] : []),
       ...(ep.style && ep.style !== DEFAULT_STYLE ? [`stil: ${ep.style}`] : []),
       ...(ep.topics?.length ? ['themen:', ...ep.topics.map((t) => `  - ${str(breakTemplater(t))}`)] : []),
@@ -490,14 +726,14 @@ export function createEpisodes({
       '',
       `# ${safeWikiMarkdown(title)}`,
       '',
-      `_${KINDS[ep.kind]} aus dem Lesestapel, ${date}, ${docs.length} ${docs.length === 1 ? 'Text' : 'Texte'} (Cockpit)_`,
+      `_${line}_`,
       '',
       ...(wished(ep) ? [`> ${safeWikiMarkdown(wished(ep))}`, ''] : []),
       safeWikiMarkdown(body),
       '',
       '## Quellen',
       '',
-      ...sources.map(({ d, path }) => (path ? `- [[${path}|${label(d)}]]` : `- [${label(d)}](<${String(d.url).replace(/[<>]/g, encodeURIComponent)}>)`)),
+      ...linked.map((s) => (s.path ? `- [[${s.path}|${label(s.title)}]]` : `- [${label(s.title)}](<${String(s.url).replace(/[<>]/g, encodeURIComponent)}>)${s.external ? ' (extern)' : ''}`)),
       '',
     ].join('\n');
     const stem = `${date}-${ep.kind}-${slugOf(title).slice(0, SLUG_CHARS).replace(/-+$/, '') || ep.kind}`;
@@ -518,6 +754,45 @@ export function createEpisodes({
     }
   }
 
+  /**
+   * Recherche und Kapitel einer Themen-Folge: Was schon da ist (Dossier,
+   * geschriebene Kapitel), bleibt; Claude macht nur, was fehlt.
+   */
+  async function topicScript(ep) {
+    let found = loadJson(researchPath(ep.id));
+    if (!found) {
+      if (!research) throw new EpisodeError(topicMissing());
+      update(ep, { status: 'recherchiert', researching_at: now().toISOString() });
+      const session = await research.open();
+      let raw;
+      let read;
+      try {
+        const input = `Heute ist ${today()}. Die Werkzeuge mcp__vault__* lesen seinen Vault${ep.web ? ', WebSearch und WebFetch das Internet' : ''}.`;
+        raw = await writer.write({ ...researchJob(ep), input, tools: ep.web ? WEB_TOOLS : [], mcp: session.mcp, timeoutMs: RESEARCH_TIMEOUT_MS });
+        read = session.read();
+      } finally {
+        await session.close();
+      }
+      found = normalizeResearch(raw, { minutes: ep.minutes, topic: ep.topic, read, web: ep.web });
+      if (!found.dossier) throw new EpisodeError('Claude hat kein Dossier geliefert');
+      saveJson(researchPath(ep.id), found);
+    }
+    const total = found.chapters.length;
+    update(ep, { title: found.title, researched: true, chapters_total: total, notes_read: found.sources.vault.length, web_sources: found.sources.web.length });
+    const script = loadScript(ep.id) ?? { chapters: [] };
+    for (let i = script.chapters.length; i < total; i += 1) {
+      update(ep, { status: 'schreibt', chapter: i + 1, writing_at: ep.status === 'schreibt' ? ep.writing_at : now().toISOString() });
+      const before = i > 0 ? chapterTail(script.chapters[i - 1]) : null;
+      const out = await writer.write({ ...chapterJob(ep, found, i, before), input: dossierInput(found) });
+      const chapter = ep.kind === 'podcast' ? { turns: (out.turns ?? []).filter((t) => String(t.text ?? '').trim()).map((t) => ({ speaker: t.speaker === 'B' ? 'B' : 'A', text: String(t.text).trim() })) } : { spoken: String(out.spoken ?? '').trim() };
+      if (ep.kind === 'podcast' ? chapter.turns.length < 2 : !chapter.spoken) throw new EpisodeError(`Claude hat Kapitel ${i + 1} leer gelassen`);
+      script.chapters.push(chapter);
+      saveScript(ep.id, script);
+    }
+    if (!script.complete) saveScript(ep.id, Object.assign(script, { complete: true }));
+    return { found, script };
+  }
+
   async function produce(ep) {
     // Erst nur das Transkript braucht keine Stimme; sonst fehlt sie schon vor Claude.
     const speaks = ep.audio !== false;
@@ -525,8 +800,16 @@ export function createEpisodes({
     if (!cfg && speaks) throw new EpisodeError(availability().vorlesen);
     let el = null;
     const voice = () => (el ??= provider(cfg));
-    const docs = ep.docs.map((id) => store.get(id)).filter(Boolean);
-    if (!docs.length) throw new EpisodeError('Die Texte gibt es nicht mehr');
+    const topic = ep.source === 'thema';
+    const docs = topic ? [] : ep.docs.map((id) => store.get(id)).filter(Boolean);
+    if (!topic && !docs.length) throw new EpisodeError('Die Texte gibt es nicht mehr');
+    const asTurns = (list) => {
+      const { host, guest } = voices();
+      return (list ?? []).filter((t) => String(t.text ?? '').trim()).map((t) => ({ text: String(t.text).trim(), voice: t.speaker === 'B' ? guest : host, speaker: t.speaker }));
+    };
+    const talk = (turns) => turns.map((t) => `**${t.speaker === 'B' ? 'Gast' : 'Moderation'}:** ${t.text}`).join('\n\n');
+    const dialogueJobs = (turns) => dialogueBatches(turns).map((inputs) => async () => ({ audio: await voice().dialogue({ inputs }), paid: inputs.reduce((n, i) => n + i.text.length, 0) }));
+    const narrationJobs = (parts) => parts.map((t, i) => async () => ({ audio: await voice().synthesize({ text: t, previous: parts[i - 1] ?? null, next: parts[i + 1] ?? null }), paid: t.length }));
 
     // Was gesprochen wird, je Stück `() => { audio, paid }`: Sätze für eine Stimme oder Gesprächsabschnitte.
     let jobs;
@@ -538,6 +821,25 @@ export function createEpisodes({
         const paid = speech.cached(p) ? 0 : p.text.length;
         return { audio: await speech.audio(p), paid };
       });
+    } else if (topic) {
+      const { found, script } = await topicScript(ep);
+      const n = script.chapters.length;
+      const name = (i) => `${n > 1 ? `Kapitel ${i + 1}: ` : ''}${found.chapters[i].title}`;
+      // Transkript vor dem Sprechen, wie bei den Folgen aus dem Stapel.
+      if (ep.kind === 'podcast') {
+        const turns = asTurns(script.chapters.flatMap((c) => c.turns));
+        if (turns.length < 2) throw new EpisodeError('Claude hat kein Gespräch geliefert');
+        await writeTopicNote(ep, found, script.chapters.map((c, i) => `## ${name(i)}\n\n${talk(asTurns(c.turns))}`));
+        jobs = dialogueJobs(turns);
+        update(ep, { title: found.title, chars: turns.reduce((sum, t) => sum + t.text.length, 0) });
+      } else {
+        await writeTopicNote(ep, found, script.chapters.map((c, i) => `## ${name(i)}\n\n${c.spoken}`));
+        // Bei mehreren Kapiteln sagt die Stimme jedes an, zur Orientierung beim Hören.
+        const parts = script.chapters.flatMap((c, i) => chunkText(n > 1 ? `${name(i)}. ${c.spoken}` : c.spoken, NARRATION_CHARS));
+        if (!parts.length) throw new EpisodeError('Claude hat keine Sprechfassung geliefert');
+        jobs = narrationJobs(parts);
+        update(ep, { title: found.title, chars: parts.join('').length });
+      }
     } else {
       let script = loadScript(ep.id);
       if (!script) {
@@ -547,14 +849,12 @@ export function createEpisodes({
         saveScript(ep.id, script);
       }
       if (ep.kind === 'podcast') {
-        const { host, guest } = voices();
-        const turns = (script.turns ?? []).filter((t) => String(t.text ?? '').trim()).map((t) => ({ text: String(t.text).trim(), voice: t.speaker === 'B' ? guest : host, speaker: t.speaker }));
+        const turns = asTurns(script.turns);
         if (turns.length < 2) throw new EpisodeError('Claude hat kein Gespräch geliefert');
         const title = cleanTitle(script.title, ep.title);
         // Transkript vor dem Sprechen: Was Claude geschrieben hat, ist dann sicher.
-        const talk = turns.map((t) => `**${t.speaker === 'B' ? 'Gast' : 'Moderation'}:** ${t.text}`).join('\n\n');
-        await writeNote(ep, docs, title, `## Gespräch\n\n${talk}`);
-        jobs = dialogueBatches(turns).map((inputs) => async () => ({ audio: await voice().dialogue({ inputs }), paid: inputs.reduce((n, i) => n + i.text.length, 0) }));
+        await writeNote(ep, docs, title, `## Gespräch\n\n${talk(turns)}`);
+        jobs = dialogueJobs(turns);
         update(ep, { title, chars: turns.reduce((s, t) => s + t.text.length, 0) });
       } else {
         const title = cleanTitle(script.title, ep.title);
@@ -562,15 +862,15 @@ export function createEpisodes({
         await writeNote(ep, docs, title, [String(script.note ?? '').trim(), spoken && `## Sprechfassung\n\n${spoken}`].filter(Boolean).join('\n\n'));
         const parts = chunkText(spoken, NARRATION_CHARS);
         if (!parts.length) throw new EpisodeError('Claude hat keine Sprechfassung geliefert');
-        jobs = parts.map((t, i) => async () => ({ audio: await voice().synthesize({ text: t, previous: parts[i - 1] ?? null, next: parts[i + 1] ?? null }), paid: t.length }));
+        jobs = narrationJobs(parts);
         update(ep, { title, chars: parts.join('').length });
       }
-      if (!speaks) {
-        // Skript bleibt für `speak`; gehört ist noch nichts.
-        update(ep, { status: 'transkript', transcript_at: now().toISOString() });
-        logger.info?.(`Folge „${ep.title}“ (${KINDS[ep.kind]}): Transkript fertig, Audio auf Knopfdruck`);
-        return;
-      }
+    }
+    if (ep.kind !== 'vorlesen' && !speaks) {
+      // Skript (bei einem Thema auch die Recherche) bleibt für `speak`; gehört ist noch nichts.
+      update(ep, { status: 'transkript', transcript_at: now().toISOString() });
+      logger.info?.(`Folge „${ep.title}“ (${KINDS[ep.kind]}): Transkript fertig, Audio auf Knopfdruck`);
+      return;
     }
 
     const part = `${audioPath(ep.id)}.part`;
@@ -589,12 +889,12 @@ export function createEpisodes({
       update(ep, { done: k + 1, part_bytes: ep.part_bytes + chunk.length, paid: ep.paid + paid });
     });
     renameSync(part, audioPath(ep.id));
-    rmSync(scriptPath(ep.id), { force: true });
+    for (const f of [scriptPath(ep.id), researchPath(ep.id)]) rmSync(f, { force: true });
     update(ep, { ...(ep.kind === 'vorlesen' ? { chars: ep.paid } : {}), status: 'fertig', frames: true, bytes: statSync(audioPath(ep.id)).size, finished_at: now().toISOString() });
     logger.info?.(`Folge „${ep.title}“ (${KINDS[ep.kind]}) fertig, ${ep.chars} Zeichen`);
-    // Die Folge bleibt fertig, auch wenn der Vermerk scheitert.
+    // Die Folge bleibt fertig, auch wenn der Vermerk scheitert. Eine Themen-Folge hat keine Texte.
     try {
-      await heard?.(ep.docs);
+      if (ep.docs?.length) await heard?.(ep.docs);
     } catch (err) {
       logger.warn?.(`Folge „${ep.title}“: Vermerk „gehört“ fehlgeschlagen: ${err.message}`);
     }
@@ -619,8 +919,10 @@ export function createEpisodes({
 
   // Beim Start: Unterbrochenes fortsetzen, wenn das ohne Claude geht, sonst als Fehler; Wartendes wieder einreihen.
   for (const ep of episodes) {
-    if (ep.status === 'schreibt' || ep.status === 'spricht') {
+    if (ep.status === 'recherchiert' || ep.status === 'schreibt' || ep.status === 'spricht') {
       if (resumable(ep)) Object.assign(ep, { status: 'wartet' });
+      else if (ep.source === 'thema' && ep.researched) Object.assign(ep, { status: 'fehler', error: 'Durch einen Neustart unterbrochen. Die Recherche und fertige Kapitel bleiben.' });
+      else if (ep.source === 'thema') Object.assign(ep, { status: 'fehler', error: 'Durch einen Neustart unterbrochen, bevor die Recherche fertig war.' });
       else Object.assign(ep, { status: 'fehler', error: 'Durch einen Neustart unterbrochen, bevor Claudes Skript da war.' });
     }
     if (ep.status === 'wartet') queue.push(ep.id);
@@ -708,6 +1010,52 @@ export function createEpisodes({
       return Object.assign(created, { done: next() });
     },
 
+    /** Was Folgen zu einem Thema fehlt, sonst null. */
+    topicMissing,
+
+    /**
+     * Folge zu einem Thema: `kind` Podcast oder Report, `topic`, optional
+     * `goal` (Ziele, Anlass, Schwerpunkte), `minutes` zwischen
+     * `TOPIC_MINUTES.min` und `.max`, `web` (Internetrecherche, Standard an),
+     * `audio` (false = erst nur das Transkript, wie bei `create`). Sprache aus
+     * den Einstellungen. Liefert sie sofort, `done` wie bei `create`.
+     */
+    createTopic({ kind, topic, goal = '', minutes = 30, web = true, audio = true }) {
+      if (!TOPIC_KINDS.includes(kind)) throw new EpisodeError(`Zu einem Thema gibt es ${TOPIC_KINDS.map((k) => KINDS[k]).join(' oder ')}`);
+      const missing = topicMissing(audio !== false);
+      if (missing) throw new EpisodeError(missing, 409);
+      const t = String(topic ?? '').replace(/\s+/g, ' ').trim();
+      if (t.length < 3) throw new EpisodeError('Bitte ein Thema nennen');
+      if (t.length > 300) throw new EpisodeError('Das Thema darf höchstens 300 Zeichen lang sein, Ziele und Details gehören ins Feld darunter');
+      const g = String(goal ?? '').replace(/\r\n?/g, '\n').trim();
+      if (g.length > 3000) throw new EpisodeError('Ziele und Anlass: höchstens 3000 Zeichen');
+      const m = Number(minutes);
+      if (!Number.isInteger(m) || m < TOPIC_MINUTES.min || m > TOPIC_MINUTES.max) throw new EpisodeError(`Länge: ${TOPIC_MINUTES.min} bis ${TOPIC_MINUTES.max} Minuten`);
+      const at = now().toISOString();
+      const ep = {
+        id: randomUUID(),
+        kind,
+        source: 'thema',
+        topic: t,
+        goal: g || null,
+        web: web !== false,
+        audio: audio !== false,
+        language: currentLanguage(),
+        minutes: m,
+        title: `${KINDS[kind]}: ${t}`,
+        docs: [],
+        status: 'wartet',
+        chars: audio !== false ? m * CHARS_PER_MINUTE : 0,
+        created_at: at,
+        updated_at: at,
+      };
+      episodes.push(ep);
+      save();
+      queue.push(ep.id);
+      const created = { ...ep };
+      return Object.assign(created, { done: next() });
+    },
+
     /**
      * Fehlgeschlagene Folge noch einmal einreihen. Gesprochenes und Claudes
      * Skript bleiben, bezahlt wird nur, was fehlt. `done` wie bei `create`.
@@ -716,7 +1064,7 @@ export function createEpisodes({
       const ep = find(id);
       if (!ep) throw new EpisodeError('Diese Folge gibt es nicht', 404);
       if (ep.status !== 'fehler') throw new EpisodeError('Nur eine fehlgeschlagene Folge lässt sich fortsetzen', 409);
-      const missing = missingFor(ep.kind, ep.audio !== false);
+      const missing = ep.source === 'thema' && !resumable(ep) ? topicMissing(ep.audio !== false) : missingFor(ep.kind, ep.audio !== false);
       if (missing) throw new EpisodeError(missing, 409);
       update(ep, { status: 'wartet', error: null });
       queue.push(ep.id);
@@ -743,7 +1091,7 @@ export function createEpisodes({
       if (!ep) throw new EpisodeError('Diese Folge gibt es nicht', 404);
       if (running === id) throw new EpisodeError('Die Folge entsteht gerade; danach löschen');
       episodes = episodes.filter((e) => e.id !== id);
-      for (const f of [audioPath(id), `${audioPath(id)}.part`, scriptPath(id)]) rmSync(f, { force: true });
+      for (const f of [audioPath(id), `${audioPath(id)}.part`, scriptPath(id), researchPath(id)]) rmSync(f, { force: true });
       save();
       return ep;
     },

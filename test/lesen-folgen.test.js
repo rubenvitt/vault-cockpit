@@ -207,6 +207,7 @@ test('Folgen: Podcast mit zwei Stimmen über Text-to-Dialogue, Texte gehen an Cl
         '---',
         'type: folge',
         'art: podcast',
+        'quelle: lesestapel',
         'titel: "Lesen und Hören"',
         `folge_id: "${ep.id}"`,
         'erzeugt: 2026-10-23',
@@ -257,7 +258,7 @@ test('Folgen: Report als Notiz im Vault mit Sprechfassung, eine Stimme liest sie
     assert.equal(calls.notes.length, 1, 'keine zweite Notiz');
     assert.equal(done.note, '30-ressourcen/audio-reports/2026-10-23-report-report-woche.md');
     const { content } = calls.notes[0];
-    assert.match(content, /^---\ntype: folge\nart: report\ntitel: "Report Woche"\nfolge_id: "[0-9a-f-]+"\nerzeugt: 2026-10-23\nminuten: 10\nquellen:\n {2}- "\[\[30-ressourcen\/lesestapel\/vom-lesen\]\]"\ningest: offen\n---\n/);
+    assert.match(content, /^---\ntype: folge\nart: report\nquelle: lesestapel\ntitel: "Report Woche"\nfolge_id: "[0-9a-f-]+"\nerzeugt: 2026-10-23\nminuten: 10\nquellen:\n {2}- "\[\[30-ressourcen\/lesestapel\/vom-lesen\]\]"\ningest: offen\n---\n/);
     assert.match(
       content,
       /\n---\n\n# Report Woche\n\n_Report aus dem Lesestapel, 2026-10-23, 1 Text \(Cockpit\)_\n\n## Überblick\n\nZwei Texte\.\n\n## Sprechfassung\n\nZwei Texte\. Beide kurz\.\n\n## Quellen\n\n- \[\[30-ressourcen\/lesestapel\/vom-lesen\|Vom Lesen\]\]\n$/,
