@@ -579,8 +579,11 @@ steht nur auf `/zustand`.
 ### Lesen
 
 Der Lesestapel ist ein Bereich im Cockpit (VCP-77): **Lesen** in der Kopfzeile
-und in der Leiste unten, darunter **Weiter · Eingang · Stapel · Markiert · Wiedersehen · Wissen · Feeds**
-(`/lesen` führt zu „Weiter“). In der
+und in der Leiste unten, darunter vier Reiter für den Ablauf eines Textes,
+**Weiter · Eingang · Stapel · Folgen**, und das Menü **Mehr** mit Ingest, Markiert,
+Wiedersehen, Wissen und Feeds (ein `<details>`, geht ohne JavaScript; steht man auf
+einer dieser Seiten, trägt der Knopf ihren Namen). Die Zahl bereiter Ingest-Entwürfe
+steht an „Weiter“ und an „Ingest“. `/lesen` führt zu „Weiter“. In der
 Leiste unten nimmt „Lesen“ den Platz der Suche ein; die Suche erreicht man dort
 über Lesen → Wissen → „Ganzen Vault durchsuchen“, im Kopf steht sie weiter.
 
@@ -596,10 +599,12 @@ oder gehört – wie weiter?“). Geschrieben wird dafür nichts, der Stand ergi
 aus Status, Lesedatum, `heard_at`, Fortschritt und Ingest.
 
 Oben steht **Als Nächstes**, der eine Schritt mit dem meisten Wert: fertige
-Entwürfe prüfen, Gelesenes entscheiden, Fehler beheben, Angefangenes weiterlesen,
-den Eingang sichten, dann vom Stapel lesen oder hören. Darunter Zahlen als
-Sprungmarken und die Texte je Stufe, jeder in genau einer: **Prüfen** (Entwurf
-bereit), **Entscheiden** (gelesen oder gehört, mit „gehört am … in ‹Folge›“; Knöpfe
+Entwürfe prüfen, Folgen anhören, Gelesenes entscheiden, Fehler beheben, Angefangenes weiterlesen,
+den Eingang sichten, dann vom Stapel lesen oder hören. Darunter die
+Texte je Stufe, jeder in genau einer: **Prüfen** (Entwurf bereit), **Anhören**
+(fertige Folgen, noch nicht gehört, mit ihren Texten, „Anhören“ bzw. „Weiterhören“ und
+„Als gehört markieren“; Texte, die nur über so eine Folge als gehört gelten, warten
+hier statt unter „Entscheiden“), **Entscheiden** (gelesen oder gehört, mit „gehört am … in ‹Folge›“; Knöpfe
 „Ins Wiki: entwerfen“, „Nur in den Vault“ mit Volltext, „Fertig, weg“; dazu „Alle
 n entwerfen lassen“, `POST /aktion/lesen/weiter/entwerfen`, auch für verworfene
 Entwürfe), **Fehler** (Entwurf oder Einpflanzen, mit „Erneut …“), **Weiterlesen**
@@ -796,8 +801,22 @@ wie beim [Ingest](#ingest-ins-wiki). Lässt sich die Notiz nicht anlegen (Vault 
 lesbar, Ordner vertraulich, ausgeschlossen oder Readwise), steht das im Log und
 die Folge entsteht ohne Transkript. Vorlesen bekommt keine Notiz,
 das sind die Texte selbst. Ist eine Folge fertig, gleich welcher Art, bekommen ihre
-Texte den Vermerk „gehört“ und gelten als gelesen: Sie wandern vom Stapel nach
-[Weiter](#lesen) → Entscheiden. Scheitert der Vermerk, bleibt die Folge trotzdem fertig.
+Texte den Vermerk „gehört“ und gelten als gelesen: Sie verlassen den Stapel und
+warten unter [Weiter](#lesen) → Anhören, bis die Folge selbst gehört ist, dann unter
+Entscheiden. Scheitert der Vermerk, bleibt die Folge trotzdem fertig.
+
+**Gehört je Folge:** Der Player meldet die Stelle (`POST /aktion/lesen/folge/stelle`
+mit `stelle` und `dauer` in Sekunden, höchstens alle 30 Sekunden, beim Anhalten und
+am Ende); kurz vor Schluss (letzte 15 Sekunden oder 95 %) ist die Folge gehört
+(`heard_at` in `folgen.json`). Von Hand geht es mit „Als gehört markieren“ bzw.
+„Doch nicht gehört“ (`POST /aktion/lesen/folge/gehoert`, `gehoert=1|0`, mit
+Rückgängig); „Doch nicht gehört“ nimmt nur den Vermerk an der Folge zurück, die
+Texte bleiben gehört. Die Liste ordnet nach Gruppen: **Zum Hören** (angefangene
+zuerst, mit „angefangen, bei 3:05“), **Entsteht** (auch fehlgeschlagene), **Nur
+Transkript** und eingeklappt **Gehört** (kleinere, leisere Karten). Im JSON trägt
+jede Folge `listen` (`neu`, `angefangen`, `gehoert`), `heardAt` und `position`.
+Folgen, die vor dieser Unterscheidung fertig wurden, gelten beim ersten Start als
+gehört. Die iOS-App meldet das Hören noch nicht; dort bis dahin „Als gehört markieren“.
 
 Claude läuft über die Claude Code CLI im Container (`claude -p`, im Image
 installiert, Version per Build-Arg `CLAUDE_CODE_VERSION`, leer = ohne) mit dem

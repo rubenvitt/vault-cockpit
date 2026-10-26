@@ -473,7 +473,7 @@ test('Feeds-Seite: Website abonnieren, einstellen, OPML importieren und exportie
   await withWeb(
     async ({ call, store }) => {
       const html = await (await call('/lesen/feeds')).text();
-      assert.match(html, /<a href="\/lesen\/feeds" class="subnav-link" aria-current="page">Feeds<\/a>/);
+      assert.match(html, /<a href="\/lesen\/feeds" class="subnav-item" aria-current="page"><span>Feeds<\/span>/);
       assert.match(html, /Noch keine Feeds abonniert/);
       assert.ok(!/style=|<script>/.test(html), 'keine Inline-Styles oder -Skripte');
       const csrf = html.match(/name="csrf" value="([^"]+)"/)[1];

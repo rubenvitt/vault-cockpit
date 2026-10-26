@@ -590,6 +590,28 @@ a:active, a.pressed { opacity: .55; transition-duration: 0s; }
 .subnav-link:hover { color: var(--text); border-color: var(--line-strong); }
 .subnav-link[aria-current=page] { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent); }
 .page-lesen .subnav, .page-lesen .page-head, main.lesen { max-width: 820px; }
+/* Lesen: vier Reiter als ein Band, der Rest unter „Mehr“ (src/lesen/pages.js `readingNav`) */
+.lesen-tabs { overflow: visible; gap: 0; }
+.lesen-tabs > .subnav-link, .lesen-tabs .subnav-mehr { flex: 1 1 0; min-width: 0; }
+.lesen-tabs .subnav-link { display: flex; align-items: center; justify-content: center; gap: 4px; padding: 10px 6px 9px; border: 0; border-bottom: 2px solid var(--line);
+  border-radius: 0; background: none; white-space: nowrap; }
+.lesen-tabs .subnav-link:hover { border-bottom-color: var(--line-strong); }
+.lesen-tabs .subnav-link[aria-current=page] { background: none; color: var(--accent); border-bottom-color: var(--accent); font-weight: 650; }
+.lesen-tabs .subnav-count { margin-left: 2px; }
+.subnav-mehr { position: relative; }
+.subnav-mehr > summary { list-style: none; cursor: pointer; }
+.subnav-mehr > summary::-webkit-details-marker { display: none; }
+.subnav-mehr > summary svg { flex: none; width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; transition: transform var(--fast); }
+.subnav-mehr[open] > summary svg { transform: rotate(180deg); }
+.subnav-mehr[open] > summary { color: var(--text); }
+.subnav-menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 30; display: grid; gap: 2px; width: min(280px, calc(100vw - 32px)); padding: var(--s-2);
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: 0 12px 32px rgb(0 0 0 / .14); }
+.subnav-item { display: grid; gap: 1px; padding: var(--s-2) var(--s-3); border-radius: var(--r-md); color: var(--text); text-decoration: none; }
+.subnav-item > span:first-child { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.subnav-item .meta { font-size: var(--t-xs); }
+.subnav-item:hover { background: var(--surface-2); text-decoration: none; }
+.subnav-item[aria-current=page] { background: var(--accent-soft); }
+.subnav-item[aria-current=page] > span:first-child { color: var(--accent); }
 .page-lesen .page-head { padding-top: var(--s-4); }
 .lesen-save { display: flex; gap: var(--s-2); margin: 0; }
 .lesen-url { flex: 1; min-width: 0; display: flex; }
@@ -1520,3 +1542,23 @@ a.ingest-item-open:hover, a.ingest-item-open:focus-visible { color: var(--accent
 .weiter-unread li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1) var(--s-2); }
 .stapel-weiter { margin: 0 0 var(--s-4); padding: var(--s-2) var(--s-3); border-radius: var(--r-md); background: var(--accent-soft); border: 1px solid var(--accent-line); }
 .stapel-weiter a { font-weight: 600; text-decoration: none; }
+
+/* Folgen in Gruppen (src/lesen/folgen-page.js): Zum Hören vorn, Gehörtes eingeklappt und leiser */
+.folgen-gruppen { display: grid; gap: var(--s-6); }
+.folgen-gruppe > h2, .folgen-gehoert > summary h2 { margin: 0 0 var(--s-3); }
+.folgen-gruppe > .meta { margin: calc(-1 * var(--s-2)) 0 var(--s-3); }
+.folgen-gehoert > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: var(--s-2); }
+.folgen-gehoert > summary::-webkit-details-marker { display: none; }
+.folgen-gehoert > summary h2 { margin: 0; color: var(--text-2); }
+.folgen-gehoert > summary::after { content: 'zeigen'; font-size: var(--t-sm); color: var(--text-3); }
+.folgen-gehoert[open] > summary::after { content: 'verbergen'; }
+.folgen-gehoert[open] > summary { margin-bottom: var(--s-3); }
+.folge.is-neu { border-color: var(--accent-line); }
+.folge.is-gehoert { gap: var(--s-2); padding: var(--s-3); background: transparent; }
+.folge.is-gehoert .folge-card { gap: var(--s-3); }
+.folge.is-gehoert .folge-play { width: 40px; height: 40px; background: var(--surface-2); color: var(--text-2); }
+.folge.is-gehoert .lesen-title { font-size: var(--t-base); color: var(--text-2); }
+.folgen-alles { margin: 0; }
+.weiter-folge-texte a { color: inherit; }
+.folge.is-gehoert .folge-actions .btn { min-height: 30px; padding: 2px 10px; font-size: var(--t-sm); }
+.folge.is-gehoert .folge-art { font-size: 10px; }

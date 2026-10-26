@@ -90,7 +90,7 @@ test('Weiter: Modell sortiert nach Stufen, zählt Ungelesenes und nennt den näc
   store.markHeard([gehoert], '2026-10-24T08:00:00.000Z');
   ingest.put(bereit, 'bereit');
   ingest.put(weg, 'fehler', { error: 'Claude antwortete nicht' });
-  const episodes = { list: () => [{ id: 'ep1', status: 'fertig', title: 'Podcast: Gehört im Podcast', kind: 'podcast', docs: [gehoert] }] };
+  const episodes = { list: () => [{ id: 'ep1', status: 'fertig', heard_at: '2026-10-24T09:00:00.000Z', title: 'Podcast: Gehört im Podcast', kind: 'podcast', docs: [gehoert] }] };
 
   const m = weiterModel({ store, ingest, episodes });
   assert.deepEqual(titles(m.stages.pruefen), ['Entwurf bereit']);
@@ -119,7 +119,7 @@ test('Weiter: Seite mit „Als Nächstes“, Stufen, Spur und Knöpfen, alles oh
   const busy = add('In Arbeit');
   store.markHeard([gehoert], '2026-10-24T08:00:00.000Z');
   ingest.put(busy, 'entwirft');
-  const routes = weiterRoutes({ store, ingest, vault: true, episodes: { list: () => [{ id: 'e', status: 'fertig', title: 'Podcast: Gehört', docs: [gehoert] }] } });
+  const routes = weiterRoutes({ store, ingest, vault: true, episodes: { list: () => [{ id: 'e', status: 'fertig', heard_at: '2026-10-24T09:00:00.000Z', title: 'Podcast: Gehört', docs: [gehoert] }] } });
   const { html } = await routes.pages['/lesen/weiter'](ctx());
   noInline(html);
   assert.match(html, /<a href="\/lesen\/weiter" class="subnav-link" aria-current="page">Weiter<\/a>/);
@@ -175,8 +175,8 @@ test('Weiter: JSON für die App mit Stufen, Spur und nächstem Schritt', async (
   const data = JSON.parse(body);
   assert.equal(data.next.stage, 'entscheiden');
   assert.equal(data.counts.entscheiden, 1);
-  assert.deepEqual(data.stages.map((s) => s.key), ['pruefen', 'entscheiden', 'fehler', 'weiterlesen', 'laeuft']);
-  const item = data.stages[1].items[0];
+  assert.deepEqual(data.stages.map((s) => s.key), ['pruefen', 'anhoeren', 'entscheiden', 'fehler', 'weiterlesen', 'laeuft']);
+  const item = data.stages[2].items[0];
   assert.equal(item.heardAt, '2026-10-24T08:00:00.000Z');
   assert.deepEqual(item.read, { how: 'gehoert', at: '2026-10-24T08:00:00.000Z', episode: null });
   assert.equal(item.track[0].label, 'Gehört');
@@ -198,4 +198,36 @@ test('Stapel: Gehörtes und Gelesenes verlassen die Leseliste, ein Hinweis führ
   assert.equal(json.decide, 2);
   // Unterwegs hören fängt Gehörtes nicht noch einmal an.
   assert.deepEqual(listenQueue(store, 15).items.map((d) => d.title), ['Offen']);
+});
+
+test('Weiter: ungehörte Folge steht unter „Anhören“, ihre Texte erst nach dem Hören unter „Entscheiden“', async () => {
+  const { store, add } = setup();
+  const a = add('Im Podcast A');
+  const b = add('Im Podcast B', { progress: 1 });
+  store.markHeard([a, b], '2026-10-24T08:00:00.000Z');
+  const ep = { id: 'ep', status: 'fertig', heard_at: null, kind: 'podcast', title: 'Podcast: A und 1 weitere', bytes: 16_000 * 600, position: 0, docs: [a, b] };
+  const episodes = { list: () => [ep] };
+  let m = weiterModel({ store, episodes });
+  assert.equal(m.counts.anhoeren, 1);
+  assert.deepEqual(m.stages.anhoeren[0].docs.map((d) => d.title), ['Im Podcast A', 'Im Podcast B']);
+  assert.deepEqual(titles(m.stages.entscheiden), ['Im Podcast B'], 'zu Ende gelesen bleibt zu entscheiden, nur Gehörtes wartet auf die Folge');
+  assert.equal(m.counts.stapel, 0, 'wartet auf die Folge, zählt nicht als Stapel');
+  assert.deepEqual([m.next.stage, m.next.label, m.next.href], ['anhoeren', 'Anhören', '/lesen/folgen#hoeren']);
+
+  const { html } = await weiterRoutes({ store, episodes }).pages['/lesen/weiter'](ctx());
+  noInline(html);
+  assert.match(html, /<section class="weiter-stufe" id="anhoeren"/);
+  assert.match(html, /Podcast · 10:00/);
+  assert.match(html, /2 Texte: <a href="\/lesen\/doc\?id=[^"]+">Im Podcast A<\/a>/);
+  assert.match(html, /action="\/aktion\/lesen\/folge\/gehoert"[^]*name="gehoert" value="1"[^]*Als gehört markieren/);
+  assert.ok(!html.includes('weiter-summe'), 'keine Chip-Leiste mehr');
+
+  ep.position = 120;
+  assert.equal(weiterModel({ store, episodes }).next.label, 'Weiterhören');
+  ep.heard_at = '2026-10-25T08:00:00.000Z';
+  m = weiterModel({ store, episodes });
+  assert.equal(m.counts.anhoeren, 0);
+  assert.deepEqual(titles(m.stages.entscheiden).sort(), ['Im Podcast A', 'Im Podcast B']);
+  const json = JSON.parse((await weiterRoutes({ store, episodes: { list: () => [{ ...ep, heard_at: null }] } }).pages['/api/lesen/weiter'](ctx('/api/lesen/weiter'))).body);
+  assert.deepEqual(json.stages[1].items[0].episode, { id: 'ep', kind: 'podcast', kindLabel: 'Podcast', title: 'Podcast: A und 1 weitere', seconds: 600, position: 120, finishedAt: null });
 });

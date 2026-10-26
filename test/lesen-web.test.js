@@ -89,7 +89,12 @@ test('Lesen: nur angemeldet, /lesen führt zu „Weiter“, Navigation mit Lesen
     const tabs = html.match(/<nav class="tabbar"[^]*?<\/nav>/)[0];
     assert.deepEqual([...tabs.matchAll(/<span>([^<]+)<\/span>/g)].map((m) => m[1]), ['Woche', 'Rückblick', 'Lesen', 'Einstellungen']);
     assert.match(html, /<a href="\/graph" class="nav-link">/);
-    assert.match(html, /<nav class="subnav" aria-label="Lesen"><a href="\/lesen\/weiter" class="subnav-link">Weiter<\/a><a href="\/lesen\/eingang" class="subnav-link" aria-current="page">Eingang<\/a><a href="\/lesen\/stapel"[^>]*>Stapel<\/a><a href="\/lesen\/folgen"[^>]*>Folgen<\/a><a href="\/lesen\/markiert"[^>]*>Markiert<\/a><a href="\/lesen\/wiedersehen"[^>]*>Wiedersehen<\/a><a href="\/wissen"[^>]*>Wissen<\/a><a href="\/lesen\/feeds"[^>]*>Feeds<\/a><\/nav>/);
+    // Vier Reiter für den Ablauf, der Rest unter „Mehr“.
+    assert.match(html, /<nav class="subnav lesen-tabs" aria-label="Lesen"><a href="\/lesen\/weiter" class="subnav-link">Weiter<\/a><a href="\/lesen\/eingang" class="subnav-link" aria-current="page">Eingang<\/a><a href="\/lesen\/stapel"[^>]*>Stapel<\/a><a href="\/lesen\/folgen"[^>]*>Folgen<\/a><details class="menu subnav-mehr"><summary class="subnav-link">Mehr<svg/);
+    const menu = html.match(/<div class="subnav-menu">[^]*?<\/div><\/details>/)[0];
+    assert.deepEqual([...menu.matchAll(/class="subnav-item"[^>]*><span>([^<]+)/g)].map((m) => m[1]), ['Markiert', 'Wiedersehen', 'Wissen', 'Feeds']);
+    // Auf einer Seite aus „Mehr“ trägt der Knopf ihren Namen.
+    assert.match(await (await call('/lesen/markiert')).text(), /<summary class="subnav-link" aria-current="page">Markiert<svg/);
     assert.match(html, /<form method="post" action="\/aktion\/lesen\/speichern"/);
     assert.match(html, /Eingang leer/);
     assert.ok(!/style=|<script>/.test(html), 'keine Inline-Styles oder -Skripte');

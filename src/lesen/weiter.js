@@ -5,6 +5,8 @@ import { readingPage } from './pages.js';
 import { docJson, jsonReply } from './json.js';
 import { isRead, remainingMinutes } from './stack.js';
 import { ENTWERFEN, EINPFLANZEN, ingestLink } from './ingest-page.js';
+import { BYTES_PER_SECOND, KINDS } from './folgen.js';
+import { clock, unheard } from './folgen-page.js';
 
 /**
  * „Weiter“ (`/lesen/weiter`): wo jeder Text im Ablauf steht und was als
@@ -19,7 +21,9 @@ import { ENTWERFEN, EINPFLANZEN, ingestLink } from './ingest-page.js';
  * Status, Lesedatum, `heard_at`, Fortschritt und dem Ingest des Textes.
  *
  * Jeder Text steht in genau einer Stufe (`STAGES`, in dieser Reihenfolge
- * gezeigt): `pruefen` (Entwurf bereit), `entscheiden` (gelesen, noch offen),
+ * gezeigt): `pruefen` (Entwurf bereit), `anhoeren` (fertige Folge, noch nicht
+ * gehört; ihre Texte warten hier statt unter „Entscheiden“, bis die Folge
+ * gehört ist), `entscheiden` (gelesen, noch offen),
  * `fehler` (Entwurf oder Einpflanzen fehlgeschlagen), `weiterlesen`
  * (angefangen), `laeuft` (Claude entwirft oder pflanzt ein). Eingang und
  * ungelesener Stapel stehen nur als Zahl da, mit Link. Oben steht „Als
@@ -35,10 +39,11 @@ const ALLE_ENTWERFEN = '/aktion/lesen/weiter/entwerfen';
 const VAULT = '/aktion/lesen/doc/vault';
 const FERTIG = '/aktion/lesen/doc/fertig';
 
-export const STAGES = ['pruefen', 'entscheiden', 'fehler', 'weiterlesen', 'laeuft'];
-const STAGE_LABELS = { pruefen: 'Prüfen', entscheiden: 'Entscheiden', fehler: 'Fehler', weiterlesen: 'Weiterlesen', laeuft: 'Läuft' };
+export const STAGES = ['pruefen', 'anhoeren', 'entscheiden', 'fehler', 'weiterlesen', 'laeuft'];
+const STAGE_LABELS = { pruefen: 'Prüfen', anhoeren: 'Anhören', entscheiden: 'Entscheiden', fehler: 'Fehler', weiterlesen: 'Weiterlesen', laeuft: 'Läuft' };
 const STAGE_HINTS = {
   pruefen: 'Claude hat einen Entwurf fürs Wiki geschrieben. Abhaken, was hinein soll, dauert ein, zwei Minuten.',
+  anhoeren: 'Fertige Folgen, noch nicht gehört. Danach stehen ihre Texte unter „Entscheiden“.',
   entscheiden: 'Gelesen oder gehört. Ins Wiki (Claude entwirft), nur als Rohquelle in den Vault oder fertig, weg.',
   fehler: 'Hier hakt es. Erneut versuchen oder ansehen.',
   weiterlesen: 'Angefangen, noch nicht zu Ende.',
@@ -117,6 +122,9 @@ export function stageOf(doc, ingest = null) {
  */
 export function weiterModel({ store, ingest = null, episodes = null }) {
   const heard = heardIn(episodes);
+  // Ungehörte Folgen und ihre Texte: Die warten aufs Hören, nicht auf eine Entscheidung.
+  const toHear = (episodes?.list?.() ?? []).filter(unheard);
+  const waiting = new Set(toHear.flatMap((ep) => ep.docs ?? []));
   const rows = new Map((ingest?.list() ?? []).map((e) => [e.doc_id, e]));
   const stack = store.list({ status: 'stapel', limit: -1 });
   const inbox = store.list({ status: 'eingang', limit: -1 });
@@ -129,8 +137,11 @@ export function weiterModel({ store, ingest = null, episodes = null }) {
   const idle = { eingang: [], stapel: [] };
   for (const doc of docs.values()) {
     const e = rows.get(doc.id) ?? null;
-    const stage = stageOf(doc, e);
+    let stage = stageOf(doc, e);
+    // Nur über die Folge „gelesen“, die aber noch nicht gehört: steht unter „Anhören“.
+    if (stage === 'entscheiden' && waiting.has(doc.id) && !doc.read_at && !(doc.progress >= 1)) stage = null;
     if (!stage) {
+      if (waiting.has(doc.id)) continue;
       idle[doc.status]?.push(doc);
       continue;
     }
@@ -141,6 +152,10 @@ export function weiterModel({ store, ingest = null, episodes = null }) {
   stages.pruefen.sort((a, b) => t(a.ingest.drafted_at) - t(b.ingest.drafted_at));
   stages.entscheiden.sort((a, b) => t(b.read?.at ?? b.doc.status_changed_at) - t(a.read?.at ?? a.doc.status_changed_at));
   stages.weiterlesen.sort((a, b) => remainingMinutes(a.doc) - remainingMinutes(b.doc));
+  // Anhören: angefangene zuerst, sonst die neueste.
+  stages.anhoeren = toHear
+    .sort((a, b) => (b.position > 0) - (a.position > 0))
+    .map((ep) => ({ stage: 'anhoeren', episode: ep, docs: (ep.docs ?? []).map((id) => store.get(id)).filter(Boolean) }));
 
   const counts = {
     ...Object.fromEntries(STAGES.map((k) => [k, stages[k].length])),
@@ -162,6 +177,10 @@ export function weiterModel({ store, ingest = null, episodes = null }) {
 function nextStep(stages, counts, draftable) {
   const first = (k) => stages[k][0];
   if (counts.pruefen) return { stage: 'pruefen', text: counts.pruefen === 1 ? `Einen Entwurf prüfen: ${name(first('pruefen').doc)}` : `${counts.pruefen} Entwürfe warten aufs Prüfen`, href: ingestLink(first('pruefen').doc.id), label: counts.pruefen === 1 ? 'Prüfen' : 'Ersten prüfen' };
+  if (counts.anhoeren) {
+    const ep = first('anhoeren').episode;
+    return { stage: 'anhoeren', text: counts.anhoeren === 1 ? `Folge anhören: ${ep.title}` : `${counts.anhoeren} Folgen warten aufs Anhören, zuerst: ${ep.title}`, href: '/lesen/folgen#hoeren', label: ep.position > 0 ? 'Weiterhören' : 'Anhören' };
+  }
   if (counts.entscheiden) {
     const text = counts.entscheiden === 1 ? `Gelesen oder gehört: ${name(first('entscheiden').doc)}. Wie weiter?` : `${counts.entscheiden} Texte sind gelesen oder gehört. Wie weiter?`;
     return draftable.length ? { stage: 'entscheiden', text, action: ALLE_ENTWERFEN, label: draftable.length === 1 ? 'Ingest entwerfen' : `Alle ${draftable.length} entwerfen lassen` } : { stage: 'entscheiden', text, href: '#entscheiden', label: 'Entscheiden' };
@@ -231,7 +250,23 @@ function actions(x, ctx, { available, planting, vault }) {
   }
 }
 
+/** Eine ungehörte Folge: Art, Länge, Stelle und ihre Texte, dazu Anhören und „Als gehört markieren“. */
+function episodeRow(x, ctx) {
+  const ep = x.episode;
+  const seconds = ep.bytes ? Math.round(ep.bytes / BYTES_PER_SECOND) : null;
+  const meta = [KINDS[ep.kind] ?? ep.kind, seconds ? clock(seconds) : ep.minutes ? `${ep.minutes} Min.` : null, ep.position > 0 ? `angefangen, bei ${clock(ep.position)}` : null].filter(Boolean).join(' · ');
+  const texts = x.docs.length ? `<p class="meta weiter-folge-texte">${x.docs.length === 1 ? 'Text' : `${x.docs.length} Texte`}: ${x.docs.map((d) => `<a href="${esc(docLink(d.id))}">${esc(name(d))}</a>`).join(', ')}</p>` : '';
+  const mark = `<form method="post" action="/aktion/lesen/folge/gehoert" class="act">${hidden({ csrf: ctx.write.csrf, back: ctx.write.back, id: ep.id, gehoert: '1' })}<button type="submit" class="btn quiet">Als gehört markieren<span class="sr-only">: ${esc(ep.title)}</span></button></form>`;
+  return `<li class="weiter-item is-anhoeren" data-weiter-folge="${esc(ep.id)}">
+    <div class="weiter-item-head"><a href="/lesen/folgen#hoeren" class="lesen-title">${esc(ep.title)}</a></div>
+    <span class="meta">${esc(meta)}</span>
+    ${texts}
+    <div class="weiter-acts"><a href="/lesen/folgen#hoeren" class="btn primary">${ep.position > 0 ? 'Weiterhören' : 'Anhören'}<span class="sr-only">: ${esc(ep.title)}</span></a>${mark}</div>
+  </li>`;
+}
+
 function row(x, ctx, opts) {
+  if (x.stage === 'anhoeren') return episodeRow(x, ctx);
   const d = x.doc;
   const minutes = x.stage === 'weiterlesen' ? `noch ${remainingMinutes(d)} Min.` : d.reading_minutes ? `${d.reading_minutes} Min.` : null;
   const meta = [d.site, minutes, readLabel(x.read, ctx.tz)].filter(Boolean).join(' · ');
@@ -262,17 +297,6 @@ function hero(model, ctx) {
   return `<section class="weiter-next${n.stage ? '' : ' is-clear'}" aria-labelledby="weiter-next"><h2 id="weiter-next">Als Nächstes</h2><p>${esc(n.text)}</p>${button}</section>`;
 }
 
-/** Zahlen je Stufe als Sprungmarken, dazu Eingang und Stapel als Links. */
-function summary({ counts }) {
-  const chip = (href, label, n) => `<a href="${href}" class="chip">${label} <span class="hint">${n}</span></a>`;
-  const chips = [
-    ...STAGES.filter((k) => counts[k]).map((k) => chip(`#${k}`, STAGE_LABELS[k], counts[k])),
-    counts.eingang ? chip('/lesen/eingang', 'Eingang', counts.eingang) : '',
-    counts.stapel ? chip('/lesen/stapel', 'Stapel', counts.stapel) : '',
-  ].filter(Boolean);
-  return chips.length ? `<nav class="chips weiter-summe" aria-label="Überblick">${chips.join('')}</nav>` : '';
-}
-
 function section(key, items, ctx, opts, extra = '') {
   if (!items.length) return '';
   return `<section class="weiter-stufe" id="${key}" aria-labelledby="weiter-${key}">
@@ -296,7 +320,15 @@ function unreadSection({ counts }, folgen) {
 
 // --- JSON --------------------------------------------------------------------
 
-const itemJson = (x) => ({
+const episodeItemJson = (x) => ({
+  stage: 'anhoeren',
+  episode: { id: x.episode.id, kind: x.episode.kind, kindLabel: KINDS[x.episode.kind] ?? x.episode.kind, title: x.episode.title, seconds: x.episode.bytes ? Math.round(x.episode.bytes / BYTES_PER_SECOND) : null, position: x.episode.position ?? null, finishedAt: x.episode.finished_at ?? null },
+  docs: x.docs.map((d) => ({ id: d.id, title: d.title ?? null, url: d.url })),
+});
+
+const itemJson = (x) => (x.stage === 'anhoeren' ? episodeItemJson(x) : docItemJson(x));
+
+const docItemJson = (x) => ({
   ...docJson(x.doc),
   stage: x.stage,
   remaining: x.stage === 'weiterlesen' ? remainingMinutes(x.doc) : null,
@@ -324,7 +356,6 @@ export function weiterRoutes({ store, ingest = null, planter = null, episodes = 
           : '';
         const body = [
           hero(m, ctx),
-          summary(m),
           ...STAGES.map((k) => section(k, m.stages[k], ctx, opts, k === 'entscheiden' ? bulk : '')),
           unreadSection(m, Boolean(episodes)),
         ].join('');

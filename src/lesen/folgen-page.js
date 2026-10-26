@@ -18,7 +18,12 @@ import { EPISODE_LANGUAGES, DEFAULT_EPISODE_LANGUAGE } from './languages.js';
  *   dazu die geschätzten Zeichen, die ElevenLabs berechnet.
  * - `/lesen/folgen/thema`: Folge zu einem Thema über den ganzen Vault (und das
  *   Internet): Thema, Ziele oder Anlass, Podcast oder Report, Länge frei.
- * - `/lesen/folgen`: alle Folgen als Karten. Fertige mit Abspiel-Knopf
+ * - `/lesen/folgen`: alle Folgen als Karten, in Gruppen: „Zum Hören“ (fertig,
+ *   noch nicht gehört, angefangene zuerst), „Entsteht“ (auch fehlgeschlagene),
+ *   „Nur Transkript“ und eingeklappt „Gehört“ (kleine Karten). Fertige mit
+ *   „Als gehört markieren“ bzw. „Doch nicht gehört“; der Player meldet die
+ *   Stelle (`/aktion/lesen/folge/stelle`), kurz vor Schluss ist die Folge gehört.
+ *   Fertige mit Abspiel-Knopf
  *   (/static/lesen-folgen.js: eigener Player mit Sperrbildschirm über die
  *   Media Session; in der iOS-App spielt der native Player) und dem Link
  *   „Im Vault“ aufs Transkript (Podcast, Report), entstehende mit
@@ -47,6 +52,15 @@ function when(iso, tz) {
 }
 
 const BUSY = ['wartet', 'recherchiert', 'schreibt', 'spricht'];
+const GEHOERT = '/aktion/lesen/folge/gehoert';
+
+/** „am 24. Okt.“, „heute“ oder leer. */
+function shortDay(iso, tz) {
+  const t = Date.parse(iso ?? '');
+  if (Number.isNaN(t)) return '';
+  const day = (d) => new Intl.DateTimeFormat('de-DE', { timeZone: tz, day: 'numeric', month: 'short' }).format(d);
+  return day(new Date(t)) === day(new Date()) ? 'heute' : `am ${day(new Date(t))}`;
+}
 
 /** `75` → `1:15`, `3725` → `1:02:05`. */
 export function clock(seconds) {
@@ -106,6 +120,16 @@ export function progressOf(ep, at = Date.now()) {
 
 /** Dauer der fertigen MP3 (feste Bitrate), sonst null. */
 const secondsOf = (ep) => (ep.bytes ? Math.round(ep.bytes / BYTES_PER_SECOND) : null);
+
+/** Hörstand einer fertigen Folge: `gehoert`, `angefangen` (Stelle gemeldet) oder `neu`; sonst null. */
+export function listenOf(ep) {
+  if (ep.status !== 'fertig') return null;
+  if (ep.heard_at) return 'gehoert';
+  return ep.position > 0 ? 'angefangen' : 'neu';
+}
+
+/** Fertig und noch nicht gehört: steht vorn und unter „Weiter → Anhören“. */
+export const unheard = (ep) => ep.status === 'fertig' && !ep.heard_at;
 
 const PLAY = '<svg viewBox="0 0 24 24" class="folge-icon-play" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.6-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg>';
 const PAUSE = '<svg viewBox="0 0 24 24" class="folge-icon-pause" aria-hidden="true"><rect x="6.5" y="5" width="4" height="14" rx="1.2"/><rect x="13.5" y="5" width="4" height="14" rx="1.2"/></svg>';
@@ -402,6 +426,10 @@ export function episodeJson(ep, { resumable = false, at = Date.now(), ingest = n
     finishedAt: ep.finished_at ?? null,
     seconds: ep.status === 'fertig' ? secondsOf(ep) : null,
     bytes: ep.bytes ?? null,
+    /** Hörstand (`listenOf`): `neu`, `angefangen`, `gehoert`; null, solange nicht fertig. */
+    listen: listenOf(ep),
+    heardAt: ep.heard_at ?? null,
+    position: ep.position ?? null,
     note: ep.note ?? null,
     source: ep.source ?? 'lesestapel',
     topic: ep.topic ?? null,
@@ -440,11 +468,14 @@ export function episodeCard(ep, { ctx, resumable = false, at = Date.now(), inges
     const src = `/lesen/folgen/audio?id=${id}`;
     // Transkript von Podcast und Report im Vault.
     const note = ep.note ? `<a href="/notiz?pfad=${esc(encodeURIComponent(ep.note))}" class="btn quiet">Im Vault</a>` : '';
-    return `<li class="folge is-ready" data-folge="${esc(ep.id)}" data-status="fertig" data-src="${esc(src)}" data-title="${esc(ep.title)}" data-art="${esc(KINDS[ep.kind] ?? '')}" data-seconds="${seconds ?? ''}" data-bytes="${ep.bytes ?? ''}">
+    const listen = listenOf(ep);
+    const heardLine = listen === 'gehoert' ? `gehört ${shortDay(ep.heard_at, ctx.tz)}` : listen === 'angefangen' ? `angefangen, bei ${clock(ep.position)}` : 'noch nicht gehört';
+    const mark = `<form method="post" action="${GEHOERT}" class="inline">${hidden({ csrf: ctx.write.csrf, back: '/lesen/folgen', id: ep.id, gehoert: listen === 'gehoert' ? '0' : '1' })}<button type="submit" class="btn quiet">${listen === 'gehoert' ? 'Doch nicht gehört' : 'Als gehört markieren'}<span class="sr-only">: ${esc(ep.title)}</span></button></form>`;
+    return `<li class="folge is-ready is-${listen}" data-folge="${esc(ep.id)}" data-status="fertig" data-listen="${listen}" data-src="${esc(src)}" data-title="${esc(ep.title)}" data-art="${esc(KINDS[ep.kind] ?? '')}" data-seconds="${seconds ?? ''}" data-bytes="${ep.bytes ?? ''}" data-csrf="${esc(ctx.write.csrf)}">
     <div class="folge-card">
       <button type="button" class="folge-play" data-play aria-label="Abspielen: ${esc(ep.title)}" hidden>${PLAY}${PAUSE}</button>
       <a href="${esc(src)}" class="folge-play folge-nojs" aria-label="Abspielen: ${esc(ep.title)}">${PLAY}</a>
-      ${head([seconds ? clock(seconds) : ep.minutes ? `${ep.minutes} Min.` : null, created, `${fmt.format(ep.chars ?? 0)} Zeichen`])}
+      ${head([seconds ? clock(seconds) : ep.minutes ? `${ep.minutes} Min.` : null, heardLine, created])}
     </div>
     <div class="folge-player" data-player hidden>
       <input type="range" class="folge-seek" data-seek min="0" max="${seconds ?? 0}" step="1" value="0" aria-label="Stelle">
@@ -458,7 +489,7 @@ export function episodeCard(ep, { ctx, resumable = false, at = Date.now(), inges
       </div>
       <p class="problem" data-error hidden></p>
     </div>
-    <div class="folge-actions">${note}${ingestUi.button}<a href="${esc(src)}" class="btn quiet" download="${esc(ep.title.replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'Folge')}.mp3">Herunterladen</a>${remove()}</div>
+    <div class="folge-actions">${mark}${note}${ingestUi.button}<a href="${esc(src)}" class="btn quiet" download="${esc(ep.title.replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'Folge')}.mp3">Herunterladen</a>${remove()}</div>
     ${ingestUi.line}
   </li>`;
   }
@@ -505,12 +536,33 @@ export function episodeCard(ep, { ctx, resumable = false, at = Date.now(), inges
   </li>`;
 }
 
+/**
+ * Folgen in Gruppen: Zum Hören (angefangene zuerst), Entsteht, Nur Transkript,
+ * eingeklappt Gehört. Leere Gruppen fehlen.
+ */
+export function episodeGroups(list) {
+  const toHear = list.filter(unheard).sort((a, b) => (b.position > 0) - (a.position > 0));
+  return {
+    hoeren: toHear,
+    entsteht: list.filter((ep) => BUSY.includes(ep.status) || ep.status === 'fehler'),
+    transkript: list.filter((ep) => ep.status === 'transkript'),
+    gehoert: list.filter((ep) => ep.status === 'fertig' && ep.heard_at),
+  };
+}
+
 function listPage(episodes, ctx, ingestOf) {
   const list = episodes.list();
   const head = '<p class="stapel-hoeren"><a href="/lesen/folgen/neu" class="btn primary">Neue Folge</a> <a href="/lesen/folgen/thema" class="btn">Zu einem Thema</a></p>';
   if (!list.length) return `${head}<p class="empty">Noch keine Folgen. Aus dem Stapel lassen sich Texte vorlesen, als Podcast besprechen oder zu einem Report zusammenfassen; zu einem Thema recherchiert Claude im ganzen Vault und im Internet.</p>`;
   const at = Date.now();
-  return `${head}<ul class="folgen">${list.map((ep) => episodeCard(ep, { ctx, resumable: episodes.resumable(ep.id), at, ingest: ingestOf(ep) })).join('')}</ul>`;
+  const cards = (eps) => `<ul class="folgen">${eps.map((ep) => episodeCard(ep, { ctx, resumable: episodes.resumable(ep.id), at, ingest: ingestOf(ep) })).join('')}</ul>`;
+  const g = episodeGroups(list);
+  const group = (key, title, eps, hint = '') => (eps.length ? `<div class="folgen-gruppe" id="${key}" role="group" aria-labelledby="folgen-${key}"><h2 id="folgen-${key}">${title} <span class="hint">${eps.length}</span></h2>${hint ? `<p class="meta">${hint}</p>` : ''}${cards(eps)}</div>` : '');
+  const heard = g.gehoert.length
+    ? `<details class="folgen-gruppe folgen-gehoert" id="gehoert"><summary><h2>Gehört <span class="hint">${g.gehoert.length}</span></h2></summary>${cards(g.gehoert)}</details>`
+    : '';
+  const empty = g.hoeren.length ? '' : '<p class="empty folgen-alles">Alles gehört. Neue Folgen entstehen aus dem Stapel.</p>';
+  return `${head}<div class="folgen-gruppen">${empty}${group('hoeren', 'Zum Hören', g.hoeren)}${group('entsteht', 'Entsteht', g.entsteht)}${group('transkript', 'Nur Transkript', g.transkript, 'Audio auf Knopfdruck, aus demselben Skript.')}${heard}</div>`;
 }
 
 /** `bytes=a-b` → `[start, end]` (einschließlich) in `size`, `null` = ganze Datei, `false` = nicht erfüllbar. */
@@ -702,6 +754,17 @@ export function folgenRoutes({ store, episodes, ingest = null }) {
         const n = started.queued.length;
         if (!n) return { message: 'Für diese Texte gibt es schon Entwürfe, oder sie sind im Wiki.', redirect: '/lesen/folgen' };
         return { message: `Ingest für ${n} ${n === 1 ? 'Text' : 'Texte'} angestoßen; prüfen unter Lesen → Ingest.`, redirect: '/lesen/folgen' };
+      },
+      /** Folge als gehört (`gehoert=1`, Standard) oder doch nicht (`0`), mit Rückgängig. */
+      async [GEHOERT](form) {
+        const value = form.get('gehoert') !== '0';
+        const ep = asAction(() => episodes.setHeard(form.get('id') ?? '', value));
+        return { message: `${value ? 'Gehört' : 'Wieder zum Hören'}: ${ep.title}`, undo: { action: GEHOERT, fields: { id: ep.id, gehoert: value ? '0' : '1' } }, listen: listenOf(ep) };
+      },
+      /** Stelle vom Player (`stelle`, `dauer` in Sekunden), still; kurz vor Schluss gehört (`heard`). */
+      async '/aktion/lesen/folge/stelle'(form) {
+        const ep = asAction(() => episodes.listened(form.get('id') ?? '', { position: form.get('stelle'), duration: form.get('dauer') }));
+        return { message: '', heard: ep.heard, listen: listenOf(ep) };
       },
       async '/aktion/lesen/folge/loeschen'(form) {
         const ep = asAction(() => episodes.remove(form.get('id') ?? ''));

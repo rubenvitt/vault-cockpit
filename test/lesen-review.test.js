@@ -206,7 +206,7 @@ test('Wiedersehen über das Cockpit: ohne JavaScript Behalten → Rückgängig a
   try {
     let html = await (await call('/lesen/wiedersehen')).text();
     assert.ok(!/style=|<script>/.test(html), 'keine Inline-Styles oder -Skripte');
-    assert.match(html, /<a href="\/lesen\/wiedersehen" class="subnav-link" aria-current="page">Wiedersehen<\/a>/);
+    assert.match(html, /<a href="\/lesen\/wiedersehen" class="subnav-item" aria-current="page"><span>Wiedersehen<\/span>/);
     assert.equal(cardId(html), h.id);
     assert.doesNotMatch(html, /In eigenen Worten/, 'ohne Inbox kein Textfeld');
     const csrf = html.match(/name="csrf" value="([^"]+)"/)[1];
