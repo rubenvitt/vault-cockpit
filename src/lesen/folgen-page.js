@@ -4,7 +4,7 @@ import { hidden } from '../web/render.js';
 import { ActionError } from '../cockpit/actions.js';
 import { readingPage } from './pages.js';
 import { WINDOWS, fitToWindow, stackItemJson } from './stack.js';
-import { EpisodeError, KINDS, LENGTHS, MAX_DOCS, BYTES_PER_SECOND, STYLES, DEFAULT_STYLE, MAX_TOPICS, MAX_FOCUS } from './folgen.js';
+import { EpisodeError, KINDS, LENGTHS, MAX_DOCS, BYTES_PER_SECOND, STYLES, DEFAULT_STYLE, MAX_TOPICS, MAX_FOCUS, TOPIC_KINDS, TOPIC_LENGTHS, TOPIC_MINUTES } from './folgen.js';
 import { jsonReply } from './json.js';
 import { IngestError } from './ingest.js';
 import { EPISODE_LANGUAGES, DEFAULT_EPISODE_LANGUAGE } from './languages.js';
@@ -16,6 +16,8 @@ import { EPISODE_LANGUAGES, DEFAULT_EPISODE_LANGUAGE } from './languages.js';
  *   Länge, bei Podcast und Report Ton, Schwerpunkt (Themen der Texte, eigener
  *   Wunsch) und ob gleich das Audio entsteht oder erst nur das Transkript,
  *   dazu die geschätzten Zeichen, die ElevenLabs berechnet.
+ * - `/lesen/folgen/thema`: Folge zu einem Thema über den ganzen Vault (und das
+ *   Internet): Thema, Ziele oder Anlass, Podcast oder Report, Länge frei.
  * - `/lesen/folgen`: alle Folgen als Karten. Fertige mit Abspiel-Knopf
  *   (/static/lesen-folgen.js: eigener Player mit Sperrbildschirm über die
  *   Media Session; in der iOS-App spielt der native Player) und dem Link
@@ -28,8 +30,9 @@ import { EPISODE_LANGUAGES, DEFAULT_EPISODE_LANGUAGE } from './languages.js';
  *   Seite den Fortschritt ohne Neuladen zeigt.
  * - `/lesen/folgen/audio?id=…`: die MP3, mit `Range` (Safari spielt Audio
  *   nur so ab, und Vorspulen braucht es auch).
- * - `/api/lesen/folgen` und `/api/lesen/folgen/neu?zeit=30`: dasselbe als JSON
- *   für die App (auch ohne Folgen, dann mit `enabled: false`).
+ * - `/api/lesen/folgen`, `/api/lesen/folgen/neu?zeit=30` und
+ *   `/api/lesen/folgen/thema`: dasselbe als JSON für die App (auch ohne Folgen,
+ *   dann mit `enabled: false`); angelegt wird über `/aktion/lesen/folge/thema`.
  */
 
 const fmt = new Intl.NumberFormat('de-DE');
@@ -43,7 +46,7 @@ function when(iso, tz) {
   return new Intl.DateTimeFormat('de-DE', { timeZone: tz, dateStyle: 'medium', timeStyle: 'short' }).format(new Date(iso));
 }
 
-const BUSY = ['wartet', 'schreibt', 'spricht'];
+const BUSY = ['wartet', 'recherchiert', 'schreibt', 'spricht'];
 
 /** `75` → `1:15`, `3725` → `1:02:05`. */
 export function clock(seconds) {
@@ -67,9 +70,21 @@ const since = (iso, at) => {
  */
 export function progressOf(ep, at = Date.now()) {
   const writes = ep.kind !== 'vorlesen';
-  const steps = !writes ? ['Eingereiht', 'Stimme spricht', 'Fertig'] : ep.audio === false ? ['Eingereiht', 'Claude schreibt', 'Transkript fertig'] : ['Eingereiht', 'Claude schreibt', 'Stimmen sprechen', 'Fertig'];
-  const step = { wartet: 0, schreibt: 1, spricht: writes ? 2 : 1 }[ep.status] ?? steps.length - 1;
+  const topic = ep.source === 'thema';
+  const ends = ep.audio === false ? ['Transkript fertig'] : ['Stimmen sprechen', 'Fertig'];
+  const steps = !writes ? ['Eingereiht', 'Stimme spricht', 'Fertig'] : topic ? ['Eingereiht', 'Claude recherchiert', 'Claude schreibt', ...ends] : ['Eingereiht', 'Claude schreibt', ...ends];
+  const step = (topic ? { wartet: 0, recherchiert: 1, schreibt: 2, spricht: 3 } : { wartet: 0, schreibt: 1, spricht: writes ? 2 : 1 })[ep.status] ?? steps.length - 1;
   if (ep.status === 'wartet') return { steps, step, percent: null, fraction: null, restMinutes: null, label: 'Wartet, bis die Folge davor fertig ist' };
+  if (ep.status === 'recherchiert') {
+    return { steps, step, percent: null, fraction: null, restMinutes: null, label: `Claude recherchiert im Vault${ep.web ? ' und im Internet' : ''}, ${since(ep.researching_at ?? ep.updated_at, at)} (meist 5 bis 20 Minuten)` };
+  }
+  if (ep.status === 'schreibt' && topic && ep.chapters_total) {
+    const total = ep.chapters_total;
+    const current = Math.min(total, Math.max(1, ep.chapter ?? 1));
+    const fraction = (current - 1) / total;
+    const read = [ep.notes_read ? `${ep.notes_read} ${ep.notes_read === 1 ? 'Notiz' : 'Notizen'}` : null, ep.web_sources ? `${ep.web_sources} ${ep.web_sources === 1 ? 'Webquelle' : 'Webquellen'}` : null].filter(Boolean).join(' und ');
+    return { steps, step, percent: Math.floor(fraction * 100), fraction, restMinutes: null, label: `Claude schreibt Kapitel ${current} von ${total}${read ? `, aus ${read}` : ''}` };
+  }
   if (ep.status === 'schreibt') {
     const what = ep.kind === 'podcast' ? 'Claude schreibt das Gespräch' : 'Claude schreibt den Report';
     return { steps, step, percent: null, fraction: null, restMinutes: null, label: `${what}, ${since(ep.writing_at ?? ep.updated_at, at)} (meist 1 bis 3 Minuten)` };
@@ -103,6 +118,15 @@ const KIND_ICONS = {
 };
 // Gesprochenes Deutsch bei ElevenLabs: rund 900 Zeichen je Minute.
 const SPOKEN_CHARS_PER_MINUTE = 900;
+
+/** Zusammenfassung am Knopf einer Themen-Folge, wie bei `newSummary`. */
+export function topicSummary({ kind, minutes, web, audio = true }) {
+  const m = Number(minutes);
+  if (!Number.isInteger(m) || m < TOPIC_MINUTES.min || m > TOPIC_MINUTES.max) return { main: `Länge: ${TOPIC_MINUTES.min} bis ${TOPIC_MINUTES.max} Minuten`, cost: '' };
+  const h = m >= 60 ? ` (${m % 60 ? clock(m * 60).replace(/:00$/, '') : m / 60} Std.)` : '';
+  const main = `${KINDS[kind] ?? kind} zum Thema · ${m} Min.${h} · Vault${web ? ' und Internet' : ''}${audio ? '' : ' · erst Transkript'}`;
+  return { main, cost: audio ? `rund ${fmt.format(m * SPOKEN_CHARS_PER_MINUTE)} Zeichen bei ElevenLabs, dazu dein Claude-Abo` : 'Nur dein Claude-Abo; Audio später auf Knopfdruck' };
+}
 
 /**
  * Zusammenfassung am Knopf: `main` (Art, Texte, Dauer) und `cost`. Dieselbe
@@ -241,11 +265,77 @@ function newPage(episodes, store, ctx) {
   </form>`;
 }
 
-/** Nach einem Fehler: Knopf und Erklärung, je nachdem, ob Claudes Skript schon da ist. */
-const retryOf = (resumable) =>
-  resumable
-    ? { label: 'Fortsetzen', hint: 'Schon Gesprochenes und Claudes Skript bleiben; es kostet nur, was noch fehlt.' }
-    : { label: 'Erneut versuchen', hint: 'Claudes Skript fehlt noch, dafür schreibt Claude noch einmal (über dein Abo).' };
+const TOPIC_DESCRIPTIONS = {
+  podcast: 'Zwei Stimmen sprechen über das Thema, Moderation und Gast.',
+  report: 'Eine Stimme erzählt, in Kapiteln, wie ein langer Radiobeitrag.',
+};
+
+/** Was „Zu einem Thema“ zeigt, für Seite und JSON. */
+export function topicModel(episodes) {
+  const missing = episodes.topicMissing();
+  return {
+    missing,
+    kinds: TOPIC_KINDS.map((kind) => ({ kind, label: KINDS[kind], description: TOPIC_DESCRIPTIONS[kind] })),
+    defaultKind: 'report',
+    lengths: TOPIC_LENGTHS,
+    defaultLength: 30,
+    min: TOPIC_MINUTES.min,
+    max: TOPIC_MINUTES.max,
+    spokenCharsPerMinute: SPOKEN_CHARS_PER_MINUTE,
+    summary: topicSummary({ kind: 'report', minutes: 30, web: true }),
+  };
+}
+
+function topicPage(episodes, ctx) {
+  const { missing, kinds, defaultKind, lengths, defaultLength, min, max, summary } = topicModel(episodes);
+  const step = (nr, title, hint = '') => `<div class="folge-schritt-kopf"><span class="folge-nr" aria-hidden="true">${nr}</span><div><h2>${title}</h2>${hint ? `<p class="meta">${hint}</p>` : ''}</div></div>`;
+  const kindChoice = kinds
+    .map(({ kind, label, description }) => `<label class="folge-wahl">
+        <input type="radio" name="art" value="${kind}"${kind === defaultKind ? ' checked' : ''}>
+        <span class="folge-wahl-icon"><svg viewBox="0 0 24 24" aria-hidden="true">${KIND_ICONS[kind]}</svg></span>
+        <span class="folge-wahl-text"><b>${label}</b><span>${esc(description)}</span></span>
+      </label>`)
+    .join('');
+  const presets = lengths.map((m) => `<label><input type="radio" name="vorschlag" value="${m}"${m === defaultLength ? ' checked' : ''}><span>${m >= 60 && m % 60 === 0 ? `${m / 60} Std.` : `${m} Min.`}</span></label>`).join('');
+  return `${missing ? `<p class="problem">${esc(missing)}</p>` : ''}<form method="post" action="/aktion/lesen/folge/thema" class="folge-neu folge-thema" data-folge-thema>
+    ${hidden({ csrf: ctx.write.csrf, back: ctx.write.back })}
+    <section class="folge-schritt">
+      ${step(1, 'Worum geht es?', 'Claude sucht dazu im ganzen Vault: Projekte, Bereiche, Wiki, Tagesnotizen, Reviews. Vertrauliche Ordner bleiben zu.')}
+      <label class="thema-feld"><span>Thema</span><input type="text" name="thema" required minlength="3" maxlength="300" placeholder="z. B. Was ich seit dem Sommer über Führung gelernt habe" autocomplete="off"></label>
+      <label class="thema-feld"><span>Ziele, Anlass, Schwerpunkte <span class="meta">(optional)</span></span><textarea name="ziel" rows="4" maxlength="3000" placeholder="Was soll die Folge leisten? Etwa: Autofahrt zum Kunden, ich will mit klarem Kopf ins Gespräch gehen; Fokus auf die letzten sechs Wochen."></textarea></label>
+      <label class="folge-check"><input type="checkbox" name="internet" value="1" checked><span>Auch im Internet recherchieren <span class="meta">(Suchanfragen ohne persönliche Details aus dem Vault)</span></span></label>
+    </section>
+    <section class="folge-schritt">
+      ${step(2, 'Was soll daraus werden?')}
+      <div class="folge-arten">${kindChoice}</div>
+    </section>
+    <section class="folge-schritt">
+      ${step(3, 'Wie lang?', `Ab etwa 15 Minuten in Kapiteln, je höchstens 20 Minuten. Zwischen ${min} und ${max} Minuten.`)}
+      <div class="folge-segmente" role="radiogroup" aria-label="Vorschläge">${presets}</div>
+      <label class="thema-feld folge-minuten"><span>Minuten</span><input type="number" name="minuten" min="${min}" max="${max}" step="1" value="${defaultLength}" required inputmode="numeric"></label>
+    </section>
+    <section class="folge-schritt">
+      ${step(4, 'Gleich mit Audio?', 'Erst nur das Transkript kostet bei ElevenLabs nichts. Gefällt es dir, wird daraus auf Knopfdruck das Audio, ohne dass Claude noch einmal recherchiert oder schreibt.')}
+      <div class="folge-segmente" role="radiogroup" aria-label="Audio"><label><input type="radio" name="audio" value="1" checked><span>Mit Audio</span></label><label><input type="radio" name="audio" value="0"><span>Erst nur Transkript</span></label></div>
+    </section>
+    <div class="folge-los">
+      <p class="folge-summe" aria-live="polite"><b data-summary>${esc(summary.main)}</b><span class="meta" data-cost>${esc(summary.cost)}</span></p>
+      <button type="submit" class="btn primary"${missing ? ' disabled' : ''}>Folge erzeugen</button>
+      <p class="meta">Erst recherchiert Claude, dann schreibt es Kapitel für Kapitel, dann sprechen die Stimmen. Das dauert, bei langen Folgen eine Stunde und mehr; du kannst die Seite verlassen.</p>
+    </div>
+  </form>`;
+}
+
+/**
+ * Nach einem Fehler: Knopf und Erklärung, je nachdem, ob Claudes Skript schon
+ * da ist; bei einer Themen-Folge, ob die Recherche schon da ist.
+ */
+const retryOf = (resumable, ep = {}) => {
+  if (resumable) return { label: 'Fortsetzen', hint: 'Schon Gesprochenes und Claudes Skript bleiben; es kostet nur, was noch fehlt.' };
+  if (ep.source === 'thema' && ep.researched) return { label: 'Fortsetzen', hint: 'Die Recherche und fertige Kapitel bleiben; Claude schreibt nur die fehlenden Kapitel (über dein Abo).' };
+  if (ep.source === 'thema') return { label: 'Erneut versuchen', hint: 'Die Recherche fehlt noch, dafür recherchiert Claude noch einmal (über dein Abo).' };
+  return { label: 'Erneut versuchen', hint: 'Claudes Skript fehlt noch, dafür schreibt Claude noch einmal (über dein Abo).' };
+};
 
 const INGEST_DONE = { bereit: 'bereit zum Prüfen', wartet: 'wird entworfen', entwirft: 'wird entworfen', uebernommen: 'im Wiki', fehler: 'mit Fehler' };
 
@@ -310,6 +400,10 @@ export function episodeJson(ep, { resumable = false, at = Date.now(), ingest = n
     seconds: ep.status === 'fertig' ? secondsOf(ep) : null,
     bytes: ep.bytes ?? null,
     note: ep.note ?? null,
+    source: ep.source ?? 'lesestapel',
+    topic: ep.topic ?? null,
+    goal: ep.goal ?? null,
+    web: ep.source === 'thema' ? ep.web !== false : null,
     /** false: erst nur das Transkript (Status `transkript`), Audio auf Knopfdruck. */
     audio: ep.audio !== false,
     language: ep.language ?? null,
@@ -323,7 +417,7 @@ export function episodeJson(ep, { resumable = false, at = Date.now(), ingest = n
     ingest: ['fertig', 'transkript'].includes(ep.status) ? ingest : null,
     error: failed ? (ep.error ?? 'Unbekannter Fehler') : null,
     resumable: failed && resumable,
-    retry: failed ? retryOf(resumable) : null,
+    retry: failed ? retryOf(resumable, ep) : null,
     progress: busy ? progressOf(ep, at) : null,
   };
 }
@@ -385,7 +479,7 @@ export function episodeCard(ep, { ctx, resumable = false, at = Date.now(), inges
   }
 
   if (ep.status === 'fehler') {
-    const again = retryOf(resumable);
+    const again = retryOf(resumable, ep);
     return `<li class="folge is-failed" data-folge="${esc(ep.id)}" data-status="fehler">
     <div class="folge-card">${head([ep.minutes ? `${ep.minutes} Min.` : null, created])}</div>
     <p class="problem">${esc(ep.error ?? 'Unbekannter Fehler')}</p>
@@ -410,8 +504,8 @@ export function episodeCard(ep, { ctx, resumable = false, at = Date.now(), inges
 
 function listPage(episodes, ctx, ingestOf) {
   const list = episodes.list();
-  const head = '<p class="stapel-hoeren"><a href="/lesen/folgen/neu" class="btn primary">Neue Folge</a></p>';
-  if (!list.length) return `${head}<p class="empty">Noch keine Folgen. Aus dem Stapel lassen sich Texte vorlesen, als Podcast besprechen oder zu einem Report zusammenfassen.</p>`;
+  const head = '<p class="stapel-hoeren"><a href="/lesen/folgen/neu" class="btn primary">Neue Folge</a> <a href="/lesen/folgen/thema" class="btn">Zu einem Thema</a></p>';
+  if (!list.length) return `${head}<p class="empty">Noch keine Folgen. Aus dem Stapel lassen sich Texte vorlesen, als Podcast besprechen oder zu einem Report zusammenfassen; zu einem Thema recherchiert Claude im ganzen Vault und im Internet.</p>`;
   const at = Date.now();
   return `${head}<ul class="folgen">${list.map((ep) => episodeCard(ep, { ctx, resumable: episodes.resumable(ep.id), at, ingest: ingestOf(ep) })).join('')}</ul>`;
 }
@@ -509,6 +603,11 @@ function episodeApi({ store, episodes, ingestOf }) {
         summaries,
       });
     },
+    /** Vorgaben für „Zu einem Thema“: Arten, Längen, Grenzen, was fehlt. */
+    async '/api/lesen/folgen/thema'() {
+      if (!episodes) return jsonReply(200, { ...off });
+      return jsonReply(200, { ok: true, enabled: true, ...topicModel(episodes) });
+    },
   };
 }
 
@@ -526,6 +625,9 @@ export function folgenRoutes({ store, episodes, ingest = null }) {
         const at = Date.now();
         const items = episodes.list().map((ep) => ({ id: ep.id, status: ep.status, busy: BUSY.includes(ep.status), html: episodeCard(ep, { ctx, resumable: episodes.resumable(ep.id), at, ingest: ingestOf(ep) }) }));
         return { status: 200, body: JSON.stringify({ ok: true, items }), headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } };
+      },
+      async '/lesen/folgen/thema'(ctx) {
+        return { html: readingPage(ctx, { key: 'folgen', title: 'Folge zu einem Thema', body: topicPage(episodes, ctx), scripts: [assets.lesenFolgen] }) };
       },
       async '/lesen/folgen/neu'(ctx) {
         return { html: readingPage(ctx, { key: 'folgen', title: 'Neue Folge', body: newPage(episodes, store, ctx), scripts: [assets.lesenFolgen] }) };
@@ -552,6 +654,22 @@ export function folgenRoutes({ store, episodes, ingest = null }) {
         ep.done?.catch(() => {});
         if (ep.audio === false) return { message: `${KINDS[ep.kind]}: Claude schreibt das Transkript, Audio danach auf Knopfdruck.`, redirect: '/lesen/folgen' };
         return { message: `${KINDS[ep.kind]} entsteht im Hintergrund, rund ${fmt.format(ep.chars)} Zeichen.`, redirect: '/lesen/folgen' };
+      },
+      async '/aktion/lesen/folge/thema'(form) {
+        const ep = asAction(() =>
+          episodes.createTopic({
+            kind: form.get('art') ?? '',
+            topic: form.get('thema') ?? '',
+            goal: form.get('ziel') ?? '',
+            minutes: Number(form.get('minuten') ?? form.get('vorschlag') ?? 30),
+            // Ohne Haken schickt das Formular nichts; die App schickt `internet=0` oder `1`.
+            web: ['1', 'true', 'on'].includes(String(form.get('internet') ?? '')),
+            audio: form.get('audio') !== '0',
+          }),
+        );
+        ep.done?.catch(() => {});
+        if (ep.audio === false) return { message: `${KINDS[ep.kind]} zu „${ep.topic}“: erst die Recherche, dann das Transkript; Audio danach auf Knopfdruck.`, redirect: '/lesen/folgen' };
+        return { message: `${KINDS[ep.kind]} zu „${ep.topic}“ entsteht im Hintergrund: erst die Recherche, dann ${ep.minutes} Minuten Text und Stimme.`, redirect: '/lesen/folgen' };
       },
       async '/aktion/lesen/folge/sprechen'(form) {
         const ep = asAction(() => episodes.speak(form.get('id') ?? ''));

@@ -12,7 +12,7 @@
 // Auf `/lesen/folgen/neu` rechnet es den Satz am Knopf (Art, Texte, Dauer,
 // Kosten, erst nur Transkript) beim Umschalten neu, wie `newSummary` in
 // src/lesen/folgen-page.js, zeigt die Erklärung zum gewählten Ton und lässt
-// höchstens `MAX_TOPICS` Themen wählen.
+// höchstens `MAX_TOPICS` Themen wählen; auf `/lesen/folgen/thema` wie `topicSummary`.
 //
 // Solange eine Folge entsteht, holt die Seite alle paar Sekunden
 // `/lesen/folgen/stand` und tauscht die Karten der entstehenden Folgen aus.
@@ -58,6 +58,37 @@
     form.addEventListener('change', update);
     // Doppeltes Absenden würde zwei Folgen bezahlen.
     form.addEventListener('submit', () => setTimeout(() => (submit.disabled = true)));
+    update();
+  }
+
+  // Zu einem Thema: Vorschläge setzen die Minuten, eigene Minuten heben den Vorschlag auf.
+  const topic = document.querySelector('[data-folge-thema]');
+  if (topic) {
+    const fmt = new Intl.NumberFormat('de-DE');
+    const KINDS = { podcast: 'Podcast', report: 'Report' };
+    const minutes = topic.querySelector('input[name=minuten]');
+    const submit = topic.querySelector('button[type=submit]');
+    const min = Number(minutes.min);
+    const max = Number(minutes.max);
+    const update = () => {
+      const kind = topic.querySelector('input[name=art]:checked')?.value ?? 'report';
+      const web = topic.querySelector('input[name=internet]')?.checked;
+      const audio = topic.querySelector('input[name=audio]:checked')?.value !== '0';
+      const m = Number(minutes.value);
+      for (const r of topic.querySelectorAll('input[name=vorschlag]')) r.checked = Number(r.value) === m;
+      const okay = Number.isInteger(m) && m >= min && m <= max;
+      if (!submit.hasAttribute('data-off')) submit.disabled = !okay;
+      const h = m >= 60 ? ` (${m % 60 ? `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}` : m / 60} Std.)` : '';
+      topic.querySelector('[data-summary]').textContent = okay ? `${KINDS[kind]} zum Thema · ${m} Min.${h} · Vault${web ? ' und Internet' : ''}${audio ? '' : ' · erst Transkript'}` : `Länge: ${min} bis ${max} Minuten`;
+      topic.querySelector('[data-cost]').textContent = !okay ? '' : audio ? `rund ${fmt.format(m * 900)} Zeichen bei ElevenLabs, dazu dein Claude-Abo` : 'Nur dein Claude-Abo; Audio später auf Knopfdruck';
+    };
+    if (submit.disabled) submit.setAttribute('data-off', '');
+    topic.addEventListener('change', (e) => {
+      if (e.target.name === 'vorschlag') minutes.value = e.target.value;
+      update();
+    });
+    minutes.addEventListener('input', update);
+    topic.addEventListener('submit', () => setTimeout(() => (submit.disabled = true)));
     update();
   }
 

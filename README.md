@@ -70,7 +70,7 @@ Betrieb und Pfade im Container (die Compose-Datei setzt sie, sonst passen die St
 | `SYNC_ADAPTER` | `obsidian-headless` (Standard) oder `none` (keine Dateibeobachtung, kein Sync-Status) |
 | `SYNC_STATUS_FILE` | Statusdatei des Sync-Sidecars, z. B. `/sync-status/sync.json` |
 | `CAPTURE_STATE_FILE` | Merkzettel gegen doppelte Aufgaben, Standard `/data/capture-state.json` |
-| `CLAUDE_CODE_OAUTH_TOKEN` | Abo-Token aus `claude setup-token` (ein Jahr gültig) für [Folgen](#lesen) „Podcast“ und „Report“; ohne gibt es nur „Vorlesen“. `ANTHROPIC_API_KEY` reicht das Cockpit bewusst nicht an die CLI weiter |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Abo-Token aus `claude setup-token` (ein Jahr gültig) für [Folgen](#lesen) „Podcast“ und „Report“, auch zu einem Thema mit Recherche im Vault und Internet; ohne gibt es nur „Vorlesen“. `ANTHROPIC_API_KEY` reicht das Cockpit bewusst nicht an die CLI weiter |
 | `FOLGEN_DIR` | Folgen (MP3 und Stand), Standard `/data/folgen` |
 | `TTS_CACHE_DIR`, `TTS_CACHE_MB` | Cache der [Stimme vom Server](#lesen) (ein MP3 je Satz), Standard `/data/tts-cache` und 500 MB; darüber fliegen die am längsten nicht gehörten Sätze |
 
@@ -102,7 +102,7 @@ Die übrigen lassen sich nicht neu bauen, ohne sie ist alles neu einzurichten:
 | `api-tokens.json` | API-Tokens für Kurzbefehle, Funke und Suche (nur Hashes; fehlen sie, müssen alle Kurzbefehle neue Tokens bekommen) |
 | `capture-state.json` | Merkzettel von Capture und Brücke (keine doppelten Aufgaben, zuletzt gesehene Checkbox-Stände) |
 | `session-secret` | Secret des Sitzungs-Cookies (bei gesetztem `SESSION_SECRET` ohne Bedeutung) |
-| `folgen/` | erzeugte [Folgen](#lesen) als MP3 mit `folgen.json`; fehlen sie, lassen sie sich neu erzeugen, das kostet aber noch einmal Zeichen bei ElevenLabs |
+| `folgen/` | erzeugte [Folgen](#lesen) als MP3 mit `folgen.json` (solange eine entsteht, auch Skript und Recherche); fehlen sie, lassen sie sich neu erzeugen, das kostet aber noch einmal Zeichen bei ElevenLabs |
 | `lesestapel.db` | [Lesestapel](#lesen): gespeicherte Artikel samt Text, Markierungen, Feeds (SQLite) |
 
 Die Obsidian-Anmeldung des Sync-Sidecars liegt nicht hier, sondern in
@@ -710,6 +710,48 @@ Podcast und Report lassen sich weiter einstellen:
 Ton und Schwerpunkt stehen im Transkript als `stil`, `themen` und `schwerpunkt`
 im Frontmatter und als Zitatzeile unter dem Titel (nur, wenn gewählt).
 
+**Folge zu einem Thema** (`/lesen/folgen/thema`, auf der Folgen-Seite „Zu einem
+Thema“): Podcast oder Report nicht aus dem Stapel, sondern über den ganzen Vault,
+wie die Audio-Reports für Autofahrten. Eingaben: das Thema, optional Ziele, Anlass
+oder Schwerpunkte, ob auch im Internet recherchiert wird (Standard ja) und die
+Länge, frei zwischen 5 und 240 Minuten (Vorschläge 15 Min. bis 2 Std.). Dann:
+
+1. **Claude recherchiert** als Agent. Den Vault liest es über einen eigenen
+   MCP-Server, den das Cockpit nur für diesen Lauf auf `127.0.0.1` mit zufälligem
+   Port und Token startet (`src/lesen/research-mcp.js`): `vault_search`,
+   `vault_read`, `vault_links`, `vault_similar`, `vault_list`, nur lesend und ohne
+   Schalter für Vertrauliches; vertrauliche Ordner bleiben zu, Ausgeschlossenes
+   steht ohnehin nicht im Index. Mit Internet dazu `WebSearch` und `WebFetch`;
+   Suchanfragen sollen keine persönlichen Details aus dem Vault enthalten. Weitere
+   Werkzeuge gibt es nicht (kein Bash, kein Schreiben). Ergebnis: Titel,
+   Überblick, ein Dossier mit Quellenkürzeln (`[V3]` Vault, `[W2]` Web), ein
+   Kapitelplan (ab etwa 15 Minuten ein Kapitel je rund 12 Minuten, keins länger
+   als 20, höchstens 30) und die Quellen. Als Vault-Quelle zählt nur, was Claude
+   auch gelesen hat; ohne Internet fallen Webquellen weg.
+2. **Claude schreibt Kapitel für Kapitel**, wie die übrigen Folgen ohne
+   Werkzeuge, nur aus dem Dossier, mit dem Kapitelplan und dem Ende des vorigen
+   Kapitels für den Anschluss. So gehen auch Folgen von Stunden.
+3. **Transkript** im Vault wie oben, mit `quelle: thema`, `thema`, `ziel`,
+   `internet`, `web` (Adressen) und `quellen` (Wikilinks auf die gelesenen
+   Notizen) im Frontmatter; darunter Ziele als Callout, Überblick, die Kapitel
+   (`## Kapitel 1: …`), `## Recherche` mit dem Dossier und die Quellen.
+4. **Stimmen sprechen**: beim Report sagt die Stimme jedes Kapitel an.
+
+Die Recherche dauert meist 5 bis 20 Minuten (Abbruch nach 45), jedes Kapitel ein
+bis zwei. Die Karte zeigt „Claude recherchiert“ und dann „Claude schreibt Kapitel 3
+von 8, aus 14 Notizen und 5 Webquellen“. Das Dossier liegt als
+`<id>.recherche.json`, jedes fertige Kapitel sofort im Skript: Nach einem Fehler
+(etwa dem Abo-Limit) oder einem Neustart schreibt **Fortsetzen** nur die fehlenden
+Kapitel, ohne neue Recherche. Kosten wie bei Podcast und Report: 900 Zeichen je
+Minute bei ElevenLabs (zwei Stunden also rund 108 000), dazu das Claude-Abo.
+`/api/lesen/folgen/thema` liefert die Vorgaben als JSON, angelegt wird mit
+`POST /aktion/lesen/folge/thema` (`art`, `thema`, `ziel`, `minuten`, `internet=1`,
+`audio=0` für erst nur das Transkript). Sprache und „Erst nur Transkript“ gelten
+wie unten; Ton und Schwerpunkt der Texte gibt es hier nicht, dafür das Feld für
+Ziele.
+In der iOS-App erscheinen Themen-Folgen in der Liste und spielen im Player; ein
+eigenes Formular dort fehlt noch.
+
 Podcast und Report landen als Transkript im Vault, unter
 `30-ressourcen/audio-reports/` neben den übrigen Audio-Reports, als
 `JJJJ-MM-TT-<art>-<titel>.md` (gibt es den Namen schon, mit Kurz-ID dahinter).
@@ -732,7 +774,11 @@ installiert, Version per Build-Arg `CLAUDE_CODE_VERSION`, leer = ohne) mit dem
 Abo-Token `CLAUDE_CODE_OAUTH_TOKEN`: keine Werkzeuge (`--tools ""`), `--safe-mode`
 (kein CLAUDE.md, keine Hooks, Skills, Plugins oder MCP-Server), leeres
 Arbeitsverzeichnis, die Texte über stdin, das Ergebnis als JSON nach
-`--json-schema`. Modell unter **Einstellungen → Vorlesen → Folgen**, Standard
+`--json-schema`. Nur die Recherche zu einem Thema bekommt Werkzeuge (siehe oben);
+weil `--safe-mode` auch MCP-Server abschaltet, läuft sie stattdessen mit
+`--setting-sources ""` (keine Einstellungsdateien, Hooks oder Plugins), einem
+frischen `CLAUDE_CONFIG_DIR` wie beim Einpflanzen, `--disable-slash-commands`,
+`--strict-mcp-config` und den erlaubten Werkzeugen als Liste. Modell unter **Einstellungen → Vorlesen → Folgen**, Standard
 `sonnet`, das schont das Abo-Limit. Es entsteht immer nur eine Folge zugleich.
 
 Bezahltes geht nicht verloren: Claudes Skript liegt als `<id>.skript.json`, sobald
