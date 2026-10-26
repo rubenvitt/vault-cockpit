@@ -49,6 +49,9 @@
       if (!kind) return;
       submit.disabled = !docs.length;
       if (!docs.length) return show('Bitte mindestens einen Text wählen', '');
+      const maxDocs = Number(form.dataset.maxDocs) || Infinity;
+      submit.disabled = docs.length > maxDocs;
+      if (docs.length > maxDocs) return show(`Höchstens ${maxDocs} Texte je Folge`, `${docs.length} gewählt`);
       const n = `${docs.length} ${docs.length === 1 ? 'Text' : 'Texte'}`;
       if (kind === 'vorlesen') {
         const chars = docs.reduce((sum, d) => sum + (Number(d.dataset.chars) || 0), 0);

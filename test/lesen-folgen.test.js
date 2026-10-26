@@ -5,7 +5,7 @@ import { PassThrough } from 'node:stream';
 import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createEpisodes, chunkText, dialogueBatches, stripId3, audioFrames, EpisodeError, DEFAULT_NOTE_FOLDER } from '../src/lesen/folgen.js';
+import { createEpisodes, inputShares, chunkText, dialogueBatches, stripId3, audioFrames, EpisodeError, DEFAULT_NOTE_FOLDER } from '../src/lesen/folgen.js';
 import { parseRange, progressOf, clock, newSummary, episodeCard } from '../src/lesen/folgen-page.js';
 import { createClaudeWriter, WriterError } from '../src/lesen/claude.js';
 import { createReadingStore } from '../src/lesen/store.js';
@@ -181,6 +181,13 @@ test('Folgen: Vorlesen bezahlt nur, was nicht schon gestreamt oder offline gelad
     assert.equal(calls.speech.length, 3);
   }));
 
+test('inputShares: kurze Texte bleiben ganz, lange teilen sich den Rest, jeder kommt zu Wort', () => {
+  assert.deepEqual(inputShares([100, 200], 1000, 600), [100, 200]);
+  assert.deepEqual(inputShares([100, 5000, 5000], 1000, 600), [100, 450, 450]);
+  assert.deepEqual(inputShares([900, 900, 900, 900], 1000, 600), [250, 250, 250, 250]);
+  assert.ok(inputShares(Array(40).fill(60_000)).every((n) => n === 7500), '40 lange Texte: alle gleich viel statt die letzten leer');
+});
+
 test('Folgen: Podcast mit zwei Stimmen über Text-to-Dialogue, Texte gehen an Claude', () =>
   withDir(async (dir) => {
     const { a, b, episodes, calls } = setup(dir);
@@ -191,6 +198,7 @@ test('Folgen: Podcast mit zwei Stimmen über Text-to-Dialogue, Texte gehen an Cl
     assert.equal(done.status, 'fertig', done.error);
     assert.equal(done.title, 'Lesen und Hören');
     assert.match(calls.writes[0].prompt, /etwa 5 Minuten/);
+    assert.doesNotMatch(calls.writes[0].prompt, /Verdichte/, 'kurze Texte passen ohne Verdichten');
     assert.match(calls.writes[0].input, /<text nr="1" titel="Vom Lesen" quelle="https:\/\/blatt\.test\/a">\nErster Satz hier\. Zweiter Satz dort\.\n<\/text>/);
     assert.deepEqual(calls.dialogue, [[{ text: 'Willkommen.', voice: 'Host' }, { text: 'Danke.', voice: 'Gast' }]]);
     assert.equal(String(readFileSync(episodes.audioPath(ep.id))), 'Host:Willkommen.|Gast:Danke.');

@@ -70,7 +70,7 @@ import { EPISODE_LANGUAGES, DEFAULT_EPISODE_LANGUAGE, episodeLanguage } from './
 
 export const KINDS = { vorlesen: 'Vorlesen', podcast: 'Podcast', report: 'Report' };
 /** Länge von Podcast und Report in Minuten. */
-export const LENGTHS = [5, 10, 20];
+export const LENGTHS = [5, 10, 20, 30];
 /** Ton von Podcast und Report: Name, Erklärung für die Auswahl und die Zeile für Claude (keine beim Standard). */
 export const STYLES = {
   ausgewogen: { label: 'Ausgewogen', description: 'Einordnen, erklären, Querverbindungen', prompt: null },
@@ -99,7 +99,7 @@ const RESEARCH_TIMEOUT_MS = 45 * 60_000;
 const WEB_TOOLS = ['WebSearch', 'WebFetch'];
 // Gesprochenes Deutsch: rund 150 Wörter zu 6 Zeichen in der Minute.
 export const CHARS_PER_MINUTE = 900;
-export const MAX_DOCS = 20;
+export const MAX_DOCS = 40;
 // Je Anfrage bei der Sprechfassung des Reports; ElevenLabs nimmt mehr, kürzere Stücke scheitern seltener.
 const NARRATION_CHARS = 3000;
 // So viele Sätze gleichzeitig beim Vorlesen; mehr erlaubt ElevenLabs je nach Tarif nicht.
@@ -260,16 +260,39 @@ async function inOrder(jobs, n, each) {
   if (failed) throw failed;
 }
 
+/**
+ * Wie viele Zeichen jeder Text an Claude geben darf: höchstens `DOC_INPUT`,
+ * zusammen höchstens `TOTAL_INPUT`, gerecht geteilt. Kurze Texte bleiben ganz,
+ * was sie übrig lassen, bekommen die langen; so kommt jeder Text zu Wort.
+ */
+export function inputShares(lengths, total = TOTAL_INPUT, each = DOC_INPUT) {
+  const shares = lengths.map(() => 0);
+  let left = total;
+  const order = lengths.map((n, i) => [n, i]).sort((a, b) => a[0] - b[0]);
+  order.forEach(([n, i], k) => {
+    shares[i] = Math.min(n, each, Math.floor(left / (order.length - k)));
+    left -= shares[i];
+  });
+  return shares;
+}
+
 /** Texte für Claude, je Text mit Nummer, Titel und Quelle. */
 function sourceInput(docs) {
-  let left = TOTAL_INPUT;
+  const bodies = docs.map(plain);
+  const shares = inputShares(bodies.map((b) => b.length));
   return docs
-    .map((d, i) => {
-      const body = plain(d).slice(0, Math.max(0, Math.min(DOC_INPUT, left)));
-      left -= body.length;
-      return `<text nr="${i + 1}" titel="${String(d.title || d.url).replace(/"/g, "'")}" quelle="${d.url}">\n${body}\n</text>`;
-    })
+    .map((d, i) => `<text nr="${i + 1}" titel="${String(d.title || d.url).replace(/"/g, "'")}" quelle="${d.url}">\n${bodies[i].slice(0, shares[i])}\n</text>`)
     .join('\n\n');
+}
+
+/**
+ * Sind die Texte zusammen länger als die Folge, soll Claude verdichten statt
+ * Texte wegzulassen oder die Länge zu sprengen.
+ */
+function condense(docs, minutes) {
+  const spoken = docs.reduce((n, d) => n + plain(d).length, 0) / CHARS_PER_MINUTE;
+  if (spoken <= minutes * 1.2) return [];
+  return [`Die Texte sind zusammen deutlich länger als die Folge. Verdichte: Halte die Länge ein, lass keinen Text ganz weg, nimm aus jedem das Wichtigste und Neue, kürze Wiederholungen und Beispiele und fass Texte zum selben Thema zusammen.`];
 }
 
 /**
@@ -306,6 +329,7 @@ function podcastJob(docs, minutes, options) {
       'Nenn jeden Text beim Titel, wenn er drankommt. Arbeite Querverbindungen zwischen den Texten heraus. Zum Schluss zwei oder drei Gedanken zum Mitnehmen.',
       'Gesprochene Sprache: kurze Sätze, keine Aufzählungen, kein Markdown, keine Links. Wechselt euch oft ab, kein Zug länger als etwa 600 Zeichen.',
       'Erlaubt sind sparsam Regieanweisungen in eckigen Klammern auf Englisch, z. B. [laughs], [thoughtful], [curious]; sonst nichts in Klammern.',
+      ...condense(docs, minutes),
       ...wishes(options),
     ].join('\n'),
     schema: {
@@ -332,6 +356,7 @@ function reportJob(docs, minutes, options) {
       'Schreib einen Report über die Texte auf stdin, in zwei Fassungen.',
       '`note`: Markdown für eine Notiz im Obsidian-Vault mit den Abschnitten „## Überblick“, „## Kernaussagen“ (je Text eine Unterüberschrift mit dem Titel und die Quelle als Link), „## Querverbindungen“ und „## Offene Fragen“. Keine Überschrift erster Ordnung.',
       `\`spoken\`: dieselben Inhalte als Fließtext zum Vorlesen, etwa ${minutes} Minuten, also rund ${chars} Zeichen. Gesprochene Sprache, kurze Sätze, kein Markdown, keine Links, Titel der Texte ausgesprochen.`,
+      ...condense(docs, minutes),
       ...wishes(options),
     ].join('\n'),
     schema: {
