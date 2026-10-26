@@ -1646,7 +1646,7 @@ test('Wissen: Fragesuche mit Typfilter, Synthese-Kopf und offene Punkte nach Zun
       assert.match(html, /<option selected>entwurf<\/option>/);
       // Wissen gehört zum Bereich Lesen (VCP-77).
       assert.match(html, /<a href="\/lesen" class="nav-link" aria-current="page">/);
-      assert.match(html, /<a href="\/wissen" class="subnav-link" aria-current="page">Wissen<\/a>/);
+      assert.match(html, /<a href="\/wissen" class="subnav-item" aria-current="page"><span>Wissen<\/span>/);
       // Die Suche, die in der Leiste unten Lesen weichen musste, bleibt von hier erreichbar.
       assert.match(html, /<a href="\/graph\?q=Struktur">Ganzen Vault durchsuchen<\/a>/);
       // Die Suche bekommt nur die Synthesen, die die Filter erfüllen.

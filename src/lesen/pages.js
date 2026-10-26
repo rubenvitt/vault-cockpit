@@ -8,24 +8,32 @@ import { hidden, flashToast } from '../web/render.js';
  * `nav`: Zusätze der Unternavigation, siehe `readingNav`).
  */
 
-/** Unternavigation unter der Kopfzeile; `/wissen` ist die Suche im Vault (VCP-76). */
-const SUB = [
+/**
+ * Unternavigation unter der Kopfzeile: vier Reiter für den Ablauf eines Textes
+ * (Weiter · Eingang · Stapel · Folgen), der Rest unter „Mehr“ (ein `<details>`,
+ * geht ohne JavaScript). Steht man auf einer Seite aus „Mehr“, trägt der Knopf
+ * ihren Namen. `/wissen` ist die Suche im Vault (VCP-76).
+ */
+const MAIN = [
   ['weiter', '/lesen/weiter', 'Weiter'],
   ['eingang', '/lesen/eingang', 'Eingang'],
   ['stapel', '/lesen/stapel', 'Stapel'],
   ['folgen', '/lesen/folgen', 'Folgen'],
-  ['markiert', '/lesen/markiert', 'Markiert'],
-  ['wiedersehen', '/lesen/wiedersehen', 'Wiedersehen'],
-  ['wissen', '/wissen', 'Wissen'],
-  ['fragen', '/fragen', 'Fragen'],
-  ['feeds', '/lesen/feeds', 'Feeds'],
+];
+const MORE = [
+  ['markiert', '/lesen/markiert', 'Markiert', 'Alle Markierungen nach Quelle und Thema'],
+  ['wiedersehen', '/lesen/wiedersehen', 'Wiedersehen', 'Markierungen wiederholen'],
+  ['wissen', '/wissen', 'Wissen', 'Im Vault suchen'],
+  ['fragen', '/fragen', 'Fragen', 'Mit Claude über den ganzen Vault sprechen'],
+  ['feeds', '/lesen/feeds', 'Feeds', 'Abos verwalten'],
 ];
 
 /**
  * `nav` (Objekt oder Funktion, die eines liefert, damit nur gezählt wird, was
- * auch gezeigt wird): `{ ingest: n }` fügt nach dem Stapel „Ingest“ mit der
- * Zahl der bereiten Entwürfe ein (src/lesen/ingest-page.js); ohne fehlt der Eintrag.
- * „Fragen“ (src/fragen/page.js) steht nur mit `{ fragen: true }` da.
+ * auch gezeigt wird): `{ ingest: n }` nimmt „Ingest“ in „Mehr“ auf und zeigt
+ * die Zahl der bereiten Entwürfe an „Weiter“ (dort stehen sie unter „Prüfen“)
+ * und an „Ingest“ (src/lesen/ingest-page.js); ohne fehlt der Eintrag.
+ * „Fragen“ (src/fragen/page.js) steht nur mit `{ fragen: true }` in „Mehr“.
  */
 export function readingNav(current, nav = null) {
   let extra = null;
@@ -34,14 +42,16 @@ export function readingNav(current, nav = null) {
   } catch {
     extra = null;
   }
-  const items = SUB.filter(([key]) => key !== 'fragen' || extra?.fragen).map(([key, href, label]) => [key, href, label]);
-  if (extra && 'ingest' in extra) {
-    const n = Number(extra.ingest) || 0;
-    items.splice(3, 0, ['ingest', '/lesen/ingest', `Ingest<span class="subnav-count" data-ingest-count${n ? '' : ' hidden'}>${n}</span>`]);
-  }
-  return `<nav class="subnav" aria-label="Lesen">${items
-    .map(([key, href, label]) => `<a href="${href}" class="subnav-link"${key === current ? ' aria-current="page"' : ''}>${label}</a>`)
-    .join('')}</nav>`;
+  const ingest = extra && 'ingest' in extra;
+  const n = ingest ? Number(extra.ingest) || 0 : 0;
+  const count = ingest ? `<span class="subnav-count" data-ingest-count${n ? '' : ' hidden'}>${n}</span>` : '';
+  const more = [...(ingest ? [['ingest', '/lesen/ingest', 'Ingest', 'Entwürfe fürs Wiki abhaken']] : []), ...MORE.filter(([key]) => key !== 'fragen' || extra?.fragen)];
+  const tabs = MAIN.map(([key, href, label]) => `<a href="${href}" class="subnav-link"${key === current ? ' aria-current="page"' : ''}>${label}${key === 'weiter' ? count : ''}</a>`).join('');
+  const here = more.find(([key]) => key === current);
+  const menu = more
+    .map(([key, href, label, hint]) => `<a href="${href}" class="subnav-item"${key === current ? ' aria-current="page"' : ''}><span>${label}${key === 'ingest' ? count : ''}</span><span class="meta">${hint}</span></a>`)
+    .join('');
+  return `<nav class="subnav lesen-tabs" aria-label="Lesen">${tabs}<details class="menu subnav-mehr"><summary class="subnav-link"${here ? ' aria-current="page"' : ''}>${here ? here[2] : 'Mehr'}<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5l3 3 3-3"/></svg></summary><div class="subnav-menu">${menu}</div></details></nav>`;
 }
 
 /**

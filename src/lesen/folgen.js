@@ -33,6 +33,12 @@ import { EPISODE_LANGUAGES, DEFAULT_EPISODE_LANGUAGE, episodeLanguage } from './
  * das sind die Texte selbst. Ist eine Folge fertig (jede Art), bekommen ihre
  * Texte über `heard` den Vermerk „gehört“.
  *
+ * Gehört ist auch die Folge selbst, sobald sie zu Ende gespielt ist (`listened`
+ * mit Stelle kurz vor Schluss, vom Player) oder von Hand markiert (`setHeard`):
+ * `heard_at` an der Folge, `position` (Sekunden) und `listened_at` für
+ * „angefangen“. Ungehörte Folgen stehen vorn, gehörte treten zurück. Folgen
+ * von vor dieser Unterscheidung gelten beim Laden als gehört.
+ *
  * Podcast und Report schreibt Claude in der Sprache aus den Einstellungen
  * (`language`, Standard Deutsch; die Folge merkt sie sich beim Anlegen, die
  * Überschriften der Notiz bleiben deutsch). Dazu lassen sie sich einstellen: `style` (Ton, `STYLES`),
@@ -568,6 +574,14 @@ export function createEpisodes({
   } catch {
     /* noch keine */
   }
+  // Folgen von vor „gehört je Folge“: Ihre Texte waren schon gehört, also die Folge auch.
+  let migrated = false;
+  for (const ep of episodes) {
+    if (ep.status === 'fertig' && !('heard_at' in ep)) {
+      ep.heard_at = ep.finished_at ?? ep.updated_at ?? null;
+      migrated = true;
+    }
+  }
   const queue = [];
   let running = null;
 
@@ -575,6 +589,14 @@ export function createEpisodes({
     mkdirSync(dir, { recursive: true });
     writeFileSync(`${file}.tmp`, `${JSON.stringify(episodes, null, 2)}\n`, { mode: 0o600 });
     renameSync(`${file}.tmp`, file);
+  }
+
+  if (migrated) {
+    try {
+      save();
+    } catch (err) {
+      logger.warn?.(`Folgen: Stand „gehört“ nicht gesichert: ${err.message}`);
+    }
   }
 
   const find = (id) => episodes.find((e) => e.id === id) ?? null;
@@ -952,6 +974,29 @@ export function createEpisodes({
     save();
   }
 
+  /**
+   * Folge gehört (`true`) oder doch nicht (`false`). Gehört: `heard_at` jetzt,
+   * Stelle vergessen; die Texte bekommen (noch einmal) den Vermerk „gehört“.
+   * Ungehört nimmt nur den Vermerk an der Folge zurück, die Texte bleiben gehört.
+   */
+  function setHeard(id, value = true) {
+    const ep = find(id);
+    if (!ep) throw new EpisodeError('Diese Folge gibt es nicht', 404);
+    if (ep.status !== 'fertig') throw new EpisodeError('Nur eine fertige Folge lässt sich als gehört markieren', 409);
+    if (!value) {
+      update(ep, { heard_at: null });
+      return { ...ep };
+    }
+    const first = !ep.heard_at;
+    update(ep, { heard_at: now().toISOString(), position: null });
+    if (first) {
+      Promise.resolve()
+        .then(() => heard?.(ep.docs))
+        .catch((err) => logger.warn?.(`Folge „${ep.title}“: Vermerk „gehört“ fehlgeschlagen: ${err.message}`));
+    }
+    return { ...ep };
+  }
+
   return {
     KINDS,
     STATES,
@@ -997,6 +1042,7 @@ export function createEpisodes({
         title: docs.length === 1 ? `${KINDS[kind]}: ${first}` : `${KINDS[kind]}: ${first} und ${docs.length - 1} weitere`,
         docs: docs.map((d) => d.id),
         status: 'wartet',
+        heard_at: null,
         chars: estimate({ kind, docs, minutes: m, audio: speaks }),
         ...(writes ? { audio: speaks, style: tone, topics: cleanTopics(topics), focus: cleanFocus(focus), language: currentLanguage() } : {}),
         created_at: at,
@@ -1045,6 +1091,7 @@ export function createEpisodes({
         title: `${KINDS[kind]}: ${t}`,
         docs: [],
         status: 'wartet',
+        heard_at: null,
         chars: audio !== false ? m * CHARS_PER_MINUTE : 0,
         created_at: at,
         updated_at: at,
@@ -1085,6 +1132,26 @@ export function createEpisodes({
       queue.push(ep.id);
       return Object.assign({ ...ep }, { done: next() });
     },
+
+    /**
+     * Stand des Players: `position` in Sekunden, `duration` (falls bekannt).
+     * Kurz vor Schluss (letzte 15 Sekunden oder 95 %) gilt die Folge als gehört.
+     * Liefert die Folge; `heard` sagt, ob sie damit gehört ist.
+     */
+    listened(id, { position, duration = null }) {
+      const ep = find(id);
+      if (!ep) throw new EpisodeError('Diese Folge gibt es nicht', 404);
+      if (ep.status !== 'fertig') throw new EpisodeError('Nur eine fertige Folge lässt sich hören', 409);
+      const pos = Number(position);
+      if (!Number.isFinite(pos) || pos < 0) throw new EpisodeError('Ungültige Stelle');
+      const length = Number(duration) > 0 ? Number(duration) : (ep.bytes ? ep.bytes / BYTES_PER_SECOND : 0);
+      const end = length > 0 && (pos >= length - 15 || pos >= length * 0.95);
+      if (end) return { ...setHeard(id, true), heard: true };
+      update(ep, { position: Math.floor(pos), listened_at: now().toISOString() });
+      return { ...ep, heard: Boolean(ep.heard_at) };
+    },
+
+    setHeard,
 
     remove(id) {
       const ep = find(id);

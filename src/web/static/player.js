@@ -206,6 +206,7 @@
     audio.addEventListener('ratechange', position);
     audio.addEventListener('ended', () => {
       if (folge) store.set(SPOT + folge.id, null);
+      report(true);
       emit();
     });
     audio.addEventListener('error', () => {
@@ -220,7 +221,7 @@
     return audio;
   }
 
-  /** Stelle merken, höchstens alle 5 Sekunden; am Ende vergessen. */
+  /** Stelle merken, höchstens alle 5 Sekunden; am Ende vergessen. Dem Server höchstens alle 30 Sekunden. */
   function rememberSpot(force = false) {
     if (!folge || !audio) return;
     const now = Date.now();
@@ -228,6 +229,32 @@
     lastSaved = now;
     const near = Number.isFinite(audio.duration) && audio.duration - audio.currentTime < 5;
     store.set(SPOT + folge.id, audio.currentTime > 3 && !near ? String(Math.floor(audio.currentTime)) : null);
+    report(force);
+  }
+
+  /**
+   * Stand an den Server (src/lesen/folgen.js `listened`): Er merkt „angefangen“
+   * und vermerkt die Folge kurz vor Schluss als gehört. Still; ohne Netz oder
+   * CSRF (Seite ohne Folgen-Liste) bleibt es beim Browser.
+   */
+  let lastReported = 0;
+  let reportedHeard = null;
+  function report(force = false) {
+    if (!folge?.csrf || !audio || audio.currentTime < 3) return;
+    const now = Date.now();
+    if (!force && now - lastReported < 30000) return;
+    lastReported = now;
+    const mine = folge;
+    const at = audio.ended ? folgeLength() : audio.currentTime;
+    post('/aktion/lesen/folge/stelle', { id: mine.id, stelle: String(Math.floor(at)), dauer: String(Math.floor(folgeLength())), csrf: mine.csrf }).then(
+      (data) => {
+        if (data?.heard && reportedHeard !== mine.id) {
+          reportedHeard = mine.id;
+          note(`Gehört: ${mine.title}`);
+        }
+      },
+      () => {},
+    );
   }
 
   /** Länge: die des Browsers, mindestens die vom Server (feste Bitrate), falls der Browser sich verschätzt. */
@@ -251,7 +278,7 @@
     if (isFolge(meta.id)) return;
     leave();
     const a = folgeAudio();
-    const mine = { id: String(meta.id), src: meta.src, title: meta.title || 'Folge', art: meta.art || 'Folge', seconds: Number(meta.seconds) || 0, error: null };
+    const mine = { id: String(meta.id), src: meta.src, title: meta.title || 'Folge', art: meta.art || 'Folge', seconds: Number(meta.seconds) || 0, csrf: meta.csrf ? String(meta.csrf) : null, error: null };
     folge = mine;
     kind = 'folge';
     a.src = mine.src;

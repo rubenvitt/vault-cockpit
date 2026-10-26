@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createEpisodes, chunkText, dialogueBatches, stripId3, audioFrames, EpisodeError, DEFAULT_NOTE_FOLDER } from '../src/lesen/folgen.js';
@@ -553,7 +553,9 @@ test('Folgen: Seiten ohne JavaScript, Anlegen per Formular, Audio mit Range', ()
     assert.equal(stand.headers['content-type'], 'application/json; charset=utf-8');
     const items = JSON.parse(stand.body).items;
     assert.deepEqual(items.map((i) => [i.id, i.status, i.busy]), [[ep.id, 'fertig', false]]);
-    assert.match(items[0].html, /^<li class="folge is-ready"/);
+    assert.match(items[0].html, /^<li class="folge is-ready is-neu"/, 'neu, noch nicht gehört');
+    assert.match(list, /<div class="folgen-gruppe" id="hoeren"[^]*Zum Hören/);
+    assert.match(list, /Als gehört markieren/);
 
     const full = await page(`/lesen/folgen/audio?id=${ep.id}`);
     assert.equal(full.status, 200);
@@ -768,4 +770,62 @@ test('Folgen: Sprache aus den Einstellungen geht an Claude und ins Transkript; D
     assert.doesNotMatch(calls.writes[1].prompt, /Sprache:/);
     assert.doesNotMatch(calls.notes[1].content, /sprache:/);
     assert.equal(episodes.language(), 'de');
+  }));
+
+test('Folgen: gehört je Folge – Stelle, Ende, von Hand, Rückgängig; Gehörte treten zurück', () =>
+  withDir(async (dir) => {
+    const { store, a, b, episodes, calls } = setup(dir);
+    const routes = readingRoutes({ store, episodes, logger: quiet });
+    const ctx = { url: new URL('https://vault.test/lesen/folgen'), user: 'ruben', tz: 'Europe/Berlin', write: { csrf: 'c', back: '/lesen/folgen' }, flash: null };
+    const one = episodes.create({ kind: 'vorlesen', docIds: [a.id] });
+    await one.done;
+    const two = episodes.create({ kind: 'vorlesen', docIds: [b.id] });
+    await two.done;
+    assert.equal(episodes.get(one.id).heard_at, null, 'neu: noch nicht gehört');
+    const heardBefore = calls.heard.length;
+
+    // Stelle mitten drin: angefangen, nicht gehört.
+    const act = (path, fields) => routes.actions[path](new URLSearchParams(fields), { sub: 'ruben' });
+    let r = await act('/aktion/lesen/folge/stelle', { id: one.id, stelle: '40', dauer: '600' });
+    assert.deepEqual([r.message, r.heard, r.listen], ['', false, 'angefangen']);
+    assert.equal(episodes.get(one.id).position, 40);
+    await assert.rejects(act('/aktion/lesen/folge/stelle', { id: one.id, stelle: 'x' }), /Ungültige Stelle/);
+
+    // Kurz vor Schluss: gehört, Stelle weg.
+    r = await act('/aktion/lesen/folge/stelle', { id: one.id, stelle: '590', dauer: '600' });
+    assert.deepEqual([r.heard, r.listen], [true, 'gehoert']);
+    assert.ok(episodes.get(one.id).heard_at);
+    assert.equal(episodes.get(one.id).position, null);
+    await new Promise((res) => setTimeout(res, 5));
+    assert.equal(calls.heard.length, heardBefore + 1, 'Texte bekommen den Vermerk noch einmal');
+
+    // Die Seite: zum Hören vorn, gehört eingeklappt.
+    const html = (await routes.pages['/lesen/folgen'](ctx)).html;
+    const hoeren = html.indexOf('id="hoeren"');
+    const gehoert = html.indexOf('<details class="folgen-gruppe folgen-gehoert" id="gehoert">');
+    assert.ok(hoeren > 0 && gehoert > hoeren, 'Gehörte unten, eingeklappt');
+    assert.ok(html.indexOf(`data-folge="${two.id}"`) < gehoert);
+    assert.ok(html.indexOf(`data-folge="${one.id}"`) > gehoert);
+    assert.match(html, /Doch nicht gehört/);
+
+    // Von Hand, mit Rückgängig.
+    r = await act('/aktion/lesen/folge/gehoert', { id: two.id });
+    assert.match(r.message, /^Gehört: /);
+    assert.deepEqual(r.undo, { action: '/aktion/lesen/folge/gehoert', fields: { id: two.id, gehoert: '0' } });
+    r = await act('/aktion/lesen/folge/gehoert', { id: two.id, gehoert: '0' });
+    assert.match(r.message, /^Wieder zum Hören: /);
+    assert.equal(episodes.get(two.id).heard_at, null);
+    const json = JSON.parse((await routes.pages['/api/lesen/folgen'](ctx)).body);
+    assert.deepEqual(json.items.map((i) => [i.id, i.listen]), [[two.id, 'neu'], [one.id, 'gehoert']]);
+  }));
+
+test('Folgen: alte fertige Folgen gelten beim Laden als gehört', () =>
+  withDir(async (dir) => {
+    const old = [{ id: 'alt', kind: 'vorlesen', status: 'fertig', title: 'Alt', docs: [], finished_at: '2026-10-01T10:00:00.000Z', created_at: '2026-10-01T09:00:00.000Z' }, { id: 'tx', kind: 'report', status: 'transkript', title: 'T', docs: [], created_at: '2026-10-01T09:00:00.000Z' }];
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'folgen.json'), JSON.stringify(old));
+    const { episodes } = setup(dir);
+    assert.equal(episodes.get('alt').heard_at, '2026-10-01T10:00:00.000Z');
+    assert.equal('heard_at' in episodes.get('tx'), false, 'nur fertige');
+    assert.match(readFileSync(join(dir, 'folgen.json'), 'utf8'), /"heard_at": "2026-10-01T10:00:00.000Z"/);
   }));

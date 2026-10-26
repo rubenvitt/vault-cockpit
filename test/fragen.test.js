@@ -269,7 +269,8 @@ test('Fragen: Seiten, Aktionen und Unternavigation', () =>
     const start = (await routes.pages['/fragen'](c('/fragen'))).html;
     assert.match(start, /<form method="post" action="\/aktion\/fragen\/frage"/);
     assert.match(start, /name="internet" value="1">/);
-    assert.match(start, /href="\/fragen" class="subnav-link" aria-current="page">Fragen/);
+    assert.match(start, /href="\/fragen" class="subnav-item" aria-current="page"><span>Fragen/);
+    assert.match(start, /<summary class="subnav-link" aria-current="page">Fragen<svg/);
     assert.match(start, /fragen\.js/);
     assert.doesNotMatch(readingNav('wissen', null), /Fragen/, 'ohne Fragen kein Eintrag');
 

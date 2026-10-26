@@ -16,6 +16,10 @@
 //
 // Solange eine Folge entsteht, holt die Seite alle paar Sekunden
 // `/lesen/folgen/stand` und tauscht die Karten der entstehenden Folgen aus.
+//
+// Der Player meldet die Stelle dem Server (`data-csrf` der Karte); kurz vor
+// Schluss gilt die Folge dort als gehört und rückt beim nächsten Laden nach
+// unten unter „Gehört“.
 (() => {
   'use strict';
 
@@ -92,7 +96,8 @@
     update();
   }
 
-  const list = document.querySelector('.folgen');
+  // Mehrere Listen (Zum Hören, Entsteht, Gehört …); `list` meint alle zusammen.
+  const list = document.querySelector('.folgen-gruppen') ?? document.querySelector('.folgen');
   if (!list) return;
   const app = window.webkit?.messageHandlers?.cockpit;
   const engine = window.cockpitPlayer;
@@ -103,7 +108,7 @@
   // MARK: Player
 
   const part = (li, name) => li.querySelector(`[data-${name}]`);
-  const meta = (li) => ({ id: li.dataset.folge, src: li.dataset.src, title: li.dataset.title, art: li.dataset.art, seconds: Number(li.dataset.seconds) || 0 });
+  const meta = (li) => ({ id: li.dataset.folge, src: li.dataset.src, title: li.dataset.title, art: li.dataset.art, seconds: Number(li.dataset.seconds) || 0, csrf: li.dataset.csrf || null });
   const isCurrent = (li, s) => s.folge?.id === li.dataset.folge;
 
   function spotOf(li) {

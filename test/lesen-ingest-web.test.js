@@ -246,13 +246,18 @@ test('Ingest: Unternavigation mit Zahl der bereiten Entwürfe zwischen Stapel un
     add('Ohne Entwurf');
     ingest.put(a.id, 'bereit', { draft: draftFor('Bereit A') });
     const page = await html('/lesen/eingang');
-    const nav = page.match(/<nav class="subnav"[^]*?<\/nav>/)[0];
-    assert.deepEqual([...nav.matchAll(/class="subnav-link"[^>]*>([^<]+)/g)].map((m) => m[1]), ['Weiter', 'Eingang', 'Stapel', 'Ingest', 'Folgen', 'Markiert', 'Wiedersehen', 'Wissen', 'Feeds']);
-    assert.match(nav, /<a href="\/lesen\/ingest" class="subnav-link">Ingest<span class="subnav-count" data-ingest-count>1<\/span><\/a>/);
+    const nav = page.match(/<nav class="subnav[^"]*"[^]*?<\/nav>/)[0];
+    assert.deepEqual([...nav.matchAll(/class="subnav-link"[^>]*>([^<]+)/g)].map((m) => m[1]), ['Weiter', 'Eingang', 'Stapel', 'Folgen', 'Mehr']);
+    assert.deepEqual([...nav.matchAll(/class="subnav-item"[^>]*><span>([^<]+)/g)].map((m) => m[1]), ['Ingest', 'Markiert', 'Wiedersehen', 'Wissen', 'Feeds']);
+    // Die Zahl steht an „Weiter“ (dort unter „Prüfen“) und an „Ingest“.
+    assert.match(nav, /<a href="\/lesen\/weiter" class="subnav-link">Weiter<span class="subnav-count" data-ingest-count>1<\/span><\/a>/);
+    assert.match(nav, /<a href="\/lesen\/ingest" class="subnav-item"><span>Ingest<span class="subnav-count" data-ingest-count>1<\/span><\/span>/);
     // Ohne bereite Entwürfe bleibt die Zahl versteckt (für die Live-Aktualisierung aber da).
     ingest.rows.get(a.id).status = 'uebernommen';
     assert.match(await html('/lesen/stapel'), /Ingest<span class="subnav-count" data-ingest-count hidden>0<\/span>/);
-    assert.match(await html('/lesen/ingest'), /<a href="\/lesen\/ingest" class="subnav-link" aria-current="page">Ingest/);
+    const ingestPage = await html('/lesen/ingest');
+    assert.match(ingestPage, /<a href="\/lesen\/ingest" class="subnav-item" aria-current="page">/);
+    assert.match(ingestPage, /<summary class="subnav-link" aria-current="page">Ingest<svg/);
   });
 });
 
