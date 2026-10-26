@@ -29,8 +29,9 @@ import { EPISODE_LANGUAGES, DEFAULT_EPISODE_LANGUAGE } from './languages.js';
  *   „Im Vault“ aufs Transkript (Podcast, Report), entstehende mit
  *   Schritten und Fortschritt, fehlgeschlagene mit „Fortsetzen“, reine
  *   Transkripte mit „Im Vault“ und „Audio erzeugen“. Fertige und Transkripte
- *   bieten „Texte ingesten“: Ingest-Entwürfe für alle Texte der Folge, auch
- *   wenn sie nicht mehr im Stapel liegen (geprüft wird unter Lesen → Ingest).
+ *   bieten „Texte ingesten“: Ingest-Entwürfe für die gewählten Texte der
+ *   Folge, auch wenn sie nicht mehr im Stapel liegen (geprüft wird unter
+ *   Lesen → Ingest).
  * - `/lesen/folgen/stand`: dieselben Karten der Folgen als JSON, damit die
  *   Seite den Fortschritt ohne Neuladen zeigt.
  * - `/lesen/folgen/audio?id=…`: die MP3, mit `Range` (Safari spielt Audio
@@ -369,38 +370,72 @@ const retryOf = (resumable, ep = {}) => {
   return { label: 'Erneut versuchen', hint: 'Claudes Skript fehlt noch, dafür schreibt Claude noch einmal (über dein Abo).' };
 };
 
+/** Ingest-Status, bei denen „Texte ingesten“ einen Text (wieder) einreiht, wie `request`. */
+const OPEN_INGEST = [null, 'fehler', 'verworfen'];
+const FOLGE_INGEST = '/aktion/lesen/folge/ingest';
 const INGEST_DONE = { bereit: 'bereit zum Prüfen', wartet: 'wird entworfen', entwirft: 'wird entworfen', uebernommen: 'im Wiki', fehler: 'mit Fehler' };
 
 /**
  * Ingest der Texte einer Folge (`ingest`: Dienst aus src/lesen/ingest.js):
  * wie viele es gibt, wie viele „Texte ingesten“ noch anstoßen würde (ohne
  * Entwurf, fehlgeschlagen oder verworfen, wie `request`), wie viele bereit
- * zum Prüfen sind, und der Stand in einem Satz. Ohne Dienst oder ohne Texte null.
+ * zum Prüfen sind, und der Stand in einem Satz. `texts` nennt jeden Text mit
+ * Titel, Quelle, Ingest-Status und ob er sich noch anstoßen lässt (`open`),
+ * zum Auswählen. Ohne Dienst oder ohne Texte null.
  */
 export function episodeIngest(ep, { ingest, store }) {
   if (!ingest) return null;
-  const ids = (ep.docs ?? []).filter((id) => store.get(id));
-  if (!ids.length) return null;
-  const statuses = ingest.statusFor(ids);
+  const docs = (ep.docs ?? []).map((id) => store.get(id)).filter(Boolean);
+  if (!docs.length) return null;
+  const statuses = ingest.statusFor(docs.map((d) => d.id));
   const statusOf = (id) => (statuses instanceof Map ? statuses.get(id) : statuses?.[id]) ?? null;
   const counts = new Map();
-  for (const id of ids) {
-    const label = INGEST_DONE[statusOf(id)];
+  for (const d of docs) {
+    const label = INGEST_DONE[statusOf(d.id)];
     if (label) counts.set(label, (counts.get(label) ?? 0) + 1);
   }
-  const open = ids.filter((id) => [null, 'fehler', 'verworfen'].includes(statusOf(id))).length;
+  const texts = docs.map((d) => ({
+    id: d.id,
+    title: d.title || d.url,
+    site: d.site ?? null,
+    status: statusOf(d.id),
+    statusLabel: INGEST_DONE[statusOf(d.id)] ?? null,
+    open: OPEN_INGEST.includes(statusOf(d.id)),
+  }));
   const label = counts.size ? `Ingest: ${[...counts].map(([what, n]) => `${n} ${what}`).join(' · ')}` : null;
-  return { total: ids.length, open, ready: ids.filter((id) => statusOf(id) === 'bereit').length, available: Boolean(ingest.available()?.ok), label };
+  return { total: docs.length, open: texts.filter((t) => t.open).length, ready: texts.filter((t) => t.status === 'bereit').length, available: Boolean(ingest.available()?.ok), label, texts };
 }
 
-/** „Texte ingesten“ und der Stand darunter, für fertige Folgen und Transkripte. */
+/**
+ * „Texte ingesten“ und der Stand darunter, für fertige Folgen und Transkripte.
+ * Bei einem Text ein Knopf; bei mehreren klappt eine Auswahl auf: Die noch
+ * offenen Texte zum Abhaken (keiner vorgewählt, nicht jeder Gehörte gehört
+ * ins Wiki), die übrigen mit ihrem Stand.
+ */
 function ingestParts(ep, info, ctx) {
   if (!info) return { button: '', line: '' };
-  const what = info.total === 1 ? 'Text' : 'Texte';
-  const button =
-    info.open && info.available
-      ? `<form method="post" action="/aktion/lesen/folge/ingest" class="inline">${hidden({ csrf: ctx.write.csrf, back: '/lesen/folgen', id: ep.id })}<button type="submit" class="btn quiet">${what} ingesten<span class="sr-only">: ${esc(ep.title)}</span></button></form>`
-      : '';
+  const fields = hidden({ csrf: ctx.write.csrf, back: '/lesen/folgen', id: ep.id });
+  let button = '';
+  if (info.open && info.available && info.total === 1) {
+    button = `<form method="post" action="${FOLGE_INGEST}" class="inline">${fields}<button type="submit" class="btn quiet">Text ingesten<span class="sr-only">: ${esc(ep.title)}</span></button></form>`;
+  } else if (info.open && info.available) {
+    const rows = info.texts
+      .map((t) => {
+        const meta = esc([t.site, t.open ? null : t.statusLabel].filter(Boolean).join(' · '));
+        const text = `<span class="folge-textwahl-text"><span class="lesen-title">${esc(t.title)}</span>${meta ? `<span class="meta">${meta}</span>` : ''}</span>`;
+        return t.open
+          ? `<li><label class="folge-textwahl"><input type="checkbox" name="doc" value="${esc(t.id)}">${text}</label></li>`
+          : `<li><div class="folge-textwahl is-done">${text}</div></li>`;
+      })
+      .join('');
+    button = `<details class="folge-ingest-wahl"><summary class="btn quiet">Texte ingesten…<span class="sr-only">: ${esc(ep.title)}</span></summary>
+      <form method="post" action="${FOLGE_INGEST}">${fields}<input type="hidden" name="auswahl" value="1">
+        <p class="meta">Welche Texte sollen ins Wiki? Claude entwirft für jeden gewählten Text einen Ingest, geprüft wird unter Lesen → Ingest.</p>
+        <ul class="folge-texte">${rows}</ul>
+        <button type="submit" class="btn primary">Gewählte ingesten</button>
+      </form>
+    </details>`;
+  }
   const line = info.label ? `<p class="meta folge-ingest">${esc(info.label)}${info.ready ? ' · <a href="/lesen/ingest">Prüfen</a>' : ''}</p>` : '';
   return { button, line };
 }
@@ -741,13 +776,21 @@ export function folgenRoutes({ store, episodes, ingest = null }) {
         ep.done?.catch(() => {});
         return { message: `Geht weiter: ${ep.title}`, redirect: '/lesen/folgen' };
       },
-      /** Ingest-Entwürfe für alle Texte der Folge, gleich ob sie noch im Stapel liegen. */
-      async '/aktion/lesen/folge/ingest'(form) {
+      /**
+       * Ingest-Entwürfe für die gewählten Texte der Folge (`doc`, mehrfach, oder
+       * `docs` mit Kommas für die App), gleich ob sie noch im Stapel liegen. Ohne
+       * Auswahl alle Texte (ältere App); mit `auswahl=1` braucht es mindestens einen.
+       */
+      async [FOLGE_INGEST](form) {
         if (!ingest) throw new ActionError('Ingest ist nicht eingerichtet', 409);
         const ep = episodes.get(form.get('id') ?? '');
         if (!ep) throw new ActionError('Diese Folge gibt es nicht', 404);
-        const ids = (ep.docs ?? []).filter((id) => store.get(id));
-        if (!ids.length) throw new ActionError('Die Texte dieser Folge gibt es nicht mehr', 404);
+        const all = (ep.docs ?? []).filter((id) => store.get(id));
+        if (!all.length) throw new ActionError('Die Texte dieser Folge gibt es nicht mehr', 404);
+        const picked = new Set([...form.getAll('doc'), ...String(form.get('docs') ?? '').split(',')].map((id) => id.trim()).filter(Boolean));
+        const chosen = picked.size || form.get('auswahl') === '1';
+        const ids = chosen ? all.filter((id) => picked.has(id)) : all;
+        if (!ids.length) throw new ActionError(picked.size ? 'Diese Texte gehören nicht zur Folge' : 'Bitte mindestens einen Text wählen', 400);
         let started;
         try {
           started = ingest.request(ids, { origin: 'knopf' });

@@ -828,7 +828,8 @@ public struct EpisodeRetry: Decodable, Equatable, Sendable {
 }
 
 /// Ingest der Texte einer Folge (`episodeIngest`): wie viele Texte, wie viele „Texte ingesten“
-/// noch anstößt, wie viele bereit zum Prüfen sind und der Stand in einem Satz.
+/// noch anstößt, wie viele bereit zum Prüfen sind, der Stand in einem Satz und die Texte selbst
+/// zum Auswählen.
 public struct EpisodeIngest: Decodable, Equatable, Sendable {
     public let total: Int
     public let open: Int
@@ -837,9 +838,40 @@ public struct EpisodeIngest: Decodable, Equatable, Sendable {
     public let available: Bool
     /// „Ingest: 1 bereit zum Prüfen · 1 im Wiki“, nil, solange nichts angestoßen ist.
     public let label: String?
+    /// Die Texte der Folge; leer bei einem älteren Server (dann gehen alle zusammen).
+    public let texts: [EpisodeIngestText]
 
     /// „Texte ingesten“ geht.
     public var canRequest: Bool { open > 0 && available }
+    /// Texte, die sich noch anstoßen lassen (ohne Entwurf, fehlgeschlagen oder verworfen).
+    public var openTexts: [EpisodeIngestText] { texts.filter(\.open) }
+    /// Mehrere Texte und der Server nennt sie: erst auswählen, dann ingesten.
+    public var choosable: Bool { total > 1 && !texts.isEmpty }
+
+    private enum CodingKeys: String, CodingKey { case total, open, ready, available, label, texts }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        total = try c.decode(Int.self, forKey: .total)
+        open = try c.decode(Int.self, forKey: .open)
+        ready = try c.decode(Int.self, forKey: .ready)
+        available = try c.decode(Bool.self, forKey: .available)
+        label = try c.decodeIfPresent(String.self, forKey: .label)
+        texts = try c.decodeIfPresent([EpisodeIngestText].self, forKey: .texts) ?? []
+    }
+}
+
+/// Ein Text einer Folge für die Auswahl beim Ingest.
+public struct EpisodeIngestText: Decodable, Equatable, Identifiable, Sendable {
+    public let id: String
+    public let title: String
+    public let site: String?
+    /// Ingest-Status (`bereit`, `wartet`, `uebernommen` …), nil ohne Entwurf.
+    public let status: String?
+    /// „im Wiki“, „bereit zum Prüfen“ …, nil ohne Entwurf.
+    public let statusLabel: String?
+    /// Lässt sich (wieder) anstoßen.
+    public let open: Bool
 }
 
 /// Status einer Folge: `wartet`, `schreibt`, `spricht`, `transkript` (erst nur das Transkript,

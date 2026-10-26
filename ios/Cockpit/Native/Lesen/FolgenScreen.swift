@@ -30,6 +30,8 @@ struct FolgenList: View {
     @State private var deleting: Episode?
     /// „Gehört“ aufgeklappt.
     @State private var showsHeard = false
+    /// Folge, deren Texte gerade für den Ingest gewählt werden.
+    @State private var choosingIngest: Episode?
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -69,6 +71,12 @@ struct FolgenList: View {
             Button("Abbrechen", role: .cancel) {}
         } message: { episode in
             Text("„\(episode.title)“ und die MP3 sind danach weg.")
+        }
+        .sheet(item: $choosingIngest) { episode in
+            FolgenIngestSheet(episode: episode) { ids in
+                toasts.signal(.selection)
+                Task { await store.ingest(episode, docIDs: ids) }
+            }
         }
         .sheet(item: $downloads.shared) { file in
             FolgenShareSheet(url: file.url)
@@ -287,6 +295,10 @@ struct FolgenList: View {
 
     private func ingest(_ episode: Episode) {
         toasts.signal(.selection)
+        if episode.ingest?.choosable == true {
+            choosingIngest = episode
+            return
+        }
         Task { await store.ingest(episode) }
     }
 

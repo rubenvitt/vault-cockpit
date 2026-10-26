@@ -268,7 +268,8 @@ struct FolgenBusyCard: View {
 // MARK: Teile
 
 /// „Texte ingesten“ (`/aktion/lesen/folge/ingest`): nur, solange es Texte ohne Entwurf gibt und
-/// Claude angebunden ist.
+/// Claude angebunden ist. Bei mehreren Texten „Texte ingesten …“: erst auswählen
+/// (`FolgenIngestSheet`).
 struct FolgenIngestButton: View {
     let episode: Episode
     let ingest: () -> Void
@@ -276,11 +277,102 @@ struct FolgenIngestButton: View {
     var body: some View {
         if let info = episode.ingest, info.canRequest {
             Button(action: ingest) {
-                Label(info.total == 1 ? "Text ingesten" : "Texte ingesten", systemImage: "books.vertical")
+                Label(info.total == 1 ? "Text ingesten" : info.choosable ? "Texte ingesten …" : "Texte ingesten", systemImage: "books.vertical")
             }
             .buttonStyle(LesenQuietButtonStyle())
-            .accessibilityHint("Entwürfe für das Wiki, auch für Texte, die nicht mehr im Stapel liegen")
+            .accessibilityHint(info.choosable ? "Wählen, welche Texte als Entwurf ins Wiki sollen" : "Entwürfe für das Wiki, auch für Texte, die nicht mehr im Stapel liegen")
         }
+    }
+}
+
+/// Auswahl für „Texte ingesten …“: die offenen Texte der Folge zum Abhaken (keiner vorgewählt,
+/// nicht jeder gehörte Text gehört ins Wiki), die übrigen mit ihrem Stand.
+struct FolgenIngestSheet: View {
+    let episode: Episode
+    let submit: ([String]) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var picked: Set<String> = []
+
+    private var texts: [EpisodeIngestText] { episode.ingest?.texts ?? [] }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(texts) { text in
+                        row(text)
+                    }
+                } header: {
+                    Text(episode.title)
+                } footer: {
+                    Text("Claude entwirft für jeden gewählten Text einen Ingest; geprüft wird unter Lesen → Ingest.")
+                }
+            }
+            .navigationTitle("Texte ingesten")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(picked.count > 1 ? "\(picked.count) ingesten" : "Ingesten") {
+                        let ids = texts.map(\.id).filter(picked.contains)
+                        dismiss()
+                        submit(ids)
+                    }
+                    .fontWeight(.semibold)
+                    .disabled(picked.isEmpty)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+
+    @ViewBuilder
+    private func row(_ text: EpisodeIngestText) -> some View {
+        let meta = [text.site, text.open ? nil : text.statusLabel].compactMap { $0 }.joined(separator: " · ")
+        let label = VStack(alignment: .leading, spacing: 2) {
+            Text(text.title)
+                .foregroundStyle(text.open ? Theme.text : Theme.text3)
+            if !meta.isEmpty {
+                Text(meta)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.text3)
+            }
+        }
+        if text.open {
+            Toggle(isOn: Binding(
+                get: { picked.contains(text.id) },
+                set: { on in if on { picked.insert(text.id) } else { picked.remove(text.id) } }
+            )) { label }
+                .toggleStyle(FolgenCheckboxStyle())
+        } else {
+            label
+                .accessibilityElement(children: .combine)
+        }
+    }
+}
+
+/// Haken statt Schalter, wie die Auswahl der Texte im Web.
+struct FolgenCheckboxStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Button {
+            configuration.isOn.toggle()
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Image(systemName: configuration.isOn ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(configuration.isOn ? Theme.accent : Theme.text3)
+                    .imageScale(.large)
+                    .accessibilityHidden(true)
+                configuration.label
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(configuration.isOn ? .isSelected : [])
     }
 }
 
