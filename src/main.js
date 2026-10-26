@@ -34,6 +34,7 @@ import { createSpeech, createSpeechCache } from './lesen/tts.js';
 import { createClaudeWriter } from './lesen/claude.js';
 import { createEpisodes } from './lesen/folgen.js';
 import { createResearchVault } from './lesen/research-mcp.js';
+import { createVaultChat } from './fragen/chat.js';
 import { createIngest, createNightlyClock } from './lesen/ingest.js';
 import { createPlanter } from './lesen/einpflanzen.js';
 import { createOidcLogin } from './web/oidc.js';
@@ -345,6 +346,7 @@ const cockpitActions = createCockpitActions({
 // unter 30-ressourcen/audio-reports in den Vault, die Texte bekommen „gehört“.
 // Zu einem Thema recherchiert Claude als Agent im ganzen Vault (eigener MCP-Server
 // je Lauf auf 127.0.0.1, nur lesend, ohne vertrauliche Ordner) und im Internet.
+const researchVault = createResearchVault({ index, semantic: currentSemantic, layoutHint: POLICY.layoutHint });
 const episodes = createEpisodes({
   dir: process.env.FOLGEN_DIR ?? '/data/folgen',
   store: reading,
@@ -360,7 +362,7 @@ const episodes = createEpisodes({
   },
   sourceNote: (docId) => readingExport.notePath(docId),
   heard: (docIds) => readingExport.heard(docIds),
-  research: createResearchVault({ index, semantic: currentSemantic, layoutHint: POLICY.layoutHint }),
+  research: researchVault,
   // Als Funktion: Eine geänderte Zeitzone oder Sprache gilt ohne Neustart.
   tz: () => cockpitSettings.get().tz,
   language: () => cockpitSettings.get().episodes.language,
@@ -398,6 +400,29 @@ const planter = createPlanter({
 });
 const ingestClock = createNightlyClock({ ingest, settings: cockpitSettings, file: join(dirname(COCKPIT_SETTINGS_FILE), 'ingest-nacht.txt') });
 setInterval(() => ingestClock.tick(), 10 * 60_000).unref();
+
+// Fragen an den ganzen Vault (src/fragen): Claude sucht über denselben nur
+// lesenden Zugang wie bei den Folgen und antwortet mit Bausteinen. Neue Notizen
+// legt es direkt in der Inbox an (wie die Schnelleingabe), Änderungen an
+// bestehenden schlägt es vor, geschrieben wird erst nach „Übernehmen“.
+const noteVisible = (path) => {
+  const row = index.getNote(String(path ?? ''));
+  return row && !row.sensitivity && !POLICY.isExcluded(row.path) ? row : null;
+};
+const vaultChat = createVaultChat({
+  dir: process.env.FRAGEN_DIR ?? '/data/fragen',
+  writer: createClaudeWriter({ model: () => cockpitSettings.get().episodes.model }),
+  research: researchVault,
+  // Ein Text, der mit `!` oder `>` anfängt, wäre in der Schnelleingabe eine Aufgabe oder ein Artikel.
+  inbox: ({ title, text }) => cockpitActions.capture({ title, text: /^\s*[!>]/.test(text) ? `\u200b${text}` : text }),
+  task: (text) => cockpitActions.capture({ text }),
+  editor,
+  canCreate: (folder) => {
+    const probe = `${String(folder ?? '').replace(/\/+$/, '')}/_.md`;
+    if (POLICY.isExcluded(probe) || POLICY.sensitivityOf(probe) || POLICY.classify(probe) !== 'core') throw new Error(`„${folder}“ ist vertraulich, ausgeschlossen oder Readwise`);
+  },
+  tz: () => cockpitSettings.get().tz,
+});
 
 // Vault-Notizen ansehen und verarbeiten, über denselben Editor wie vault_edit;
 // Bilder aus dem Vault und ähnliche Notizen für die Vorschau.
@@ -437,6 +462,7 @@ const webHttp = process.env.WEB_CLIENT_ID
         // Ingest ins Wiki: Entwürfe prüfen, abhaken, übernehmen.
         ingest,
         planter,
+        fragen: { chat: vaultChat, index, visible: noteVisible },
         onChange: (id) => readingExport.changed(id),
       }),
       oidc: createOidcLogin({
@@ -532,6 +558,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`  Folgen      : ${process.env.CLAUDE_CODE_OAUTH_TOKEN ? 'Vorlesen, Podcast und Report, auch zu einem Thema mit Recherche im Vault und Internet' : 'nur Vorlesen (Podcast und Report brauchen CLAUDE_CODE_OAUTH_TOKEN)'}`);
   const ig = cockpitSettings.get().ingest;
   console.log(`  Ingest      : ${ingest.available().ok ? `Entwürfe per Knopf${ig.nightly ? `, nachts um ${ig.hour} Uhr (höchstens ${ig.limit})` : ''}, Modell ${ig.model}${ig.agent ? ', danach einpflanzen' : ''}` : 'aus (braucht CLAUDE_CODE_OAUTH_TOKEN)'}`);
+  console.log(`  Fragen      : ${vaultChat.missing() ?? '/fragen, Antworten als Bausteine, Modell wie bei den Folgen'}`);
   console.log(`  Vorlesen    : ${t ? `ElevenLabs (${t.model}, Stimme ${t.voice})` : 'Gerätestimme (Einstellungen → Vorlesen)'}`);
   console.log(`  Cockpit     : ${webHttp ? `${PUBLIC_URL}/ (${cockpitSettings.get().calendars.length} Kalender, Einstellungen unter /einstellungen)` : 'aus (WEB_CLIENT_ID)'}`);
 });

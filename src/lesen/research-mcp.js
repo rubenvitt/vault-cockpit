@@ -16,7 +16,9 @@ import { toWebRequest, writeWebResponse } from '../http/bridge.js';
  *
  * `open()` liefert `mcp` für src/lesen/claude.js (`{ name, config }`),
  * `read()` die Pfade der Notizen, die Claude gelesen hat (für die Quellen),
- * und `close()`.
+ * und `close()`. Mit `open({ inbox })` (`({ title, text }) → { path }`) kommt
+ * ein Werkzeug dazu, das eine neue Notiz in der Inbox anlegt (Fragen,
+ * src/fragen/chat.js); `created()` nennt die angelegten.
  */
 
 const ok = (data) => ({ content: [{ type: 'text', text: JSON.stringify(data, null, 2) }], structuredContent: data });
@@ -25,7 +27,7 @@ const READ_ONLY = { readOnlyHint: true, destructiveHint: false, openWorldHint: f
 const MAX_BODY = 1024 * 1024;
 
 /** Die Werkzeuge; `seen` sammelt gelesene Pfade. `semantic` als Wert oder Funktion. */
-export function researchServer({ index, semantic: semanticOrGetter = null, layoutHint = null, seen = new Set() }) {
+export function researchServer({ index, semantic: semanticOrGetter = null, layoutHint = null, seen = new Set(), inbox = null, created = [] }) {
   const semantic = typeof semanticOrGetter === 'function' ? semanticOrGetter() : semanticOrGetter;
   const server = new McpServer({ name: 'vault-recherche', version: '1.0.0' });
   const open = () => index.filterPaths({ include: ['core', 'readwise'], includeSensitive: false });
@@ -140,6 +142,33 @@ export function researchServer({ index, semantic: semanticOrGetter = null, layou
     },
   );
 
+  if (inbox) {
+    server.registerTool(
+      'vault_inbox_note',
+      {
+        title: 'Neue Notiz in der Inbox',
+        description:
+          'Legt eine NEUE Notiz in seiner Inbox an, wenn er darum bittet, etwas festzuhalten. Bestehende Notizen ändert das nie; ' +
+          'Änderungen an bestehenden Notizen schlägst du stattdessen als Baustein "proposal" vor.',
+        inputSchema: {
+          title: z.string().max(120).describe('Kurzer Titel, ohne Schrägstriche.'),
+          text: z.string().describe('Inhalt als Markdown.'),
+        },
+        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      },
+      async (args) => {
+        if (created.length >= 10) return fail('Höchstens zehn neue Notizen je Antwort.');
+        try {
+          const made = await inbox({ title: args.title, text: args.text });
+          created.push({ path: made.path, title: args.title });
+          return ok({ path: made.path });
+        } catch (err) {
+          return fail(`Nicht angelegt: ${err.message}`);
+        }
+      },
+    );
+  }
+
   return server;
 }
 
@@ -152,10 +181,11 @@ const same = (a, b) => {
 /** `index`, `semantic` (Wert oder Funktion), `layoutHint` wie beim MCP-Server des Cockpits. */
 export function createResearchVault({ index, semantic = null, layoutHint = null, logger = console }) {
   return {
-    async open() {
+    async open({ inbox = null } = {}) {
       const token = randomBytes(24).toString('base64url');
       const seen = new Set();
-      const handler = createMcpHandler(() => researchServer({ index, semantic, layoutHint, seen }));
+      const created = [];
+      const handler = createMcpHandler(() => researchServer({ index, semantic, layoutHint, seen, inbox, created }));
       const http = createServer(async (req, res) => {
         try {
           if (!same(req.headers.authorization ?? '', `Bearer ${token}`)) {
@@ -188,6 +218,7 @@ export function createResearchVault({ index, semantic = null, layoutHint = null,
       return {
         mcp: { name: 'vault', config: { type: 'http', url, headers: { Authorization: `Bearer ${token}` } } },
         read: () => [...seen],
+        created: () => [...created],
         close: () => new Promise((resolve) => {
           http.closeAllConnections?.();
           http.close(() => resolve());

@@ -1423,3 +1423,64 @@ a.ingest-item-open:hover, a.ingest-item-open:focus-visible { color: var(--accent
 .synth-open ul { margin: 0 0 var(--s-2); padding-left: 22px; list-style: disc; }
 .synth-open li { padding: 2px 0; overflow-wrap: anywhere; }
 .synth-open form { margin: 0; }
+
+/* Fragen (/fragen): Gespräch mit Claude über den Vault, Antworten als Bausteine (src/fragen/ui.js) */
+.fragen-start { display: grid; gap: var(--s-3); }
+.fragen-eingabe { display: grid; gap: var(--s-2); margin: var(--s-3) 0; }
+.fragen-eingabe textarea { width: 100%; resize: vertical; line-height: 1.45; }
+.fragen-eingabe-leiste { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s-2); }
+.fragen-liste li { display: grid; gap: 2px; }
+.fragen-verlauf { display: grid; gap: var(--s-4); }
+.fragen-frage { justify-self: end; max-width: 85%; padding: var(--s-3) var(--s-4); border-radius: var(--r-lg) var(--r-lg) 4px var(--r-lg); background: var(--accent-soft); }
+.fragen-frage p { margin: 0; }
+.fragen-antwort { display: grid; gap: var(--s-3); min-width: 0; padding: var(--s-4); border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); }
+.fragen-antwort.is-busy { border-style: dashed; }
+.fragen-denkt { display: flex; align-items: center; gap: var(--s-2); margin: 0; color: var(--text-2); }
+.fragen-text > :first-child { margin-top: 0; }
+.fragen-text > :last-child { margin-bottom: 0; }
+.fragen-block { display: grid; gap: var(--s-2); min-width: 0; }
+.fragen-titel { margin: 0; font-size: var(--t-md); font-weight: 650; text-transform: none; letter-spacing: 0; color: var(--text); }
+.fragen-notizen { display: grid; gap: var(--s-2); margin: 0; padding: 0; list-style: none; }
+.fragen-notizen li { display: grid; gap: 2px; padding: var(--s-2) var(--s-3); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-2); }
+.fragen-notizen a { font-weight: 600; }
+.fragen-fehlt { color: var(--text-3); text-decoration: line-through dotted; }
+.fragen-tabelle { overflow-x: auto; }
+.fragen-tabelle table { width: 100%; border-collapse: collapse; font-size: var(--t-sm); }
+.fragen-tabelle th, .fragen-tabelle td { padding: 6px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.fragen-tabelle th { color: var(--text-2); font-weight: 600; }
+.fragen-check { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.fragen-check li { display: flex; gap: var(--s-2); align-items: flex-start; }
+.fragen-box { flex: none; width: 16px; height: 16px; margin-top: 3px; border: 1.5px solid var(--accent-line); border-radius: 4px; }
+.fragen-zeit { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.fragen-zeit li { display: grid; grid-template-columns: 6.5em 1fr; gap: var(--s-3); padding: 6px 0 6px; border-left: 2px solid var(--accent-line); padding-left: var(--s-3); }
+.fragen-zeit time { color: var(--accent); font-weight: 650; font-variant-numeric: tabular-nums; }
+.fragen-zeit p { margin: 2px 0 0; color: var(--text-2); }
+.fragen-kacheln { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: var(--s-2); }
+.fragen-kachel { display: grid; gap: 2px; padding: var(--s-3); border-radius: var(--r-md); background: var(--surface-2); border: 1px solid var(--line); }
+.fragen-kachel b { font-size: var(--t-lg); font-variant-numeric: tabular-nums; }
+.fragen-balken { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.fragen-balken li { display: grid; grid-template-columns: minmax(6em, 30%) 1fr auto; align-items: center; gap: var(--s-2); font-size: var(--t-sm); }
+.fragen-balken-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fragen-balken-spur { width: 100%; height: 10px; border-radius: 3px; background: var(--bg-sunk); }
+.fragen-balken-spur rect { fill: var(--accent); }
+.fragen-balken-wert { font-variant-numeric: tabular-nums; color: var(--text-2); }
+.fragen-zitat { margin: 0; padding: var(--s-2) var(--s-4); border-left: 3px solid var(--accent); }
+.fragen-zitat blockquote { margin: 0; font-family: var(--font-read); font-size: var(--t-md); }
+.fragen-zitat figcaption { margin-top: 4px; font-size: var(--t-sm); color: var(--text-2); }
+.fragen-callout { display: grid; gap: 4px; padding: var(--s-3) var(--s-4); border-radius: var(--r-md); background: var(--surface-2); border: 1px solid var(--line); }
+.fragen-callout.is-tipp { border-color: var(--accent-line); background: var(--accent-soft); }
+.fragen-callout.is-warnung { border-color: color-mix(in srgb, var(--danger, #c0392b) 45%, transparent); }
+.fragen-callout > :last-child { margin-bottom: 0; }
+.fragen-vorschlag { display: grid; gap: var(--s-2); padding: var(--s-3) var(--s-4); border: 1.5px dashed var(--accent-line); border-radius: var(--r-lg); }
+.fragen-vorschlag.is-done { border-style: solid; opacity: .8; }
+.fragen-vorschlag p { margin: 0; }
+.fragen-vorschlag-kopf { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
+.fragen-vorschlag pre { margin: 0; padding: var(--s-2) var(--s-3); border-radius: var(--r-md); white-space: pre-wrap; word-break: break-word; font-size: var(--t-sm); }
+.fragen-plus { background: color-mix(in srgb, #2e9d5b 12%, transparent); }
+.fragen-minus { background: color-mix(in srgb, #c0392b 12%, transparent); text-decoration: line-through; }
+.fragen-vorschlag-knoepfe, .fragen-aktionen, .fragen-weiter { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.fragen-weiter .chip { cursor: pointer; text-align: left; }
+.fragen-erledigt { margin: 0; color: var(--text-2); }
+.fragen-quellen summary { cursor: pointer; color: var(--text-2); font-size: var(--t-sm); }
+.fragen-quellen ul { margin: var(--s-2) 0 0; padding-left: 1.2em; font-size: var(--t-sm); }
+.fragen-fuss { margin-top: var(--s-4); }

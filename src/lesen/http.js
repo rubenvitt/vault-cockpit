@@ -13,6 +13,7 @@ import { listenRoutes, listenQueue, listenText, listenAudio } from './listen.js'
 import { connectionRoutes } from './connections.js';
 import { folgenRoutes } from './folgen-page.js';
 import { ingestRoutes } from './ingest-page.js';
+import { fragenRoutes } from '../fragen/page.js';
 
 /**
  * Routen des Bereichs „Lesen“, eingebunden in src/web/http.js (Sitzung, CSRF,
@@ -48,11 +49,14 @@ import { ingestRoutes } from './ingest-page.js';
  * `/api/lesen/ingest` mit `enabled: false`. `planter` pflanzt Übernommenes ein
  * (src/lesen/einpflanzen.js, `createPlanter`).
  *
+ * `fragen` (`{ chat, index, visible }`, src/fragen/page.js) schaltet „Fragen“
+ * ein: Gespräche mit Claude über den ganzen Vault.
+ *
  * `nav` ergänzt die Unternavigation (`readingNav` in src/lesen/pages.js), etwa
  * um „Ingest“ mit der Zahl der bereiten Entwürfe; src/web/http.js reicht es als
  * `ctx.nav` an die Seiten.
  */
-export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefined, capture = null, review = {}, embedCache = null, connections = null, exporter = null, speech = null, episodes = null, ingest = null, planter = null, onChange = () => {}, logger = console }) {
+export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefined, capture = null, review = {}, embedCache = null, connections = null, exporter = null, speech = null, episodes = null, ingest = null, planter = null, fragen = null, onChange = () => {}, logger = console }) {
   const feeds = feedRoutes({ store, fetchFeed, logger });
   /** Fehler aus Abruf und Speicher als Meldung für die Seite. */
   const asAction = async (run) => {
@@ -74,10 +78,11 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
   const wiedersehen = reviewRoutes({ store, capture, logger, embedCache, ...review });
   const folgen = folgenRoutes({ store, episodes, ingest });
   const ingestUi = ingestRoutes({ store, ingest, planter, logger });
+  const ask = fragen ? fragenRoutes(fragen) : { pages: {}, actions: {} };
   const links = connections ? connectionRoutes({ store, embedCache, logger, ...connections }) : { pages: {}, actions: {} };
 
   return {
-    nav: ingest ? () => ({ ingest: ingest.counts()?.bereit ?? 0 }) : null,
+    nav: ingest || fragen ? () => ({ ...(ingest ? { ingest: ingest.counts()?.bereit ?? 0 } : {}), ...(fragen ? { fragen: true } : {}) }) : null,
     offlineDocs: (n) => upNext(store.list({ status: 'stapel', limit: -1 }), n).map((d) => docLink(d.id)),
     listen: {
       queue: (zeit) => listenQueue(store, zeit),
@@ -101,6 +106,7 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
       ...marked.pages,
       ...wiedersehen.pages,
       ...links.pages,
+      ...ask.pages,
     },
     actions: {
       ...folgen.actions,
@@ -111,6 +117,7 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
       ...marked.actions,
       ...wiedersehen.actions,
       ...links.actions,
+      ...ask.actions,
       async '/aktion/lesen/speichern'(form, session) {
         const url = (form.get('url') ?? '').trim();
         if (!url) throw new ActionError('Bitte eine Adresse eingeben');
