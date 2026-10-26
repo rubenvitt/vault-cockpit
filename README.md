@@ -72,6 +72,7 @@ Betrieb und Pfade im Container (die Compose-Datei setzt sie, sonst passen die St
 | `CAPTURE_STATE_FILE` | Merkzettel gegen doppelte Aufgaben, Standard `/data/capture-state.json` |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Abo-Token aus `claude setup-token` (ein Jahr gültig) für [Folgen](#lesen) „Podcast“ und „Report“, auch zu einem Thema mit Recherche im Vault und Internet; ohne gibt es nur „Vorlesen“. `ANTHROPIC_API_KEY` reicht das Cockpit bewusst nicht an die CLI weiter |
 | `FOLGEN_DIR` | Folgen (MP3 und Stand), Standard `/data/folgen` |
+| `FRAGEN_DIR` | Gespräche unter [Fragen](#fragen-an-den-vault), Standard `/data/fragen` |
 | `TTS_CACHE_DIR`, `TTS_CACHE_MB` | Cache der [Stimme vom Server](#lesen) (ein MP3 je Satz), Standard `/data/tts-cache` und 500 MB; darüber fliegen die am längsten nicht gehörten Sätze |
 
 **Übergang für ältere Deployments:** `CAPTURE_TOKEN`, `ZUNDER_URL`/`ZUNDER_TOKEN`,
@@ -102,6 +103,7 @@ Die übrigen lassen sich nicht neu bauen, ohne sie ist alles neu einzurichten:
 | `api-tokens.json` | API-Tokens für Kurzbefehle, Funke und Suche (nur Hashes; fehlen sie, müssen alle Kurzbefehle neue Tokens bekommen) |
 | `capture-state.json` | Merkzettel von Capture und Brücke (keine doppelten Aufgaben, zuletzt gesehene Checkbox-Stände) |
 | `session-secret` | Secret des Sitzungs-Cookies (bei gesetztem `SESSION_SECRET` ohne Bedeutung) |
+| `fragen/` | Gespräche unter [Fragen](#fragen-an-den-vault), je eins als JSON; ohne sind sie weg, sonst nichts |
 | `folgen/` | erzeugte [Folgen](#lesen) als MP3 mit `folgen.json` (solange eine entsteht, auch Skript und Recherche); fehlen sie, lassen sie sich neu erzeugen, das kostet aber noch einmal Zeichen bei ElevenLabs |
 | `lesestapel.db` | [Lesestapel](#lesen): gespeicherte Artikel samt Text, Markierungen, Feeds (SQLite) |
 
@@ -966,6 +968,48 @@ Wikilinks. Zitat und Notiz sind entschärft wie Claudes Text im Wiki (siehe
 verschwinden, Bilder von fremden Servern werden Links, Abfrage-Blöcke laufen nicht.
 
 ```markdown
+### Fragen an den Vault
+
+**Fragen** (`/fragen`, in der Unternavigation von Lesen neben Wissen): ein Gespräch
+mit Claude über den ganzen Vault. Claude sucht wie bei den
+[Folgen zu einem Thema](#lesen) über den nur lesenden Vault-Zugang
+(`src/lesen/research-mcp.js`, vertrauliche Ordner bleiben zu), auf Wunsch je
+Frage auch im Internet, und antwortet mit **Bausteinen** statt Fließtext
+(`src/fragen/ui.js`): Text, Notizen als Karten mit einem Satz, warum sie passen,
+Tabelle, Checkliste, Zeitleiste, Kennzahlen, Balken, Zitat, Hinweis und
+Änderungsvorschlag. Welche, entscheidet Claude je nach Frage. Claude liefert nur
+JSON nach festem Schema; das Cockpit prüft jeden Baustein und zeichnet ihn selbst,
+kein Text von Claude kommt als HTML auf die Seite (Markdown wie in der
+Notizansicht, Balken als SVG, weil die Content-Security-Policy keine Inline-Stile
+erlaubt). Wikilinks und Notizkarten zeigen nur auf Notizen, die das Cockpit
+zeigen darf.
+
+- **Nachfragen**: Jede Frage bekommt die letzten sechs Fragen und Antworten des
+  Gesprächs mit. Unter der letzten Antwort stehen Claudes Vorschläge für die
+  nächste Frage als Knöpfe. Gespräche liegen als `<id>.json` unter `FRAGEN_DIR`
+  (Standard `/data/fragen`); es läuft immer eine Frage zugleich.
+- **Schreiben, gemischt**: Bittest du Claude, etwas festzuhalten, legt es mit
+  dem Werkzeug `vault_inbox_note` selbst eine neue Notiz in der Inbox an (wie die
+  Schnelleingabe; ein Text mit `!` oder `>` am Anfang wird dabei nicht zur Aufgabe
+  oder zum Artikel). Bestehende Notizen ändert Claude nie selbst: Anhängen (auch
+  unter einer Überschrift), Ersetzen, Frontmatter setzen und neue Notizen außerhalb
+  der Inbox kommen als Vorschlag mit Vorschau, geschrieben wird erst mit
+  **Übernehmen**, über den Vault-Editor (vertrauliche Ordner und Readwise gesperrt,
+  Ändern während Obsidian Sync schreibt, bricht ab).
+- **Weiterverwenden**: **Als Notiz speichern** legt Frage, Antwort (als Markdown)
+  und Quellen in der Inbox ab; eine Checkliste wird mit **Als Zunder-Aufgaben
+  anlegen** zu Aufgaben (über die `!`-Schnelleingabe, jede Zeile höchstens
+  einmal); **Als Folge vertonen** öffnet die [Folge zu einem Thema](#lesen) mit der
+  Frage als Thema.
+
+Während Claude antwortet, zeigt die Seite, wie viele Notizen gelesen sind
+(`/fragen/stand`), und lädt neu, sobald die Antwort da ist. Unter jeder Antwort
+stehen die gelesenen Notizen und Webseiten. Modell wie bei den Folgen
+(**Einstellungen → Vorlesen → Folgen**), Abbruch nach 20 Minuten. JSON für die
+App: `/api/fragen` (Gespräche) und `/api/fragen?id=…` (ein Gespräch mit
+Bausteinen); gefragt wird mit `POST /aktion/fragen/frage` (`frage`, `id` für eine
+Nachfrage, `internet=1`).
+
 ## Markierungen
 
 <!-- cockpit:markierungen:start · aus dem Lesestapel, das Cockpit schreibt bis zum Endmarker neu -->
@@ -1398,6 +1442,7 @@ npm ci && npm test
 - `src/graph/` — Graph um eine Notiz mit Aufgaben- und Termin-Knoten
 - `src/health/` — Zustand der Hintergrunddienste für `/zustand` und `/health`, Maskieren von Fehlertexten
 - `src/lesen/` — Lesestapel: SQLite-Speicher (`store.js`), SSRF-sicheres Holen (`fetch.js`), Readability und Säubern (`extract.js`), Seiten und Routen (`pages.js`, `http.js`), Leseansicht und Markierungen (`doc.js`, `highlights.js`, Textanker in `anchor.js`), Wiedersehen (Planung und Clustering in `review.js`, Seite in `review-page.js`), Querverbindungen (`connections.js`, Embeddings der Markierungen in `embed-cache.js`)
+- `src/fragen/` — Fragen an den Vault: Gespräche und Claudes Lauf (`chat.js`), Bausteine der Antworten mit Schema, Prüfung und HTML (`ui.js`), Seiten und Aktionen (`page.js`)
 - `src/web/` — Web-Cockpit: OIDC-Login mit PKCE, signiertes Sitzungs-Cookie, HTML der Wochenansicht, Einstellungen, Suche und Graph
 - `sync/` — Image des Sidecars `vault-sync` (Obsidian Headless mit Status-Wrapper)
 

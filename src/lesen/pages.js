@@ -16,6 +16,7 @@ const SUB = [
   ['markiert', '/lesen/markiert', 'Markiert'],
   ['wiedersehen', '/lesen/wiedersehen', 'Wiedersehen'],
   ['wissen', '/wissen', 'Wissen'],
+  ['fragen', '/fragen', 'Fragen'],
   ['feeds', '/lesen/feeds', 'Feeds'],
 ];
 
@@ -23,6 +24,7 @@ const SUB = [
  * `nav` (Objekt oder Funktion, die eines liefert, damit nur gezählt wird, was
  * auch gezeigt wird): `{ ingest: n }` fügt nach dem Stapel „Ingest“ mit der
  * Zahl der bereiten Entwürfe ein (src/lesen/ingest-page.js); ohne fehlt der Eintrag.
+ * „Fragen“ (src/fragen/page.js) steht nur mit `{ fragen: true }` da.
  */
 export function readingNav(current, nav = null) {
   let extra = null;
@@ -31,7 +33,7 @@ export function readingNav(current, nav = null) {
   } catch {
     extra = null;
   }
-  const items = SUB.map(([key, href, label]) => [key, href, label]);
+  const items = SUB.filter(([key]) => key !== 'fragen' || extra?.fragen).map(([key, href, label]) => [key, href, label]);
   if (extra && 'ingest' in extra) {
     const n = Number(extra.ingest) || 0;
     items.splice(2, 0, ['ingest', '/lesen/ingest', `Ingest<span class="subnav-count" data-ingest-count${n ? '' : ' hidden'}>${n}</span>`]);

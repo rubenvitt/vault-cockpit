@@ -383,6 +383,20 @@ test('Recherche-Vault: nur lesen, nie Vertrauliches, nur mit Token, merkt sich G
     } finally {
       await session.close();
     }
+
+    // Mit Inbox (Fragen): ein Werkzeug mehr, das nur neue Notizen anlegt.
+    const made = [];
+    const writing = await createResearchVault({ index, logger: quiet }).open({ inbox: async (n) => (made.push(n), { path: `inbox/${n.title}.md` }) });
+    try {
+      const res = await fetch(writing.mcp.config.url, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', authorization: writing.mcp.config.headers.Authorization }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'vault_inbox_note', arguments: { title: 'Plan', text: 'Drei Schritte' } } }) });
+      const text = await res.text();
+      const line = text.split('\n').find((l) => l.startsWith('data: '));
+      assert.deepEqual(JSON.parse(line ? line.slice(6) : text).result.structuredContent, { path: 'inbox/Plan.md' });
+      assert.deepEqual(made, [{ title: 'Plan', text: 'Drei Schritte' }]);
+      assert.deepEqual(writing.created(), [{ path: 'inbox/Plan.md', title: 'Plan' }]);
+    } finally {
+      await writing.close();
+    }
     await assert.rejects(fetch(url, { method: 'POST' }), 'danach zu');
   } finally {
     rmSync(root, { recursive: true, force: true });

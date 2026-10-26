@@ -38,12 +38,13 @@ const LESEN_FOLGEN_JS = staticFile('lesen-folgen.js', 'utf8');
 const LESEN_LINKS_JS = staticFile('lesen-verbinden.js', 'utf8');
 const LESEN_FEEDS_JS = staticFile('lesen-feeds.js', 'utf8');
 const LESEN_INGEST_JS = staticFile('lesen-ingest.js', 'utf8');
+const FRAGEN_JS = staticFile('fragen.js', 'utf8');
 // sigma + graphology + ForceAtlas2, gebündelt mit `npm run vendor` und eingecheckt.
 const GRAPH_LIB = staticFile('vendor/graph-lib.js', 'utf8');
 // Design-System (Tokens, Bausteine, Wochenansicht) plus die Teile der übrigen Seiten.
 const CSS = staticFile('cockpit.css', 'utf8') + GRAPH_CSS + NOTE_CSS + REVIEW_CSS + PLAN_CSS + HEALTH_CSS + OFFLINE_CSS;
 const hash = (s) => createHash('sha256').update(s).digest('base64url').slice(0, 10);
-const VERSION = { css: hash(CSS), ui: hash(UI_JS), player: hash(PLAYER_JS), js: hash(CLIENT_JS), graph: hash(GRAPH_JS), graphLib: hash(GRAPH_LIB), offline: hash(OFFLINE_JS), inbox: hash(INBOX_JS), lesenDoc: hash(LESEN_DOC_JS), lesenHoeren: hash(LESEN_HOEREN_JS), lesenFolgen: hash(LESEN_FOLGEN_JS), lesenLinks: hash(LESEN_LINKS_JS), lesenFeeds: hash(LESEN_FEEDS_JS), lesenIngest: hash(LESEN_INGEST_JS) };
+const VERSION = { css: hash(CSS), ui: hash(UI_JS), player: hash(PLAYER_JS), js: hash(CLIENT_JS), graph: hash(GRAPH_JS), graphLib: hash(GRAPH_LIB), offline: hash(OFFLINE_JS), inbox: hash(INBOX_JS), lesenDoc: hash(LESEN_DOC_JS), lesenHoeren: hash(LESEN_HOEREN_JS), lesenFolgen: hash(LESEN_FOLGEN_JS), lesenLinks: hash(LESEN_LINKS_JS), lesenFeeds: hash(LESEN_FEEDS_JS), lesenIngest: hash(LESEN_INGEST_JS), fragen: hash(FRAGEN_JS) };
 versionAssets(VERSION);
 
 /** Web-App-Manifest: Das Cockpit startet auf dem iPhone und unter Android wie eine App. */
@@ -85,6 +86,7 @@ const PUBLIC = new Map([
   ['/static/lesen-verbinden.js', { type: 'text/javascript; charset=utf-8', body: LESEN_LINKS_JS, version: VERSION.lesenLinks }],
   ['/static/lesen-feeds.js', { type: 'text/javascript; charset=utf-8', body: LESEN_FEEDS_JS, version: VERSION.lesenFeeds }],
   ['/static/lesen-ingest.js', { type: 'text/javascript; charset=utf-8', body: LESEN_INGEST_JS, version: VERSION.lesenIngest }],
+  ['/static/fragen.js', { type: 'text/javascript; charset=utf-8', body: FRAGEN_JS, version: VERSION.fragen }],
   ['/manifest.webmanifest', { type: 'application/manifest+json; charset=utf-8', body: MANIFEST }],
   ['/static/icon.svg', { type: 'image/svg+xml', body: staticFile('icon.svg') }],
   ...['apple-touch-icon', 'icon-192', 'icon-512', 'icon-maskable-512'].map((n) => [`/static/icons/${n}.png`, { type: 'image/png', body: staticFile(`icons/${n}.png`) }]),

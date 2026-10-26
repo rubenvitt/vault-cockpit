@@ -288,6 +288,8 @@ export function topicModel(episodes) {
 
 function topicPage(episodes, ctx) {
   const { missing, kinds, defaultKind, lengths, defaultLength, min, max, summary } = topicModel(episodes);
+  // Vorbelegt, etwa aus „Als Folge vertonen“ unter einer Antwort in „Fragen“.
+  const given = (k, max) => (ctx.url.searchParams.get(k) ?? '').slice(0, max);
   const step = (nr, title, hint = '') => `<div class="folge-schritt-kopf"><span class="folge-nr" aria-hidden="true">${nr}</span><div><h2>${title}</h2>${hint ? `<p class="meta">${hint}</p>` : ''}</div></div>`;
   const kindChoice = kinds
     .map(({ kind, label, description }) => `<label class="folge-wahl">
@@ -301,8 +303,8 @@ function topicPage(episodes, ctx) {
     ${hidden({ csrf: ctx.write.csrf, back: ctx.write.back })}
     <section class="folge-schritt">
       ${step(1, 'Worum geht es?', 'Claude sucht dazu im ganzen Vault: Projekte, Bereiche, Wiki, Tagesnotizen, Reviews. Vertrauliche Ordner bleiben zu.')}
-      <label class="thema-feld"><span>Thema</span><input type="text" name="thema" required minlength="3" maxlength="300" placeholder="z. B. Was ich seit dem Sommer über Führung gelernt habe" autocomplete="off"></label>
-      <label class="thema-feld"><span>Ziele, Anlass, Schwerpunkte <span class="meta">(optional)</span></span><textarea name="ziel" rows="4" maxlength="3000" placeholder="Was soll die Folge leisten? Etwa: Autofahrt zum Kunden, ich will mit klarem Kopf ins Gespräch gehen; Fokus auf die letzten sechs Wochen."></textarea></label>
+      <label class="thema-feld"><span>Thema</span><input type="text" name="thema" required minlength="3" maxlength="300" value="${esc(given('thema', 300))}" placeholder="z. B. Was ich seit dem Sommer über Führung gelernt habe" autocomplete="off"></label>
+      <label class="thema-feld"><span>Ziele, Anlass, Schwerpunkte <span class="meta">(optional)</span></span><textarea name="ziel" rows="4" maxlength="3000" placeholder="Was soll die Folge leisten? Etwa: Autofahrt zum Kunden, ich will mit klarem Kopf ins Gespräch gehen; Fokus auf die letzten sechs Wochen.">${esc(given('ziel', 3000))}</textarea></label>
       <label class="folge-check"><input type="checkbox" name="internet" value="1" checked><span>Auch im Internet recherchieren <span class="meta">(Suchanfragen ohne persönliche Details aus dem Vault)</span></span></label>
     </section>
     <section class="folge-schritt">
