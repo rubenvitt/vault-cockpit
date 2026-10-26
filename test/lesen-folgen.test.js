@@ -616,7 +616,7 @@ test('Folgen: Ton, Themen der Texte und „erst nur Transkript“ im Formular un
     assert.deepEqual(calls.speech.map((c) => c.text), ['Zwei Texte. Beide kurz.']);
   }));
 
-test('Folgen: „Texte ingesten“ auf der Karte, auch wenn die Texte nicht mehr im Stapel liegen', () =>
+test('Folgen: „Texte ingesten“ auf der Karte mit Auswahl, auch wenn die Texte nicht mehr im Stapel liegen', () =>
   withDir(async (dir) => {
     const { store, a, b, episodes } = setup(dir);
     const statuses = new Map();
@@ -645,14 +645,28 @@ test('Folgen: „Texte ingesten“ auf der Karte, auch wenn die Texte nicht mehr
     statuses.set(b.id, 'uebernommen');
 
     let list = (await page('/lesen/folgen')).html;
-    assert.match(list, /action="\/aktion\/lesen\/folge\/ingest"[^]*>Texte ingesten<span class="sr-only">/);
+    assert.match(list, /<summary class="btn quiet">Texte ingesten…<span class="sr-only">/, 'mehrere Texte: erst auswählen');
+    assert.match(list, new RegExp(`<input type="checkbox" name="doc" value="${a.id}">`), 'offener Text zum Abhaken, nicht vorgewählt');
+    assert.doesNotMatch(list, new RegExp(`name="doc" value="${b.id}"`), 'Text im Wiki ohne Haken');
     assert.match(list, /Ingest: 1 im Wiki/);
     let json = JSON.parse((await page('/api/lesen/folgen')).body).items[0].ingest;
-    assert.deepEqual(json, { total: 2, open: 1, ready: 0, available: true, label: 'Ingest: 1 im Wiki' });
+    assert.deepEqual(
+      { ...json, texts: json.texts.map((t) => [t.id, t.status, t.statusLabel, t.open]) },
+      { total: 2, open: 1, ready: 0, available: true, label: 'Ingest: 1 im Wiki', texts: [[a.id, null, null, true], [b.id, 'uebernommen', 'im Wiki', false]] },
+    );
+    assert.equal(json.texts[0].title, a.title);
 
-    const r = await routes.actions['/aktion/lesen/folge/ingest'](new URLSearchParams({ id: ep.id }), {});
+    // Auswahl ohne Haken: nichts anstoßen.
+    await assert.rejects(routes.actions['/aktion/lesen/folge/ingest'](new URLSearchParams({ id: ep.id, auswahl: '1' }), {}), /mindestens einen Text/);
+    await assert.rejects(routes.actions['/aktion/lesen/folge/ingest'](new URLSearchParams({ id: ep.id, doc: 'fremd' }), {}), /gehören nicht zur Folge/);
+    assert.deepEqual(requests, []);
+    const r = await routes.actions['/aktion/lesen/folge/ingest'](new URLSearchParams([['id', ep.id], ['auswahl', '1'], ['doc', a.id]]), {});
     assert.equal(r.message, 'Ingest für 1 Text angestoßen; prüfen unter Lesen → Ingest.');
-    assert.deepEqual(requests, [[a.id, b.id]], 'alle Texte der Folge, der Dienst sortiert aus');
+    assert.deepEqual(requests, [[a.id]], 'nur die gewählten Texte');
+    // App: `docs` mit Kommas; ohne Auswahl (ältere App) alle Texte, der Dienst sortiert aus.
+    await routes.actions['/aktion/lesen/folge/ingest'](new URLSearchParams({ id: ep.id, docs: `${b.id},${a.id}` }), {});
+    await routes.actions['/aktion/lesen/folge/ingest'](new URLSearchParams({ id: ep.id }), {});
+    assert.deepEqual(requests.slice(1), [[a.id, b.id], [a.id, b.id]]);
 
     statuses.set(a.id, 'bereit');
     list = (await page('/lesen/folgen')).html;

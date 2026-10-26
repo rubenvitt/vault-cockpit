@@ -573,6 +573,19 @@ final class ReadingStoreTests: XCTestCase {
         XCTAssertTrue(ok)
         let request = try XCTUnwrap(transport.requests.first { path(of: $0) == "/aktion/lesen/folge/ingest" })
         XCTAssertEqual(formFields(request), ["id": "ep-fertig-2"])
+        XCTAssertEqual(episode.ingest?.texts, [], "älterer Server ohne Texte")
+        XCTAssertFalse(episode.ingest?.choosable ?? true)
+
+        // Mit Texten: nur die gewählten, als `docs` mit Kommas.
+        let picking = try JSONDecoder().decode(Episode.self, from: json(#"{"id":"ep-3","kind":"podcast","title":"Podcast","status":"fertig","createdAt":"2026-10-25T09:00:00.000Z","ingest":{"total":3,"open":2,"ready":0,"available":true,"label":"Ingest: 1 im Wiki","texts":[{"id":"d1","title":"Eins","site":"a.test","status":null,"statusLabel":null,"open":true},{"id":"d2","title":"Zwei","site":null,"status":"fehler","statusLabel":"mit Fehler","open":true},{"id":"d3","title":"Drei","site":null,"status":"uebernommen","statusLabel":"im Wiki","open":false}]}}"#))
+        XCTAssertTrue(picking.ingest?.choosable ?? false)
+        XCTAssertEqual(picking.ingest?.openTexts.map(\.id), ["d1", "d2"])
+        let empty = await store.ingest(picking, docIDs: [])
+        XCTAssertFalse(empty, "ohne Auswahl nichts")
+        let picked = await store.ingest(picking, docIDs: ["d2"])
+        XCTAssertTrue(picked)
+        let chosen = try XCTUnwrap(transport.requests.last { path(of: $0) == "/aktion/lesen/folge/ingest" })
+        XCTAssertEqual(formFields(chosen), ["id": "ep-3", "docs": "d2", "auswahl": "1"])
 
         // Alles entworfen oder im Wiki: nichts anzustoßen.
         let done = try JSONDecoder().decode(Episode.self, from: json(#"{"id":"x","kind":"report","status":"fertig","createdAt":"2026-10-25T09:00:00.000Z","ingest":{"total":1,"open":0,"ready":1,"available":true,"label":"Ingest: 1 bereit zum Prüfen"}}"#))

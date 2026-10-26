@@ -843,8 +843,11 @@ Claude schreibt → Transkript fertig), Fortschrittsbalken und geschätzter
 Restzeit, live über `/lesen/folgen/stand`; reine Transkripte mit „Transkript
 lesen“ und „Audio erzeugen“ (`POST /aktion/lesen/folge/sprechen`). Fertige
 Folgen und Transkripte bieten **Texte ingesten** (`POST /aktion/lesen/folge/ingest`):
-Ingest-Entwürfe für alle Texte der Folge, auch wenn sie nach dem Hören schon
-„Fertig, weg“ sind; darunter steht der Stand („Ingest: 1 bereit zum Prüfen · 1 im
+Ingest-Entwürfe für die Texte der Folge, auch wenn sie nach dem Hören schon
+„Fertig, weg“ sind. Bei mehreren Texten klappt erst eine Auswahl auf (in der App
+ein Blatt): die noch offenen Texte zum Abhaken, keiner vorgewählt, die übrigen
+mit ihrem Stand; angestoßen werden nur die gewählten (`doc`, mehrfach, oder
+`docs` mit Kommas; ohne Auswahl wie früher alle). Darunter steht der Stand („Ingest: 1 bereit zum Prüfen · 1 im
 Wiki“), geprüft wird wie sonst unter Lesen → Ingest; fertige mit großem Abspiel-Knopf
 (`/static/lesen-folgen.js`): Stelle, ±15/30 Sekunden, Tempo, gemerkte Stelle je
 Folge, Titel und Knöpfe auf dem Sperrbildschirm über die Media Session, bei
