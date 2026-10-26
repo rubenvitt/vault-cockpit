@@ -15,6 +15,9 @@ import { ingestBadge } from './ingest-page.js';
  * Mit dem Ingest-Dienst trägt jeder Eintrag ein Abzeichen („Ingest bereit“,
  * „wird entworfen…“, „Ingest-Fehler“) oder den Knopf „Ingest entwerfen“
  * (src/lesen/ingest-page.js), gefragt mit einer Abfrage für den ganzen Stapel.
+ * Gelesene und gehörte Texte (`isRead`) stehen nicht mehr in der Leseliste:
+ * Sie warten unter „Weiter“ (src/lesen/weiter.js) auf die Entscheidung, ein
+ * Hinweis oben verlinkt dorthin.
  */
 
 export const WINDOWS = [5, 15, 30, 60];
@@ -25,6 +28,15 @@ const SORTS = [
 ];
 
 const started = (doc) => doc.progress > 0;
+
+/**
+ * Gelesen oder gehört: zu Ende gelesen, mit Lesedatum oder in einer Folge
+ * gehört (`heard_at`). Was im Podcast vorkam, gilt als gelesen.
+ */
+export const isRead = (doc) => Boolean(doc.read_at || doc.heard_at) || (doc.progress ?? 0) >= 1;
+/** Was noch gelesen werden will: Stapel, Hören, Folgen und Offline-Cache nehmen nur diese. */
+export const toRead = (docs) => docs.filter((d) => !isRead(d));
+
 // Lesezeit 0 heißt unbekannt (kein Text extrahiert): passt in kein Fenster.
 const known = (doc) => doc.reading_minutes > 0;
 
@@ -148,13 +160,14 @@ export function stackRoutes({ store, vault = false, folgen = false, ingest = nul
     const sort = SORTS.some(([key]) => key === sortParam) ? sortParam : 'passt';
     // SQLite: LIMIT -1 heißt ohne Grenze; kurze Texte sollen auch hinter den neuesten 100 passen.
     const filter = groupFilter(store, url);
-    const docs = store.list({ status: 'stapel', group: filter.group, limit: -1 });
-    return { minutes, sortParam, sort, filter, docs };
+    const all = store.list({ status: 'stapel', group: filter.group, limit: -1 });
+    const docs = toRead(all);
+    return { minutes, sortParam, sort, filter, docs, decide: all.length - docs.length };
   };
   return {
     pages: {
       async '/lesen/stapel'(ctx) {
-        const { minutes, sortParam, sort, filter, docs } = query(ctx.url);
+        const { minutes, sortParam, sort, filter, docs, decide } = query(ctx.url);
         // Im Vault ablegen (VCP-96): je Eintrag ein Formular, die Aktion steht in src/lesen/doc.js.
         const ablegen = vault
           ? (d) => `<form method="post" action="/aktion/lesen/ablegen" class="act lesen-ablegen">${hidden({ csrf: ctx.write.csrf, back: ctx.write.back, id: d.id })}<button type="submit" class="btn quiet">Im Vault ablegen<span class="sr-only">: ${esc(d.title || d.url)}</span></button></form>`
@@ -170,14 +183,15 @@ export function stackRoutes({ store, vault = false, folgen = false, ingest = nul
           };
         }
         const selection = stackSelection(docs, { zeit: minutes, sort });
-        const content = !docs.length ? '<p class="empty">Auf dem Stapel liegt nichts.</p>' : minutes ? windowBody(selection, minutes, file) : allBody(selection, sort, file, filter.group);
+        const weiter = decide ? `<p class="stapel-weiter"><a href="/lesen/weiter#entscheiden">${decide === 1 ? 'Ein Text ist' : `${decide} Texte sind`} gelesen oder gehört – wie weiter?</a></p>` : '';
+        const content = !docs.length ? `<p class="empty">${decide ? 'Alles auf dem Stapel ist gelesen oder gehört.' : 'Auf dem Stapel liegt nichts.'}</p>` : minutes ? windowBody(selection, minutes, file) : allBody(selection, sort, file, filter.group);
         const groups = groupChips('/lesen/stapel', filter, { zeit: minutes, sort: sortParam === sort && !minutes ? sort : null });
         // „Unterwegs hören“ ohne `gruppe`: /lesen/hoeren kennt nur `zeit`.
-        return { html: readingPage(ctx, { key: 'stapel', title: 'Stapel', body: `<section>${groups}${windowPicker(minutes, filter.group)}<p class="stapel-hoeren"><a href="/lesen/hoeren?zeit=${minutes ?? 15}" class="btn quiet">Unterwegs hören</a>${folgen ? ` <a href="/lesen/folgen/neu?zeit=${minutes ?? 30}" class="btn quiet">Folge erzeugen</a>` : ''}</p>${content}</section>`, scripts: ingest ? [assets.lesenIngest] : [] }) };
+        return { html: readingPage(ctx, { key: 'stapel', title: 'Stapel', body: `<section>${groups}${windowPicker(minutes, filter.group)}<p class="stapel-hoeren"><a href="/lesen/hoeren?zeit=${minutes ?? 15}" class="btn quiet">Unterwegs hören</a>${folgen ? ` <a href="/lesen/folgen/neu?zeit=${minutes ?? 30}" class="btn quiet">Folge erzeugen</a>` : ''}</p>${weiter}${content}</section>`, scripts: ingest ? [assets.lesenIngest] : [] }) };
       },
       /** Stapel als JSON: Einträge mit Restzeit, beim Zeitfenster `window` (x von y Min., n weitere, ob etwas passt). */
       async '/api/lesen/stapel'(ctx) {
-        const { minutes, sort, filter, docs } = query(ctx.url);
+        const { minutes, sort, filter, docs, decide } = query(ctx.url);
         const { items, total, rest, fits } = stackSelection(docs, { zeit: minutes, sort });
         const statuses = ingest ? ingest.statusFor(items.map((d) => d.id)) : null;
         return jsonReply(200, {
@@ -190,6 +204,8 @@ export function stackRoutes({ store, vault = false, folgen = false, ingest = nul
           groups: groupsJson(filter.groups),
           showGroups: filter.groups.length > 0 || Boolean(filter.group),
           count: docs.length,
+          // Gelesen oder gehört, aber noch nicht entschieden: steht unter `/api/lesen/weiter`, nicht in `items`.
+          decide,
           // `ingest`: Status des Entwurfs (`bereit`, `entwirft` …) oder null; ohne Dienst fehlt das Feld.
           items: items.map((d) => (ingest ? { ...stackItemJson(d), ingest: statusIn(statuses, d.id) } : stackItemJson(d))),
           ingest: Boolean(ingest),

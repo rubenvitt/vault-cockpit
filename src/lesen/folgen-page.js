@@ -3,7 +3,7 @@ import { esc, assets } from '../web/layout.js';
 import { hidden } from '../web/render.js';
 import { ActionError } from '../cockpit/actions.js';
 import { readingPage } from './pages.js';
-import { WINDOWS, fitToWindow, stackItemJson } from './stack.js';
+import { WINDOWS, fitToWindow, stackItemJson, toRead } from './stack.js';
 import { EpisodeError, KINDS, LENGTHS, MAX_DOCS, BYTES_PER_SECOND, STYLES, DEFAULT_STYLE, MAX_TOPICS, MAX_FOCUS, TOPIC_KINDS, TOPIC_LENGTHS, TOPIC_MINUTES } from './folgen.js';
 import { jsonReply } from './json.js';
 import { IngestError } from './ingest.js';
@@ -174,7 +174,8 @@ const kindCost = (kind) => (kind === 'vorlesen' ? 'Kosten nach Textlänge, Gehö
 export function newEpisodeModel(episodes, store, zeitParam) {
   const n = Number(zeitParam);
   const zeit = WINDOWS.includes(n) ? n : 30;
-  const { items } = fitToWindow(store.list({ status: 'stapel', limit: -1 }), zeit);
+  // Schon Gelesenes oder in einer Folge Gehörtes nicht noch einmal.
+  const { items } = fitToWindow(toRead(store.list({ status: 'stapel', limit: -1 })), zeit);
   const missing = episodes.availability();
   // Zeichen je Text fürs Vorlesen; Gehörtes und offline Geladenes kostet nichts mehr.
   const charsOf = (id) => {

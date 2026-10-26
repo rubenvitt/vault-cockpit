@@ -579,9 +579,36 @@ steht nur auf `/zustand`.
 ### Lesen
 
 Der Lesestapel ist ein Bereich im Cockpit (VCP-77): **Lesen** in der Kopfzeile
-und in der Leiste unten, darunter **Eingang · Stapel · Markiert · Wiedersehen · Wissen · Feeds**. In der
+und in der Leiste unten, darunter **Weiter · Eingang · Stapel · Markiert · Wiedersehen · Wissen · Feeds**
+(`/lesen` führt zu „Weiter“). In der
 Leiste unten nimmt „Lesen“ den Platz der Suche ein; die Suche erreicht man dort
 über Lesen → Wissen → „Ganzen Vault durchsuchen“, im Kopf steht sie weiter.
+
+**Weiter** (`/lesen/weiter`, `src/lesen/weiter.js`) zeigt, wo jeder Text im Ablauf
+steht und was als Nächstes geht. Der Ablauf: gespeichert → gelesen oder gehört →
+Ingest-Entwurf → im Wiki → eingepflanzt; statt Ingest gehen nach dem Lesen auch
+„Nur in den Vault“ und „Fertig, weg“. **Gelesen** heißt: zu Ende gelesen, mit
+Lesedatum oder in einer fertigen Folge gehört (`heard_at`, `isRead` in
+`src/lesen/stack.js`). Was im Podcast vorkam, gilt also als gelesen. Solche Texte
+verlassen die Leselisten (Stapel, Unterwegs hören, Folge erzeugen, Offline-Cache,
+Stapel in der Leseansicht); der Stapel verlinkt sie oben („3 Texte sind gelesen
+oder gehört – wie weiter?“). Geschrieben wird dafür nichts, der Stand ergibt sich
+aus Status, Lesedatum, `heard_at`, Fortschritt und Ingest.
+
+Oben steht **Als Nächstes**, der eine Schritt mit dem meisten Wert: fertige
+Entwürfe prüfen, Gelesenes entscheiden, Fehler beheben, Angefangenes weiterlesen,
+den Eingang sichten, dann vom Stapel lesen oder hören. Darunter Zahlen als
+Sprungmarken und die Texte je Stufe, jeder in genau einer: **Prüfen** (Entwurf
+bereit), **Entscheiden** (gelesen oder gehört, mit „gehört am … in ‹Folge›“; Knöpfe
+„Ins Wiki: entwerfen“, „Nur in den Vault“ mit Volltext, „Fertig, weg“; dazu „Alle
+n entwerfen lassen“, `POST /aktion/lesen/weiter/entwerfen`, auch für verworfene
+Entwürfe), **Fehler** (Entwurf oder Einpflanzen, mit „Erneut …“), **Weiterlesen**
+(angefangen) und **Läuft** (live über das Ingest-Skript). Je Text eine Spur
+Gelesen/Gehört · Entwurf · Im Wiki · Eingepflanzt. Ungelesenes in Eingang und
+Stapel steht nur als Zahl mit Link da. Für die App: `/api/lesen/weiter` (`next`,
+`counts`, `stages` mit `items`, je Eintrag `stage`, `read`, `ingest`, `track`);
+`/api/lesen/stapel` nennt unter `decide`, wie viele gelesene Texte dort warten,
+und jedes Dokument trägt `heardAt`.
 
 Im **Eingang** (`/lesen/eingang`) speichert ein Formular eine Adresse: Das Cockpit
 holt die Seite, macht mit Readability den Lesetext daraus und legt ihn mit Titel,
@@ -769,7 +796,8 @@ wie beim [Ingest](#ingest-ins-wiki). Lässt sich die Notiz nicht anlegen (Vault 
 lesbar, Ordner vertraulich, ausgeschlossen oder Readwise), steht das im Log und
 die Folge entsteht ohne Transkript. Vorlesen bekommt keine Notiz,
 das sind die Texte selbst. Ist eine Folge fertig, gleich welcher Art, bekommen ihre
-Texte den Vermerk „gehört“; scheitert der, bleibt die Folge trotzdem fertig.
+Texte den Vermerk „gehört“ und gelten als gelesen: Sie wandern vom Stapel nach
+[Weiter](#lesen) → Entscheiden. Scheitert der Vermerk, bleibt die Folge trotzdem fertig.
 
 Claude läuft über die Claude Code CLI im Container (`claude -p`, im Image
 installiert, Version per Build-Arg `CLAUDE_CODE_VERSION`, leer = ohne) mit dem

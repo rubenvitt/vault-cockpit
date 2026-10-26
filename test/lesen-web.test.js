@@ -72,7 +72,7 @@ async function withReading(run, { pages = {} } = {}) {
 
 const csrfFrom = (html) => html.match(/name="csrf" value="([^"]+)"/)[1];
 
-test('Lesen: nur angemeldet, /lesen führt zum Eingang, Navigation mit Lesen und Unternavigation', async () => {
+test('Lesen: nur angemeldet, /lesen führt zu „Weiter“, Navigation mit Lesen und Unternavigation', async () => {
   await withReading(async ({ call }) => {
     const anon = await call('/lesen/eingang', { cookie: false });
     assert.equal(anon.status, 303);
@@ -81,7 +81,7 @@ test('Lesen: nur angemeldet, /lesen führt zum Eingang, Navigation mit Lesen und
 
     const root = await call('/lesen');
     assert.equal(root.status, 303);
-    assert.equal(root.headers.get('location'), '/lesen/eingang');
+    assert.equal(root.headers.get('location'), '/lesen/weiter');
 
     const html = await (await call('/lesen/eingang')).text();
     assert.match(html, /<a href="\/lesen" class="nav-link" aria-current="page">/);
@@ -89,7 +89,7 @@ test('Lesen: nur angemeldet, /lesen führt zum Eingang, Navigation mit Lesen und
     const tabs = html.match(/<nav class="tabbar"[^]*?<\/nav>/)[0];
     assert.deepEqual([...tabs.matchAll(/<span>([^<]+)<\/span>/g)].map((m) => m[1]), ['Woche', 'Rückblick', 'Lesen', 'Einstellungen']);
     assert.match(html, /<a href="\/graph" class="nav-link">/);
-    assert.match(html, /<nav class="subnav" aria-label="Lesen"><a href="\/lesen\/eingang" class="subnav-link" aria-current="page">Eingang<\/a><a href="\/lesen\/stapel"[^>]*>Stapel<\/a><a href="\/lesen\/folgen"[^>]*>Folgen<\/a><a href="\/lesen\/markiert"[^>]*>Markiert<\/a><a href="\/lesen\/wiedersehen"[^>]*>Wiedersehen<\/a><a href="\/wissen"[^>]*>Wissen<\/a><a href="\/lesen\/feeds"[^>]*>Feeds<\/a><\/nav>/);
+    assert.match(html, /<nav class="subnav" aria-label="Lesen"><a href="\/lesen\/weiter" class="subnav-link">Weiter<\/a><a href="\/lesen\/eingang" class="subnav-link" aria-current="page">Eingang<\/a><a href="\/lesen\/stapel"[^>]*>Stapel<\/a><a href="\/lesen\/folgen"[^>]*>Folgen<\/a><a href="\/lesen\/markiert"[^>]*>Markiert<\/a><a href="\/lesen\/wiedersehen"[^>]*>Wiedersehen<\/a><a href="\/wissen"[^>]*>Wissen<\/a><a href="\/lesen\/feeds"[^>]*>Feeds<\/a><\/nav>/);
     assert.match(html, /<form method="post" action="\/aktion\/lesen\/speichern"/);
     assert.match(html, /Eingang leer/);
     assert.ok(!/style=|<script>/.test(html), 'keine Inline-Styles oder -Skripte');

@@ -10,6 +10,7 @@ import { hidden, flashToast } from '../web/render.js';
 
 /** Unternavigation unter der Kopfzeile; `/wissen` ist die Suche im Vault (VCP-76). */
 const SUB = [
+  ['weiter', '/lesen/weiter', 'Weiter'],
   ['eingang', '/lesen/eingang', 'Eingang'],
   ['stapel', '/lesen/stapel', 'Stapel'],
   ['folgen', '/lesen/folgen', 'Folgen'],
@@ -36,7 +37,7 @@ export function readingNav(current, nav = null) {
   const items = SUB.filter(([key]) => key !== 'fragen' || extra?.fragen).map(([key, href, label]) => [key, href, label]);
   if (extra && 'ingest' in extra) {
     const n = Number(extra.ingest) || 0;
-    items.splice(2, 0, ['ingest', '/lesen/ingest', `Ingest<span class="subnav-count" data-ingest-count${n ? '' : ' hidden'}>${n}</span>`]);
+    items.splice(3, 0, ['ingest', '/lesen/ingest', `Ingest<span class="subnav-count" data-ingest-count${n ? '' : ' hidden'}>${n}</span>`]);
   }
   return `<nav class="subnav" aria-label="Lesen">${items
     .map(([key, href, label]) => `<a href="${href}" class="subnav-link"${key === current ? ' aria-current="page"' : ''}>${label}</a>`)
