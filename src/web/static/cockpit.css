@@ -599,6 +599,12 @@ a:active, a.pressed { opacity: .55; transition-duration: 0s; }
 .lesen-tabs .subnav-link:hover { border-bottom-color: var(--line-strong); }
 .lesen-tabs .subnav-link[aria-current=page] { background: none; color: var(--accent); border-bottom-color: var(--accent); font-weight: 650; }
 .lesen-tabs .subnav-count { margin-left: 2px; }
+/* Breit genug für alle Reiter: „Mehr“ fällt weg, seine Einträge stehen als Reiter daneben (readingNav). */
+.lesen-tabs > .subnav-weit { display: none; }
+@media (min-width: 1100px) {
+  .lesen-tabs > .subnav-weit { display: flex; }
+  .lesen-tabs > .subnav-mehr { display: none; }
+}
 .subnav-mehr { position: relative; }
 .subnav-mehr > summary { list-style: none; cursor: pointer; }
 .subnav-mehr > summary::-webkit-details-marker { display: none; }

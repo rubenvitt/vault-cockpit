@@ -93,8 +93,13 @@ test('Lesen: nur angemeldet, /lesen führt zu „Weiter“, Navigation mit Lesen
     assert.match(html, /<nav class="subnav lesen-tabs" aria-label="Lesen"><a href="\/lesen\/weiter" class="subnav-link">Weiter<\/a><a href="\/lesen\/eingang" class="subnav-link" aria-current="page">Eingang<\/a><a href="\/lesen\/stapel"[^>]*>Stapel<\/a><a href="\/lesen\/folgen"[^>]*>Folgen<\/a><details class="menu subnav-mehr"><summary class="subnav-link">Mehr<svg/);
     const menu = html.match(/<div class="subnav-menu">[^]*?<\/div><\/details>/)[0];
     assert.deepEqual([...menu.matchAll(/class="subnav-item"[^>]*><span>([^<]+)/g)].map((m) => m[1]), ['Markiert', 'Wiedersehen', 'Wissen', 'Feeds']);
-    // Auf einer Seite aus „Mehr“ trägt der Knopf ihren Namen.
-    assert.match(await (await call('/lesen/markiert')).text(), /<summary class="subnav-link" aria-current="page">Markiert<svg/);
+    // Auf dem Desktop stehen dieselben Einträge als Reiter neben den vier (CSS blendet „Mehr“ dort aus).
+    const nav = html.match(/<nav class="subnav lesen-tabs"[^]*?<\/nav>/)[0];
+    assert.deepEqual([...nav.matchAll(/class="subnav-link subnav-weit"[^>]*>([^<]+)/g)].map((m) => m[1]), ['Markiert', 'Wiedersehen', 'Wissen', 'Feeds']);
+    // Auf einer Seite aus „Mehr“ trägt der Knopf ihren Namen, der breite Reiter ist markiert.
+    const markiert = await (await call('/lesen/markiert')).text();
+    assert.match(markiert, /<summary class="subnav-link" aria-current="page">Markiert<svg/);
+    assert.match(markiert, /<a href="\/lesen\/markiert" class="subnav-link subnav-weit" aria-current="page">Markiert<\/a>/);
     assert.match(html, /<form method="post" action="\/aktion\/lesen\/speichern"/);
     assert.match(html, /Eingang leer/);
     assert.ok(!/style=|<script>/.test(html), 'keine Inline-Styles oder -Skripte');

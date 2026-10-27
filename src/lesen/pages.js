@@ -12,7 +12,9 @@ import { hidden, flashToast } from '../web/render.js';
  * Unternavigation unter der Kopfzeile: vier Reiter für den Ablauf eines Textes
  * (Weiter · Eingang · Stapel · Folgen), der Rest unter „Mehr“ (ein `<details>`,
  * geht ohne JavaScript). Steht man auf einer Seite aus „Mehr“, trägt der Knopf
- * ihren Namen. `/wissen` ist die Suche im Vault (VCP-76).
+ * ihren Namen. Auf breiten Bildschirmen stehen die Einträge aus „Mehr“ als
+ * eigene Reiter daneben und das Menü fällt weg (CSS, `.subnav-weit`).
+ * `/wissen` ist die Suche im Vault (VCP-76).
  */
 const MAIN = [
   ['weiter', '/lesen/weiter', 'Weiter'],
@@ -51,7 +53,8 @@ export function readingNav(current, nav = null) {
   const menu = more
     .map(([key, href, label, hint]) => `<a href="${href}" class="subnav-item"${key === current ? ' aria-current="page"' : ''}><span>${label}${key === 'ingest' ? count : ''}</span><span class="meta">${hint}</span></a>`)
     .join('');
-  return `<nav class="subnav lesen-tabs" aria-label="Lesen">${tabs}<details class="menu subnav-mehr"><summary class="subnav-link"${here ? ' aria-current="page"' : ''}>${here ? here[2] : 'Mehr'}<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5l3 3 3-3"/></svg></summary><div class="subnav-menu">${menu}</div></details></nav>`;
+  const wide = more.map(([key, href, label]) => `<a href="${href}" class="subnav-link subnav-weit"${key === current ? ' aria-current="page"' : ''}>${label}${key === 'ingest' ? count : ''}</a>`).join('');
+  return `<nav class="subnav lesen-tabs" aria-label="Lesen">${tabs}<details class="menu subnav-mehr"><summary class="subnav-link"${here ? ' aria-current="page"' : ''}>${here ? here[2] : 'Mehr'}<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5l3 3 3-3"/></svg></summary><div class="subnav-menu">${menu}</div></details>${wide}</nav>`;
 }
 
 /**
