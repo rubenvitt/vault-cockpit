@@ -106,6 +106,7 @@ Die übrigen lassen sich nicht neu bauen, ohne sie ist alles neu einzurichten:
 | `fragen/` | Gespräche unter [Fragen](#fragen-an-den-vault), je eins als JSON; ohne sind sie weg, sonst nichts |
 | `folgen/` | erzeugte [Folgen](#lesen) als MP3 mit `folgen.json` (solange eine entsteht, auch Skript und Recherche); fehlen sie, lassen sie sich neu erzeugen, das kostet aber noch einmal Zeichen bei ElevenLabs |
 | `lesestapel.db` | [Lesestapel](#lesen): gespeicherte Artikel samt Text, Markierungen, Feeds (SQLite) |
+| `credentials-key` | Schlüssel für die Zugangsdaten privater Feeds in `lesestapel.db` (beim ersten Start erzeugt; fehlt er, müssen die Zugangsdaten neu eingegeben werden) |
 
 Die Obsidian-Anmeldung des Sync-Sidecars liegt nicht hier, sondern in
 `./sync-config`; fehlt sie, einmal neu anmelden (siehe [Sync](#sync)).
@@ -1135,6 +1136,16 @@ und auf `/zustand` steht der Fehler beim Feed. Icons werden einmal geholt und al
 `data:`-Adresse gespeichert, weil die Content-Security-Policy keine fremden Bilder
 lädt. Unten auf der Seite: OPML importieren (Datei aus einem anderen Reader,
 Ordner werden flach übernommen) und exportieren.
+
+**Private Feeds** mit Zugangsdaten (HTTP Basic Auth) gehen über die Adresse
+(`https://name:passwort@host/feed`, auch im OPML-Import) oder die Felder
+Benutzername und Passwort in den Einstellungen des Feeds. Das Cockpit löst sie
+aus der Adresse und speichert sie getrennt, mit AES-256-GCM verschlüsselt und an
+den Feed gebunden (`src/cockpit/secret-box.js`, Schlüssel `credentials-key`
+unter `/data`, keine neue Umgebungsvariable). Die Seite, die App-JSON und der
+OPML-Export zeigen nur, dass es welche gibt. Gesendet werden sie an den Feed und
+an Seiten, Icons und Weiterleitungen auf demselben Host, nie an einen anderen
+Host und nie von https zurück auf http.
 
 #### Ingest ins Wiki
 

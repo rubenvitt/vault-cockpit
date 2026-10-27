@@ -1,5 +1,5 @@
 import { DOMParser } from 'linkedom';
-import { normalizeUrl } from './fetch.js';
+import { normalizeUrl, splitCredentials } from './fetch.js';
 import { ReadingError } from './store.js';
 import { esc } from '../web/layout.js';
 import { xmlAttr } from './feeds.js';
@@ -13,7 +13,9 @@ const isOutline = (el) => el?.tagName?.toLowerCase() === 'outline';
  * `outline` mit `xmlUrl`, egal wie tief in Ordnern verschachtelt; `group` ist
  * der Titel des nächsten Ordners darüber (`outline` ohne `xmlUrl`), sonst
  * `null`. Tiefere Ordner werden so flach: ein Feed hat höchstens eine Gruppe.
- * Ungültige Adressen fallen still weg.
+ * Ungültige Adressen fallen still weg. Zugangsdaten in der Adresse
+ * (`https://name:passwort@…`) kommen getrennt als `auth`; der Export schreibt
+ * nie welche hinaus.
  */
 export function parseOpml(text) {
   const root = new DOMParser().parseFromString(String(text ?? '').replace(/^\uFEFF/, ''), 'text/xml').documentElement;
@@ -21,8 +23,9 @@ export function parseOpml(text) {
   const feeds = new Map();
   for (const o of root.getElementsByTagName('outline')) {
     let url;
+    let auth;
     try {
-      url = normalizeUrl(attrOf(o, 'xmlUrl'));
+      ({ url, auth } = splitCredentials(attrOf(o, 'xmlUrl')));
     } catch {
       continue;
     }
@@ -34,7 +37,7 @@ export function parseOpml(text) {
     }
     let folder = o.parentElement;
     while (isOutline(folder) && attrOf(folder, 'xmlUrl') != null) folder = folder.parentElement;
-    if (!feeds.has(url)) feeds.set(url, { url, title: titleOf(o), site_url: site, group: isOutline(folder) ? titleOf(folder) : null });
+    if (!feeds.has(url)) feeds.set(url, { url, title: titleOf(o), site_url: site, group: isOutline(folder) ? titleOf(folder) : null, ...(auth ? { auth } : {}) });
   }
   return [...feeds.values()];
 }

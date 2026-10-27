@@ -705,6 +705,9 @@ a:active, a.pressed { opacity: .55; transition-duration: 0s; }
 .feed-form { display: grid; gap: var(--s-2); margin: var(--s-2) 0; }
 .feed-check { display: flex; align-items: center; gap: var(--s-2); }
 .feed-field { display: grid; gap: 4px; }
+/* Zugangsdaten privater Feeds: zwei Felder als Gruppe, ohne Rahmen des Browsers */
+.feed-auth { display: grid; gap: var(--s-2); margin: 0; padding: 0; border: 0; min-width: 0; }
+.feed-auth legend { padding: 0; margin-bottom: var(--s-1); }
 .feed-actions { margin: 0; }
 .feed-group + .feed-group { margin-top: var(--s-5); }
 .feed-group > summary { cursor: pointer; font-weight: 600; margin-bottom: var(--s-2); }

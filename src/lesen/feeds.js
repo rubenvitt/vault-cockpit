@@ -1,5 +1,5 @@
 import { DOMParser, parseHTML } from 'linkedom';
-import { safeFetch, normalizeUrl } from './fetch.js';
+import { safeFetch, normalizeUrl, sameHost } from './fetch.js';
 import { sanitizeHtml, extractArticle, readingMinutes } from './extract.js';
 import { ReadingError } from './store.js';
 import { esc } from '../web/layout.js';
@@ -21,6 +21,10 @@ import { esc } from '../web/layout.js';
  * XML liest linkedom; es löst keine Entitäten aus einer DTD auf (auch keine
  * externen), `&xxe;` bleibt Text. Abgerufen wird nur über `safeFetch`, mit
  * dessen Größen- und Zeitlimit; Inhalte gehen immer durch `sanitizeHtml`.
+ *
+ * Private Feeds: Zugangsdaten liegen verschlüsselt beim Feed (`store.feedAuth`),
+ * nie in seiner Adresse. Sie gehen als Basic Auth an den Feed und an Seiten,
+ * Icons und Weiterleitungen auf demselben Host, sonst nirgendwohin.
  */
 
 export const DEFAULT_INTERVAL = 30;
@@ -181,18 +185,23 @@ export function findFeedLink(html, baseUrl) {
   return link ? absolute(link.getAttribute('href'), baseUrl) : null;
 }
 
+/** `{ auth }` für einen Abruf von `url`, wenn er auf dem Host von `base` liegt; sonst `{}`. */
+export const authFor = (url, base, auth) => (auth && sameHost(url, base) ? { auth } : {});
+
 /**
  * Adresse aus dem Formular → `{ url, feed }`: entweder direkt ein Feed oder
- * eine Webseite, die auf einen verweist.
+ * eine Webseite, die auf einen verweist. `auth` (Zugangsdaten, schon aus der
+ * Adresse gelöst) gilt auch für den gefundenen Feed, wenn er auf demselben Host liegt.
  */
-export async function discoverFeed(input, { fetchFeed = fetchFeedDefault } = {}) {
-  const res = await fetchFeed(normalizeUrl(input));
+export async function discoverFeed(input, { fetchFeed = fetchFeedDefault, auth = null } = {}) {
+  const start = normalizeUrl(input);
+  const res = await fetchFeed(start, auth ? { auth } : {});
   try {
     return { url: res.url, feed: parseFeed(res.body, res.url) };
   } catch (err) {
     const alt = findFeedLink(res.body, res.url);
     if (!alt) throw new ReadingError(`Unter dieser Adresse ist kein Feed zu finden (${err.message})`);
-    const found = await fetchFeed(alt);
+    const found = await fetchFeed(alt, authFor(alt, start, auth));
     return { url: found.url, feed: parseFeed(found.body, found.url) };
   }
 }
@@ -264,12 +273,12 @@ export function createFeedPoller({ store, fetchFeed = fetchFeedDefault, fetchPag
   let running = null;
   const iso = (ms) => new Date(ms).toISOString();
 
-  /** Volltext: der Feed, wenn er lang genug ist, sonst die Seite; scheitert die, doch der Feed. */
-  async function article(entry, site) {
+  /** Volltext: der Feed, wenn er lang genug ist, sonst die Seite; scheitert die, doch der Feed. `access`: Feed-Adresse und Zugangsdaten. */
+  async function article(entry, site, access = null) {
     const own = fromFeed(entry, site);
     if (own.word_count >= FULL_TEXT_WORDS) return own;
     try {
-      const page = await fetchPage(entry.url);
+      const page = await fetchPage(entry.url, access ? authFor(entry.url, access.url, access.auth) : {});
       const full = extractArticle(page.body, page.url);
       if (full.word_count > own.word_count) return { ...full, url: entry.url, comments_url: own.comments_url, title: entry.title || full.title };
     } catch (err) {
@@ -280,9 +289,10 @@ export function createFeedPoller({ store, fetchFeed = fetchFeedDefault, fetchPag
 
   /** Icon als `data:`-Adresse (die CSP lädt keine fremden Bilder); `''` heißt: keins gefunden. */
   // shortcut: Ein nicht gefundenes Icon (`''`) wird nie wieder versucht; nachrüsten, wenn Feeds später eins bekommen.
-  async function icon(feed, parsed) {
+  async function icon(feed, parsed, auth) {
     try {
-      const res = await fetchFeed(parsed.icon ?? new URL('/favicon.ico', parsed.siteUrl ?? feed.url).href, { accept: ICON_TYPES, maxBytes: 100_000 });
+      const url = parsed.icon ?? new URL('/favicon.ico', parsed.siteUrl ?? feed.url).href;
+      const res = await fetchFeed(url, { accept: ICON_TYPES, maxBytes: 100_000, ...authFor(url, feed.url, auth) });
       return `data:${String(res.contentType).split(';')[0].trim().toLowerCase()};base64,${Buffer.from(res.bytes).toString('base64')}`;
     } catch {
       return '';
@@ -292,7 +302,8 @@ export function createFeedPoller({ store, fetchFeed = fetchFeedDefault, fetchPag
   /** Ein Feed: abrufen, neue Einträge anlegen. Liefert Anzahl neuer Dokumente und Felder für den Feed. */
   async function refresh(feed) {
     const headers = { ...(feed.etag ? { 'if-none-match': feed.etag } : {}), ...(feed.last_modified ? { 'if-modified-since': feed.last_modified } : {}) };
-    const res = await fetchFeed(feed.url, { headers });
+    const auth = feed.has_auth ? store.feedAuth(feed.id) : null;
+    const res = await fetchFeed(feed.url, { headers, ...(auth ? { auth } : {}) });
     if (res.status === 304) return { added: 0, patch: {} };
     const parsed = parseFeed(res.body, res.url);
     const known = store.knownEntries(feed.id);
@@ -314,7 +325,7 @@ export function createFeedPoller({ store, fetchFeed = fetchFeedDefault, fetchPag
         store.rememberEntry(feed.id, entry.key, null);
         continue;
       }
-      const { doc, duplicate } = store.addDocument({ ...(await article(entry, site)), kind: 'feed', origin: `feed:${feed.id}`, status: feed.to_stack || feed.group_to_stack ? 'stapel' : 'eingang' });
+      const { doc, duplicate } = store.addDocument({ ...(await article(entry, site, auth ? { url: feed.url, auth } : null)), kind: 'feed', origin: `feed:${feed.id}`, status: feed.to_stack || feed.group_to_stack ? 'stapel' : 'eingang' });
       store.rememberEntry(feed.id, entry.key, doc.id);
       if (!duplicate) added += 1;
     }
@@ -323,7 +334,7 @@ export function createFeedPoller({ store, fetchFeed = fetchFeedDefault, fetchPag
       last_modified: res.headers?.['last-modified'] ?? null,
       ...(feed.title ? {} : { title: parsed.title }),
       ...(parsed.siteUrl ? { site_url: parsed.siteUrl } : {}),
-      ...(feed.icon == null ? { icon: await icon(feed, parsed) } : {}),
+      ...(feed.icon == null ? { icon: await icon(feed, parsed, auth) } : {}),
     };
     return { added, patch };
   }

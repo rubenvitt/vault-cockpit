@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { safeFetch, isPublicAddress, normalizeUrl, FetchError } from '../src/lesen/fetch.js';
+import { safeFetch, isPublicAddress, normalizeUrl, splitCredentials, sameHost, FetchError } from '../src/lesen/fetch.js';
+import { createSecretBox } from '../src/cockpit/secret-box.js';
 
 test('SSRF: private, lokale und reservierte Adressen gelten nicht als öffentlich', () => {
   const blocked = [
@@ -148,4 +149,49 @@ test('Abruf: der Body einer Weiterleitung wird nicht gelesen, die Verbindung sch
       assert.ok(closed, 'Redirect-Verbindung bleibt nicht offen');
     },
   );
+});
+
+test('Zugangsdaten: aus der Adresse gelöst und dekodiert, nur an denselben Host und nie zurück auf http', async () => {
+  assert.deepEqual(splitCredentials(' https://ru%20ben:p%40ss@a.test/feed#x '), { url: 'https://a.test/feed', auth: { user: 'ru ben', password: 'p@ss' } });
+  assert.deepEqual(splitCredentials('https://a.test/feed'), { url: 'https://a.test/feed', auth: null });
+  assert.deepEqual(splitCredentials('https://token@a.test/feed'), { url: 'https://a.test/feed', auth: { user: 'token', password: '' } });
+  assert.throws(() => splitCredentials('ftp://u:p@a.test/'), /Nur http/);
+  assert.equal(sameHost('https://a.test/x', 'http://a.test/feed'), true, 'Wechsel auf https darf');
+  assert.equal(sameHost('http://a.test/x', 'https://a.test/feed'), false, 'zurück auf http nicht');
+  assert.equal(sameHost('https://b.test/x', 'https://a.test/feed'), false);
+  assert.equal(sameHost('https://a.test:8443/x', 'https://a.test/feed'), false);
+
+  const seen = [];
+  await withServer(
+    (req, res) => {
+      seen.push([req.headers.host.split(':')[0], req.url, req.headers.authorization ?? null]);
+      if (req.url === '/weiter') return res.writeHead(302, { location: '/feed' }).end();
+      if (req.url === '/weg') return res.writeHead(302, { location: `http://anders.test:${req.socket.localPort}/feed` }).end();
+      if (req.headers.authorization !== `Basic ${Buffer.from('ruben:p@ss').toString('base64')}`) return res.writeHead(401).end();
+      res.writeHead(200, { 'content-type': 'application/rss+xml' }).end('<rss/>');
+    },
+    async (base, opts) => {
+      const o = { ...opts, accept: null, resolve: async (host) => (['artikel.test', 'anders.test'].includes(host) ? [{ address: '127.0.0.1', family: 4 }] : []) };
+      const auth = { user: 'ruben', password: 'p@ss' };
+      assert.equal((await safeFetch(`${base}/weiter`, { ...o, auth })).body, '<rss/>');
+      await assert.rejects(safeFetch(`${base}/weg`, { ...o, auth }), /Zugang verweigert \(HTTP 401\)/);
+      await assert.rejects(safeFetch(`${base}/feed`, { ...o, auth: { user: 'ruben', password: 'falsch' } }), /Zugang verweigert \(HTTP 401\), bitte die Zugangsdaten prüfen/);
+    },
+  );
+  const basic = `Basic ${Buffer.from('ruben:p@ss').toString('base64')}`;
+  assert.deepEqual(seen.slice(0, 4), [['artikel.test', '/weiter', basic], ['artikel.test', '/feed', basic], ['artikel.test', '/weg', basic], ['anders.test', '/feed', null]]);
+});
+
+test('Secret-Box: nur mit demselben Schlüssel und Kontext zu öffnen', () => {
+  const box = createSecretBox('k'.repeat(40));
+  const sealed = box.seal({ user: 'a', password: 'geheim' }, 'feed:1');
+  assert.match(sealed, /^v1\./);
+  assert.ok(!sealed.includes('geheim'));
+  assert.notEqual(box.seal({ user: 'a' }, 'feed:1'), box.seal({ user: 'a' }, 'feed:1'), 'zufälliger IV');
+  assert.deepEqual(box.open(sealed, 'feed:1'), { user: 'a', password: 'geheim' });
+  assert.equal(box.open(sealed, 'feed:2'), null, 'in eine andere Zeile kopiert');
+  assert.equal(createSecretBox('j'.repeat(40)).open(sealed, 'feed:1'), null);
+  assert.equal(box.open(`${sealed.slice(0, -2)}AA`, 'feed:1'), null);
+  assert.equal(box.open('kaputt', 'feed:1'), null);
+  assert.throws(() => createSecretBox('kurz'), /32 Zeichen/);
 });

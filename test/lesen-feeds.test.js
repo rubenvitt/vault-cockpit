@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createApp } from '../src/http/app.js';
 import { createWebHttp } from '../src/web/http.js';
 import { createCookieSigner } from '../src/web/session.js';
@@ -12,6 +15,7 @@ import { FetchError, safeFetch } from '../src/lesen/fetch.js';
 import { parseFeed, findFeedLink, matchesFilter, createFeedPoller } from '../src/lesen/feeds.js';
 import { parseOpml, toOpml } from '../src/lesen/opml.js';
 import { docJson } from '../src/lesen/json.js';
+import { createSecretBox } from '../src/cockpit/secret-box.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
 const SECRET = 'x'.repeat(40);
@@ -428,7 +432,7 @@ test('OPML: Gruppen als Ordner in ihrer Reihenfolge, Round-Trip ergibt dieselben
 // --- Seite ---------------------------------------------------------------------
 
 async function withWeb(run, routes = {}) {
-  const store = createReadingStore({ path: ':memory:' });
+  const store = createReadingStore({ path: ':memory:', secrets: createSecretBox(SECRET) });
   const webHttp = createWebHttp({
     cockpit: { week: async () => null },
     settings: createSettingsStore({ defaults: { tz: 'Europe/Berlin' }, logger: quiet }),
@@ -757,4 +761,124 @@ test('Lesestapel: updateFeeds und deleteFeeds gehen alles oder nichts', () => {
   assert.equal(store.getFeed(b).paused, false);
   assert.equal(store.deleteFeeds([a, b, 'x']), 2);
   assert.equal(store.listFeeds().length, 0);
+});
+
+// --- Private Feeds (Zugangsdaten) -------------------------------------------------
+
+test('Private Feeds: Zugangsdaten liegen verschlüsselt und an den Feed gebunden, nach außen nur has_auth', () => {
+  const store = createReadingStore({ path: ':memory:', secrets: createSecretBox(SECRET) });
+  const { feed } = store.addFeed({ url: 'https://privat.test/feed', auth: { user: 'ruben', password: 'pw_geheim_123' } });
+  assert.equal(feed.has_auth, true);
+  assert.equal('auth' in feed, false, 'der verschlüsselte Wert verlässt den Store nicht');
+  assert.equal(store.listFeeds()[0].has_auth, true);
+  assert.deepEqual(store.feedAuth(feed.id), { user: 'ruben', password: 'pw_geheim_123' });
+  const raw = store.snapshot().toString('latin1');
+  assert.ok(!raw.includes('pw_geheim_123') && !raw.includes('ruben'), 'kein Klartext in der Datenbank');
+
+  // Schon abonniert: neue Zugangsdaten ersetzen die alten.
+  assert.equal(store.addFeed({ url: 'https://privat.test/feed', auth: { user: 'ruben', password: 'neu' } }).duplicate, true);
+  assert.equal(store.feedAuth(feed.id).password, 'neu');
+  store.setFeedAuth(feed.id, null);
+  assert.equal(store.getFeed(feed.id).has_auth, false);
+  assert.equal(store.feedAuth(feed.id), null);
+
+  // Anderer Schlüssel (Datenbank ohne ihren credentials-key zurückgespielt): klare Meldung statt Müll.
+  store.setFeedAuth(feed.id, { user: 'a', password: 'b' });
+  const dir = mkdtempSync(join(tmpdir(), 'vc-feeds-'));
+  try {
+    const file = join(dir, 'lesestapel.db');
+    writeFileSync(file, store.snapshot());
+    const other = createReadingStore({ path: file, secrets: createSecretBox('y'.repeat(40)) });
+    assert.throws(() => other.feedAuth(feed.id), /lassen sich nicht entschlüsseln/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  // Ohne Schlüssel lassen sich keine speichern.
+  assert.throws(() => createReadingStore({ path: ':memory:' }).addFeed({ url: 'https://x.test/feed', auth: { user: 'a', password: 'b' } }), /nicht speichern/);
+});
+
+test('Private Feeds: der Abruf schickt die Zugangsdaten an den Feed und Seiten auf demselben Host, sonst nirgendwohin', async () => {
+  const store = createReadingStore({ path: ':memory:', now: () => T0, secrets: createSecretBox(SECRET) });
+  const auth = { user: 'ruben', password: 'pw' };
+  const { feed } = store.addFeed({ url: 'https://privat.test/feed', auth });
+  const items = [
+    '<item><title>Intern</title><link>https://privat.test/a/1</link><guid>p1</guid><description>kurz</description></item>',
+    '<item><title>Fremd</title><link>https://fremd.test/a/2</link><guid>p2</guid><description>kurz</description></item>',
+  ];
+  const calls = [];
+  const pageCalls = [];
+  const poller = createFeedPoller({
+    store,
+    fetchFeed: fakeFetch({ 'https://privat.test/feed': rss(items), 'https://blog.test/favicon.ico': async () => { throw new FetchError('kein Icon'); } }, calls),
+    fetchPage: async (url, opts = {}) => {
+      pageCalls.push({ url, auth: opts.auth ?? null });
+      return { url, body: ARTICLE };
+    },
+    now: () => T0,
+    logger: quiet,
+  });
+  assert.equal(await poller.runDue(), 2);
+  assert.deepEqual(calls[0].opts.auth, auth);
+  assert.deepEqual(pageCalls.sort((a, b) => a.url.localeCompare(b.url)), [{ url: 'https://fremd.test/a/2', auth: null }, { url: 'https://privat.test/a/1', auth }]);
+  assert.ok(calls.filter((c) => c.url !== feed.url).every((c) => !c.opts.auth), 'Icon auf anderem Host ohne Zugangsdaten');
+  assert.equal(store.getFeed(feed.id).error_count, 0);
+});
+
+test('Private Feeds: Adresse mit Zugangsdaten abonnieren, in den Einstellungen ändern und löschen, OPML-Import', async () => {
+  const seen = [];
+  const guarded = (body) => async (opts) => {
+    seen.push(opts.auth ?? null);
+    if (opts.auth?.password !== 'p@ss:wort') throw new FetchError('Zugang verweigert (HTTP 401)');
+    return { url: 'https://privat.test/feed', status: 200, body, bytes: Buffer.from(body), headers: {} };
+  };
+  await withWeb(
+    async ({ call, store }) => {
+      const html = await (await call('/lesen/feeds')).text();
+      const csrf = html.match(/name="csrf" value="([^"]+)"/)[1];
+      const form = (path, fields) => call(path, { form: { csrf, back: '/lesen/feeds', ...fields } });
+
+      // Falsches Passwort: Meldung, nichts abonniert.
+      const wrong = await form('/aktion/lesen/feed/abonnieren', { url: 'https://ruben:falsch@privat.test/feed' });
+      assert.match(await (await call('/lesen/feeds', { cookie: wrong.headers.getSetCookie() })).text(), /Zugang verweigert/);
+      assert.equal(store.listFeeds().length, 0);
+
+      // Zugangsdaten in der Adresse, Sonderzeichen prozentkodiert.
+      await form('/aktion/lesen/feed/abonnieren', { url: 'https://ruben:p%40ss%3Awort@privat.test/feed' });
+      const [feed] = store.listFeeds();
+      assert.equal(feed.url, 'https://privat.test/feed', 'Adresse ohne Zugangsdaten');
+      assert.equal(feed.has_auth, true);
+      assert.deepEqual(store.feedAuth(feed.id), { user: 'ruben', password: 'p@ss:wort' });
+
+      const page = await (await call('/lesen/feeds')).text();
+      assert.ok(!page.includes('p@ss') && !page.includes('ruben:'), 'Passwort nie auf der Seite');
+      assert.match(page, /mit Zugangsdaten/);
+      assert.match(page, /name="passwort" type="password"/);
+      const json = await (await call('/api/lesen/feeds')).text();
+      assert.ok(!json.includes('p@ss') && JSON.parse(json).ungrouped[0].hasAuth === true);
+      assert.ok(!(await (await call('/lesen/feeds.opml')).text()).includes('p@ss'), 'OPML-Export ohne Zugangsdaten');
+
+      // Nur ein neues Passwort: der Name bleibt; danach ist der Feed gleich wieder dran.
+      store.updateFeed(feed.id, { error_count: 3, last_error: 'Zugang verweigert (HTTP 401)', next_fetch_at: '2030-01-01T00:00:00Z' });
+      await form('/aktion/lesen/feed/aendern', { id: feed.id, url: feed.url, passwort: 'neu', intervall: '30' });
+      assert.deepEqual(store.feedAuth(feed.id), { user: 'ruben', password: 'neu' });
+      assert.deepEqual([store.getFeed(feed.id).error_count, store.getFeed(feed.id).next_fetch_at], [0, null]);
+      // Leere Felder behalten sie.
+      await form('/aktion/lesen/feed/aendern', { id: feed.id, url: feed.url, intervall: '30' });
+      assert.deepEqual(store.feedAuth(feed.id), { user: 'ruben', password: 'neu' });
+      // Löschen.
+      await form('/aktion/lesen/feed/aendern', { id: feed.id, url: feed.url, ohne_zugang: '1', intervall: '30' });
+      assert.equal(store.getFeed(feed.id).has_auth, false);
+
+      // OPML mit Zugangsdaten in der Adresse.
+      const upload = new FormData();
+      upload.append('csrf', csrf);
+      upload.append('back', '/lesen/feeds');
+      upload.append('datei', new Blob(['<opml><body><outline text="Intern" xmlUrl="https://leser:geheim@intern.test/rss"/></body></opml>']), 'abos.opml');
+      await call('/aktion/lesen/feeds/import', { body: upload });
+      const imported = store.listFeeds().find((f) => f.url === 'https://intern.test/rss');
+      assert.deepEqual(store.feedAuth(imported.id), { user: 'leser', password: 'geheim' });
+    },
+    { 'https://privat.test/feed': guarded(ATOM) },
+  );
+  assert.deepEqual(seen, [{ user: 'ruben', password: 'falsch' }, { user: 'ruben', password: 'p@ss:wort' }]);
 });
