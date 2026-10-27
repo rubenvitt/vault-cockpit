@@ -12,6 +12,9 @@ import { createReadingExport, blockId } from '../src/lesen/vault-export.js';
 import { createIngest, createNightlyClock, excerptOf, IngestError } from '../src/lesen/ingest.js';
 import { hybridSearch } from '../src/semantic/search.js';
 import { parseNote } from '../src/vault/markdown.js';
+import { isLinkStub } from '../src/lesen/feeds.js';
+import { FetchError } from '../src/lesen/fetch.js';
+import { makePdf } from './fixtures/make-pdf.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
 const NOW = new Date('2026-10-25T10:00:00Z');
@@ -221,6 +224,53 @@ test('Entwurf: ohne Claude 409, Claude-Fehler wird „fehler“, unbekanntes Dok
   assert.equal(ingest.get(doc.id).status, 'fehler');
   assert.equal(ingest.get(doc.id).error, 'Claude: Limit erreicht');
   assert.equal(store.get(doc.id).status, 'stapel');
+});
+
+test('Entwurf: Link-Post aus dem Feed holt erst den Artikel (auch als PDF); scheitert der Abruf, wird es „fehler“ statt Anriss', async () => {
+  const hn = (article, id) => [`Article URL: ${article}`, `Comments URL: https://news.ycombinator.com/item?id=${id}`, 'Points: 104', '# Comments: 31'];
+  const stub = (article, id) =>
+    store.addDocument({
+      url: article,
+      comments_url: `https://news.ycombinator.com/item?id=${id}`,
+      title: 'The Exponential Time Hypothesis is False',
+      kind: 'feed',
+      origin: 'feed:hn',
+      status: 'stapel',
+      content_html: hn(article, id).map((l) => `<p>${l}</p>`).join(''),
+      content_text: hn(article, id).join('\n\n'),
+      word_count: 12,
+    }).doc;
+  const PAPER = ['We show that 3-SAT can be solved in subexponential time.', 'The algorithm combines a new sparsification lemma with a careful', 'analysis of the branching tree, which refutes the Exponential Time Hypothesis.', 'This changes what we believe about the limits of fine-grained complexity.'];
+  const paper = stub('https://github.com/openai/math/blob/main/preprints/eth/paper.pdf', 1);
+  const broken = stub('https://kaputt.test/paper.pdf', 2);
+  assert.equal(isLinkStub(paper), true);
+  assert.equal(isLinkStub({ ...paper, content_text: PAPER.join(' ') }), false, 'eigener Text ist kein Link-Post');
+  assert.equal(isLinkStub(doc), false, 'nicht aus einem Feed');
+
+  const fetched = [];
+  const fetchPage = async (url) => {
+    fetched.push(url);
+    if (url.startsWith('https://kaputt.test/')) throw new FetchError('Die Seite antwortet mit HTTP 404');
+    // GitHub liefert die Datei als octet-stream, erkannt wird sie am Inhalt.
+    return { url: 'https://raw.githubusercontent.com/openai/math/main/preprints/eth/paper.pdf', status: 200, contentType: 'application/octet-stream', body: '', bytes: makePdf(PAPER) };
+  };
+  const ingest = make({ fetchPage });
+  ingest.request([paper.id, broken.id]);
+  await ingest.idle();
+
+  assert.equal(ingest.get(paper.id).status, 'bereit', ingest.get(paper.id).error);
+  assert.deepEqual(fetched, ['https://github.com/openai/math/raw/main/preprints/eth/paper.pdf', 'https://kaputt.test/paper.pdf'], 'GitHub-Ansicht → Datei');
+  const p = store.get(paper.id);
+  assert.deepEqual([p.url, p.comments_url], ['https://github.com/openai/math/blob/main/preprints/eth/paper.pdf', 'https://news.ycombinator.com/item?id=1']);
+  assert.match(p.content_text, /refutes the Exponential Time Hypothesis/);
+  assert.equal(calls.length, 1, 'Claude nur für den geholten Artikel');
+  assert.match(calls[0].input, /sparsification lemma/);
+  assert.doesNotMatch(calls[0].input, /Points: 104/);
+
+  const b = ingest.get(broken.id);
+  assert.equal(b.status, 'fehler');
+  assert.match(b.error, /Link-Post.*HTTP 404/);
+  assert.equal(store.get(broken.id).word_count, 12, 'Anriss bleibt, nichts überschrieben');
 });
 
 test('Übernehmen: Rohquelle, Source-Page, neue Seiten, Verknüpfungen, Log, Archiv; ein zweites Mal ändert nichts', async () => {

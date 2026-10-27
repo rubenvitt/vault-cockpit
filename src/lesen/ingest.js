@@ -4,6 +4,7 @@ import { localDate, zonedParts } from '../cockpit/week.js';
 import { writePrivate } from '../cockpit/settings.js';
 import { headingsOf } from '../vault/edit.js';
 import { htmlToMarkdown } from './extract.js';
+import { isLinkStub, fetchLinkPost } from './feeds.js';
 import { blockId, fullTextOf, slugOf } from './vault-export.js';
 import { breakTemplater, safeWikiMarkdown } from './wiki-markdown.js';
 import { parseNote } from '../vault/markdown.js';
@@ -338,8 +339,9 @@ function itemCounts(draft) {
  * - `exporter`: Lesestapel → Vault (src/lesen/vault-export.js), legt die Rohquelle an.
  * - `settings.get()`: `tz` und `ingest` (`nightly`, `hour`, `model`, `limit`).
  * - `resumeDelayMs`: Pause vor dem Fortsetzen nach dem Start.
+ * - `fetchPage`: Abruf für Link-Posts (`fetchLinkPost` in src/lesen/feeds.js), Standard `safeFetch`; setzen Tests.
  */
-export function createIngest({ store, writer, search, index, exporter, editor, policy, settings, vaultPath, onApplied = null, logger = console, now = () => new Date(), resumeDelayMs = 1000 }) {
+export function createIngest({ store, writer, search, index, exporter, editor, policy, settings, vaultPath, onApplied = null, logger = console, now = () => new Date(), resumeDelayMs = 1000, fetchPage }) {
   const queue = [];
   // Worklog laufender und fehlgeschlagener Entwürfe (nur im Speicher).
   const logs = new Map();
@@ -615,7 +617,7 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
   async function draftOne(docId) {
     const row = store.getIngest(docId);
     if (!row || row.status !== 'wartet') return;
-    const doc = store.get(docId);
+    let doc = store.get(docId);
     if (!doc) return;
     // Der Skill war schneller: kein zweiter Ingest, Claude bleibt unbefragt.
     const done = ingestedAs(docId);
@@ -629,6 +631,13 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
     logs.set(docId, log);
     try {
       store.saveIngest(docId, { status: 'entwirft', error: null, model });
+      // Link-Post (etwa Hacker News): Claude bekommt den Artikel, nicht den Anriss aus dem Feed.
+      if (isLinkStub(doc)) {
+        logStep(log, 'Holt den Artikel hinter dem Link-Post', now());
+        doc = await fetchLinkPost(store, doc, { fetchPage }).catch((err) => {
+          throw new IngestError(`Nur ein Link-Post, der Artikel ließ sich nicht holen: ${err.message}`);
+        });
+      }
       if (!htmlToMarkdown(doc.content_html)) throw new IngestError('Dieser Text hat keinen Lesetext');
       const text = fullTextOf(doc).slice(0, DOC_INPUT);
       const highlights = store.listHighlights({ docId });
