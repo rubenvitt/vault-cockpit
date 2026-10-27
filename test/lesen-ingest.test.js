@@ -248,9 +248,11 @@ test('Entwurf: Link-Post aus dem Feed holt erst den Artikel (auch als PDF); sche
   assert.equal(isLinkStub(doc), false, 'nicht aus einem Feed');
 
   const fetched = [];
-  const fetchPage = async (url) => {
+  const fetchPage = async (url, opts = {}) => {
     fetched.push(url);
     if (url.startsWith('https://kaputt.test/')) throw new FetchError('Die Seite antwortet mit HTTP 404');
+    // Wie safeFetch: ohne `accept: null` nur HTML.
+    if (opts.accept !== null) throw new FetchError('Kein Artikel (application/octet-stream)', 415);
     // GitHub liefert die Datei als octet-stream, erkannt wird sie am Inhalt.
     return { url: 'https://raw.githubusercontent.com/openai/math/main/preprints/eth/paper.pdf', status: 200, contentType: 'application/octet-stream', body: '', bytes: makePdf(PAPER) };
   };
@@ -271,6 +273,14 @@ test('Entwurf: Link-Post aus dem Feed holt erst den Artikel (auch als PDF); sche
   assert.equal(b.status, 'fehler');
   assert.match(b.error, /Link-Post.*HTTP 404/);
   assert.equal(store.get(broken.id).word_count, 12, 'Anriss bleibt, nichts überschrieben');
+
+  // Nachtlauf: kein PDF (pdf.js im Hauptprozess nur auf Knopfdruck), sichtbar als „fehler“.
+  const night = stub('https://github.com/openai/math/blob/main/preprints/nacht/paper.pdf', 3);
+  await ingest.request([night.id], { origin: 'nacht' }).done;
+  assert.equal(ingest.get(night.id).status, 'fehler');
+  assert.match(ingest.get(night.id).error, /Link-Post.*Kein Artikel \(application\/octet-stream\)/);
+  assert.equal(fetched.at(-1), 'https://github.com/openai/math/blob/main/preprints/nacht/paper.pdf', 'ohne Umweg auf die Datei');
+  assert.equal(calls.length, 1);
 });
 
 test('Übernehmen: Rohquelle, Source-Page, neue Seiten, Verknüpfungen, Log, Archiv; ein zweites Mal ändert nichts', async () => {

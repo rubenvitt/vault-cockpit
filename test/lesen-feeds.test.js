@@ -12,10 +12,11 @@ import { createHealth } from '../src/health/collect.js';
 import { createReadingStore } from '../src/lesen/store.js';
 import { readingRoutes } from '../src/lesen/http.js';
 import { FetchError, safeFetch } from '../src/lesen/fetch.js';
-import { parseFeed, findFeedLink, matchesFilter, createFeedPoller } from '../src/lesen/feeds.js';
+import { parseFeed, findFeedLink, matchesFilter, createFeedPoller, isLinkStub } from '../src/lesen/feeds.js';
 import { parseOpml, toOpml } from '../src/lesen/opml.js';
 import { docJson } from '../src/lesen/json.js';
 import { createSecretBox } from '../src/cockpit/secret-box.js';
+import { makePdf } from './fixtures/make-pdf.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
 const SECRET = 'x'.repeat(40);
@@ -881,4 +882,40 @@ test('Private Feeds: Adresse mit Zugangsdaten abonnieren, in den Einstellungen �
     { 'https://privat.test/feed': guarded(ATOM) },
   );
   assert.deepEqual(seen, [{ user: 'ruben', password: 'falsch' }, { user: 'ruben', password: 'p@ss:wort' }]);
+});
+
+test('Feeds: Der Hintergrundabruf holt kein PDF, der Link-Post behält seinen Anriss für den Ingest', async () => {
+  const pdf = makePdf(['Ein PDF, das der Abruf im Hintergrund nicht anfassen darf.']);
+  const served = [];
+  const server = http.createServer((req, res) => {
+    served.push(req.url);
+    res.writeHead(200, { 'content-type': req.url === '/a.pdf' ? 'application/pdf' : 'application/octet-stream' }).end(pdf);
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://papers.test:${server.address().port}`;
+  const local = { resolve: async () => [{ address: '127.0.0.1', family: 4 }], isAllowed: (ip) => ip === '127.0.0.1' };
+  const items = ['a.pdf', 'b.bin'].map((f, i) => `<item><title>Paper ${i}</title><link>${base}/${f}</link><guid>hn-${i}</guid><description><![CDATA[<p>Article URL: ${base}/${f}</p><p>Points: 104</p>]]></description><comments>https://news.ycombinator.com/item?id=${i}</comments></item>`);
+  const store = createReadingStore({ path: ':memory:', now: () => T0 });
+  store.addFeed({ url: 'https://hnrss.test/frontpage' });
+  const pageOpts = [];
+  const poller = createFeedPoller({
+    store,
+    fetchFeed: fakeFetch({ 'https://hnrss.test/frontpage': rss(items) }),
+    // Echtes safeFetch mit seinen Standards (nur HTML, 5 MB), nur auf den Testserver umgelenkt.
+    fetchPage: (url, opts = {}) => (pageOpts.push(opts), safeFetch(url, { ...local, ...opts })),
+    now: () => T0,
+    logger: quiet,
+  });
+  try {
+    assert.equal(await poller.runDue(), 2);
+  } finally {
+    server.close();
+  }
+  assert.deepEqual(served.sort(), ['/a.pdf', '/b.bin']);
+  assert.deepEqual(pageOpts, [{}, {}], 'weder accept noch maxBytes geändert');
+  for (const d of store.list({ limit: 10 })) {
+    const doc = store.get(d.id);
+    assert.doesNotMatch(doc.content_text, /nicht anfassen/);
+    assert.equal(isLinkStub(doc), true, 'bleibt Link-Post, der Ingest holt den Artikel');
+  }
 });
