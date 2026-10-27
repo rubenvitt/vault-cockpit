@@ -248,7 +248,7 @@ const SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['kind', 'slug', 'title', 'summary', 'body', 'warum'],
+        required: ['kind', 'slug', 'title', 'summary', 'tags', 'body', 'warum'],
         properties: {
           kind: { type: 'string', enum: NEW_KINDS },
           slug: { type: 'string' },
@@ -868,7 +868,8 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
         ['summary', item.summary],
         ['created', d],
         ['updated', d],
-        ['sources', [`[[${slug}]]`]],
+        // Synthesen stützen sich auf alle Beteiligten, nicht nur auf die neue Quelle (Confidence-Bonus in mycel.py).
+        ['sources', [...new Set([slug, ...beteiligte])].map((s) => `[[${s}]]`)],
         ['tags', item.tags ?? []],
         ['status', item.kind === 'question' ? 'open' : 'active'],
         ['confidence', confidence],

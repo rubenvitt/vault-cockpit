@@ -9,8 +9,8 @@ import { logStep, logTool } from './worklog.js';
 /**
  * Einpflanzen nach dem Ingest: Ist ein Entwurf übernommen (src/lesen/ingest.js),
  * startet das Cockpit einen Claude-Agenten, der die Quelle in die Seiten
- * einarbeitet, an die sie andockt, Widersprüche als Spannung festhält und neue
- * Seiten im Index einträgt. Der Auftrag ist der Skill `wiki-einpflanzen`
+ * einarbeitet, an die sie andockt, und Widersprüche als Spannung festhält. Den
+ * Index (`wiki/index.md`) erzeugt `mycel.py index`, der Agent fasst ihn nicht an. Der Auftrag ist der Skill `wiki-einpflanzen`
  * (src/lesen/skills/wiki-einpflanzen/SKILL.md), derselbe, den man in den Vault
  * kopieren und von Hand aufrufen kann.
  *
@@ -47,6 +47,7 @@ export class PlantError extends Error {
 
 const SKILL = parseNote(readFileSync(new URL('./skills/wiki-einpflanzen/SKILL.md', import.meta.url), 'utf8')).body.trim();
 const LOG = 'wiki/log.md';
+const INDEX = 'wiki/index.md';
 const MAX_PAGES = 15;
 const BODY_LIMIT = 4 * 1024 * 1024;
 const READ_TOOLS = ['vault_search', 'vault_read', 'vault_links', 'vault_list', 'vault_similar', 'vault_graph'];
@@ -64,7 +65,7 @@ const SYSTEM = [
   '- Einfügen mitten in einer Seite: vault_edit mit einer eindeutigen Stelle als old_text und new_text = dieselbe Stelle plus der neue Text. Das Cockpit lehnt jede Änderung ab, bei der der alte Text nicht unverändert im neuen steht.',
   '- Ans Ende eines Abschnitts: vault_append mit heading. Einen neuen Abschnitt („## Spannungen“) legst du an, indem du ihn per vault_edit vor „## Quellen“ einfügst oder per vault_append ans Ende stellst.',
   '- Frontmatter nur `relations` (Liste wie "contradicts [[ziel]]"), immer mit allen bisherigen Einträgen. `updated` setzt das Cockpit selbst.',
-  `- Höchstens ${MAX_PAGES} Seiten, nur unter wiki/, nicht ${LOG}. Neue Seiten legst du nicht an.`,
+  `- Höchstens ${MAX_PAGES} Seiten, nur unter wiki/, nicht ${LOG} und nicht ${INDEX}. Neue Seiten legst du nicht an.`,
   '- Am Ende lieferst du das verlangte JSON: `zusammenfassung` (1–3 Sätze), `eingepflanzt` (je geänderter Seite Pfad und was sie bekommen hat), `offen` (was ein Mensch entscheiden sollte, 0–5 Punkte).',
 ].join('\n');
 
@@ -87,16 +88,16 @@ const list = (v) => (Array.isArray(v) ? v : []);
 const relationList = (v) => [v ?? []].flat().filter((x) => x != null && String(x).trim()).map((x) => String(x).trim());
 
 /**
- * Editor für den Agenten: nur bestehende Seiten unter `wiki/` (ohne Log, ohne
- * versteckte Ordner), nur ergänzen, höchstens `maxPages` Seiten. `onWrite(path)`
+ * Editor für den Agenten: nur bestehende Seiten unter `wiki/` (ohne Log und Index,
+ * ohne versteckte Ordner), nur ergänzen, höchstens `maxPages` Seiten. `onWrite(path)`
  * nach jeder tatsächlichen Änderung.
  */
 export function guardEditor(editor, { index, maxPages = MAX_PAGES, onWrite = () => {} }) {
   const touched = new Set();
   const check = (path) => {
     const p = String(path ?? '');
-    if (!/^wiki\/.+\.md$/.test(p) || p === LOG || p.split('/').some((s) => s.startsWith('.') || s === '..')) {
-      throw new Error(`Nur Seiten unter wiki/ (außer ${LOG}) sind für das Einpflanzen freigegeben, nicht „${p}“`);
+    if (!/^wiki\/.+\.md$/.test(p) || p === LOG || p === INDEX || p.split('/').some((s) => s.startsWith('.') || s === '..')) {
+      throw new Error(`Nur Seiten unter wiki/ (außer ${LOG} und ${INDEX}) sind für das Einpflanzen freigegeben, nicht „${p}“`);
     }
     if (!touched.has(p) && touched.size >= maxPages) throw new Error(`Höchstens ${maxPages} Seiten je Lauf; „${p}“ bleibt unverändert`);
     return p;

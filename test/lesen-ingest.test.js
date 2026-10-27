@@ -652,6 +652,13 @@ test('Kollision beim Übernehmen: neue Seite, deren Name inzwischen anderswo ver
   assert.match(read(r.source), /mit Elastischer Loop und \[\[robert-glaser\]\]/);
 });
 
+test('Übernehmen: neue Synthese führt Source-Page und Beteiligte unter sources', async () => {
+  const { ingest } = await drafted();
+  const r = await ingest.apply(doc.id, { items: ['s1'] });
+  assert.ok(r.written.includes('wiki/synthesis/synthese-loops.md'));
+  assert.deepEqual(fm('wiki/synthesis/synthese-loops.md').sources, ['[[glaser-der-elastische-loeop]]', '[[backpressure]]', '[[loops-und-widerstand]]']);
+});
+
 test('force: Übernommenes und angefangenes Übernehmen werden weder neu entworfen noch verworfen', async () => {
   const { ingest } = await drafted();
   const real = editor.setFrontmatter;
