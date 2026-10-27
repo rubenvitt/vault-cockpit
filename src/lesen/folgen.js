@@ -8,6 +8,7 @@ import { slugOf } from './vault-export.js';
 import { breakTemplater, safeWikiMarkdown } from './wiki-markdown.js';
 import { localDate } from '../cockpit/week.js';
 import { EPISODE_LANGUAGES, DEFAULT_EPISODE_LANGUAGE, episodeLanguage } from './languages.js';
+import { logStep, logTool } from './worklog.js';
 
 /**
  * Folgen aus dem Lesestapel: eine MP3, im Hintergrund erzeugt, auf Knopfdruck.
@@ -659,6 +660,12 @@ export function createEpisodes({
     save();
   }
 
+  /** Worklog der Folge (src/lesen/worklog.js); gespeichert mit dem nächsten `update`. */
+  function step(ep, text) {
+    ep.log ??= [];
+    logStep(ep.log, text, now());
+  }
+
   function availability() {
     const voice = Boolean(tts());
     const claude = Boolean(writer?.available());
@@ -810,12 +817,13 @@ export function createEpisodes({
     if (!found) {
       if (!research) throw new EpisodeError(topicMissing());
       update(ep, { status: 'recherchiert', researching_at: now().toISOString() });
+      step(ep, `Claude recherchiert zu „${ep.topic}“ im Vault${ep.web ? ' und im Internet' : ''}`);
       const session = await research.open();
       let raw;
       let read;
       try {
         const input = `Heute ist ${today()}. Die Werkzeuge mcp__vault__* lesen seinen Vault${ep.web ? ', WebSearch und WebFetch das Internet' : ''}.`;
-        raw = await writer.write({ ...researchJob(ep), input, tools: ep.web ? WEB_TOOLS : [], mcp: session.mcp, timeoutMs: RESEARCH_TIMEOUT_MS });
+        raw = await writer.write({ ...researchJob(ep), input, tools: ep.web ? WEB_TOOLS : [], mcp: session.mcp, timeoutMs: RESEARCH_TIMEOUT_MS, onTool: (name, args) => logTool(ep.log, name, args, now()) });
         read = session.read();
       } finally {
         await session.close();
@@ -823,12 +831,14 @@ export function createEpisodes({
       found = normalizeResearch(raw, { minutes: ep.minutes, topic: ep.topic, read, web: ep.web });
       if (!found.dossier) throw new EpisodeError('Claude hat kein Dossier geliefert');
       saveJson(researchPath(ep.id), found);
+      step(ep, `Recherche fertig: ${found.chapters.length} Kapitel geplant, aus ${found.sources.vault.length} Notizen${found.sources.web.length ? ` und ${found.sources.web.length} Webquellen` : ''}`);
     }
     const total = found.chapters.length;
     update(ep, { title: found.title, researched: true, chapters_total: total, notes_read: found.sources.vault.length, web_sources: found.sources.web.length });
     const script = loadScript(ep.id) ?? { chapters: [] };
     for (let i = script.chapters.length; i < total; i += 1) {
       update(ep, { status: 'schreibt', chapter: i + 1, writing_at: ep.status === 'schreibt' ? ep.writing_at : now().toISOString() });
+      step(ep, `Claude schreibt Kapitel ${i + 1} von ${total}: „${found.chapters[i].title}“`);
       const before = i > 0 ? chapterTail(script.chapters[i - 1]) : null;
       const out = await writer.write({ ...chapterJob(ep, found, i, before), input: dossierInput(found) });
       const chapter = ep.kind === 'podcast' ? { turns: (out.turns ?? []).filter((t) => String(t.text ?? '').trim()).map((t) => ({ speaker: t.speaker === 'B' ? 'B' : 'A', text: String(t.text).trim() })) } : { spoken: String(out.spoken ?? '').trim() };
@@ -891,6 +901,7 @@ export function createEpisodes({
       let script = loadScript(ep.id);
       if (!script) {
         update(ep, { status: 'schreibt', writing_at: now().toISOString() });
+        step(ep, `Claude schreibt ${ep.kind === 'podcast' ? 'das Gespräch' : 'den Report'} aus ${docs.length} ${docs.length === 1 ? 'Text' : 'Texten'}`);
         const options = { style: ep.style, topics: ep.topics, focus: ep.focus, language: ep.language };
         script = await writer.write({ ...(ep.kind === 'podcast' ? podcastJob(docs, ep.minutes, options) : reportJob(docs, ep.minutes, options)), input: sourceInput(docs) });
         saveScript(ep.id, script);
@@ -913,8 +924,10 @@ export function createEpisodes({
         update(ep, { title, chars: parts.join('').length });
       }
     }
+    if (ep.kind !== 'vorlesen') step(ep, ep.note ? `Transkript im Vault: ${ep.note.split('/').pop().replace(/\.md$/i, '')}` : 'Skript fertig (Transkript nicht im Vault)');
     if (ep.kind !== 'vorlesen' && !speaks) {
       // Skript (bei einem Thema auch die Recherche) bleibt für `speak`; gehört ist noch nichts.
+      step(ep, 'Fertig: nur Transkript, Audio auf Knopfdruck');
       update(ep, { status: 'transkript', transcript_at: now().toISOString() });
       logger.info?.(`Folge „${ep.title}“ (${KINDS[ep.kind]}): Transkript fertig, Audio auf Knopfdruck`);
       return;
@@ -927,6 +940,7 @@ export function createEpisodes({
     if (from) truncateSync(part, ep.part_bytes);
     else writeFileSync(part, Buffer.alloc(0), { mode: 0o600 });
     const at = now().toISOString();
+    step(ep, `${ep.kind === 'vorlesen' ? 'ElevenLabs liest vor' : 'ElevenLabs spricht'}: ${jobs.length} ${jobs.length === 1 ? 'Abschnitt' : 'Abschnitte'}${from ? `, weiter ab ${from + 1}` : ''}`);
     update(ep, { status: 'spricht', done: from, total: jobs.length, part_bytes: from ? ep.part_bytes : 0, paid: from ? (ep.paid ?? 0) : 0, speaking_at: at, speaking_from: from });
     // Satzweise mehrere zugleich (Vorlesen); Gespräch und Report nacheinander, die Stücke sind groß.
     await inOrder(jobs.slice(from), ep.kind === 'vorlesen' ? PARALLEL : 1, ({ audio, paid }, i) => {
@@ -937,6 +951,7 @@ export function createEpisodes({
     });
     renameSync(part, audioPath(ep.id));
     for (const f of [scriptPath(ep.id), researchPath(ep.id)]) rmSync(f, { force: true });
+    step(ep, 'Fertig');
     update(ep, { ...(ep.kind === 'vorlesen' ? { chars: ep.paid } : {}), status: 'fertig', frames: true, bytes: statSync(audioPath(ep.id)).size, finished_at: now().toISOString() });
     logger.info?.(`Folge „${ep.title}“ (${KINDS[ep.kind]}) fertig, ${ep.chars} Zeichen`);
     // Die Folge bleibt fertig, auch wenn der Vermerk scheitert. Eine Themen-Folge hat keine Texte.
@@ -957,6 +972,7 @@ export function createEpisodes({
     } catch (err) {
       // `.part` und Skript bleiben für `retry`.
       logger.warn?.(`Folge „${ep.title}“: ${err.message}`);
+      step(ep, `Abgebrochen: ${err.message}`);
       update(ep, { status: 'fehler', error: err.message });
     } finally {
       running = null;

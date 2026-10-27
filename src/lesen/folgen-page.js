@@ -8,6 +8,7 @@ import { EpisodeError, KINDS, LENGTHS, MAX_DOCS, BYTES_PER_SECOND, STYLES, DEFAU
 import { jsonReply } from './json.js';
 import { IngestError } from './ingest.js';
 import { EPISODE_LANGUAGES, DEFAULT_EPISODE_LANGUAGE } from './languages.js';
+import { worklogHtml, worklogJson } from './worklog.js';
 
 /**
  * Seiten der Folgen (src/lesen/folgen.js), ohne JavaScript bedienbar:
@@ -490,6 +491,8 @@ export function episodeJson(ep, { resumable = false, at = Date.now(), ingest = n
     resumable: failed && resumable,
     retry: failed ? retryOf(resumable, ep) : null,
     progress: busy ? progressOf(ep, at) : null,
+    /** Grob, was im Hintergrund passiert (`[{ at, text }]`), solange sie entsteht oder fehlgeschlagen ist. */
+    worklog: busy || failed ? worklogJson(ep.log) : [],
   };
 }
 
@@ -562,6 +565,7 @@ export function episodeCard(ep, { ctx, resumable = false, at = Date.now(), inges
       ${remove()}
     </div>
     <p class="meta">${esc(again.hint)}</p>
+    ${worklogHtml(ep.log, { tz: ctx.tz })}
   </li>`;
   }
 
@@ -572,6 +576,7 @@ export function episodeCard(ep, { ctx, resumable = false, at = Date.now(), inges
     <div class="folge-card"><span class="folge-spinner" aria-hidden="true"></span>${head([ep.minutes ? `${ep.minutes} Min.` : null, created])}</div>
     <ol class="folge-steps">${steps}</ol>
     <div class="folge-progress">${bar}<span class="meta" data-label>${esc(p.label)}</span></div>
+    ${worklogHtml(ep.log, { tz: ctx.tz, live: true })}
     <noscript><p class="meta"><a href="/lesen/folgen">Stand aktualisieren</a></p></noscript>
   </li>`;
 }

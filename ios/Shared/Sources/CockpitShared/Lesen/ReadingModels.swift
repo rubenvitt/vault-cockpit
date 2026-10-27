@@ -821,6 +821,17 @@ public struct EpisodeProgress: Decodable, Equatable, Sendable {
     public let label: String
 }
 
+/// Eine Zeile im Worklog (`worklogJson` in src/lesen/worklog.js): grob, was Claude im Hintergrund tut.
+public struct WorklogEntry: Decodable, Equatable, Sendable {
+    public let at: String
+    public let text: String
+
+    /// Uhrzeit `HH:MM` in `timeZone`, nil ohne lesbare Zeit.
+    public func time(timeZone: TimeZone = .current) -> String? {
+        CockpitFormat.date(from: at).map { CockpitFormat.time($0, timeZone: timeZone) }
+    }
+}
+
 /// „Fortsetzen“ oder „Erneut versuchen“ mit Erklärung.
 public struct EpisodeRetry: Decodable, Equatable, Sendable {
     public let label: String
@@ -928,6 +939,8 @@ public struct Episode: Decodable, Equatable, Identifiable, Sendable {
     public let resumable: Bool
     public let retry: EpisodeRetry?
     public let progress: EpisodeProgress?
+    /// Was im Hintergrund passiert, solange sie entsteht oder fehlgeschlagen ist (leer bei älteren Servern).
+    public let worklog: [WorklogEntry]
     /// Hörstand einer fertigen Folge: `neu`, `angefangen` oder `gehoert`; nil, solange sie entsteht
     /// (und bei älteren Servern).
     public var listen: String?
@@ -970,7 +983,7 @@ public struct Episode: Decodable, Equatable, Identifiable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, kindLabel, title, minutes, status, busy, docs, chars, createdAt, updatedAt, finishedAt, seconds, bytes, note, audio, language, style, styleLabel, topics, focus, wishes, speak, ingest, error, resumable, retry, progress, listen, heardAt, position
+        case id, kind, kindLabel, title, minutes, status, busy, docs, chars, createdAt, updatedAt, finishedAt, seconds, bytes, note, audio, language, style, styleLabel, topics, focus, wishes, speak, ingest, error, resumable, retry, progress, worklog, listen, heardAt, position
     }
 
     public init(from decoder: Decoder) throws {
@@ -1003,6 +1016,7 @@ public struct Episode: Decodable, Equatable, Identifiable, Sendable {
         resumable = try c.decodeIfPresent(Bool.self, forKey: .resumable) ?? false
         retry = try c.decodeIfPresent(EpisodeRetry.self, forKey: .retry)
         progress = try c.decodeIfPresent(EpisodeProgress.self, forKey: .progress)
+        worklog = try c.decodeIfPresent([WorklogEntry].self, forKey: .worklog) ?? []
         listen = try c.decodeIfPresent(String.self, forKey: .listen)
         heardAt = try c.decodeIfPresent(String.self, forKey: .heardAt)
         position = try c.decodeIfPresent(Int.self, forKey: .position)

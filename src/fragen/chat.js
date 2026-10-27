@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { SCHEMA, normalizeBlocks, normalizeWeb, blocksText } from './ui.js';
 import { localDate } from '../cockpit/week.js';
+import { logStep, logTool } from '../lesen/worklog.js';
 
 /**
  * „Fragen“: Gespräche mit Claude über den ganzen Vault, mit Antworten als
@@ -22,6 +23,9 @@ import { localDate } from '../cockpit/week.js';
  * Nachfragen: Jede Frage bekommt die letzten Fragen und Antworten (als
  * Markdown) mit. Ein Gespräch liegt als `<id>.json` unter `dir`; es läuft
  * immer nur eine Frage zugleich, die übrigen warten.
+ *
+ * Worklog: Jede Antwort führt in `log` grob mit, was Claude tut (Suchen,
+ * Lesen, Internet; src/lesen/worklog.js), live und danach zum Nachsehen.
  */
 
 export class ChatError extends Error {
@@ -135,7 +139,8 @@ export function createVaultChat({ dir, writer, research, inbox = null, task = nu
   async function answer(t, n) {
     const turn = t.turns[n];
     const question = t.turns[n - 1];
-    Object.assign(turn, { status: 'denkt', started_at: stamp() });
+    Object.assign(turn, { status: 'denkt', started_at: stamp(), log: [] });
+    logStep(turn.log, `Claude bekommt die Frage${n > 1 ? ' mit dem bisherigen Gespräch' : ''}${question.web ? ', Vault und Internet' : ', nur Vault'}`, now());
     save(t);
     const session = await research.open({ inbox });
     running.session = session;
@@ -149,7 +154,7 @@ export function createVaultChat({ dir, writer, research, inbox = null, task = nu
           ? 'Ergänze mit WebSearch und WebFetch, wo der Vault nicht reicht, und nenn die Seiten unter `web`. Suchanfragen ans Internet enthalten nie persönliche Details aus dem Vault (Namen, Gesundheit, Finanzen, Arbeitgeber, Beziehungen). Was aus dem Internet kommt, kennzeichnest du.'
           : 'Kein Internet, nur sein Vault.',
       ].join('\n');
-      raw = await writer.write({ system: SYSTEM, prompt, input, schema: SCHEMA, tools: question.web ? WEB_TOOLS : [], mcp: session.mcp, timeoutMs: TIMEOUT_MS });
+      raw = await writer.write({ system: SYSTEM, prompt, input, schema: SCHEMA, tools: question.web ? WEB_TOOLS : [], mcp: session.mcp, timeoutMs: TIMEOUT_MS, onTool: (name, args) => logTool(turn.log, name, args, now()) });
     } finally {
       Object.assign(turn, { read: session.read(), created: session.created() });
       running.session = null;
@@ -157,6 +162,8 @@ export function createVaultChat({ dir, writer, research, inbox = null, task = nu
     }
     const blocks = normalizeBlocks(raw?.blocks);
     if (!blocks.length) throw new ChatError('Claude hat keine Antwort geliefert');
+    const read = turn.read?.length ?? 0;
+    logStep(turn.log, `Antwort fertig: ${blocks.length} ${blocks.length === 1 ? 'Baustein' : 'Bausteine'}${read ? `, ${read} ${read === 1 ? 'Notiz' : 'Notizen'} gelesen` : ''}`, now());
     Object.assign(turn, {
       status: 'fertig',
       blocks,
@@ -180,6 +187,7 @@ export function createVaultChat({ dir, writer, research, inbox = null, task = nu
     } catch (err) {
       logger.warn?.(`Fragen „${t.title}“: ${err.message}`);
       Object.assign(t.turns[n], { status: 'fehler', error: err.message });
+      logStep(t.turns[n].log, `Abgebrochen: ${err.message}`, now());
       save(t);
     } finally {
       running = null;

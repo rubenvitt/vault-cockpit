@@ -323,3 +323,37 @@ test('Fragen: Während Claude antwortet, Fortschritt mit gelesenen Notizen', () 
     await r.done;
     assert.equal(JSON.parse((await routes.pages['/fragen/stand'](c(`/fragen/stand?id=${r.thread.id}`))).body).busy, false);
   }));
+
+test('Fragen: Worklog zeigt grob, was Claude tut, live und danach eingeklappt', () =>
+  withDir(async (dir) => {
+    let release;
+    const gate = new Promise((res) => (release = res));
+    const writer = {
+      available: () => true,
+      write: async ({ onTool }) => {
+        onTool('mcp__vault__vault_search', { query: 'Schlaf' });
+        onTool('mcp__vault__vault_read', { path: 'projekte/Hund.md' });
+        onTool('mcp__vault__vault_read', { path: 'daily/2026-10-20.md' });
+        await gate;
+        onTool('StructuredOutput', {});
+        return { title: 'T', blocks: [{ type: 'text', markdown: 'Fertig' }] };
+      },
+    };
+    const research = { open: async () => ({ mcp: {}, read: () => ['projekte/Hund.md'], created: () => [], close: async () => {} }) };
+    const chat = createVaultChat({ dir, writer, research, logger: quiet });
+    const routes = readingRoutes({ store: createReadingStore({ path: ':memory:' }), fragen: { chat, index: { resolveLink: () => null }, visible }, logger: quiet });
+    const c = (path) => ({ url: new URL(`https://vault.test${path}`), user: 'ruben', tz: 'Europe/Berlin', write: { csrf: 'c', back: path }, flash: null });
+    const r = chat.ask({ question: 'Schlaf?' });
+    await new Promise((res) => setTimeout(res, 10));
+    const stand = JSON.parse((await routes.pages['/fragen/stand'](c(`/fragen/stand?id=${r.thread.id}`))).body);
+    assert.match(stand.html, /<span data-label>Liest „Hund“ und „2026-10-20“ · 1 Notiz gelesen<\/span>/, 'Statuszeile nennt, was Claude gerade tut');
+    assert.match(stand.html, /<details class="worklog" data-worklog><summary>Worklog <span class="meta">· 3 Schritte<\/span>/);
+    assert.match(stand.html, /Claude bekommt die Frage, nur Vault[\s\S]*Sucht im Vault nach „Schlaf“[\s\S]*<li aria-current="step">/);
+    release();
+    await r.done;
+    const page = (await routes.pages['/fragen'](c(`/fragen?id=${r.thread.id}`))).html;
+    assert.match(page, /<details class="worklog" data-worklog>[\s\S]*Schreibt das Ergebnis zusammen[\s\S]*Antwort fertig: 1 Baustein, 1 Notiz gelesen/);
+    assert.doesNotMatch(page, /<details class="worklog" data-worklog open/, 'eingeklappt');
+    const api = JSON.parse((await routes.pages['/api/fragen'](c(`/api/fragen?id=${r.thread.id}`))).body);
+    assert.deepEqual(api.thread.turns[1].worklog.map((w) => w.text), ['Claude bekommt die Frage, nur Vault', 'Sucht im Vault nach „Schlaf“', 'Liest „Hund“ und „2026-10-20“', 'Schreibt das Ergebnis zusammen', 'Antwort fertig: 1 Baustein, 1 Notiz gelesen']);
+  }));

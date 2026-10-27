@@ -221,6 +221,9 @@ final class ReadingModelTests: XCTestCase {
         XCTAssertEqual(speaking.progress?.restMinutes, 5)
         XCTAssertNil(speaking.minutes)
         XCTAssertNil(model.items[1].progress?.percent)
+        XCTAssertEqual(model.items[1].worklog.map(\.text), ["Claude schreibt das Gespräch aus 2 Texten", "Schreibt das Ergebnis zusammen"])
+        XCTAssertEqual(model.items[1].worklog.first?.time(timeZone: TimeZone(identifier: "Europe/Berlin")!), "18:10")
+        XCTAssertEqual(speaking.worklog, [])
         let failed = model.items[3]
         XCTAssertTrue(failed.isFailed)
         XCTAssertTrue(failed.resumable)

@@ -7,6 +7,7 @@ import { readingPage } from '../lesen/pages.js';
 import { jsonReply } from '../lesen/json.js';
 import { ChatError } from './chat.js';
 import { renderBlocks } from './ui.js';
+import { worklogHtml, worklogJson } from '../lesen/worklog.js';
 
 /**
  * Seiten von „Fragen“ (src/fragen/chat.js), im Bereich Lesen neben „Wissen“,
@@ -16,7 +17,7 @@ import { renderBlocks } from './ui.js';
  *   Gespräch mit Antworten als Bausteinen (src/fragen/ui.js), Nachfragen,
  *   Vorschlägen zum Übernehmen und „Als Notiz speichern“, „Als Folge vertonen“.
  * - `/fragen/stand?id=…`: Stand der laufenden Antwort als JSON (gelesene
- *   Notizen), damit die Seite ohne Neuladen weiß, wann sie fertig ist.
+ *   Notizen, Worklog), damit die Seite ohne Neuladen weiß, wann sie fertig ist.
  * - `/api/fragen` und `/api/fragen?id=…`: dasselbe als JSON für die App.
  *
  * `visible(path)`: Indexzeile einer Notiz, die das Cockpit zeigen darf, sonst null.
@@ -60,11 +61,13 @@ export function answerHtml(t, n, ctx, { visible, links, progress = null }) {
   const id = `antwort-${n}`;
   if (BUSY.includes(turn.status)) {
     const read = progress?.turn === n ? progress.read : 0;
-    const label = turn.status === 'wartet' ? 'Wartet, bis die Frage davor beantwortet ist' : `Claude sucht im Vault${question?.web ? ' und im Internet' : ''}${read ? ` · ${read} ${read === 1 ? 'Notiz' : 'Notizen'} gelesen` : ''}`;
-    return `<article class="fragen-antwort is-busy" id="${id}" data-busy="${esc(t.id)}"><p class="fragen-denkt"><span class="folge-spinner" aria-hidden="true"></span><span data-label>${esc(label)}</span></p><noscript><p class="meta"><a href="/fragen?id=${esc(t.id)}#${id}">Stand aktualisieren</a></p></noscript></article>`;
+    // Was Claude gerade tut (letzte Zeile im Worklog), dazu wie viel es schon gelesen hat.
+    const doing = turn.status === 'denkt' && turn.log?.length > 1 ? turn.log.at(-1).text : `Claude sucht im Vault${question?.web ? ' und im Internet' : ''}`;
+    const label = turn.status === 'wartet' ? 'Wartet, bis die Frage davor beantwortet ist' : `${doing}${read ? ` · ${read} ${read === 1 ? 'Notiz' : 'Notizen'} gelesen` : ''}`;
+    return `<article class="fragen-antwort is-busy" id="${id}" data-busy="${esc(t.id)}"><p class="fragen-denkt"><span class="folge-spinner" aria-hidden="true"></span><span data-label>${esc(label)}</span></p>${worklogHtml(turn.log, { tz: ctx.tz, live: true })}<noscript><p class="meta"><a href="/fragen?id=${esc(t.id)}#${id}">Stand aktualisieren</a></p></noscript></article>`;
   }
   if (turn.status === 'fehler') {
-    return `<article class="fragen-antwort is-failed" id="${id}"><p class="problem">${esc(turn.error ?? 'Unbekannter Fehler')}</p><form method="post" action="/aktion/fragen/wiederholen" class="inline">${hidden({ csrf: ctx.write.csrf, back: ctx.write.back, id: t.id, turn: n })}<button type="submit" class="btn primary">Erneut fragen</button></form></article>`;
+    return `<article class="fragen-antwort is-failed" id="${id}"><p class="problem">${esc(turn.error ?? 'Unbekannter Fehler')}</p>${worklogHtml(turn.log, { tz: ctx.tz })}<form method="post" action="/aktion/fragen/wiederholen" class="inline">${hidden({ csrf: ctx.write.csrf, back: ctx.write.back, id: t.id, turn: n })}<button type="submit" class="btn primary">Erneut fragen</button></form></article>`;
   }
   const blocks = renderBlocks(turn.blocks, { links, visible, write: ctx.write, thread: t.id, turn: n, tasks: turn.tasks ?? {} });
   const created = (turn.created ?? []).length
@@ -81,7 +84,7 @@ export function answerHtml(t, n, ctx, { visible, links, progress = null }) {
   const save = turn.saved
     ? `<a href="${esc(noteHref(turn.saved))}" class="btn quiet">Gespeichert</a>`
     : `<form method="post" action="/aktion/fragen/notiz" class="inline">${hidden({ csrf: ctx.write.csrf, back: ctx.write.back, id: t.id, turn: n })}<button type="submit" class="btn quiet">Als Notiz speichern</button></form>`;
-  return `<article class="fragen-antwort" id="${id}">${blocks}${created}${sources}<div class="fragen-aktionen">${save}<a href="${esc(episode)}" class="btn quiet">Als Folge vertonen</a></div>${follow}</article>`;
+  return `<article class="fragen-antwort" id="${id}">${blocks}${created}${sources}${worklogHtml(turn.log, { tz: ctx.tz })}<div class="fragen-aktionen">${save}<a href="${esc(episode)}" class="btn quiet">Als Folge vertonen</a></div>${follow}</article>`;
 }
 
 function threadPage(chat, t, ctx, deps) {
@@ -117,6 +120,8 @@ function threadJson(t, chat, visible) {
             created: x.created ?? [],
             saved: x.saved ?? null,
             progress: progress?.turn === n ? progress.read : null,
+            /** Grob, was Claude getan hat bzw. gerade tut: `[{ at, text }]`. */
+            worklog: worklogJson(x.log),
           },
     ),
   };

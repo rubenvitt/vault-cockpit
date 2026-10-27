@@ -15,7 +15,8 @@
 // höchstens `MAX_TOPICS` Themen wählen; auf `/lesen/folgen/thema` wie `topicSummary`.
 //
 // Solange eine Folge entsteht, holt die Seite alle paar Sekunden
-// `/lesen/folgen/stand` und tauscht die Karten der entstehenden Folgen aus.
+// `/lesen/folgen/stand` und tauscht die Karten der entstehenden Folgen aus
+// (ein aufgeklappter Worklog bleibt dabei offen).
 //
 // Der Player meldet die Stelle dem Server (`data-csrf` der Karte); kurz vor
 // Schluss gilt die Folge dort als gehört und rückt beim nächsten Laden nach
@@ -225,6 +226,8 @@
       const tpl = document.createElement('template');
       tpl.innerHTML = item.html.trim();
       const next = tpl.content.firstElementChild;
+      // Ein aufgeklappter Worklog bleibt offen.
+      if (li.querySelector('[data-worklog]')?.open) next.querySelector('[data-worklog]')?.setAttribute('open', '');
       li.replaceWith(next);
       bind(next);
       if (item.status === 'fertig') toast(`Fertig: ${next.dataset.title}`);

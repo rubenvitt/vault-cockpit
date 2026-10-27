@@ -727,15 +727,30 @@ test('Claude-Writer: ohne Werkzeuge, mit Abo-Token statt API-Key, Ergebnis aus s
     assert.equal(seen.input, 'Texte');
     const a = seen.args;
     assert.deepEqual(a.slice(0, 2), ['-p', 'P']);
-    for (const [flag, value] of [['--output-format', 'json'], ['--json-schema', '{"type":"object"}'], ['--system-prompt', 'S'], ['--tools', ''], ['--permission-mode', 'dontAsk'], ['--model', 'sonnet']]) {
+    for (const [flag, value] of [['--output-format', 'stream-json'], ['--json-schema', '{"type":"object"}'], ['--system-prompt', 'S'], ['--tools', ''], ['--permission-mode', 'dontAsk'], ['--model', 'sonnet']]) {
       assert.equal(a[a.indexOf(flag) + 1], value, flag);
     }
-    for (const flag of ['--safe-mode', '--strict-mcp-config', '--no-session-persistence']) assert.ok(a.includes(flag), flag);
+    for (const flag of ['--verbose', '--safe-mode', '--strict-mcp-config', '--no-session-persistence']) assert.ok(a.includes(flag), flag);
     assert.equal(seen.opts.env.CLAUDE_CODE_OAUTH_TOKEN, 'oat-abo');
     assert.equal(seen.opts.env.ANTHROPIC_API_KEY, undefined, 'API-Key geht nicht mit, sonst rechnet die CLI darüber ab');
   } finally {
     delete process.env.ANTHROPIC_API_KEY;
   }
+});
+
+test('Claude-Writer: meldet Werkzeugaufrufe aus dem Stream fürs Worklog, Ergebnis aus der letzten Zeile', async () => {
+  const lines = [
+    { type: 'system', subtype: 'init' },
+    { type: 'assistant', message: { content: [{ type: 'text', text: 'Ich suche.' }, { type: 'tool_use', name: 'mcp__vault__vault_search', input: { query: 'Schlaf' } }] } },
+    { type: 'user', message: { content: [{ type: 'tool_result', content: 'x'.repeat(5000) }] } },
+    { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'WebSearch', input: { query: 'Schlafhygiene' } }] } },
+    { type: 'result', subtype: 'success', is_error: false, structured_output: { ok: true } },
+  ];
+  const { run } = fakeClaude(lines.map((l) => JSON.stringify(l)).join('\n'));
+  const seen = [];
+  const out = await createClaudeWriter({ token: 't', run, logger: quiet }).write({ system: '', prompt: '', input: '', schema: {}, tools: ['WebSearch'], onTool: (name, input) => seen.push([name, input.query]) });
+  assert.deepEqual(out, { ok: true });
+  assert.deepEqual(seen, [['mcp__vault__vault_search', 'Schlaf'], ['WebSearch', 'Schlafhygiene']]);
 });
 
 test('Claude-Writer: Fehler als Meldung', async () => {
@@ -850,4 +865,15 @@ test('Folgen: alte fertige Folgen gelten beim Laden als gehört', () =>
     assert.equal(episodes.get('alt').heard_at, '2026-10-01T10:00:00.000Z');
     assert.equal('heard_at' in episodes.get('tx'), false, 'nur fertige');
     assert.match(readFileSync(join(dir, 'folgen.json'), 'utf8'), /"heard_at": "2026-10-01T10:00:00.000Z"/);
+  }));
+
+test('Folgen: Worklog nennt die groben Schritte', () =>
+  withDir(async (dir) => {
+    const { a, episodes } = setup(dir);
+    const ep = episodes.create({ kind: 'podcast', docIds: [a.id], minutes: 5, audio: false });
+    await ep.done;
+    const texts = (episodes.get(ep.id).log ?? []).map((e) => e.text);
+    assert.equal(texts[0], 'Claude schreibt das Gespräch aus 1 Text');
+    assert.match(texts[1], /^Transkript im Vault: /);
+    assert.equal(texts.at(-1), 'Fertig: nur Transkript, Audio auf Knopfdruck');
   }));

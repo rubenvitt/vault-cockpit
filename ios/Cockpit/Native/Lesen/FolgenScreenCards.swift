@@ -219,14 +219,15 @@ struct FolgenFailedCard: View {
                     .foregroundStyle(Theme.text3)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            WorklogDisclosure(entries: episode.worklog)
         }
         .cardStyle()
         .accessibilityElement(children: .contain)
     }
 }
 
-/// Entstehende Folge (`.folge.is-busy`): Schritte, Balken (unbestimmt, solange Claude schreibt)
-/// und der Satz dazu mit der geschätzten Restzeit.
+/// Entstehende Folge (`.folge.is-busy`): Schritte, Balken (unbestimmt, solange Claude schreibt),
+/// der Satz dazu mit der geschätzten Restzeit und darunter der Worklog zum Aufklappen.
 struct FolgenBusyCard: View {
     let episode: Episode
 
@@ -259,6 +260,7 @@ struct FolgenBusyCard: View {
                 .accessibilityLabel(progress.label)
                 .accessibilityValue(progress.percent.map { "\($0) Prozent" } ?? "")
             }
+            WorklogDisclosure(entries: episode.worklog, live: true)
         }
         .cardStyle()
         .accessibilityElement(children: .contain)

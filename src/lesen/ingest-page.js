@@ -5,6 +5,7 @@ import { renderMarkdown, inlineMd, parseMarkdown, parseInline } from '../web/mar
 import { readingPage } from './pages.js';
 import { ReadingError } from './store.js';
 import { jsonReply } from './json.js';
+import { worklogHtml, worklogJson } from './worklog.js';
 
 /**
  * Oberfläche des Ingests (Dienst: src/lesen/ingest.js, `createIngest`): aus
@@ -47,6 +48,8 @@ const DOC_STATUS = '/aktion/lesen/doc/status';
 const BUSY = ['wartet', 'entwirft'];
 const ACTIVE = [...BUSY, 'bereit', 'fehler'];
 const PLANT_BUSY = ['wartet', 'laeuft'];
+/** Worklog, der sich mit `/lesen/ingest/stand` erneuert (`data-ingest-worklog`). */
+const liveLog = (id, log, tz) => `<div data-ingest-worklog="${esc(id)}">${worklogHtml(log, { tz, live: true })}</div>`;
 // So lange steht ein fertiges Einpflanzen noch in der Übersicht.
 const PLANT_RECENT_MS = 3 * 24 * 3_600_000;
 const SUMMARY_MAX = 80;
@@ -239,19 +242,21 @@ function plantBlock(e, ctx, planter) {
   const back = ingestLink(id);
   const p = plantOf(e);
   const can = Boolean(planter.available?.()?.ok);
+  const log = planter.worklog?.(id) ?? p?.log ?? null;
   if (!p) {
     return `<section class="ingest-state ingest-plant"><p><b>Einpflanzen</b><span class="meta"> Ein Agent arbeitet die Quelle in die Seiten ein, an die sie andockt, und hält Widersprüche als Spannung fest.</span></p>${can ? plantForm(ctx, id, back, 'Jetzt einpflanzen') : ''}</section>`;
   }
   if (PLANT_BUSY.includes(p.status)) {
     return `<section class="ingest-state ingest-plant" data-ingest-watch="${esc(id)}" data-ingest-plant data-ingest-status="${esc(p.status)}" data-ingest-reload>
       <div class="ingest-state-row"><span class="folge-spinner" aria-hidden="true"></span><p><b>Einpflanzen</b><span class="meta">${esc(plantLabel(p))}. Die Seite aktualisiert sich, sobald es fertig ist.</span></p></div>
+      ${liveLog(id, log, ctx.tz)}
       <noscript><p class="meta"><a href="${esc(back)}">Stand aktualisieren</a></p></noscript>
     </section>`;
   }
   if (p.status === 'fehler') {
-    return `<section class="ingest-state ingest-plant"><p class="problem">${esc(plantLabel(p))}</p>${plantDetails(p)}${can ? plantForm(ctx, id, back, 'Erneut einpflanzen') : ''}</section>`;
+    return `<section class="ingest-state ingest-plant"><p class="problem">${esc(plantLabel(p))}</p>${plantDetails(p)}${worklogHtml(log, { tz: ctx.tz })}${can ? plantForm(ctx, id, back, 'Erneut einpflanzen') : ''}</section>`;
   }
-  return `<section class="ingest-state ingest-plant"><p><b>${esc(plantLabel(p))}</b>${p.finished_at ? `<span class="meta"> · ${esc(when(p.finished_at, ctx.tz) ?? '')}</span>` : ''}</p>${plantDetails(p)}${can ? plantForm(ctx, id, back, 'Noch einmal einpflanzen', 'btn quiet') : ''}</section>`;
+  return `<section class="ingest-state ingest-plant"><p><b>${esc(plantLabel(p))}</b>${p.finished_at ? `<span class="meta"> · ${esc(when(p.finished_at, ctx.tz) ?? '')}</span>` : ''}</p>${plantDetails(p)}${worklogHtml(log, { tz: ctx.tz })}${can ? plantForm(ctx, id, back, 'Noch einmal einpflanzen', 'btn quiet') : ''}</section>`;
 }
 
 function plantRow(e, ctx, planter) {
@@ -265,6 +270,7 @@ function plantRow(e, ctx, planter) {
     <span class="ingest-row-text"><a href="${esc(ingestLink(e.doc_id))}" class="lesen-title">${esc(titleOf(e))}</a><span class="meta">${esc(plantLabel(p))}</span>${
       p.status === 'fertig' && pages.length ? `<span class="meta">${pages.map((c) => esc(readable(slugOf(c.path)))).join(' · ')}</span>` : ''
     }</span>
+    ${busy ? liveLog(e.doc_id, planter?.worklog?.(e.doc_id), ctx.tz) : ''}
     ${retry}
   </li>`;
 }
@@ -301,10 +307,11 @@ function readyCard(e, ctx) {
   </li>`;
 }
 
-function busyRow(e, at) {
+function busyRow(e, at, log = null, tz = null) {
   return `<li class="ingest-row is-busy" data-ingest-doc="${esc(e.doc_id)}" data-ingest-watch="${esc(e.doc_id)}" data-ingest-status="${esc(e.status)}">
     <span class="folge-spinner" aria-hidden="true"></span>
     <span class="ingest-row-text"><a href="${esc(docLink(e.doc_id))}" class="lesen-title">${esc(docTitle(e))}</a><span class="meta">${esc(busyLabel(e, at))}</span></span>
+    ${liveLog(e.doc_id, log, tz)}
   </li>`;
 }
 
@@ -348,7 +355,7 @@ function overview({ store, ingest, planter }, ctx) {
     `<section class="ingest-ready" aria-labelledby="ingest-bereit"><h2 id="ingest-bereit">Bereit zum Abhaken <span class="hint">${ready.length}</span></h2>${
       ready.length ? `<ul class="ingest-cards">${ready.map((e) => readyCard(e, ctx)).join('')}</ul>` : '<p class="empty">Gerade keiner. Was in Arbeit ist, erscheint hier, sobald Claude fertig ist.</p>'
     }</section>`,
-    busy.length ? `<section class="ingest-busy" aria-labelledby="ingest-arbeit"><h2 id="ingest-arbeit">In Arbeit <span class="hint">${busy.length}</span></h2><ul class="ingest-rows">${busy.map((e) => busyRow(e, at)).join('')}</ul><noscript><p class="meta"><a href="${INGEST}">Stand aktualisieren</a></p></noscript></section>` : '',
+    busy.length ? `<section class="ingest-busy" aria-labelledby="ingest-arbeit"><h2 id="ingest-arbeit">In Arbeit <span class="hint">${busy.length}</span></h2><ul class="ingest-rows">${busy.map((e) => busyRow(e, at, ingest.worklog?.(e.doc_id), ctx.tz)).join('')}</ul><noscript><p class="meta"><a href="${INGEST}">Stand aktualisieren</a></p></noscript></section>` : '',
     planting.length ? `<section class="ingest-planting" aria-labelledby="ingest-einpflanzen"><h2 id="ingest-einpflanzen">Einpflanzen <span class="hint">${planting.length}</span></h2><ul class="ingest-rows">${planting.map((e) => plantRow(e, ctx, planter)).join('')}</ul></section>` : '',
     failed.length ? `<section class="ingest-failed" id="fehler" aria-labelledby="ingest-fehler"><h2 id="ingest-fehler">Fehler <span class="hint">${failed.length}</span></h2><ul class="ingest-rows">${failed.map((e) => failedRow(e, ctx, av.ok)).join('')}</ul></section>` : '',
   ];
@@ -658,7 +665,7 @@ function reviewForm(e, ctx, nav) {
 }
 
 /** Prüfansicht, wenn (noch) kein bereiter Entwurf da ist. */
-function reviewState(e, doc, ctx, available, planter = null) {
+function reviewState(e, doc, ctx, available, planter = null, log = null) {
   const id = e?.doc_id ?? doc.id;
   const back = ingestLink(id);
   const draftForm = (label, force = false, cls = 'btn primary') =>
@@ -666,11 +673,12 @@ function reviewState(e, doc, ctx, available, planter = null) {
   if (e && BUSY.includes(e.status)) {
     return `<section class="ingest-state" data-ingest-watch="${esc(id)}" data-ingest-status="${esc(e.status)}" data-ingest-reload>
       <div class="ingest-state-row"><span class="folge-spinner" aria-hidden="true"></span><p><b>${e.status === 'wartet' ? 'Wartet auf Claude' : 'Claude entwirft'}</b><span class="meta">${esc(busyLabel(e))}. Die Seite aktualisiert sich, sobald der Entwurf da ist.</span></p></div>
+      ${liveLog(id, log, ctx.tz)}
       <noscript><p class="meta"><a href="${esc(back)}">Stand aktualisieren</a></p></noscript>
     </section>`;
   }
   if (e?.status === 'fehler') {
-    return `<section class="ingest-state"><p class="problem">${esc(e.error || 'Der Entwurf ist fehlgeschlagen.')}</p><div class="ingest-row-actions">${draftForm('Erneut entwerfen', true)}<form method="post" action="${VERWERFEN}" class="act">${hidden({ csrf: ctx.write.csrf, back: INGEST, id })}<button type="submit" class="btn quiet">Verwerfen</button></form></div></section>`;
+    return `<section class="ingest-state"><p class="problem">${esc(e.error || 'Der Entwurf ist fehlgeschlagen.')}</p>${worklogHtml(log, { tz: ctx.tz })}<div class="ingest-row-actions">${draftForm('Erneut entwerfen', true)}<form method="post" action="${VERWERFEN}" class="act">${hidden({ csrf: ctx.write.csrf, back: INGEST, id })}<button type="submit" class="btn quiet">Verwerfen</button></form></div></section>`;
   }
   if (e?.status === 'uebernommen') {
     const src = e.applied?.source;
@@ -695,6 +703,7 @@ function plantJson(e) {
     changed: list(p.changed).filter((c) => wikiPath(c?.path)).map((c) => ({ path: c.path, title: readable(slugOf(c.path)), was: c.was ?? null })),
     open: list(p.open),
     error: p.status === 'fehler' ? (p.error ?? null) : null,
+    worklog: worklogJson(p.log),
     requestedAt: p.requested_at ?? null,
     finishedAt: p.finished_at ?? null,
   };
@@ -726,6 +735,8 @@ export function ingestJson(e) {
     tallyLabel: tallyLabel(t),
     offerLabel: offerLabel(t),
     plant: plantJson(e),
+    /** Grob, was Claude beim Entwerfen getan hat (`[{ at, text }]`). */
+    worklog: worklogJson(e.draft?.log),
   };
 }
 
@@ -921,7 +932,8 @@ export function ingestRoutes({ store, ingest = null, planter = null, logger = co
         if (!e && !doc) return { status: 404, html: readingPage(ctx, { key: 'ingest', title: 'Nicht gefunden', body: '<section><p class="empty">Diesen Text gibt es nicht (mehr).</p></section>' }) };
         const av = ingest.available() ?? { ok: false };
         const nav = e?.status === 'bereit' ? neighbours(ingest, id) : null;
-        const body = e?.status === 'bereit' && e.draft ? reviewForm(e, ctx, nav) : `${av.ok ? '' : unavailable(av)}${reviewState(e, { ...doc, id }, ctx, av.ok, planter)}`;
+        const log = ingest.worklog?.(id) ?? null;
+        const body = e?.status === 'bereit' && e.draft ? `${reviewForm(e, ctx, nav)}${worklogHtml(log, { tz: ctx.tz })}` : `${av.ok ? '' : unavailable(av)}${reviewState(e, { ...doc, id }, ctx, av.ok, planter, log)}`;
         return {
           html: readingPage(ctx, { key: 'ingest', title: `Ingest: ${docTitle(e ?? { doc })}`, heading: reviewHead(e, { ...doc, id }, nav), bodyClass: 'page-ingest', body, scripts: [assets.lesenIngest] }),
         };
@@ -943,7 +955,9 @@ export function ingestRoutes({ store, ingest = null, planter = null, logger = co
         const out = items.map(({ id, status }) => {
           const title = nameOf(id);
           const plant = status === 'uebernommen' ? (ingest.get(id)?.applied?.plant?.status ?? null) : null;
-          return { id, status, plant, busy: BUSY.includes(status), title, badge: ingestBadge(id, status, { ctx, title, available, ready, back: safeBack }) };
+          // Worklog, solange Claude entwirft oder einpflanzt.
+          const log = status === 'entwirft' ? ingest.worklog?.(id) : PLANT_BUSY.includes(plant) ? planter?.worklog?.(id) : null;
+          return { id, status, plant, busy: BUSY.includes(status), title, badge: ingestBadge(id, status, { ctx, title, available, ready, back: safeBack }), worklog: log ? worklogHtml(log, { tz: ctx.tz, live: true }) : null };
         });
         return jsonReply(200, { ok: true, counts: ingest.counts(), available, items: out });
       },
