@@ -23,12 +23,19 @@ export async function saveUrl({ store, url, origin = 'formular', clientId = null
 const GITHUB_PDF = /^(https:\/\/github\.com\/[^/]+\/[^/]+)\/blob\/(.+\.pdf)$/i;
 
 /**
- * Artikel hinter einer Adresse → Felder für `addDocument`: HTML über
- * `extractArticle`, PDF (erkannt am Inhalt, nicht am Inhaltstyp) über
- * `pdfFields`. `opts` (etwa `auth`) gehen an `fetchPage`. Anderes: `FetchError`
- * mit Status 415; PDF-Fehler als `ReadingError`.
+ * Artikel hinter einer Adresse → Felder für `addDocument`. `opts` (etwa `auth`)
+ * gehen an `fetchPage`. Ohne `allowPdf` wie `saveUrl`: nur HTML, mit den
+ * Grenzen von `safeFetch`. Mit `allowPdf` auch PDFs (erkannt am Inhalt, nicht am
+ * Inhaltstyp) über `pdfFields`, dann anderes als `FetchError` 415.
+ * `allowPdf` nur auf Knopfdruck, nie im Hintergrundabruf von Adressen Dritter:
+ * pdf.js läuft im Hauptprozess (src/lesen/pdf.js, `readPages`), ein präpariertes
+ * PDF hielte den Dienst auf.
  */
-export async function fetchArticle(url, { fetchPage = safeFetch, ...opts } = {}) {
+export async function fetchArticle(url, { fetchPage = safeFetch, allowPdf = false, ...opts } = {}) {
+  if (!allowPdf) {
+    const page = await fetchPage(url, opts);
+    return extractArticle(page.body, page.url);
+  }
   const page = await fetchPage(String(url).replace(GITHUB_PDF, '$1/raw/$2'), { accept: null, maxBytes: MAX_PDF, ...opts });
   if (isPdf(page.bytes)) return { url: page.url, ...(await pdfFields(page.bytes)) };
   const type = String(page.contentType ?? 'text/html').split(';')[0].trim().toLowerCase();

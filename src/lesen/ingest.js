@@ -634,7 +634,8 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
       // Link-Post (etwa Hacker News): Claude bekommt den Artikel, nicht den Anriss aus dem Feed.
       if (isLinkStub(doc)) {
         logStep(log, 'Holt den Artikel hinter dem Link-Post', now());
-        doc = await fetchLinkPost(store, doc, { fetchPage }).catch((err) => {
+        // PDFs nur auf Knopfdruck: Der Nachtlauf parst keine Dateien Dritter im Hauptprozess.
+        doc = await fetchLinkPost(store, doc, { fetchPage, allowPdf: row.origin !== 'nacht' }).catch((err) => {
           throw new IngestError(`Nur ein Link-Post, der Artikel ließ sich nicht holen: ${err.message}`);
         });
       }

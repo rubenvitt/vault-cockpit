@@ -115,13 +115,14 @@ export const isLinkStub = (doc) => String(doc?.origin ?? '').startsWith('feed:')
  * des Dokuments: Adresse wird der Artikel, die Diskussion bleibt
  * `comments_url`, der Lesefortschritt beginnt von vorn. Liefert das Dokument
  * neu. Kein Artikel (Abruf gescheitert, wieder nur ein Anriss, Artikel schon
- * als eigenes Dokument): Fehler, das Dokument bleibt, wie es war.
+ * als eigenes Dokument): Fehler, das Dokument bleibt, wie es war. PDFs nur
+ * mit `allowPdf`, also auf Knopfdruck (siehe `fetchArticle`).
  */
-export async function fetchLinkPost(store, doc, { fetchPage = safeFetch } = {}) {
+export async function fetchLinkPost(store, doc, { fetchPage = safeFetch, allowPdf = false } = {}) {
   const link = storedLinkPost(doc) ?? { url: doc.url, comments: doc.comments_url ?? null };
   const other = store.find({ url: link.url });
   if (other && other.id !== doc.id) throw new ReadingError(`Den Artikel gibt es schon als eigenes Dokument („${other.title}“)`);
-  const full = await fetchArticle(link.url, { fetchPage });
+  const full = await fetchArticle(link.url, { fetchPage, allowPdf });
   if (isLinkStub({ ...doc, content_text: full.content_text })) throw new ReadingError(`Unter ${link.url} steht kein Artikeltext`);
   const { canonical_url = null, excerpt, content_html, content_text, word_count, reading_minutes } = full;
   store.updateDocument(doc.id, { url: link.url, comments_url: link.comments, canonical_url, excerpt, content_html, content_text, word_count, reading_minutes });
@@ -308,6 +309,7 @@ export function createFeedPoller({ store, fetchFeed = fetchFeedDefault, fetchPag
     const own = fromFeed(entry, site);
     if (own.word_count >= FULL_TEXT_WORDS) return own;
     try {
+      // Im Hintergrund nur HTML: PDFs von Adressen Dritter erst auf Knopfdruck beim Ingest (`fetchLinkPost`).
       const full = await fetchArticle(entry.url, { fetchPage, ...(access ? authFor(entry.url, access.url, access.auth) : {}) });
       if (full.word_count > own.word_count) return { site, ...full, url: entry.url, comments_url: own.comments_url, title: entry.title || full.title };
     } catch (err) {
