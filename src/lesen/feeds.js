@@ -1,6 +1,7 @@
 import { DOMParser, parseHTML } from 'linkedom';
 import { safeFetch, normalizeUrl, sameHost } from './fetch.js';
-import { sanitizeHtml, extractArticle, readingMinutes } from './extract.js';
+import { sanitizeHtml, readingMinutes } from './extract.js';
+import { fetchArticle } from './save.js';
 import { ReadingError } from './store.js';
 import { esc } from '../web/layout.js';
 
@@ -90,13 +91,42 @@ function resolveLinkPost(entry) {
 
 /**
  * Gespeicherter Feed-Eintrag von vor der Auflösung → `{ url, comments }` oder
- * `null`: Reddit über `[link]` im Inhalt, Hacker News (hnrss) über „Comments
- * URL: …“ im Text.
+ * `null`: Reddit über `[link]` im Inhalt, Hacker News (hnrss) über „Article
+ * URL: …“ und „Comments URL: …“ im Text.
  */
 export function storedLinkPost(doc) {
-  const hn = /Comments URL:\s*(https?:\/\/\S+)/.exec(doc.content_text ?? '')?.[1];
-  const { url, comments } = resolveLinkPost({ url: doc.url, html: doc.content_html, comments: hn ? absolute(hn, doc.url) : null });
+  const hn = (label) => absolute(new RegExp(`${label} URL:\\s*(https?:\\/\\/\\S+)`).exec(doc.content_text ?? '')?.[1], doc.url);
+  const { url, comments } = resolveLinkPost({ url: hn('Article') ?? doc.url, html: doc.content_html, comments: hn('Comments') });
   return comments ? { url, comments } : null;
+}
+
+// Weniger eigene Wörter (ohne Adressen) hat ein Feed-Eintrag, der nur auf einen Artikel zeigt.
+const LINK_STUB_WORDS = 25;
+
+/**
+ * Link-Post aus einem Feed, dessen Inhalt kaum eigenen Text hat, etwa hnrss
+ * („Article URL: …“, „Points: 104“) oder Reddits „submitted by … [link]“:
+ * Der Text steht dann hinter der Adresse (`fetchLinkPost`).
+ */
+export const isLinkStub = (doc) => String(doc?.origin ?? '').startsWith('feed:') && words(String(doc.content_text ?? '').replace(/https?:\/\/\S+/g, ' ')) < LINK_STUB_WORDS;
+
+/**
+ * Holt zu einem Link-Post den Artikel (HTML oder PDF) und macht ihn zum Text
+ * des Dokuments: Adresse wird der Artikel, die Diskussion bleibt
+ * `comments_url`, der Lesefortschritt beginnt von vorn. Liefert das Dokument
+ * neu. Kein Artikel (Abruf gescheitert, wieder nur ein Anriss, Artikel schon
+ * als eigenes Dokument): Fehler, das Dokument bleibt, wie es war.
+ */
+export async function fetchLinkPost(store, doc, { fetchPage = safeFetch } = {}) {
+  const link = storedLinkPost(doc) ?? { url: doc.url, comments: doc.comments_url ?? null };
+  const other = store.find({ url: link.url });
+  if (other && other.id !== doc.id) throw new ReadingError(`Den Artikel gibt es schon als eigenes Dokument („${other.title}“)`);
+  const full = await fetchArticle(link.url, { fetchPage });
+  if (isLinkStub({ ...doc, content_text: full.content_text })) throw new ReadingError(`Unter ${link.url} steht kein Artikeltext`);
+  const { canonical_url = null, excerpt, content_html, content_text, word_count, reading_minutes } = full;
+  store.updateDocument(doc.id, { url: link.url, comments_url: link.comments, canonical_url, excerpt, content_html, content_text, word_count, reading_minutes });
+  if (doc.progress > 0) store.setProgress(doc.id, 0, null);
+  return store.get(doc.id);
 }
 
 function parseAny(body, baseUrl) {
@@ -278,9 +308,8 @@ export function createFeedPoller({ store, fetchFeed = fetchFeedDefault, fetchPag
     const own = fromFeed(entry, site);
     if (own.word_count >= FULL_TEXT_WORDS) return own;
     try {
-      const page = await fetchPage(entry.url, access ? authFor(entry.url, access.url, access.auth) : {});
-      const full = extractArticle(page.body, page.url);
-      if (full.word_count > own.word_count) return { ...full, url: entry.url, comments_url: own.comments_url, title: entry.title || full.title };
+      const full = await fetchArticle(entry.url, { fetchPage, ...(access ? authFor(entry.url, access.url, access.auth) : {}) });
+      if (full.word_count > own.word_count) return { site, ...full, url: entry.url, comments_url: own.comments_url, title: entry.title || full.title };
     } catch (err) {
       logger.warn?.(`Feeds: ${entry.url} nicht geholt, nehme den Feed-Inhalt: ${err.message}`);
     }

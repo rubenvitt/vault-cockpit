@@ -94,6 +94,32 @@ export function paragraphsOf(pageText) {
 }
 
 /**
+ * PDF-Inhalt (`data`: Buffer) → Felder für `addDocument` (Titel, Autor, Lesetext,
+ * `kind: 'pdf'`), ohne Adresse und Herkunft. `filename` für den Titel, falls das
+ * PDF keinen hat. Fehler als `ReadingError`, bei überschrittenen Grenzen mit
+ * `status` 413 oder 422.
+ */
+export async function pdfFields(data, filename = null) {
+  if (!data?.length) throw new ReadingError('Keine PDF-Datei');
+  if (data.length > MAX_PDF) throw limitError(`Die PDF-Datei ist zu groß (höchstens ${MAX_PDF / 1024 / 1024} MB)`, 413);
+  if (!isPdf(data)) throw new ReadingError('Das ist keine PDF-Datei');
+  const { info, pages } = await readPages(data);
+  const paragraphs = pages.flatMap(paragraphsOf);
+  if (!paragraphs.length) throw new ReadingError('Das PDF enthält keinen Text (gescannt?), nichts gespeichert');
+  const name = String(filename ?? '').replace(/\.pdf$/i, '').trim();
+  const meta = (v) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 300) : null);
+  return {
+    title: meta(info.Title) || name.slice(0, 300) || paragraphs[0].slice(0, 120),
+    author: meta(info.Author),
+    kind: 'pdf',
+    ...textFields(paragraphs.map((p) => `<p>${esc(p)}</p>`).join('')),
+  };
+}
+
+/** Ob `data` mit `%PDF-` beginnt; der Inhaltstyp lügt oft (`application/octet-stream`). */
+export const isPdf = (data) => Buffer.from(data?.subarray?.(0, 5) ?? []).toString('latin1') === '%PDF-';
+
+/**
  * Legt ein PDF im Eingang ab. `data`: Buffer, `filename` für den Titel, falls
  * das PDF keinen hat. Idempotent per `clientId` und Inhalt. Liefert `{ doc, duplicate }`.
  * Fehler als `ReadingError`, bei überschrittenen Grenzen mit `status` 413 oder 422.
@@ -101,23 +127,9 @@ export function paragraphsOf(pageText) {
 export async function savePdf({ store, data, filename = null, origin = 'formular', clientId = null }) {
   if (!data?.length) throw new ReadingError('Keine PDF-Datei');
   if (data.length > MAX_PDF) throw limitError(`Die PDF-Datei ist zu groß (höchstens ${MAX_PDF / 1024 / 1024} MB)`, 413);
-  if (Buffer.from(data.subarray(0, 5)).toString('latin1') !== '%PDF-') throw new ReadingError('Das ist keine PDF-Datei');
+  if (!isPdf(data)) throw new ReadingError('Das ist keine PDF-Datei');
   const url = `pdf:sha256-${createHash('sha256').update(data).digest('hex')}`;
   const known = store.find({ client_id: clientId, url });
   if (known) return { doc: known, duplicate: true };
-
-  const { info, pages } = await readPages(data);
-  const paragraphs = pages.flatMap(paragraphsOf);
-  if (!paragraphs.length) throw new ReadingError('Das PDF enthält keinen Text (gescannt?), nichts gespeichert');
-  const name = String(filename ?? '').replace(/\.pdf$/i, '').trim();
-  const meta = (v) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 300) : null);
-  return store.addDocument({
-    url,
-    title: meta(info.Title) || name.slice(0, 300) || paragraphs[0].slice(0, 120),
-    author: meta(info.Author),
-    kind: 'pdf',
-    origin,
-    client_id: clientId,
-    ...textFields(paragraphs.map((p) => `<p>${esc(p)}</p>`).join('')),
-  });
+  return store.addDocument({ url, origin, client_id: clientId, ...(await pdfFields(data, filename)) });
 }
