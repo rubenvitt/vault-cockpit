@@ -85,7 +85,7 @@ test('Sicherung: erfasst die bekannten Dateien unter /data, leer heißt ohne Ein
     assert.equal(backup.isEmpty(), true, 'keine Tokens und kein Merkzettel zählen nicht');
     const status = backup.status();
     assert.deepEqual(status.files.map((f) => f.name), DATA_FILES.map((f) => f.name));
-    assert.deepEqual(status.files.map((f) => f.present), [false, true, true, true, false]);
+    assert.deepEqual(status.files.map((f) => f.present), [false, true, true, true, false, false]);
 
     writeFileSync(join(dir, 'cockpit-settings.json'), SETTINGS);
     assert.equal(backup.isEmpty(), false);

@@ -3,7 +3,7 @@ import { esc, assets } from '../web/layout.js';
 import { hidden } from '../web/render.js';
 import { when } from '../web/health-render.js';
 import { maskSecrets } from '../health/mask.js';
-import { FetchError } from './fetch.js';
+import { FetchError, splitCredentials } from './fetch.js';
 import { ReadingError } from './store.js';
 import { readingPage } from './pages.js';
 import { discoverFeed, fetchFeedDefault, rememberBacklog, DEFAULT_INTERVAL } from './feeds.js';
@@ -22,6 +22,11 @@ import { jsonReply } from './json.js';
  * Leiste unten, so geht es auch ohne JavaScript; Entfernen fragt vorher nach
  * (mit JavaScript im Dialog, sonst auf `/lesen/feeds/entfernen`).
  * src/web/static/lesen-feeds.js ergänzt Suche, „Alle auswählen“ und Zähler.
+ *
+ * Private Feeds: Zugangsdaten gehen in der Adresse (`https://name:passwort@…`,
+ * auch aus OPML) oder in den Einstellungen des Feeds; gespeichert werden sie
+ * getrennt und verschlüsselt (`store.setFeedAuth`), gezeigt wird nur, dass es
+ * welche gibt.
  *
  * Für die App: `/api/lesen/feeds` liefert Gruppen (Reihenfolge, Flags, neue
  * Einträge) mit ihren Feeds und die ohne Gruppe als JSON (`feedsJson`),
@@ -73,7 +78,7 @@ function feedState(f, tz, now = Date.now()) {
 const status = (f, tz) => feedState(f, tz).text;
 
 /** Kurzinfo unter dem Titel: Host, Abstand, „direkt auf den Stapel“, Filter. */
-const metaOf = (f) => [host(f.url), `alle ${f.interval_minutes} min`, f.to_stack ? 'direkt auf den Stapel' : f.group_to_stack ? 'direkt auf den Stapel (Gruppe)' : null, f.keyword_filter ? `nur „${f.keyword_filter}“` : null].filter(Boolean).join(' · ');
+const metaOf = (f) => [host(f.url), f.has_auth ? 'mit Zugangsdaten' : null, `alle ${f.interval_minutes} min`, f.to_stack ? 'direkt auf den Stapel' : f.group_to_stack ? 'direkt auf den Stapel (Gruppe)' : null, f.keyword_filter ? `nur „${f.keyword_filter}“` : null].filter(Boolean).join(' · ');
 
 /** Ein Feed für die App; Fehler maskiert wie auf der Seite, Icon nur als data:-Adresse. */
 export function feedJson(f, tz, now = Date.now()) {
@@ -89,6 +94,7 @@ export function feedJson(f, tz, now = Date.now()) {
     paused: f.paused,
     toStack: f.to_stack,
     keywordFilter: f.keyword_filter ?? null,
+    hasAuth: f.has_auth ?? false,
     intervalMinutes: f.interval_minutes,
     groupId: f.group_id ?? null,
     groupPaused: f.group_paused,
@@ -152,6 +158,11 @@ function feedItem(f, ctx, groups) {
     <details class="feed-edit"><summary>Einstellungen</summary>
       <form method="post" action="/aktion/lesen/feed/aendern" class="feed-form">${token}
         <label class="feed-field"><span>Adresse <span class="hint">Feed oder Website, wird beim Speichern geprüft</span></span><input name="url" type="url" value="${esc(f.url)}" required autocomplete="off" spellcheck="false" inputmode="url"></label>
+        <fieldset class="feed-auth"><legend>Zugangsdaten <span class="hint">${f.has_auth ? 'gespeichert, verschlüsselt; leer lassen behält sie' : 'nur für private Feeds, werden verschlüsselt gespeichert'}</span></legend>
+          <label class="feed-field"><span>Benutzername</span><input name="benutzer" autocomplete="off" spellcheck="false"${f.has_auth ? ' placeholder="gespeichert"' : ''}></label>
+          <label class="feed-field"><span>Passwort oder Token</span><input name="passwort" type="password" autocomplete="new-password"${f.has_auth ? ' placeholder="gespeichert"' : ''}></label>
+          ${f.has_auth ? '<label class="feed-check"><input type="checkbox" name="ohne_zugang" value="1"> Zugangsdaten löschen</label>' : ''}
+        </fieldset>
         <label class="feed-check"><input type="checkbox" name="pausiert" value="1"${f.paused ? ' checked' : ''}> Pausiert</label>
         <label class="feed-check"><input type="checkbox" name="stapel" value="1"${f.to_stack ? ' checked' : ''}> Direkt auf den Stapel</label>
         <label class="feed-field"><span>Stichwort-Filter <span class="hint">durch Komma getrennt, leer = alles</span></span><input name="filter" value="${esc(f.keyword_filter ?? '')}" autocomplete="off"></label>
@@ -211,7 +222,7 @@ export function renderFeeds({ feeds, groups = [], inbox = {} }, ctx) {
     ${groupSelect(groups, null, '<span class="sr-only">Gruppe</span>')}
     <button type="submit" class="btn primary">Abonnieren</button>
   </form>
-  <p class="meta">Neue Einträge landen von selbst im Eingang, beim ersten Abruf die letzten fünf.</p>
+  <p class="meta">Neue Einträge landen von selbst im Eingang, beim ersten Abruf die letzten fünf. Private Feeds mit Zugangsdaten in der Adresse (<code>https://name:passwort@…</code>); sie werden getrennt und verschlüsselt gespeichert.</p>
 </section>
 ${feeds.length ? tools(feeds) : ''}
 <section class="feed-lists">${list}</section>
@@ -309,13 +320,37 @@ export function feedRoutes({ store, fetchFeed = fetchFeedDefault, logger = conso
    * der Feed als frisch (gleich wieder dran, ohne Fehler und ohne ETag); was
    * er schon kennt, bleibt bekannt, vom Neuen kommen höchstens fünf.
    */
-  const newAddress = async (feed, input) => {
+  const newAddress = async (feed, input, auth) => {
     if (!input || input === feed.url) return {};
-    const { url, feed: parsed } = await asAction(() => discoverFeed(input, { fetchFeed }));
+    const { url, feed: parsed } = await asAction(() => discoverFeed(input, { fetchFeed, auth }));
     if (url === feed.url) return {};
     if (store.listFeeds().some((f) => f.url === url)) throw new ActionError('Diesen Feed gibt es schon');
     rememberBacklog(store, feed.id, parsed.entries);
     return { url, etag: null, last_modified: null, last_error: null, error_count: 0, next_fetch_at: null, ...(parsed.siteUrl ? { site_url: parsed.siteUrl } : {}) };
+  };
+  /** Zugangsdaten aus den Feldern `benutzer`/`passwort`, sonst `null`. */
+  const typed = (form) => {
+    const user = form.get('benutzer') ?? '';
+    const password = form.get('passwort') ?? '';
+    return user.trim() || password ? { user: user.trim(), password } : null;
+  };
+  /**
+   * Zugangsdaten nach dem Speichern der Einstellungen: `undefined` heißt
+   * unverändert, `null` löschen. Ein leeres Feld behält den gespeicherten
+   * Teil (neues Passwort, gleicher Name und umgekehrt).
+   */
+  const nextAuth = (feed, form, fromUrl) => {
+    if (form.get('ohne_zugang') === '1') return feed.has_auth ? null : undefined;
+    if (fromUrl) return fromUrl;
+    const t = typed(form);
+    if (!t) return undefined;
+    let old = null;
+    try {
+      old = feed.has_auth ? store.feedAuth(feed.id) : null;
+    } catch {
+      // nicht mehr zu öffnen: dann zählt nur, was jetzt eingetragen ist
+    }
+    return { user: t.user || old?.user || '', password: t.password || old?.password || '' };
   };
   const opml = async () => ({
     body: toOpml(store.listFeeds(), { groups: store.listGroups() }),
@@ -335,16 +370,24 @@ export function feedRoutes({ store, fetchFeed = fetchFeedDefault, logger = conso
       async '/aktion/lesen/feed/abonnieren'(form, session) {
         const input = (form.get('url') ?? '').trim();
         if (!input) throw new ActionError('Bitte eine Adresse eingeben');
-        const { url, feed } = await asAction(() => discoverFeed(input, { fetchFeed }));
-        const r = await asAction(() => store.addFeed({ url, title: feed.title, site_url: feed.siteUrl, interval_minutes: DEFAULT_INTERVAL, group_id: form.get('gruppe') || null }));
+        const split = await asAction(async () => splitCredentials(input));
+        const auth = typed(form) ?? split.auth;
+        const { url, feed } = await asAction(() => discoverFeed(split.url, { fetchFeed, auth }));
+        const r = await asAction(() => store.addFeed({ url, title: feed.title, site_url: feed.siteUrl, interval_minutes: DEFAULT_INTERVAL, group_id: form.get('gruppe') || null, ...(auth ? { auth } : {}) }));
         if (!r.duplicate) logger.info?.(`Feeds: ${r.feed.title ?? host(url)} abonniert (${session.sub})`); // nie die URL: private Feeds tragen Tokens darin
         return { message: `${r.duplicate ? 'Schon abonniert' : 'Abonniert'}: ${r.feed.title ?? host(url)}` };
       },
       async '/aktion/lesen/feed/aendern'(form) {
         const feed = feedOf(form);
         const minutes = Number(form.get('intervall'));
-        const moved = await newAddress(feed, (form.get('url') ?? '').trim());
+        const input = (form.get('url') ?? '').trim();
+        const split = input ? await asAction(async () => splitCredentials(input)) : { url: '', auth: null };
+        const auth = await asAction(async () => nextAuth(feed, form, split.auth));
+        const moved = await newAddress(feed, split.url, auth === undefined ? await asAction(async () => store.feedAuth(feed.id)) : auth);
+        if (auth !== undefined) await asAction(async () => store.setFeedAuth(feed.id, auth));
         const f = await asAction(() => store.updateFeed(feed.id, {
+          // Neue Zugangsdaten: gleich wieder dran, alte Fehler zählen nicht mehr.
+          ...(auth !== undefined ? { last_error: null, error_count: 0, next_fetch_at: null } : {}),
           ...moved,
           ...(form.has('gruppe') ? { group_id: form.get('gruppe') } : {}),
           paused: form.get('pausiert') === '1',
@@ -411,7 +454,7 @@ export function feedRoutes({ store, fetchFeed = fetchFeedDefault, logger = conso
         for (const { group, ...f } of list) {
           // Ordner werden Gruppen; ein schon abonnierter Feed behält eine vorhandene Zuordnung.
           const groupId = group?.trim() ? store.addGroup({ name: group }).group.id : null;
-          const r = store.addFeed({ ...f, group_id: groupId, interval_minutes: DEFAULT_INTERVAL });
+          const r = await asAction(async () => store.addFeed({ ...f, group_id: groupId, interval_minutes: DEFAULT_INTERVAL }));
           if (!r.duplicate) added += 1;
           else if (groupId && !r.feed.group_id) store.updateFeed(r.feed.id, { group_id: groupId });
         }

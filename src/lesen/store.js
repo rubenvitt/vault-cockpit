@@ -129,6 +129,8 @@ export const MIGRATIONS = [
     updated_at TEXT NOT NULL
   );
   CREATE INDEX ingests_status ON ingests(status, updated_at);`,
+  // Zugangsdaten privater Feeds, verschlüsselt (src/cockpit/secret-box.js); nie in `url`.
+  `ALTER TABLE feeds ADD COLUMN auth TEXT;`,
 ];
 
 /** Zustände eines Ingest-Entwurfs (src/lesen/ingest.js). */
@@ -145,11 +147,13 @@ const GROUP_EDIT = ['name', 'paused', 'to_stack'];
 export const NO_FEED = 'ohne';
 
 const fromRow = (row) => (row ? { ...row, topics: JSON.parse(row.topics ?? '[]') } : null);
+// Die verschlüsselten Zugangsdaten verlassen den Store nie, nur `has_auth` sagt, ob es welche gibt.
+const withoutAuth = ({ auth, ...row }) => row;
 /**
  * Feed mit den Einstellungen seiner Gruppe (`group_paused`, `group_to_stack`).
  * Es gilt Feed ODER Gruppe: `false` am Feed heißt „nichts Eigenes gesetzt“.
  */
-const feedRow = (row) => (row ? { ...row, paused: Boolean(row.paused), to_stack: Boolean(row.to_stack), group_paused: Boolean(row.group_paused), group_to_stack: Boolean(row.group_to_stack) } : null);
+const feedRow = (row) => (row ? { ...withoutAuth(row), has_auth: Boolean(row.auth), paused: Boolean(row.paused), to_stack: Boolean(row.to_stack), group_paused: Boolean(row.group_paused), group_to_stack: Boolean(row.group_to_stack) } : null);
 const parseJson = (v) => (v == null ? null : JSON.parse(v));
 const ingestRow = (row) => (row ? { ...row, draft: parseJson(row.draft), applied: parseJson(row.applied) } : null);
 const groupRow = (row) => (row ? { ...row, paused: Boolean(row.paused), to_stack: Boolean(row.to_stack) } : null);
@@ -173,9 +177,11 @@ function migrate(db) {
 
 /**
  * `path`: SQLite-Datei (`/data/lesestapel.db`, in Tests auch `:memory:`).
- * `now` liefert die Zeit für die Zeitstempel (ISO-Text).
+ * `now` liefert die Zeit für die Zeitstempel (ISO-Text). `secrets`
+ * (`createSecretBox`) verschlüsselt Zugangsdaten von Feeds; ohne lassen sich
+ * keine speichern.
  */
-export function createReadingStore({ path, now = () => Date.now() }) {
+export function createReadingStore({ path, now = () => Date.now(), secrets = null }) {
   let db;
   const open = () => {
     db = new DatabaseSync(path);
@@ -207,6 +213,15 @@ export function createReadingStore({ path, now = () => Date.now() }) {
   const get = (id) => fromRow(db.prepare('SELECT * FROM documents WHERE id = ?').get(String(id ?? '')));
   const getHighlight = (id) => db.prepare('SELECT * FROM highlights WHERE id = ?').get(String(id ?? '')) ?? null;
   const getFeed = (id) => feedRow(db.prepare(`${FEED_SELECT} WHERE f.id = ?`).get(String(id ?? '')));
+  /** Zugangsdaten setzen (`{ user, password }`) oder mit `null` löschen; verschlüsselt, an den Feed gebunden. */
+  const setFeedAuth = (id, auth) => {
+    let sealed = null;
+    if (auth) {
+      if (!secrets) throw new ReadingError('Zugangsdaten lassen sich hier nicht speichern');
+      sealed = secrets.seal({ user: String(auth.user ?? ''), password: String(auth.password ?? '') }, `feed:${id}`);
+    }
+    db.prepare('UPDATE feeds SET auth = ? WHERE id = ?').run(sealed, String(id));
+  };
   const getGroup = (id) => groupRow(db.prepare('SELECT * FROM feed_groups WHERE id = ?').get(String(id ?? '')));
   const listGroups = () => db.prepare('SELECT * FROM feed_groups ORDER BY position, name').all().map(groupRow);
   const groupName = (name) => {
@@ -423,18 +438,40 @@ export function createReadingStore({ path, now = () => Date.now() }) {
 
     // --- Feeds ----------------------------------------------------------------
 
-    /** Idempotent per Adresse. */
+    /**
+     * Idempotent per Adresse. `auth` (`{ user, password }`) speichert
+     * Zugangsdaten, bei einem schon abonnierten Feed ersetzen sie dessen.
+     */
     addFeed(fields) {
       if (!fields?.url) throw new ReadingError('Adresse fehlt');
       const existing = db.prepare('SELECT * FROM feeds WHERE url = ?').get(fields.url);
-      if (existing) return { feed: getFeed(existing.id), duplicate: true };
+      if (existing) {
+        if (fields.auth) setFeedAuth(existing.id, fields.auth);
+        return { feed: getFeed(existing.id), duplicate: true };
+      }
       const checked = withGroup(fields);
       const id = randomUUID();
-      db.prepare('INSERT INTO feeds (id, url, created_at) VALUES (?, ?, ?)').run(id, fields.url, iso());
-      update('feeds', id, checked, FEED_EDIT.filter((k) => k !== 'url'));
+      inTransaction(() => {
+        db.prepare('INSERT INTO feeds (id, url, created_at) VALUES (?, ?, ?)').run(id, fields.url, iso());
+        update('feeds', id, checked, FEED_EDIT.filter((k) => k !== 'url'));
+        if (fields.auth) setFeedAuth(id, fields.auth);
+      });
       return { feed: getFeed(id), duplicate: false };
     },
     getFeed,
+    setFeedAuth,
+    /**
+     * Zugangsdaten eines Feeds im Klartext (`{ user, password }`), nur für
+     * den Abruf; `null` ohne. Lassen sie sich nicht öffnen (Datenbank ohne
+     * ihren Schlüssel zurückgespielt): `ReadingError`.
+     */
+    feedAuth(id) {
+      const row = db.prepare('SELECT auth FROM feeds WHERE id = ?').get(String(id ?? ''));
+      if (!row?.auth) return null;
+      const auth = secrets?.open(row.auth, `feed:${id}`);
+      if (!auth) throw new ReadingError('Die gespeicherten Zugangsdaten lassen sich nicht entschlüsseln, bitte in den Einstellungen des Feeds neu eingeben');
+      return auth;
+    },
     /** Alle Feeds, nach Titel; mit `group` nur die dieser Gruppe, `NO_FEED` heißt hier: ohne Gruppe. */
     listFeeds({ group } = {}) {
       const where = group === undefined ? '' : group === NO_FEED || group === null ? 'WHERE f.group_id IS NULL' : 'WHERE f.group_id = ?';

@@ -36,6 +36,7 @@ export const DATA_FILES = [
   { name: 'api-tokens.json', label: 'API-Tokens (nur ihre Hashes)', setup: true },
   { name: 'capture-state.json', label: 'Merkzettel von Capture und Zunder-Brücke' },
   { name: 'session-secret', label: 'Secret für das Sitzungs-Cookie' },
+  { name: 'credentials-key', label: 'Schlüssel für gespeicherte Zugangsdaten (private Feeds)' },
   { name: 'lesestapel.db', label: 'Lesestapel (Artikel, Markierungen, Feeds)', sqlite: true },
 ];
 

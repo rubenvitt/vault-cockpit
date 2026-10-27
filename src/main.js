@@ -22,6 +22,7 @@ import { createSettingsStore, loadOrCreateSecret } from './cockpit/settings.js';
 import { createTokenStore } from './cockpit/tokens.js';
 import { createBackup } from './cockpit/backup.js';
 import { createReadingStore } from './lesen/store.js';
+import { createSecretBox } from './cockpit/secret-box.js';
 import { readingRoutes } from './lesen/http.js';
 import { createFeedPoller } from './lesen/feeds.js';
 import { createReadingApi } from './lesen/api.js';
@@ -212,7 +213,12 @@ const LEGACY_CAPTURE_TOKEN = process.env.CAPTURE_TOKEN || null;
 
 // Lesestapel (VCP-77): Artikel, Markierungen und Feeds, neben den Einstellungen
 // unter /data. Lässt sich nicht neu bauen, gehört deshalb in die Sicherung.
-const reading = createReadingStore({ path: join(dirname(COCKPIT_SETTINGS_FILE), 'lesestapel.db') });
+// Zugangsdaten privater Feeds liegen darin verschlüsselt, mit einem eigenen,
+// beim ersten Start erzeugten Schlüssel (`credentials-key`, ebenfalls in der Sicherung).
+const reading = createReadingStore({
+  path: join(dirname(COCKPIT_SETTINGS_FILE), 'lesestapel.db'),
+  secrets: createSecretBox(loadOrCreateSecret(join(dirname(COCKPIT_SETTINGS_FILE), 'credentials-key'))),
+});
 // Feeds (VCP-78): jede Minute nachsehen, welche dran sind; jeder Feed hat seinen
 // eigenen Abstand (Standard 30 min), Fehler verlängern ihn.
 const feedPoller = createFeedPoller({ store: reading });

@@ -458,7 +458,7 @@ test('Sicherung als JSON: Stand, Datei herunterladen mit Geräte-Token, Fehler m
   await withSettingsApp(async ({ call, get, post, settings }) => {
     const status = await get('/api/einstellungen/sicherung');
     assert.equal(status.body.empty, false, 'der Geräte-Token zählt als eingerichtet');
-    assert.deepEqual(status.body.files.map((f) => [f.name, f.present]), [['cockpit-settings.json', false], ['api-tokens.json', true], ['capture-state.json', false], ['session-secret', false], ['lesestapel.db', false]]);
+    assert.deepEqual(status.body.files.map((f) => [f.name, f.present]), [['cockpit-settings.json', false], ['api-tokens.json', true], ['capture-state.json', false], ['session-secret', false], ['credentials-key', false], ['lesestapel.db', false]]);
     keep('sicherung', status.body);
 
     settings.save(FULL);
@@ -610,7 +610,7 @@ test('Feeds als JSON: Gruppen mit Feeds, ohne Gruppe, Zustand; Aktionen und OPML
     const [a] = body.ungrouped;
     assert.deepEqual(
       { ...a, nextFetchAt: undefined },
-      { id: atom.id, url: 'https://atom.test/feed.xml', host: 'atom.test', siteUrl: 'https://atom.test/', title: 'Atom-Seite', icon: null, letter: 'A', paused: true, toStack: true, keywordFilter: 'swift, ios', intervalMinutes: 5, groupId: null, groupPaused: false, groupToStack: false, lastFetchAt: null, nextFetchAt: undefined, errorCount: 0, lastError: null, state: 'paused', status: 'pausiert', meta: 'atom.test · alle 5 min · direkt auf den Stapel · nur „swift, ios“' },
+      { id: atom.id, url: 'https://atom.test/feed.xml', host: 'atom.test', siteUrl: 'https://atom.test/', title: 'Atom-Seite', icon: null, letter: 'A', paused: true, toStack: true, keywordFilter: 'swift, ios', hasAuth: false, intervalMinutes: 5, groupId: null, groupPaused: false, groupToStack: false, lastFetchAt: null, nextFetchAt: undefined, errorCount: 0, lastError: null, state: 'paused', status: 'pausiert', meta: 'atom.test · alle 5 min · direkt auf den Stapel · nur „swift, ios“' },
     );
 
     // OPML-Export mit Geräte-Token; die Seite `/lesen/feeds.opml` bleibt beim Cookie.

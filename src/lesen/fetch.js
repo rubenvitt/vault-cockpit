@@ -7,7 +7,8 @@ import { BlockList, isIP } from 'node:net';
  * Holt eine fremde Seite für den Lesestapel, ohne dass sich damit Dienste im
  * eigenen Netz erreichen lassen (SSRF). Vertrauensgrenze, deshalb:
  *
- * - nur `http:` und `https:`, ohne Zugangsdaten in der Adresse;
+ * - nur `http:` und `https:`, ohne Zugangsdaten in der Adresse (private Feeds
+ *   geben sie getrennt als `auth` mit, siehe `splitCredentials`);
  * - die Adresse wird nach der DNS-Auflösung geprüft, und zwar in der
  *   `lookup`-Funktion des Requests: Verbunden wird genau mit der geprüften IP
  *   (kein DNS-Rebinding zwischen Prüfen und Verbinden). IP-Literale, die Node
@@ -77,18 +78,26 @@ const defaultResolve = (hostname) => dnsLookup(hostname, { all: true, verbatim: 
  * der Antwort. `headers` gehen zusätzlich mit (bedingte Anfragen der Feeds);
  * `304 Not Modified` kommt dann ohne Inhalt zurück. `accept: null` nimmt jeden
  * Inhaltstyp an.
+ *
+ * `auth` (`{ user, password }`) geht als HTTP Basic Auth mit, aber nur an den
+ * Host der Ausgangsadresse: Eine Weiterleitung auf einen anderen Host oder von
+ * https auf http bekommt sie nicht.
  */
-export async function safeFetch(input, { resolve = defaultResolve, isAllowed = isPublicAddress, maxBytes = 5 * 1024 * 1024, timeoutMs = 15_000, maxRedirects = 5, accept = ['text/html', 'application/xhtml+xml'], headers = {} } = {}) {
+export async function safeFetch(input, { resolve = defaultResolve, isAllowed = isPublicAddress, maxBytes = 5 * 1024 * 1024, timeoutMs = 15_000, maxRedirects = 5, accept = ['text/html', 'application/xhtml+xml'], headers = {}, auth = null } = {}) {
   const deadline = Date.now() + timeoutMs;
   let url = parseTarget(input);
+  const start = url;
+  const basic = auth ? `Basic ${Buffer.from(`${auth.user ?? ''}:${auth.password ?? ''}`).toString('base64')}` : null;
   for (let hop = 0; ; hop++) {
-    const res = await request(url, { resolve, isAllowed, maxBytes, deadline, headers });
+    const withAuth = basic && sameHost(url, start);
+    const res = await request(url, { resolve, isAllowed, maxBytes, deadline, headers: withAuth ? { ...headers, authorization: basic } : headers });
     if (res.status === 304) return { url: url.href, status: 304, contentType: null, body: '', bytes: res.body, headers: res.headers };
     if (res.status >= 300 && res.status < 400 && res.location) {
       if (hop >= maxRedirects) throw new FetchError('Zu viele Weiterleitungen');
       url = parseTarget(res.location, url);
       continue;
     }
+    if (res.status === 401 || res.status === 403) throw new FetchError(`Zugang verweigert (HTTP ${res.status})${withAuth ? ', bitte die Zugangsdaten prüfen' : ''}`);
     if (res.status >= 400) throw new FetchError(`Die Seite antwortet mit HTTP ${res.status}`);
     const type = String(res.contentType ?? '').split(';')[0].trim().toLowerCase();
     if (accept && !accept.includes(type)) throw new FetchError(`Kein Artikel (${type || 'ohne Inhaltstyp'})`, 415);
@@ -98,6 +107,45 @@ export async function safeFetch(input, { resolve = defaultResolve, isAllowed = i
 
 /** Geprüfte Adresse (nur http/https, ohne Anker), sonst `FetchError` mit Status 400. */
 export const normalizeUrl = (input) => parseTarget(input).href;
+
+/**
+ * Ob Zugangsdaten für `start` auch an `url` gehen dürfen: derselbe Host
+ * (samt Port), und nicht von https zurück auf http.
+ */
+export const sameHost = (url, start) => {
+  try {
+    const [a, b] = [new URL(url), new URL(start)];
+    return a.host === b.host && !(b.protocol === 'https:' && a.protocol === 'http:');
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Adresse mit Zugangsdaten (`https://name:passwort@host/feed`) → `{ url, auth }`:
+ * die Adresse ohne sie (geprüft wie `normalizeUrl`) und `{ user, password }`
+ * (dekodiert), ohne Zugangsdaten `auth: null`.
+ */
+export function splitCredentials(input) {
+  let url;
+  try {
+    url = new URL(String(input ?? '').trim());
+  } catch {
+    throw new FetchError('Keine gültige Adresse', 400);
+  }
+  if (!url.username && !url.password) return { url: normalizeUrl(url.href), auth: null };
+  const decode = (s) => {
+    try {
+      return decodeURIComponent(s);
+    } catch {
+      return s;
+    }
+  };
+  const auth = { user: decode(url.username), password: decode(url.password) };
+  url.username = '';
+  url.password = '';
+  return { url: normalizeUrl(url.href), auth };
+}
 
 function parseTarget(input, base = undefined) {
   let url;
