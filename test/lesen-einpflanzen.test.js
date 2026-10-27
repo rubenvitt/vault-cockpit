@@ -250,6 +250,7 @@ test('guardEditor: nur wiki/, nur ergänzen, Frontmatter nur relations, höchste
   const g = guardEditor(editor, { index: idx, maxPages: 1 });
   assert.throws(() => g.replace({ path: 'wiki/concepts/backpressure.md', oldText: 'Loop.', newText: 'x', replaceAll: true }), /replace_all/);
   assert.throws(() => g.replace({ path: 'wiki/../inbox/Start.md', oldText: 'Start', newText: 'Start!' }), /Nur Seiten unter wiki/);
+  assert.throws(() => g.append({ path: 'wiki/index.md', text: '| [[neu]] |' }), /Nur Seiten unter wiki/);
   assert.throws(() => g.replace({ path: 'wiki/concepts/backpressure.md', oldText: 'im Loop.', newText: 'in Loops.' }), /nur ergänzt/);
   assert.throws(() => g.setFrontmatter({ path: 'wiki/concepts/backpressure.md', set: { relations: ['extends [[loops]]'] } }), /es fehlten danach: uses \[\[loops\]\]/);
   assert.throws(() => g.setFrontmatter({ path: 'wiki/concepts/backpressure.md', set: { updated: '2030-01-01' } }), /nur `relations`/);
