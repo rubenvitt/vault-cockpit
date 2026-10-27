@@ -1526,6 +1526,17 @@ a.ingest-item-open:hover, a.ingest-item-open:focus-visible { color: var(--accent
 .fragen-quellen summary { cursor: pointer; color: var(--text-2); font-size: var(--t-sm); }
 .fragen-quellen ul { margin: var(--s-2) 0 0; padding-left: 1.2em; font-size: var(--t-sm); }
 .fragen-fuss { margin-top: var(--s-4); }
+/* --- Worklog --- */
+/* src/lesen/worklog.js: ausklappbar, grob was Claude im Hintergrund tut (Fragen, Folgen, Ingest, Einpflanzen) */
+.worklog { margin-top: var(--s-2); font-size: var(--t-sm); min-width: 0; }
+.worklog summary { cursor: pointer; color: var(--text-2); }
+.worklog summary .meta { display: inline; }
+.worklog-list { list-style: none; display: grid; gap: 4px; margin: var(--s-2) 0 0; padding: 0 0 0 var(--s-3); border-left: 2px solid var(--line); }
+.worklog-list li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--s-2); color: var(--text-2); overflow-wrap: anywhere; }
+.worklog-list time { color: var(--text-3); font-variant-numeric: tabular-nums; }
+.worklog-list li[aria-current] { color: var(--text); font-weight: 600; }
+[data-ingest-worklog]:empty { display: none; }
+.ingest-row.is-busy > [data-ingest-worklog] { grid-column: 1 / -1; }
 /* --- Lesen: Weiter --- */
 /* /lesen/weiter (src/lesen/weiter.js): wo jeder Text steht und was als Nächstes geht */
 .weiter-next { display: grid; gap: var(--s-2); justify-items: start; margin: 0 0 var(--s-4); padding: var(--s-4) var(--s-5);

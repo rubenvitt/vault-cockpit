@@ -4,6 +4,7 @@ import http from 'node:http';
 import { localDate } from '../cockpit/week.js';
 import { toWebRequest, writeWebResponse } from '../http/bridge.js';
 import { parseNote } from '../vault/markdown.js';
+import { logStep, logTool } from './worklog.js';
 
 /**
  * Einpflanzen nach dem Ingest: Ist ein Entwurf übernommen (src/lesen/ingest.js),
@@ -29,6 +30,9 @@ import { parseNote } from '../vault/markdown.js';
  * schreibt einen Eintrag „einpflanzen (cockpit)“ ins Log. Der Stand steht in
  * `applied.plant` des Ingests: `wartet`, `laeuft`, `fertig` oder `fehler`, mit
  * Zusammenfassung, geänderten Seiten und dem, was offen bleibt.
+ *
+ * Worklog (src/lesen/worklog.js): was der Agent liest und ergänzt, live unter
+ * `worklog(docId)`, danach in `applied.plant.log`.
  *
  * Immer nur ein Lauf zugleich; nach einem Neustart gehen wartende und
  * angefangene wieder in die Warteschlange.
@@ -230,6 +234,8 @@ async function startLoopback(handler, token, logger) {
 export function createPlanter({ store, claude, mcp, editor, index, settings, log = () => {}, logger = console, now = () => new Date(), resumeDelayMs = 1000 }) {
   const queue = [];
   let pump = null;
+  // Worklog des laufenden Agenten (nur im Speicher, bis er fertig ist).
+  const logs = new Map();
   const iso = () => now().toISOString();
   const today = () => localDate(now(), settings.get().tz);
 
@@ -253,7 +259,10 @@ export function createPlanter({ store, claude, mcp, editor, index, settings, log
     if (row?.status !== 'uebernommen' || row.applied?.plant?.status !== 'wartet') return;
     const a = row.applied;
     const title = oneLine(a.title ?? row.draft?.source?.title ?? docId, 200);
-    setPlant(docId, { status: 'laeuft', started_at: iso(), error: null });
+    setPlant(docId, { status: 'laeuft', started_at: iso(), error: null, log: null });
+    const steps = [];
+    logs.set(docId, steps);
+    logStep(steps, `Agent startet mit der Source-Page „${a.slug ?? title}“`, now());
     const token = randomBytes(32).toString('base64url');
     const guarded = guardEditor(editor, { index });
     let server = null;
@@ -261,7 +270,7 @@ export function createPlanter({ store, claude, mcp, editor, index, settings, log
       if (!a.source || !a.slug) throw new PlantError('Zu diesem Ingest fehlt die Source-Page');
       const principal = { subject: 'cockpit-einpflanzen', scopes: ['vault:read', 'vault:edit'], expiresAt: Math.floor(Date.now() / 1000) + 3600 };
       server = await startLoopback(mcp({ editor: guarded, verifyToken: (t) => (t === token ? principal : null) }), token, logger);
-      const out = await claude.agent({ system: SYSTEM, prompt: PROMPT, input: inputFor(row), schema: SCHEMA, mcp: { name: 'vault', url: server.url, token }, tools: [...READ_TOOLS, ...EDIT_TOOLS] });
+      const out = await claude.agent({ system: SYSTEM, prompt: PROMPT, input: inputFor(row), schema: SCHEMA, mcp: { name: 'vault', url: server.url, token }, tools: [...READ_TOOLS, ...EDIT_TOOLS], onTool: (name, args) => logTool(steps, name, args, now()) });
 
       // Was sich geändert hat, weiß das Cockpit selbst; Claudes Bericht liefert nur die Beschreibung.
       const changed = [...guarded.touched];
@@ -287,13 +296,16 @@ export function createPlanter({ store, claude, mcp, editor, index, settings, log
       } catch (err) {
         logger.warn?.(`Einpflanzen: Log nicht geschrieben: ${err.message}`);
       }
-      setPlant(docId, { status: 'fertig', finished_at: iso(), summary, changed: changed.map((path) => ({ path, was: was.get(path) ?? null })), open: offen, error: null });
+      logStep(steps, `Fertig: ${changed.length} ${changed.length === 1 ? 'Seite' : 'Seiten'} ergänzt`, now());
+      setPlant(docId, { log: steps, status: 'fertig', finished_at: iso(), summary, changed: changed.map((path) => ({ path, was: was.get(path) ?? null })), open: offen, error: null });
       logger.info?.(`Einpflanzen „${title}“: ${changed.length} Seiten geändert`);
     } catch (err) {
       logger.warn?.(`Einpflanzen „${title}“: ${err.message}`);
       // Was schon geschrieben ist, bleibt; ein neuer Lauf sieht es und ergänzt nicht doppelt.
-      setPlant(docId, { status: 'fehler', finished_at: iso(), error: err.message, changed: [...guarded.touched].map((path) => ({ path, was: null })) });
+      logStep(steps, `Abgebrochen: ${err.message}`, now());
+      setPlant(docId, { log: steps, status: 'fehler', finished_at: iso(), error: err.message, changed: [...guarded.touched].map((path) => ({ path, was: null })) });
     } finally {
+      logs.delete(docId);
       await server?.close();
     }
   }
@@ -323,7 +335,7 @@ export function createPlanter({ store, claude, mcp, editor, index, settings, log
     if (row?.status !== 'uebernommen') throw new PlantError('Erst ins Wiki übernehmen, dann einpflanzen', 409);
     const cur = row.applied?.plant?.status;
     if (cur === 'wartet' || cur === 'laeuft') return cur;
-    setPlant(id, { status: 'wartet', requested_at: iso(), started_at: null, finished_at: null, error: null, summary: null, changed: [], open: [] });
+    setPlant(id, { status: 'wartet', requested_at: iso(), started_at: null, finished_at: null, error: null, summary: null, changed: [], open: [], log: null });
     queue.push(id);
     kick();
     return 'wartet';
@@ -344,6 +356,8 @@ export function createPlanter({ store, claude, mcp, editor, index, settings, log
     available,
     enabled,
     request,
+    /** Worklog eines Laufs: live, sonst der gespeicherte; sonst null. */
+    worklog: (docId) => logs.get(docId) ?? store.getIngest(docId)?.applied?.plant?.log ?? null,
     /** Läufe, die warten oder laufen. */
     busy: () => store.listIngests({ status: 'uebernommen' }).filter((r) => ['wartet', 'laeuft'].includes(r.applied?.plant?.status)).length,
     /** Wartet, bis die Warteschlange leer ist (Tests). */

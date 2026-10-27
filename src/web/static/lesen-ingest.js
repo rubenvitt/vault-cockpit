@@ -6,7 +6,8 @@
 // Status, tauscht sie das Abzeichen aus (Stapel, Leseansicht), lädt die
 // Übersicht neu (nur `main`) bzw. die Prüfansicht ganz. Die Zahl an „Ingest“ in
 // der Unternavigation läuft mit. Ebenso beim Einpflanzen nach dem Übernehmen
-// (`[data-ingest-plant]`, Stand `plant` statt `status`).
+// (`[data-ingest-plant]`, Stand `plant` statt `status`). Der Worklog
+// (`[data-ingest-worklog]`) läuft bei jeder Abfrage mit.
 //
 // Prüfansicht: „alle/keine“ je Gruppe, die Zahl am Knopf „Ins Wiki übernehmen“,
 // der Zähler der Summary (bis 80) und Nachfragen vor „Neu entwerfen“ und
@@ -66,6 +67,13 @@
       setCount(data.counts?.bereit ?? 0);
       let reloadMain = false;
       for (const item of data.items ?? []) {
+        // Worklog erneuern; ein aufgeklappter bleibt offen.
+        for (const box of document.querySelectorAll(`[data-ingest-worklog="${CSS.escape(item.id)}"]`)) {
+          if (!item.worklog) continue;
+          const open = box.querySelector('[data-worklog]')?.open;
+          box.innerHTML = item.worklog;
+          if (open) box.querySelector('[data-worklog]')?.setAttribute('open', '');
+        }
         for (const el of document.querySelectorAll(`[data-ingest-watch="${CSS.escape(item.id)}"]`)) {
           // Einpflanzen (`data-ingest-plant`) beobachtet den Stand des Agenten statt den des Entwurfs.
           const plant = el.hasAttribute('data-ingest-plant');

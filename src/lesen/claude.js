@@ -32,6 +32,10 @@ import { join } from 'node:path';
  * MCP-Servers (`mcp`: `{ name, config }`, der nur lesende Vault-Zugang aus
  * src/lesen/research-mcp.js), keine Einstellungsdateien (`--setting-sources ""`)
  * und auf Wunsch ein eigener Zeitrahmen (`timeoutMs`).
+ *
+ * Worklog: Die CLI läuft mit `--output-format stream-json`; jeder
+ * Werkzeugaufruf geht, sobald er kommt, an `onTool(name, input)` (für
+ * src/lesen/worklog.js), das Ergebnis steht in der letzten Zeile (`result`).
  */
 
 export class WriterError extends Error {}
@@ -57,15 +61,17 @@ export function createClaudeWriter({ token = process.env.CLAUDE_CODE_OAUTH_TOKEN
   /**
    * `{ system, prompt, input, schema }` → Objekt nach `schema` (JSON Schema).
    * Optional `tools` (eingebaute Werkzeuge), `mcp` (`{ name, config }`: ein
-   * Server wie in `mcpServers`) und `timeoutMs` für diesen Lauf.
+   * Server wie in `mcpServers`), `timeoutMs` für diesen Lauf und `onTool`
+   * (Werkzeugaufrufe, sobald sie kommen).
    */
-  async function write({ system, prompt, input, schema, tools = [], mcp = null, timeoutMs: limit = timeoutMs }) {
-    if (!tools.length && !mcp) return invoke({ input, limit, args: () => [...common({ system, prompt, schema }), '--tools', '', '--safe-mode', '--strict-mcp-config'] });
+  async function write({ system, prompt, input, schema, tools = [], mcp = null, timeoutMs: limit = timeoutMs, onTool = null }) {
+    if (!tools.length && !mcp) return invoke({ input, limit, onTool, args: () => [...common({ system, prompt, schema }), '--tools', '', '--safe-mode', '--strict-mcp-config'] });
     const name = String(mcp?.name ?? 'vault');
     if (!/^[a-z][a-z0-9_-]*$/.test(name)) throw new WriterError(`Ungültiger Name des MCP-Servers „${name}“`);
     return invoke({
       input,
       limit,
+      onTool,
       env: (cwd) => ({ CLAUDE_CONFIG_DIR: join(cwd, '.claude-config') }),
       args: (cwd) => {
         const config = join(cwd, 'mcp.json');
@@ -87,11 +93,12 @@ export function createClaudeWriter({ token = process.env.CLAUDE_CODE_OAUTH_TOKEN
    * `{ system, prompt, input, schema, mcp: { name, url, token }, tools }` → Objekt nach `schema`.
    * `tools`: Namen der Werkzeuge des Servers ohne Präfix, z. B. `vault_read`.
    */
-  async function agent({ system, prompt, input, schema, mcp, tools }) {
+  async function agent({ system, prompt, input, schema, mcp, tools, onTool = null }) {
     const name = String(mcp?.name ?? 'vault');
     if (!/^[a-z][a-z0-9_-]*$/.test(name)) throw new WriterError(`Ungültiger Name des MCP-Servers „${name}“`);
     return invoke({
       input,
+      onTool,
       env: (cwd) => ({ CLAUDE_CONFIG_DIR: join(cwd, '.claude-config') }),
       args: (cwd) => {
         const config = join(cwd, 'mcp.json');
@@ -110,16 +117,16 @@ export function createClaudeWriter({ token = process.env.CLAUDE_CODE_OAUTH_TOKEN
 
   function common({ system, prompt, schema }) {
     const m = currentModel();
-    return ['-p', prompt, '--output-format', 'json', '--json-schema', JSON.stringify(schema), '--system-prompt', system, '--permission-mode', 'dontAsk', '--no-session-persistence', ...(m ? ['--model', m] : [])];
+    return ['-p', prompt, '--output-format', 'stream-json', '--verbose', '--json-schema', JSON.stringify(schema), '--system-prompt', system, '--permission-mode', 'dontAsk', '--no-session-persistence', ...(m ? ['--model', m] : [])];
   }
 
-  async function invoke({ input, args: argsFor, env: envFor = () => ({}), limit = timeoutMs }) {
+  async function invoke({ input, args: argsFor, env: envFor = () => ({}), limit = timeoutMs, onTool = null }) {
     if (!token) throw new WriterError('Kein Claude-Zugang: CLAUDE_CODE_OAUTH_TOKEN fehlt (Token aus `claude setup-token`)');
     // Leeres Verzeichnis: kein Projekt, kein CLAUDE.md in der Nähe.
     const cwd = mkdtempSync(join(tmpdir(), 'cockpit-claude-'));
     try {
       const args = argsFor(cwd);
-      const { code, stdout, stderr } = await new Promise((resolve, reject) => {
+      const { code, result, stderr } = await new Promise((resolve, reject) => {
         let child;
         try {
           child = run(command, args, { cwd, env: env(envFor(cwd)), stdio: ['pipe', 'pipe', 'pipe'] });
@@ -127,16 +134,48 @@ export function createClaudeWriter({ token = process.env.CLAUDE_CODE_OAUTH_TOKEN
           reject(err);
           return;
         }
-        const out = [];
+        // Zeile für Zeile: Werkzeugaufrufe gleich melden, nur das Ergebnis behalten.
+        let line = '';
+        let skipping = false;
+        let found = null;
+        const consume = (raw) => {
+          let ev;
+          try {
+            ev = JSON.parse(raw);
+          } catch {
+            return;
+          }
+          if (ev?.type === 'assistant') {
+            for (const c of ev.message?.content ?? []) {
+              if (c?.type !== 'tool_use' || !onTool) continue;
+              try {
+                onTool(String(c.name ?? ''), c.input ?? {});
+              } catch (err) {
+                logger.warn?.(`Claude: Worklog: ${err.message}`);
+              }
+            }
+          } else if (ev && typeof ev === 'object' && (ev.type === 'result' || (!ev.type && ('structured_output' in ev || 'is_error' in ev)))) found = ev;
+        };
         const errs = [];
-        let size = 0;
         const timer = setTimeout(() => {
           child.kill('SIGKILL');
           reject(new WriterError(`Claude hat nach ${Math.round(limit / 60_000)} Minuten nicht geantwortet`));
         }, limit);
-        child.stdout.on('data', (b) => {
-          size += b.length;
-          if (size <= LIMIT) out.push(b);
+        child.stdout.setEncoding('utf8');
+        child.stdout.on('data', (chunk) => {
+          const parts = chunk.split('\n');
+          for (let i = 0; i < parts.length - 1; i += 1) {
+            if (!skipping) consume(line + parts[i]);
+            line = '';
+            skipping = false;
+          }
+          if (skipping) return;
+          line += parts.at(-1);
+          // Übergroße Zeile (etwa eine lange Notiz als Werkzeugergebnis): bis zum Zeilenende überspringen.
+          if (line.length > LIMIT) {
+            line = '';
+            skipping = true;
+          }
         });
         child.stderr.on('data', (b) => errs.push(b));
         child.on('error', (err) => {
@@ -145,17 +184,13 @@ export function createClaudeWriter({ token = process.env.CLAUDE_CODE_OAUTH_TOKEN
         });
         child.on('close', (c) => {
           clearTimeout(timer);
-          resolve({ code: c, stdout: Buffer.concat(out).toString('utf8'), stderr: Buffer.concat(errs).toString('utf8') });
+          if (!skipping && line.trim()) consume(line);
+          resolve({ code: c, result: found, stderr: Buffer.concat(errs).toString('utf8') });
         });
         child.stdin.on('error', () => {});
         child.stdin.end(input);
       });
-      let result;
-      try {
-        result = JSON.parse(stdout);
-      } catch {
-        throw new WriterError(`Claude antwortet ohne JSON (Exit ${code})${stderr.trim() ? `: ${stderr.trim().slice(0, 300)}` : ''}`);
-      }
+      if (!result) throw new WriterError(`Claude antwortet ohne JSON (Exit ${code})${stderr.trim() ? `: ${stderr.trim().slice(0, 300)}` : ''}`);
       if (result.is_error || code !== 0) {
         const why = [result.result, ...(result.errors ?? [])].filter(Boolean).join(' ').slice(0, 300) || result.subtype || `Exit ${code}`;
         throw new WriterError(`Claude: ${why}`);

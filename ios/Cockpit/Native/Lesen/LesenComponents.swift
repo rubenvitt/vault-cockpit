@@ -100,6 +100,49 @@ struct LesenBar: View {
     }
 }
 
+/// Worklog wie `.worklog` im Web (src/lesen/worklog.js): ausklappbar, grob was Claude im
+/// Hintergrund tut, mit Uhrzeit. `live`: läuft noch, die letzte Zeile ist hervorgehoben.
+/// Ohne Einträge nichts.
+struct WorklogDisclosure: View {
+    let entries: [WorklogEntry]
+    var live = false
+
+    @State private var expanded = false
+
+    var body: some View {
+        if !entries.isEmpty {
+            DisclosureGroup(isExpanded: $expanded) {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(entries.enumerated()), id: \.offset) { index, entry in
+                        let current = live && index == entries.count - 1
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(entry.time() ?? "")
+                                .monospacedDigit()
+                                .foregroundStyle(Theme.text3)
+                            Text(entry.text)
+                                .fontWeight(current ? .semibold : .regular)
+                                .foregroundStyle(current ? Theme.text : Theme.text2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+                .font(.footnote)
+                .padding(.leading, 10)
+                .overlay(alignment: .leading) {
+                    Rectangle().fill(Theme.line).frame(width: 2)
+                }
+                .padding(.top, 6)
+            } label: {
+                Text("Worklog · \(entries.count) \(entries.count == 1 ? "Schritt" : "Schritte")")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.text2)
+            }
+            .tint(Theme.text2)
+        }
+    }
+}
+
 /// Knopf „Im Vault ablegen“, „Unterwegs hören“ usw. (`.btn.quiet`).
 struct LesenQuietButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {

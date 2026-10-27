@@ -7,6 +7,7 @@ import { htmlToMarkdown } from './extract.js';
 import { blockId, fullTextOf, slugOf } from './vault-export.js';
 import { breakTemplater, safeWikiMarkdown } from './wiki-markdown.js';
 import { parseNote } from '../vault/markdown.js';
+import { logStep, logTool } from './worklog.js';
 
 /**
  * Ingest ins Mycel-Wiki: Claude entwirft, der Nutzer hakt ab, erst dann
@@ -46,6 +47,9 @@ import { parseNote } from '../vault/markdown.js';
  * `onApplied(docId)`: Dort reiht main.js das Einpflanzen ein
  * (src/lesen/einpflanzen.js), das die Quelle in die Seiten einarbeitet und
  * Widersprüche als Spannung festhält.
+ *
+ * Worklog (src/lesen/worklog.js): Was beim Entwerfen passiert, steht live
+ * unter `worklog(docId)` und danach im Entwurf (`draft.log`).
  *
  * Es entsteht immer nur ein Entwurf zugleich (Claude-Abo schonen). Nach einem
  * Neustart gehen angefangene Entwürfe wieder in die Warteschlange.
@@ -337,6 +341,8 @@ function itemCounts(draft) {
  */
 export function createIngest({ store, writer, search, index, exporter, editor, policy, settings, vaultPath, onApplied = null, logger = console, now = () => new Date(), resumeDelayMs = 1000 }) {
   const queue = [];
+  // Worklog laufender und fehlgeschlagener Entwürfe (nur im Speicher).
+  const logs = new Map();
   const applying = new Set();
   let pump = null;
   const iso = () => now().toISOString();
@@ -619,20 +625,29 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
       return;
     }
     const model = settings.get().ingest?.model ?? null;
+    const log = [];
+    logs.set(docId, log);
     try {
       store.saveIngest(docId, { status: 'entwirft', error: null, model });
       if (!htmlToMarkdown(doc.content_html)) throw new IngestError('Dieser Text hat keinen Lesetext');
       const text = fullTextOf(doc).slice(0, DOC_INPUT);
       const highlights = store.listHighlights({ docId });
+      logStep(log, `Bereitet den Text vor${highlights.length ? `, mit ${highlights.length} ${highlights.length === 1 ? 'Markierung' : 'Markierungen'}` : ''}`, now());
       const candidates = await findCandidates(doc, text, highlights);
-      const out = await writer.write({ system: SYSTEM, prompt: PROMPT, input: inputFor(doc, text, highlights, candidates), schema: SCHEMA });
+      logStep(log, `Sucht passende Seiten im Wiki: ${candidates.length} ${candidates.length === 1 ? 'Kandidat' : 'Kandidaten'}`, now());
+      logStep(log, `Claude entwirft Source-Page und Vorschläge${model ? ` (${model})` : ''}`, now());
+      const out = await writer.write({ system: SYSTEM, prompt: PROMPT, input: inputFor(doc, text, highlights, candidates), schema: SCHEMA, onTool: (name, args) => logTool(log, name, args, now()) });
       const draft = shape(out, { doc, candidates, text });
+      logStep(log, `Entwurf geprüft: ${draft.items.length} ${draft.items.length === 1 ? 'Vorschlag' : 'Vorschläge'}`, now());
+      draft.log = log;
       // Inzwischen verworfen oder gelöscht: nichts überschreiben.
       if (store.getIngest(docId)?.status !== 'entwirft') return;
+      logs.delete(docId);
       store.saveIngest(docId, { status: 'bereit', draft, drafted_at: iso(), error: null });
       logger.info?.(`Ingest „${doc.title || doc.url}“: Entwurf bereit, ${draft.items.length} Vorschläge`);
     } catch (err) {
       logger.warn?.(`Ingest „${doc.title || doc.url}“: ${err.message}`);
+      logStep(log, `Abgebrochen: ${err.message}`, now());
       try {
         if (store.get(docId)) store.saveIngest(docId, { status: 'fehler', error: err.message });
       } catch {
@@ -1101,6 +1116,9 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
     return n;
   }
 
+  /** Worklog eines Entwurfs: live beim Entwerfen, danach aus dem Entwurf; sonst null. */
+  const worklog = (docId) => logs.get(docId) ?? store.getIngest(docId)?.draft?.log ?? null;
+
   const get = (docId) => {
     const row = store.getIngest(docId);
     return row ? view(row, docInfo(store.get(row.doc_id)), { full: true }) : null;
@@ -1135,6 +1153,7 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
     request,
     requestStack,
     get,
+    worklog,
     list({ status = null } = {}) {
       return store.listIngests({ status }).map((r) =>
         view(r, { id: r.doc_id, title: r.doc_title, url: r.doc_url, site: r.doc_site, reading_minutes: r.doc_reading_minutes, status: r.doc_status }, { full: false }),

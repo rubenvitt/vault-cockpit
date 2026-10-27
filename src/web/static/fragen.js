@@ -1,5 +1,5 @@
 // Fragen (src/fragen/page.js): Solange Claude antwortet, holt die Seite alle
-// paar Sekunden `/fragen/stand` und zeigt, wie viele Notizen gelesen sind; ist
+// paar Sekunden `/fragen/stand` und zeigt, was Claude gerade tut (Worklog); ist
 // die Antwort da, lädt sie neu. Ohne JavaScript gibt es „Stand aktualisieren“.
 // Dazu: Absenden mit Cmd/Strg+Enter und kein doppeltes Absenden.
 (() => {
@@ -25,9 +25,13 @@
       const res = await fetch(`/fragen/stand?id=${encodeURIComponent(id)}`, { headers: { accept: 'application/json' } });
       const data = await res.json();
       if (!data.busy) return location.reload();
-      const label = new DOMParser().parseFromString(data.html, 'text/html').querySelector('[data-label]');
-      const mine = busy.querySelector('[data-label]');
-      if (label && mine) mine.textContent = label.textContent;
+      // Stand und Worklog tauschen; ein aufgeklappter Worklog bleibt offen.
+      const next = new DOMParser().parseFromString(data.html, 'text/html').querySelector('[data-busy]');
+      if (next) {
+        const open = busy.querySelector('[data-worklog]')?.open;
+        busy.innerHTML = next.innerHTML;
+        if (open) busy.querySelector('[data-worklog]')?.setAttribute('open', '');
+      }
     } catch {
       /* Netz kurz weg: beim nächsten Mal */
     }
