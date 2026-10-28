@@ -38,8 +38,8 @@ import { worklogHtml, worklogJson } from './worklog.js';
  *   Seite den Fortschritt ohne Neuladen zeigt.
  * - `/lesen/folgen/audio?id=…`: die MP3, mit `Range` (Safari spielt Audio
  *   nur so ab, und Vorspulen braucht es auch).
- * - `/lesen/folgen/transkript?id=…`: der ganze Text eines Transkripts als
- *   Markdown (`portableMarkdown`), für „Text kopieren“ an der Karte.
+ * - `/lesen/folgen/transkript?id=…`: was in einem Transkript gesprochen wird
+ *   (Gespräch bzw. Sprechfassung) als Markdown, für „Text kopieren“ an der Karte.
  * - `/aktion/lesen/folge/teilen` legt einen Einmal-Link an: `/geteilt.md?t=…`
  *   liefert ohne Anmeldung dasselbe Markdown, höchstens `SHARE_MINUTES` lang
  *   und nur beim ersten Abruf (`createShareLinks`; HEAD verbraucht ihn nicht).
@@ -76,6 +76,26 @@ const ownNote = (md, id) => {
   const front = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n---/.exec(String(md))?.[1] ?? '';
   return new RegExp(`^folge_id:\\s*"?${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"?\\s*$`, 'm').test(front);
 };
+
+/** Abschnitte einer Folgen-Notiz, die nicht gesprochen werden (src/lesen/folgen.js, `saveNote`). */
+const UNSPOKEN = new Set(['Überblick', 'Kernaussagen', 'Querverbindungen', 'Offene Fragen', 'Recherche', 'Quellen']);
+
+/**
+ * Der gesprochene Teil einer Folgen-Notiz: „Gespräch“ oder „Sprechfassung“,
+ * bei einem Thema die Kapitel (alle `##`-Abschnitte außer `UNSPOKEN`); null,
+ * wenn nichts davon da ist.
+ */
+export function spokenOfNote(md) {
+  const sections = String(md ?? '').split(/^## +/m).slice(1).map((part) => {
+    const nl = part.indexOf('\n');
+    return { title: (nl < 0 ? part : part.slice(0, nl)).trim(), body: nl < 0 ? '' : part.slice(nl + 1).trim() };
+  });
+  const main = sections.find((s) => s.title === 'Gespräch' || s.title === 'Sprechfassung');
+  if (main) return main.body ? `${main.body}\n` : null;
+  const chapters = sections.filter((s) => !UNSPOKEN.has(s.title) && s.body);
+  if (!chapters.length) return null;
+  return `${chapters.length > 1 ? chapters.map((c) => `## ${c.title}\n\n${c.body}`).join('\n\n') : chapters[0].body}\n`;
+}
 
 /**
  * Einmal-Links im Speicher: `create(id)` → `{ token, expiresAt }`, `take(token)`
@@ -794,18 +814,19 @@ export function folgenRoutes({ store, episodes, ingest = null, readNote = null, 
   const shares = createShareLinks({ now });
 
   /**
-   * Ganzer Text eines Transkripts als Markdown: die Notiz im Vault, wenn sie
-   * noch zur Folge gehört (`folge_id`), sonst Claudes Skript. Eine Notiz, die
-   * das Cockpit nicht zeigen darf (`readNote` → false), gibt es auch nicht
-   * aus dem Skript. Auch während aus dem Transkript Audio entsteht.
+   * Was in der Folge gesprochen wird, als Markdown (Ruben will nur den
+   * Sprechteil, ohne Überblick, Recherche und Quellen): aus Claudes Skript,
+   * sonst aus der Notiz im Vault, wenn sie noch zur Folge gehört
+   * (`folge_id`). Eine Notiz, die das Cockpit nicht zeigen darf
+   * (`readNote` → false), gibt es auch nicht aus dem Skript. Auch während aus
+   * dem Transkript Audio entsteht.
    */
   async function transcriptOf(ep) {
     if (!ep || ep.kind === 'vorlesen' || !(['transkript', 'fertig'].includes(ep.status) || ep.transcript_at)) return null;
     const note = ep.note && readNote ? await readNote(ep.note) : null;
     if (note === false) return null;
-    if (note && ownNote(note, ep.id)) return portableMarkdown(note);
-    const script = episodes.scriptText(ep.id);
-    return script ? portableMarkdown(script) : null;
+    const spoken = episodes.spokenText(ep.id) ?? (note && ownNote(note, ep.id) ? spokenOfNote(note) : null);
+    return spoken ? portableMarkdown(spoken) : null;
   }
 
   return {
