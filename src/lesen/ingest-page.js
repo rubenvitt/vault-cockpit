@@ -327,15 +327,15 @@ function failedRow(e, ctx, available) {
 /** Hinweis, wenn Claude fehlt: Entwürfe abhaken geht trotzdem. */
 const unavailable = (av) => `<p class="problem unconfigured">Claude ist gerade nicht verfügbar${av.reason ? `: ${esc(av.reason)}` : ''}. Neue Entwürfe entstehen erst wieder, wenn Claude angebunden ist; fertige lassen sich weiter abhaken.</p>`;
 
-function overview({ store, ingest, planter }, ctx) {
+function overview({ store, ingest, planter, now = Date.now }, ctx) {
   const av = ingest.available() ?? { ok: false };
   const all = ingest.list();
   const ready = all.filter((e) => e.status === 'bereit');
   const busy = all.filter((e) => BUSY.includes(e.status));
   const failed = all.filter((e) => e.status === 'fehler');
-  const planting = planter ? plantingNow(all) : [];
+  const at = now();
+  const planting = planter ? plantingNow(all, at) : [];
   const open = openOnStack(store, ingest);
-  const at = Date.now();
 
   const stackForm = av.ok && open
     ? `<form method="post" action="${ENTWERFEN}" class="act ingest-stapel">${hidden({ csrf: ctx.write.csrf, back: INGEST, stapel: '1' })}<button type="submit" class="btn">Ganzen Stapel entwerfen</button><span class="meta">${esc(open === 1 ? 'Ein Text auf dem Stapel hat noch keinen fertigen Entwurf.' : `${open} Texte auf dem Stapel haben noch keinen fertigen Entwurf.`)} Claude entwirft einen nach dem anderen.</span></form>`
@@ -848,7 +848,7 @@ export function appliedMessage(title, r) {
  * Seiten, Stand und Aktionen des Ingests. Ohne `ingest` gibt es nur die
  * JSON-Endpunkte mit `enabled: false`, damit die App fragt statt rät.
  */
-export function ingestRoutes({ store, ingest = null, planter = null, logger = console }) {
+export function ingestRoutes({ store, ingest = null, planter = null, logger = console, now = Date.now }) {
   const off = { ok: true, enabled: false };
   const api = {
     async '/api/lesen/ingest'() {
@@ -866,7 +866,7 @@ export function ingestRoutes({ store, ingest = null, planter = null, logger = co
         busy: all.filter((e) => BUSY.includes(e.status)).map((e) => ({ ...ingestJson(e), label: busyLabel(e) })),
         failed: all.filter((e) => e.status === 'fehler').map(ingestJson),
         // Einpflanzen nach dem Übernehmen: wartet, läuft, fehlgeschlagen oder in den letzten Tagen fertig.
-        planting: planter ? plantingNow(all).map(ingestJson) : [],
+        planting: planter ? plantingNow(all, now()).map(ingestJson) : [],
         plantAvailable: Boolean(planter?.available?.()?.ok),
         actions: ACTIONS,
       });
@@ -923,7 +923,7 @@ export function ingestRoutes({ store, ingest = null, planter = null, logger = co
     pages: {
       ...api,
       async [INGEST](ctx) {
-        return { html: readingPage(ctx, { key: 'ingest', title: 'Ingest', body: overview({ store, ingest, planter }, ctx), scripts: [assets.lesenIngest] }) };
+        return { html: readingPage(ctx, { key: 'ingest', title: 'Ingest', body: overview({ store, ingest, planter, now }, ctx), scripts: [assets.lesenIngest] }) };
       },
       async '/lesen/ingest/doc'(ctx) {
         const id = ctx.url.searchParams.get('id') ?? '';

@@ -266,7 +266,7 @@ test('Einpflanzen in der Oberfläche: Stand als JSON und im Live-Stand, Knopf re
   agentRun = () => new Promise((r) => (release = () => r({ zusammenfassung: 'Fertig.', eingepflanzt: [], offen: [] })));
   await applied();
   await new Promise((r) => setTimeout(r, 20));
-  const routes = ingestRoutes({ store, ingest, planter, logger: quiet });
+  const routes = ingestRoutes({ store, ingest, planter, logger: quiet, now: () => NOW.getTime() });
   const ctx = { url: new URL('http://x/lesen/ingest'), write: { csrf: 't', back: '/lesen/ingest' }, tz: 'Europe/Berlin', nav: {} };
 
   const data = JSON.parse((await routes.pages['/api/lesen/ingest'](ctx)).body);
