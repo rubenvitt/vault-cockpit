@@ -1052,6 +1052,34 @@ export function createEpisodes({
       return Boolean(ep && resumable(ep));
     },
     audioPath: (id) => (find(id)?.status === 'fertig' && existsSync(audioPath(id)) ? audioPath(id) : null),
+    /**
+     * Claudes Text als Markdown aus dem gesicherten Skript, für den Fall, dass
+     * das Transkript nicht im Vault liegt; ohne Skript (Vorlesen) null.
+     */
+    scriptText(id) {
+      const ep = find(id);
+      const script = ep && ep.kind !== 'vorlesen' ? loadScript(id) : null;
+      if (!script) return null;
+      const talk = (turns) => (turns ?? []).filter((t) => String(t.text ?? '').trim()).map((t) => `**${t.speaker === 'B' ? 'Gast' : 'Moderation'}:** ${String(t.text).trim()}`).join('\n\n');
+      let title = cleanTitle(script.title, ep.title);
+      let body;
+      if (ep.source === 'thema') {
+        const found = loadJson(researchPath(id));
+        const chapters = script.chapters ?? [];
+        title = found?.title ?? ep.title;
+        const name = (i) => {
+          const t = found?.chapters?.[i]?.title;
+          return chapters.length > 1 ? `Kapitel ${i + 1}${t ? `: ${t}` : ''}` : t || 'Kapitel 1';
+        };
+        body = chapters.map((c, i) => `## ${name(i)}\n\n${ep.kind === 'podcast' ? talk(c.turns) : String(c.spoken ?? '').trim()}`).join('\n\n');
+      } else if (ep.kind === 'podcast') {
+        body = `## Gespräch\n\n${talk(script.turns)}`;
+      } else {
+        const spoken = String(script.spoken ?? '').trim();
+        body = [String(script.note ?? '').trim(), spoken && `## Sprechfassung\n\n${spoken}`].filter(Boolean).join('\n\n');
+      }
+      return `# ${title}\n\n${body.trim()}\n`;
+    },
     /** Zeichen und Texte vor dem Anstoßen, für die Auswahlseite. */
     preview({ kind, docIds, minutes = 10, audio = true }) {
       const docs = docsOf(docIds);

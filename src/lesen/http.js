@@ -42,6 +42,8 @@ import { weiterRoutes } from './weiter.js';
  * Querverbindungen der Leseansicht ein (src/lesen/connections.js).
  * `speech` ist die Stimme vom Server (src/lesen/tts.js); ohne liest nur das Gerät vor.
  * `episodes` erzeugt Folgen aus dem Stapel (src/lesen/folgen.js); ohne gibt es die Seite „Folgen“ nicht.
+ * `readNote(path)` liest eine Vault-Notiz (Text der Transkripte zum Kopieren
+ * und Teilen), `publicUrl` macht deren Einmal-Links absolut.
  * `onChange(docId)` meldet Statuswechsel und geänderte Markierungen (für die
  * Lesestapel-Notiz im Vault, src/lesen/vault-export.js). `exporter` schaltet
  * „In den Vault“ und „Im Vault ablegen“ ein (VCP-96, src/lesen/doc.js).
@@ -57,7 +59,7 @@ import { weiterRoutes } from './weiter.js';
  * um „Ingest“ mit der Zahl der bereiten Entwürfe; src/web/http.js reicht es als
  * `ctx.nav` an die Seiten.
  */
-export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefined, capture = null, review = {}, embedCache = null, connections = null, exporter = null, speech = null, episodes = null, ingest = null, planter = null, fragen = null, onChange = () => {}, logger = console }) {
+export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefined, capture = null, review = {}, embedCache = null, connections = null, exporter = null, speech = null, episodes = null, readNote = null, publicUrl = '', ingest = null, planter = null, fragen = null, onChange = () => {}, logger = console }) {
   const feeds = feedRoutes({ store, fetchFeed, logger });
   /** Fehler aus Abruf und Speicher als Meldung für die Seite. */
   const asAction = async (run) => {
@@ -77,7 +79,7 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
   const doc = docRoutes({ store, asAction, onChange, exporter, ingest });
   const marked = highlightRoutes({ store, asAction, capture, onChange, logger });
   const wiedersehen = reviewRoutes({ store, capture, logger, embedCache, ...review });
-  const folgen = folgenRoutes({ store, episodes, ingest });
+  const folgen = folgenRoutes({ store, episodes, ingest, readNote, publicUrl });
   const ingestUi = ingestRoutes({ store, ingest, planter, logger });
   const ask = fragen ? fragenRoutes(fragen) : { pages: {}, actions: {} };
   // „Weiter“: wo jeder Text steht und was als Nächstes geht; Einstieg in den Bereich.
@@ -93,6 +95,8 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
       audio: (params) => listenAudio(store, speech, params),
       voice: () => speech?.voice() ?? null,
     },
+    /** Einmal-Link eines Transkripts, ohne Anmeldung (`{ path, get }`, src/lesen/folgen-page.js) oder null. */
+    shared: folgen.shared,
     /** Pfad der fertigen MP3 einer Folge oder null (für `/api/app/folge`). */
     episodeAudio: (id) => episodes?.audioPath(id) ?? null,
     uploads: { ...add.uploads, ...feeds.uploads },

@@ -938,6 +938,10 @@ html[data-read-sans] .lesen-text :is(h1, h2, h3, h4, h5, h6) { font-family: var(
 .folge-ingest-wahl form { display: grid; gap: var(--s-3); }
 .folge-ingest-wahl form .meta { margin: 0; }
 .folge-ingest-wahl form > .btn { justify-self: start; }
+/* Einmal-Link eines Transkripts: Adresse zum Markieren, Knopf zum Kopieren. */
+.folge-link:not([hidden]) { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1) var(--s-2); }
+.folge-link-url { flex: 1 1 16rem; min-width: 0; font-size: var(--t-sm); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.folge-link .meta { flex-basis: 100%; margin: 0; }
 .folge-textwahl.is-done { cursor: default; }
 .folge-textwahl.is-done .folge-textwahl-text { opacity: .55; }
 /* Erst nur Transkript: Dokument statt Abspielen, Knopf „Audio erzeugen“ */

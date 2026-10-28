@@ -6,7 +6,7 @@ import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, existsSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createEpisodes, inputShares, chunkText, dialogueBatches, stripId3, audioFrames, EpisodeError, DEFAULT_NOTE_FOLDER } from '../src/lesen/folgen.js';
-import { parseRange, progressOf, clock, newSummary, episodeCard } from '../src/lesen/folgen-page.js';
+import { parseRange, progressOf, clock, newSummary, episodeCard, portableMarkdown, createShareLinks, SHARED_PATH } from '../src/lesen/folgen-page.js';
 import { createClaudeWriter, WriterError } from '../src/lesen/claude.js';
 import { createReadingStore } from '../src/lesen/store.js';
 import { readingRoutes } from '../src/lesen/http.js';
@@ -623,6 +623,70 @@ test('Folgen: Ton, Themen der Texte und „erst nur Transkript“ im Formular un
     assert.equal(calls.writes.length, 1);
     assert.deepEqual(calls.speech.map((c) => c.text), ['Zwei Texte. Beide kurz.']);
   }));
+
+test('Folgen: Transkript als Markdown kopieren und per Einmal-Link teilen', () =>
+  withDir(async (dir) => {
+    const { store, a, b, episodes, calls } = setup(dir);
+    // Wie `noteVisible` in src/main.js: der Inhalt der Notiz, so wie sie angelegt wurde.
+    const readNote = (path) => calls.notes.find((n) => `${n.folder}/${n.name}` === path)?.content ?? null;
+    let clockMs = Date.parse('2026-10-28T07:00:00Z');
+    const routes = readingRoutes({ store, episodes, readNote, publicUrl: 'https://vault.test/', logger: quiet });
+    const ctx = (path) => ({ url: new URL(`https://vault.test${path}`), range: null, user: 'ruben', tz: 'Europe/Berlin', write: { csrf: 'c', back: path }, flash: null });
+    const page = (path) => routes.pages[new URL(`https://vault.test${path}`).pathname](ctx(path));
+
+    const ep = episodes.create({ kind: 'podcast', docIds: [a.id, b.id], minutes: 5, audio: false });
+    await ep.done;
+    assert.equal(episodes.get(ep.id).status, 'transkript');
+
+    const card = (await page('/lesen/folgen')).html;
+    assert.match(card, new RegExp(`<a href="/lesen/folgen/transkript\\?id=${ep.id}" class="btn quiet" data-copy>Text kopieren`));
+    assert.match(card, /<form method="post" action="\/aktion\/lesen\/folge\/teilen" class="inline" data-share>/);
+    assert.match(card, /<div class="folge-link" data-share-out hidden><\/div>/);
+
+    const md = await page(`/lesen/folgen/transkript?id=${ep.id}`);
+    assert.equal(md.headers['content-type'], 'text/markdown; charset=utf-8');
+    assert.equal(md.headers['cache-control'], 'no-store');
+    assert.match(md.body, /^# Lesen und Hören\n/, 'ohne Frontmatter');
+    assert.match(md.body, /\*\*Moderation:\*\* Willkommen\.\n\n\*\*Gast:\*\* Danke\./);
+    assert.match(md.body, /- Vom Lesen\n/, 'Wikilink als Text');
+    assert.doesNotMatch(md.body, /\[\[|folge_id/);
+    assert.equal((await page('/lesen/folgen/transkript?id=gibts-nicht')).status, 404);
+
+    const shared = await routes.actions['/aktion/lesen/folge/teilen'](new URLSearchParams({ id: ep.id }), {});
+    assert.match(shared.url, /^https:\/\/vault\.test\/geteilt\.md\?t=[\w-]{32}$/);
+    assert.equal(shared.minutes, 15);
+    assert.match(shared.message, /15 Minuten gültig und nur einmal abrufbar: https:\/\/vault\.test\/geteilt\.md\?t=/);
+    const token = new URL(shared.url).searchParams.get('t');
+    assert.equal(routes.shared.path, SHARED_PATH);
+    assert.equal((await routes.shared.get(token, { consume: false })).status, 200, 'HEAD verbraucht nicht');
+    const first = await routes.shared.get(token);
+    assert.equal(first.status, 200);
+    assert.equal(first.body, md.body);
+    assert.equal(first.headers['x-robots-tag'], 'noindex, nofollow');
+    const second = await routes.shared.get(token);
+    assert.equal(second.status, 404, 'nur einmal');
+    assert.match(second.body, /abgelaufen oder wurde schon benutzt/);
+    assert.equal((await routes.shared.get('')).status, 404);
+    await assert.rejects(routes.actions['/aktion/lesen/folge/teilen'](new URLSearchParams({ id: 'gibts-nicht' }), {}), /kein Transkript/);
+
+    // Ohne Notiz im Vault: Claudes Skript.
+    const fromScript = readingRoutes({ store, episodes, logger: quiet });
+    const plain = await fromScript.pages['/lesen/folgen/transkript'](ctx(`/lesen/folgen/transkript?id=${ep.id}`));
+    assert.equal(plain.body, '# Lesen und Hören\n\n## Gespräch\n\n**Moderation:** Willkommen.\n\n**Gast:** Danke.\n');
+
+    // Ablauf nach 15 Minuten.
+    const links = createShareLinks({ now: () => clockMs });
+    const late = links.create('x');
+    assert.equal(late.expiresAt, '2026-10-28T07:15:00.000Z');
+    clockMs += 15 * 60_000;
+    assert.equal(links.take(late.token), null);
+  }));
+
+test('Folgen: portableMarkdown nimmt Frontmatter, Wikilinks und Einbettungen heraus', () => {
+  const md = '---\ntype: folge\nquellen:\n  - "[[a/b]]"\n---\n\n# Titel\n\nSiehe [[ordner/Notiz]], [[x|Anzeige]] und [[y#Abschnitt]].\n![[bild.png]]\n';
+  assert.equal(portableMarkdown(md), '# Titel\n\nSiehe Notiz, Anzeige und y.\n');
+  assert.equal(portableMarkdown('Nur Text'), 'Nur Text\n');
+});
 
 test('Folgen: „Texte ingesten“ auf der Karte mit Auswahl, auch wenn die Texte nicht mehr im Stapel liegen', () =>
   withDir(async (dir) => {
