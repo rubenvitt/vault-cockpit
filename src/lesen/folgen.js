@@ -1053,32 +1053,27 @@ export function createEpisodes({
     },
     audioPath: (id) => (find(id)?.status === 'fertig' && existsSync(audioPath(id)) ? audioPath(id) : null),
     /**
-     * Claudes Text als Markdown aus dem gesicherten Skript, für den Fall, dass
-     * das Transkript nicht im Vault liegt; ohne Skript (Vorlesen) null.
+     * Nur was gesprochen wird, als Markdown aus dem gesicherten Skript: beim
+     * Podcast das Gespräch (Sprecher fett), beim Report die Sprechfassung, bei
+     * einem Thema je Kapitel (mit Überschrift, wenn es mehrere sind). Ohne
+     * Skript (Vorlesen, fertige Folgen) null.
      */
-    scriptText(id) {
+    spokenText(id) {
       const ep = find(id);
       const script = ep && ep.kind !== 'vorlesen' ? loadScript(id) : null;
       if (!script) return null;
       const talk = (turns) => (turns ?? []).filter((t) => String(t.text ?? '').trim()).map((t) => `**${t.speaker === 'B' ? 'Gast' : 'Moderation'}:** ${String(t.text).trim()}`).join('\n\n');
-      let title = cleanTitle(script.title, ep.title);
-      let body;
+      const said = (part) => (ep.kind === 'podcast' ? talk(part.turns) : String(part.spoken ?? '').trim());
+      let text;
       if (ep.source === 'thema') {
         const found = loadJson(researchPath(id));
         const chapters = script.chapters ?? [];
-        title = found?.title ?? ep.title;
-        const name = (i) => {
-          const t = found?.chapters?.[i]?.title;
-          return chapters.length > 1 ? `Kapitel ${i + 1}${t ? `: ${t}` : ''}` : t || 'Kapitel 1';
-        };
-        body = chapters.map((c, i) => `## ${name(i)}\n\n${ep.kind === 'podcast' ? talk(c.turns) : String(c.spoken ?? '').trim()}`).join('\n\n');
-      } else if (ep.kind === 'podcast') {
-        body = `## Gespräch\n\n${talk(script.turns)}`;
+        const name = (i) => `Kapitel ${i + 1}${found?.chapters?.[i]?.title ? `: ${found.chapters[i].title}` : ''}`;
+        text = chapters.map((c, i) => (chapters.length > 1 ? `## ${name(i)}\n\n${said(c)}` : said(c))).join('\n\n');
       } else {
-        const spoken = String(script.spoken ?? '').trim();
-        body = [String(script.note ?? '').trim(), spoken && `## Sprechfassung\n\n${spoken}`].filter(Boolean).join('\n\n');
+        text = said(script);
       }
-      return `# ${title}\n\n${body.trim()}\n`;
+      return text.trim() ? `${text.trim()}\n` : null;
     },
     /** Zeichen und Texte vor dem Anstoßen, für die Auswahlseite. */
     preview({ kind, docIds, minutes = 10, audio = true }) {

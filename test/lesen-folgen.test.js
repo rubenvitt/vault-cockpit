@@ -6,7 +6,7 @@ import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, existsSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createEpisodes, inputShares, chunkText, dialogueBatches, stripId3, audioFrames, EpisodeError, DEFAULT_NOTE_FOLDER } from '../src/lesen/folgen.js';
-import { parseRange, progressOf, clock, newSummary, episodeCard, portableMarkdown, createShareLinks, SHARED_PATH } from '../src/lesen/folgen-page.js';
+import { parseRange, progressOf, clock, newSummary, episodeCard, portableMarkdown, spokenOfNote, createShareLinks, SHARED_PATH } from '../src/lesen/folgen-page.js';
 import { createClaudeWriter, WriterError } from '../src/lesen/claude.js';
 import { createReadingStore } from '../src/lesen/store.js';
 import { readingRoutes } from '../src/lesen/http.js';
@@ -646,10 +646,7 @@ test('Folgen: Transkript als Markdown kopieren und per Einmal-Link teilen', () =
     const md = await page(`/lesen/folgen/transkript?id=${ep.id}`);
     assert.equal(md.headers['content-type'], 'text/markdown; charset=utf-8');
     assert.equal(md.headers['cache-control'], 'no-store');
-    assert.match(md.body, /^# Lesen und Hören\n/, 'ohne Frontmatter');
-    assert.match(md.body, /\*\*Moderation:\*\* Willkommen\.\n\n\*\*Gast:\*\* Danke\./);
-    assert.match(md.body, /- Vom Lesen\n/, 'Wikilink als Text');
-    assert.doesNotMatch(md.body, /\[\[|folge_id/);
+    assert.equal(md.body, '**Moderation:** Willkommen.\n\n**Gast:** Danke.\n', 'nur das Gesprochene, ohne Titel und Quellen');
     assert.equal((await page('/lesen/folgen/transkript?id=gibts-nicht')).status, 404);
 
     const shared = await routes.actions['/aktion/lesen/folge/teilen'](new URLSearchParams({ id: ep.id }), {});
@@ -669,14 +666,10 @@ test('Folgen: Transkript als Markdown kopieren und per Einmal-Link teilen', () =
     assert.equal((await routes.shared.get('')).status, 404);
     await assert.rejects(routes.actions['/aktion/lesen/folge/teilen'](new URLSearchParams({ id: 'gibts-nicht' }), {}), /kein Transkript/);
 
-    // Ohne Notiz im Vault: Claudes Skript.
+    // Ohne Notiz im Vault: Claudes Skript, gleich.
     const fromScript = readingRoutes({ store, episodes, logger: quiet });
     const plain = await fromScript.pages['/lesen/folgen/transkript'](ctx(`/lesen/folgen/transkript?id=${ep.id}`));
-    assert.equal(plain.body, '# Lesen und Hören\n\n## Gespräch\n\n**Moderation:** Willkommen.\n\n**Gast:** Danke.\n');
-
-    // Notiz mit fremder `folge_id` (verschoben, neue Notiz am Pfad): Claudes Skript statt der fremden Notiz.
-    const other = readingRoutes({ store, episodes, readNote: () => '---\nfolge_id: "andere"\n---\n# Fremd\n', logger: quiet });
-    assert.equal((await other.pages['/lesen/folgen/transkript'](ctx(`/lesen/folgen/transkript?id=${ep.id}`))).body, plain.body);
+    assert.equal(plain.body, md.body);
     // Vertraulich gewordene Notiz: auch nicht aus dem Skript, der Link bleibt bis zum Ablauf.
     const hidden = readingRoutes({ store, episodes, readNote: () => false, logger: quiet });
     assert.equal((await hidden.pages['/lesen/folgen/transkript'](ctx(`/lesen/folgen/transkript?id=${ep.id}`))).status, 404);
@@ -693,6 +686,12 @@ test('Folgen: Transkript als Markdown kopieren und per Einmal-Link teilen', () =
     assert.equal((await flaky.shared.get(kept)).status, 200);
     assert.equal((await flaky.shared.get(kept)).status, 404);
 
+    // Ohne Skript: der gesprochene Teil der Notiz, aber nur, wenn sie zur Folge gehört (`folge_id`).
+    rmSync(join(dir, `${ep.id}.skript.json`));
+    assert.equal((await page(`/lesen/folgen/transkript?id=${ep.id}`)).body, md.body);
+    const other = readingRoutes({ store, episodes, readNote: () => '---\nfolge_id: "andere"\n---\n## Gespräch\n\nFremd\n', logger: quiet });
+    assert.equal((await other.pages['/lesen/folgen/transkript'](ctx(`/lesen/folgen/transkript?id=${ep.id}`))).status, 404);
+
     // Ablauf nach 15 Minuten.
     const links = createShareLinks({ now: () => clockMs });
     const late = links.create('x');
@@ -700,6 +699,14 @@ test('Folgen: Transkript als Markdown kopieren und per Einmal-Link teilen', () =
     clockMs += 15 * 60_000;
     assert.equal(links.take(late.token), null);
   }));
+
+test('Folgen: spokenOfNote nimmt nur, was gesprochen wird', () => {
+  const report = '# R\n\n_Report (Cockpit)_\n\n## Überblick\n\nKurz.\n\n## Kernaussagen\n\n### A\n\nX.\n\n## Sprechfassung\n\nZwei Texte. Beide kurz.\n\n## Quellen\n\n- [[a|A]]\n';
+  assert.equal(spokenOfNote(report), 'Zwei Texte. Beide kurz.\n');
+  const topic = '# T\n\n> [!note] Ziele\n> z\n\n## Überblick\n\nÜ\n\n## Kapitel 1: Eins\n\nErstens.\n\n## Kapitel 2: Zwei\n\nZweitens.\n\n## Recherche\n\nDossier\n\n## Quellen\n\n- x\n';
+  assert.equal(spokenOfNote(topic), '## Kapitel 1: Eins\n\nErstens.\n\n## Kapitel 2: Zwei\n\nZweitens.\n');
+  assert.equal(spokenOfNote('# Nur Titel\n\n## Quellen\n\n- x\n'), null);
+});
 
 test('Folgen: portableMarkdown nimmt Frontmatter, Wikilinks und Einbettungen heraus', () => {
   const md = '---\ntype: folge\nquellen:\n  - "[[a/b]]"\n---\n\n# Titel\n\nSiehe [[ordner/Notiz]], [[x|Anzeige]] und [[y#Abschnitt]].\n![[bild.png]]\n';
