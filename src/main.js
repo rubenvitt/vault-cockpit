@@ -461,6 +461,9 @@ const webHttp = process.env.WEB_CLIENT_ID
         embedCache,
         speech,
         episodes,
+        // Text der Transkripte zum Kopieren und für Einmal-Links: nur Notizen, die das Cockpit zeigen darf.
+        readNote: (path) => noteVisible(path)?.content ?? null,
+        publicUrl: PUBLIC_URL,
         // Querverbindungen in der Leseansicht (VCP-73): Wikilinks nur in die Lesestapel-Notiz.
         connections: { index, semantic: currentSemantic, policy: POLICY, exporter: readingExport },
         // „In den Vault“ und „Im Vault ablegen“ (VCP-96) schreiben die Lesestapel-Notiz sofort.

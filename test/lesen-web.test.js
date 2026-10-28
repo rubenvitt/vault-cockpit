@@ -20,7 +20,7 @@ const ARTICLE = `<html><head><title>Vom Lesen</title><meta property="og:site_nam
  * Sitzungs-Cookie. Adressen aus `pages` liefert der Test, alles andere geht an
  * den echten Abruf mit einem DNS, das nur `localhost` kennt.
  */
-async function withReading(run, { pages = {} } = {}) {
+async function withReading(run, { pages = {}, wrap = (r) => r } = {}) {
   const store = createReadingStore({ path: ':memory:' });
   const fetchPage = async (url) => {
     if (pages[url]) return { url, body: pages[url] };
@@ -29,7 +29,7 @@ async function withReading(run, { pages = {} } = {}) {
   const webHttp = createWebHttp({
     cockpit: { week: async () => null },
     settings: createSettingsStore({ defaults: { tz: 'Europe/Berlin' }, logger: quiet }),
-    reading: readingRoutes({ store, fetchPage, logger: quiet }),
+    reading: wrap(readingRoutes({ store, fetchPage, logger: quiet })),
     oidc: {},
     sessionSecret: SECRET,
     publicUrl: 'https://vault.test',
@@ -143,5 +143,29 @@ test('Lesen: URL speichern erscheint mit Titel, Quelle und Lesezeit im Eingang; 
       assert.equal(store.list().length, 1);
     },
     { pages: { 'https://blatt.test/vom-lesen': ARTICLE } },
+  );
+});
+
+test('Lesen: Einmal-Link eines Transkripts ohne Anmeldung, HEAD verbraucht ihn nicht', async () => {
+  const seen = [];
+  const shared = {
+    path: '/geteilt.md',
+    async get(token, { consume }) {
+      seen.push([token, consume]);
+      return token === 'gut' ? { status: 200, body: '# Text\n', headers: { 'content-type': 'text/markdown; charset=utf-8', 'cache-control': 'no-store' } } : { status: 404, body: 'weg\n', headers: { 'content-type': 'text/plain; charset=utf-8' } };
+    },
+  };
+  await withReading(
+    async ({ call }) => {
+      const ok = await call('/geteilt.md?t=gut', { cookie: false });
+      assert.equal(ok.status, 200);
+      assert.equal(ok.headers.get('content-type'), 'text/markdown; charset=utf-8');
+      assert.equal(await ok.text(), '# Text\n');
+      assert.equal((await call('/geteilt.md?t=gut', { method: 'HEAD', cookie: false })).status, 200);
+      assert.equal((await call('/geteilt.md?t=falsch', { cookie: false })).status, 404);
+      assert.equal((await call('/geteilt.md?t=gut', { method: 'POST', form: {}, cookie: false })).status, 405, 'nur GET und HEAD');
+      assert.deepEqual(seen, [['gut', true], ['gut', false], ['falsch', true]]);
+    },
+    { wrap: (r) => ({ ...r, shared }) },
   );
 });

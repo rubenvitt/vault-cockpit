@@ -202,6 +202,82 @@
     engine.toggle();
   });
 
+  // MARK: Transkript kopieren und teilen
+
+  // Safari kopiert nur im Klick selbst: Der Text darf als Promise nachkommen
+  // (ClipboardItem), `writeText` nach einem `await` lehnt es ab.
+  async function copyFrom(src) {
+    const load = async () => {
+      const res = await fetch(src, { credentials: 'same-origin', cache: 'no-store' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.text();
+    };
+    if (window.ClipboardItem && navigator.clipboard?.write) {
+      try {
+        const blob = load().then((text) => new Blob([text], { type: 'text/plain' }));
+        await navigator.clipboard.write([new ClipboardItem({ 'text/plain': blob })]);
+        return;
+      } catch {
+        /* weiter mit writeText */
+      }
+    }
+    await navigator.clipboard.writeText(await load());
+  }
+
+  async function copyText(text, field) {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast('Link kopiert');
+    } catch {
+      field?.select();
+      toast('Link markiert, bitte kopieren');
+    }
+  }
+
+  list.addEventListener('click', async (e) => {
+    const copy = e.target.closest('[data-copy]');
+    if (copy) {
+      e.preventDefault();
+      try {
+        await copyFrom(copy.getAttribute('href'));
+        toast('Text kopiert');
+      } catch {
+        // Ohne Zugriff auf die Zwischenablage: das Markdown öffnen, dort lässt es sich markieren.
+        location.href = copy.getAttribute('href');
+      }
+      return;
+    }
+    const again = e.target.closest('[data-share-copy]');
+    if (again) copyText(again.dataset.shareCopy, again.parentElement.querySelector('input'));
+  });
+
+  list.addEventListener('submit', async (e) => {
+    const form = e.target.closest('[data-share]');
+    if (!form) return;
+    e.preventDefault();
+    const out = form.closest('.folge')?.querySelector('[data-share-out]');
+    let data;
+    try {
+      const res = await fetch(form.action, { method: 'POST', body: new URLSearchParams(new FormData(form)), headers: { accept: 'application/json' }, credentials: 'same-origin' });
+      data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+    } catch (err) {
+      toast(err.message || 'Kein Link, bitte noch einmal versuchen');
+      return;
+    }
+    if (!out) return toast(data.message);
+    const until = new Date(data.expiresAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+    out.replaceChildren();
+    const field = Object.assign(document.createElement('input'), { type: 'text', readOnly: true, value: data.url, className: 'folge-link-url' });
+    field.setAttribute('aria-label', 'Einmal-Link');
+    field.addEventListener('focus', () => field.select());
+    const button = Object.assign(document.createElement('button'), { type: 'button', className: 'btn quiet', textContent: 'Link kopieren' });
+    button.dataset.shareCopy = data.url;
+    const note = Object.assign(document.createElement('p'), { className: 'meta', textContent: `Gilt bis ${until} Uhr und nur für einen Abruf, liefert reines Markdown.` });
+    out.append(field, button, note);
+    out.hidden = false;
+  });
+
   // MARK: Stand der entstehenden Folgen
 
   let polling = null;

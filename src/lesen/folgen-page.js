@@ -1,4 +1,5 @@
 import { openSync, readSync, closeSync, statSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { esc, assets } from '../web/layout.js';
 import { hidden } from '../web/render.js';
 import { ActionError } from '../cockpit/actions.js';
@@ -37,12 +38,73 @@ import { worklogHtml, worklogJson } from './worklog.js';
  *   Seite den Fortschritt ohne Neuladen zeigt.
  * - `/lesen/folgen/audio?id=…`: die MP3, mit `Range` (Safari spielt Audio
  *   nur so ab, und Vorspulen braucht es auch).
+ * - `/lesen/folgen/transkript?id=…`: der ganze Text eines Transkripts als
+ *   Markdown (`portableMarkdown`), für „Text kopieren“ an der Karte.
+ * - `/aktion/lesen/folge/teilen` legt einen Einmal-Link an: `/geteilt.md?t=…`
+ *   liefert ohne Anmeldung dasselbe Markdown, höchstens `SHARE_MINUTES` lang
+ *   und nur beim ersten Abruf (`createShareLinks`; HEAD verbraucht ihn nicht).
+ *   Die Links liegen nur im Speicher, ein Neustart macht sie ungültig.
  * - `/api/lesen/folgen`, `/api/lesen/folgen/neu?zeit=30` und
  *   `/api/lesen/folgen/thema`: dasselbe als JSON für die App (auch ohne Folgen,
  *   dann mit `enabled: false`); angelegt wird über `/aktion/lesen/folge/thema`.
  */
 
 const fmt = new Intl.NumberFormat('de-DE');
+const TRANSKRIPT = '/lesen/folgen/transkript';
+const TEILEN = '/aktion/lesen/folge/teilen';
+/** Einmal-Link eines Transkripts, ohne Anmeldung (src/web/http.js). */
+export const SHARED_PATH = '/geteilt.md';
+export const SHARE_MINUTES = 15;
+/** So viele Einmal-Links gleichzeitig; der älteste fällt dann weg. */
+const MAX_SHARES = 50;
+
+/**
+ * Markdown einer Vault-Notiz für andere Apps: ohne Frontmatter, Wikilinks als
+ * Text (`[[pfad|Titel]]` → Titel, `[[ordner/notiz]]` → notiz), Einbettungen weg.
+ */
+export function portableMarkdown(md) {
+  return `${String(md ?? '')
+    .replace(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---[ \t]*(\r?\n|$)/, '')
+    .replace(/!\[\[[^\]\n]*\]\]/g, '')
+    .replace(/\[\[([^\]|\n]+)\|([^\]\n]+)\]\]/g, '$2')
+    .replace(/\[\[([^\]\n]+)\]\]/g, (_, target) => target.split('#')[0].split('/').pop() || target)
+    .trim()}\n`;
+}
+
+/**
+ * Einmal-Links im Speicher: `create(id)` → `{ token, expiresAt }`, `take(token)`
+ * → ID der Folge, solange er gilt; danach ist er verbraucht (`consume: false`
+ * nur nachsehen, etwa für HEAD).
+ */
+export function createShareLinks({ minutes = SHARE_MINUTES, max = MAX_SHARES, now = Date.now } = {}) {
+  const links = new Map();
+  const prune = () => {
+    for (const [token, link] of links) if (link.expires <= now()) links.delete(token);
+  };
+  return {
+    create(id) {
+      prune();
+      while (links.size >= max) links.delete(links.keys().next().value);
+      const token = randomBytes(24).toString('base64url');
+      const expires = now() + minutes * 60_000;
+      links.set(token, { id, expires });
+      return { token, expiresAt: new Date(expires).toISOString() };
+    },
+    take(token, { consume = true } = {}) {
+      prune();
+      const key = String(token ?? '');
+      const link = links.get(key);
+      if (!link) return null;
+      if (consume) links.delete(key);
+      return link.id;
+    },
+  };
+}
+
+const MARKDOWN_HEADERS = { 'content-type': 'text/markdown; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'x-robots-tag': 'noindex, nofollow', 'referrer-policy': 'no-referrer' };
+const fileName = (title) => title.replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'Folge';
+const markdownReply = (ep, text) => ({ status: 200, body: text, headers: { ...MARKDOWN_HEADERS, 'content-disposition': `inline; filename*=UTF-8''${encodeURIComponent(`${fileName(ep.title)}.md`)}` } });
+
 /**
  * Zeitfenster für „Neue Folge“: wie im Stapel, dazu längere. Podcast und
  * Report verdichten, also passen mehr Texte hinein, als ihre Länge Lesezeit hat.
@@ -532,7 +594,7 @@ export function episodeCard(ep, { ctx, resumable = false, at = Date.now(), inges
       </div>
       <p class="problem" data-error hidden></p>
     </div>
-    <div class="folge-actions">${mark}${note}${ingestUi.button}<a href="${esc(src)}" class="btn quiet" download="${esc(ep.title.replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'Folge')}.mp3">Herunterladen</a>${remove()}</div>
+    <div class="folge-actions">${mark}${note}${ingestUi.button}<a href="${esc(src)}" class="btn quiet" download="${esc(fileName(ep.title))}.mp3">Herunterladen</a>${remove()}</div>
     ${ingestUi.line}
   </li>`;
   }
@@ -542,15 +604,19 @@ export function episodeCard(ep, { ctx, resumable = false, at = Date.now(), inges
     const note = ep.note
       ? `<a href="/notiz?pfad=${esc(encodeURIComponent(ep.note))}" class="btn">Transkript lesen</a>`
       : '<span class="meta">Das Transkript ließ sich nicht im Vault anlegen; das Skript liegt im Cockpit.</span>';
+    // Ohne JavaScript öffnet „Text kopieren“ das Markdown; mit kopiert es (/static/lesen-folgen.js).
+    const share = `<a href="${TRANSKRIPT}?id=${esc(id)}" class="btn quiet" data-copy>Text kopieren<span class="sr-only">: ${esc(ep.title)}</span></a><form method="post" action="${TEILEN}" class="inline" data-share>${hidden({ csrf: ctx.write.csrf, back: '/lesen/folgen', id: ep.id })}<button type="submit" class="btn quiet">Einmal-Link<span class="sr-only">: ${esc(ep.title)}</span></button></form>`;
     return `<li class="folge is-transcript" data-folge="${esc(ep.id)}" data-status="transkript">
     <div class="folge-card"><span class="folge-play folge-play-doc" aria-hidden="true"><svg viewBox="0 0 24 24">${KIND_ICONS.report}</svg></span>${head(['Transkript', ep.minutes ? `${ep.minutes} Min.` : null, created])}</div>
     <div class="folge-actions">
       ${note}
       <form method="post" action="/aktion/lesen/folge/sprechen" class="inline">${hidden({ csrf: ctx.write.csrf, back: '/lesen/folgen', id: ep.id })}<button type="submit" class="btn primary">${esc(speak.label)}</button></form>
+      ${share}
       ${ingestUi.button}
       ${remove()}
     </div>
     <p class="meta">${esc(speak.hint)}</p>
+    <div class="folge-link" data-share-out hidden></div>
     ${ingestUi.line}
   </li>`;
   }
@@ -711,11 +777,35 @@ function episodeApi({ store, episodes, ingestOf }) {
   };
 }
 
-export function folgenRoutes({ store, episodes, ingest = null }) {
+/**
+ * `readNote(path)` liefert den Inhalt einer Vault-Notiz (oder null), für den
+ * Text eines Transkripts; `publicUrl` macht Einmal-Links absolut.
+ */
+export function folgenRoutes({ store, episodes, ingest = null, readNote = null, publicUrl = '', now = Date.now }) {
   const ingestOf = (ep) => (['fertig', 'transkript'].includes(ep.status) ? episodeIngest(ep, { ingest, store }) : null);
   const api = episodeApi({ store, episodes, ingestOf });
-  if (!episodes) return { pages: api, actions: {} };
+  if (!episodes) return { pages: api, actions: {}, shared: null };
+  const shares = createShareLinks({ now });
+
+  /** Ganzer Text eines Transkripts als Markdown: die Notiz im Vault, sonst Claudes Skript. */
+  async function transcriptOf(ep) {
+    if (!ep || ep.kind === 'vorlesen' || !['transkript', 'fertig'].includes(ep.status)) return null;
+    const note = ep.note && readNote ? await readNote(ep.note) : null;
+    return note ? portableMarkdown(note) : episodes.scriptText(ep.id);
+  }
+
   return {
+    /** Einmal-Link ohne Anmeldung (src/web/http.js): `get(token, { consume })` → Antwort. */
+    shared: {
+      path: SHARED_PATH,
+      async get(token, { consume = true } = {}) {
+        const id = shares.take(token, { consume });
+        const ep = id ? episodes.get(id) : null;
+        const text = await transcriptOf(ep);
+        if (!text) return { status: 404, body: 'Dieser Link ist abgelaufen oder wurde schon benutzt.\n', headers: { ...MARKDOWN_HEADERS, 'content-type': 'text/plain; charset=utf-8' } };
+        return markdownReply(ep, text);
+      },
+    },
     pages: {
       ...api,
       async '/lesen/folgen'(ctx) {
@@ -731,6 +821,12 @@ export function folgenRoutes({ store, episodes, ingest = null }) {
       },
       async '/lesen/folgen/neu'(ctx) {
         return { html: readingPage(ctx, { key: 'folgen', title: 'Neue Folge', body: newPage(episodes, store, ctx), scripts: [assets.lesenFolgen] }) };
+      },
+      async [TRANSKRIPT](ctx) {
+        const ep = episodes.get(ctx.url.searchParams.get('id') ?? '');
+        const text = await transcriptOf(ep);
+        if (!text) return { status: 404, body: 'Zu dieser Folge gibt es kein Transkript.', headers: { 'content-type': 'text/plain; charset=utf-8' } };
+        return markdownReply(ep, text);
       },
       async '/lesen/folgen/audio'(ctx) {
         const path = episodes.audioPath(ctx.url.searchParams.get('id') ?? '');
@@ -818,6 +914,14 @@ export function folgenRoutes({ store, episodes, ingest = null }) {
       async '/aktion/lesen/folge/stelle'(form) {
         const ep = asAction(() => episodes.listened(form.get('id') ?? '', { position: form.get('stelle'), duration: form.get('dauer') }));
         return { message: '', heard: ep.heard, listen: listenOf(ep) };
+      },
+      /** Einmal-Link aufs Transkript: `url` und `expiresAt` für die Seite, die Meldung nennt ihn auch ohne JavaScript. */
+      async [TEILEN](form) {
+        const ep = episodes.get(form.get('id') ?? '');
+        if (!(await transcriptOf(ep))) throw new ActionError('Zu dieser Folge gibt es kein Transkript', 404);
+        const { token, expiresAt } = shares.create(ep.id);
+        const url = `${publicUrl.replace(/\/+$/, '')}${SHARED_PATH}?t=${token}`;
+        return { message: `Einmal-Link, ${SHARE_MINUTES} Minuten gültig und nur einmal abrufbar: ${url}`, url, expiresAt, minutes: SHARE_MINUTES };
       },
       async '/aktion/lesen/folge/loeschen'(form) {
         const ep = asAction(() => episodes.remove(form.get('id') ?? ''));

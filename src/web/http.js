@@ -1109,6 +1109,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   if (health) ROUTES.add('/api/zustand');
   if (notes || reading) ROUTES.add('/api/lesen/offline');
   for (const p of appAccess ? [...appAccess.paths, SITE_ASSOCIATION_PATH, APP_CALLBACK_PATH] : []) ROUTES.add(p);
+  if (reading?.shared) ROUTES.add(reading.shared.path);
 
   return {
     matches: (path) => ROUTES.has(path),
@@ -1128,6 +1129,12 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
           ...file.headers,
         });
         return res.end(file.body);
+      }
+      // Ohne Anmeldung: Einmal-Link eines Transkripts; der Token im Link ist der Schlüssel, HEAD verbraucht ihn nicht.
+      if (reading?.shared && path === reading.shared.path && method === 'GET') {
+        const r = await reading.shared.get(url.searchParams.get('t'), { consume: req.method === 'GET' });
+        res.writeHead(r.status, r.headers);
+        return res.end(r.body);
       }
       // Ohne Anmeldung: Apple holt die Datei für Universal Links; `/app/angemeldet` sieht nur, wer den Link im Browser öffnet, der Code darin bleibt unbenutzt.
       if (appAccess && method === 'GET' && path === SITE_ASSOCIATION_PATH) return json(res, 200, appAccess.siteAssociation);
