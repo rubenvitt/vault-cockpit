@@ -461,8 +461,15 @@ const webHttp = process.env.WEB_CLIENT_ID
         embedCache,
         speech,
         episodes,
-        // Text der Transkripte zum Kopieren und für Einmal-Links: nur Notizen, die das Cockpit zeigen darf.
-        readNote: (path) => noteVisible(path)?.content ?? null,
+        // Text der Transkripte zum Kopieren und für Einmal-Links: nur Notizen, die das Cockpit zeigen darf;
+        // false: vertraulich oder ausgeschlossen, dann auch nicht aus Claudes Skript; null: (noch) nicht im Index.
+        readNote: (path) => {
+          const p = String(path ?? '');
+          if (POLICY.isExcluded(p) || POLICY.sensitivityOf(p)) return false;
+          const row = index.getNote(p);
+          if (row?.sensitivity) return false;
+          return row?.content ?? null;
+        },
         publicUrl: PUBLIC_URL,
         // Querverbindungen in der Leseansicht (VCP-73): Wikilinks nur in die Lesestapel-Notiz.
         connections: { index, semantic: currentSemantic, policy: POLICY, exporter: readingExport },
