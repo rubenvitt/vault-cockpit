@@ -71,6 +71,12 @@ export function portableMarkdown(md) {
     .trim()}\n`;
 }
 
+/** Gehört die Notiz zur Folge? Das Transkript trägt `folge_id` im Frontmatter (src/lesen/folgen.js). */
+const ownNote = (md, id) => {
+  const front = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n---/.exec(String(md))?.[1] ?? '';
+  return new RegExp(`^folge_id:\\s*"?${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"?\\s*$`, 'm').test(front);
+};
+
 /**
  * Einmal-Links im Speicher: `create(id)` → `{ token, expiresAt }`, `take(token)`
  * → ID der Folge, solange er gilt; danach ist er verbraucht (`consume: false`
@@ -787,11 +793,19 @@ export function folgenRoutes({ store, episodes, ingest = null, readNote = null, 
   if (!episodes) return { pages: api, actions: {}, shared: null };
   const shares = createShareLinks({ now });
 
-  /** Ganzer Text eines Transkripts als Markdown: die Notiz im Vault, sonst Claudes Skript. */
+  /**
+   * Ganzer Text eines Transkripts als Markdown: die Notiz im Vault, wenn sie
+   * noch zur Folge gehört (`folge_id`), sonst Claudes Skript. Eine Notiz, die
+   * das Cockpit nicht zeigen darf (`readNote` → false), gibt es auch nicht
+   * aus dem Skript. Auch während aus dem Transkript Audio entsteht.
+   */
   async function transcriptOf(ep) {
-    if (!ep || ep.kind === 'vorlesen' || !['transkript', 'fertig'].includes(ep.status)) return null;
+    if (!ep || ep.kind === 'vorlesen' || !(['transkript', 'fertig'].includes(ep.status) || ep.transcript_at)) return null;
     const note = ep.note && readNote ? await readNote(ep.note) : null;
-    return note ? portableMarkdown(note) : episodes.scriptText(ep.id);
+    if (note === false) return null;
+    if (note && ownNote(note, ep.id)) return portableMarkdown(note);
+    const script = episodes.scriptText(ep.id);
+    return script ? portableMarkdown(script) : null;
   }
 
   return {
@@ -799,10 +813,11 @@ export function folgenRoutes({ store, episodes, ingest = null, readNote = null, 
     shared: {
       path: SHARED_PATH,
       async get(token, { consume = true } = {}) {
-        const id = shares.take(token, { consume });
+        // Verbraucht wird der Link erst, wenn es den Text gibt; der zweite `take` gewinnt bei zwei Abrufen zugleich.
+        const id = shares.take(token, { consume: false });
         const ep = id ? episodes.get(id) : null;
         const text = await transcriptOf(ep);
-        if (!text) return { status: 404, body: 'Dieser Link ist abgelaufen oder wurde schon benutzt.\n', headers: { ...MARKDOWN_HEADERS, 'content-type': 'text/plain; charset=utf-8' } };
+        if (!text || (consume && !shares.take(token))) return { status: 404, body: 'Dieser Link ist abgelaufen oder wurde schon benutzt.\n', headers: { ...MARKDOWN_HEADERS, 'content-type': 'text/plain; charset=utf-8' } };
         return markdownReply(ep, text);
       },
     },

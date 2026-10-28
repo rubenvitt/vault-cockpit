@@ -674,6 +674,25 @@ test('Folgen: Transkript als Markdown kopieren und per Einmal-Link teilen', () =
     const plain = await fromScript.pages['/lesen/folgen/transkript'](ctx(`/lesen/folgen/transkript?id=${ep.id}`));
     assert.equal(plain.body, '# Lesen und Hören\n\n## Gespräch\n\n**Moderation:** Willkommen.\n\n**Gast:** Danke.\n');
 
+    // Notiz mit fremder `folge_id` (verschoben, neue Notiz am Pfad): Claudes Skript statt der fremden Notiz.
+    const other = readingRoutes({ store, episodes, readNote: () => '---\nfolge_id: "andere"\n---\n# Fremd\n', logger: quiet });
+    assert.equal((await other.pages['/lesen/folgen/transkript'](ctx(`/lesen/folgen/transkript?id=${ep.id}`))).body, plain.body);
+    // Vertraulich gewordene Notiz: auch nicht aus dem Skript, der Link bleibt bis zum Ablauf.
+    const hidden = readingRoutes({ store, episodes, readNote: () => false, logger: quiet });
+    assert.equal((await hidden.pages['/lesen/folgen/transkript'](ctx(`/lesen/folgen/transkript?id=${ep.id}`))).status, 404);
+    await assert.rejects(hidden.actions['/aktion/lesen/folge/teilen'](new URLSearchParams({ id: ep.id }), {}), /kein Transkript/);
+
+    // Ein Abruf ohne Text verbraucht den Link nicht.
+    let blocked = true;
+    const flaky = readingRoutes({ store, episodes, readNote: () => (blocked ? false : null), publicUrl: 'https://vault.test', logger: quiet });
+    blocked = false;
+    const kept = new URL((await flaky.actions['/aktion/lesen/folge/teilen'](new URLSearchParams({ id: ep.id }), {})).url).searchParams.get('t');
+    blocked = true;
+    assert.equal((await flaky.shared.get(kept)).status, 404);
+    blocked = false;
+    assert.equal((await flaky.shared.get(kept)).status, 200);
+    assert.equal((await flaky.shared.get(kept)).status, 404);
+
     // Ablauf nach 15 Minuten.
     const links = createShareLinks({ now: () => clockMs });
     const late = links.create('x');
