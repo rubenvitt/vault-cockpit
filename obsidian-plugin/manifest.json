@@ -1,0 +1,9 @@
+{
+  "id": "cockpit-sync",
+  "name": "Cockpit Sync",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "Gleicht den Vault über das Vault-Cockpit ab (eigener Sync statt Obsidian Sync), auf Desktop und Mobil.",
+  "author": "Ruben Vitt",
+  "isDesktopOnly": false
+}
