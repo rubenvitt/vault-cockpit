@@ -367,6 +367,8 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
 
   /** Was Notizseite und `/api/notiz` außer der Notiz zeigen: Ziele, Verwandte, Vorschläge, Belege. */
   async function noteExtras(note) {
+    // Eben erfasst: Inbox-Notiz ohne Embeddings gleich einbetten, damit die Vorschläge nicht nur aus dem Volltext kommen (VCP-63).
+    if (note.inInbox) await notes.embedNow?.(note.path);
     const related = notes.related?.(note.path) ?? null;
     return {
       targets: notes.targets(note.path),

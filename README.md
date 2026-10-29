@@ -399,6 +399,11 @@ Policy zeigt das Cockpit weder an noch nimmt es sie als Ziel. Die Vorschau
 taugt auch zum Lesen im ganzen Vault: Wikilinks (über Pfad, Dateiname oder
 Alias aus `aliases`, auch `[[Notiz#Überschrift]]`) führen zur nächsten
 Notizseite, nicht auflösbare oder vertrauliche Ziele stehen als „fehlt“ da.
+Eingebettete Notizen (`![[Notiz]]`, `![[Notiz#Überschrift]]` nur diesen
+Abschnitt) zeigt die Vorschau mit ihrem Inhalt, zwei Ebenen tief, ohne Kreise;
+vertrauliche bleiben ein Link. Öffnet man eine eben erfasste Inbox-Notiz, bettet
+das Cockpit sie gleich ein (bis zu vier Sekunden), damit die Vorschläge aus den
+Embeddings kommen und nicht nur aus dem Volltext.
 Unter der Notiz stehen **Verweist hierher** (Backlinks) und **Ähnlich** (aus den
 Embeddings, ohne sie per Volltext). Bilder (`![[bild.png]]`, `![](anhang/bild.png)`;
 PNG, JPEG, GIF, WebP, AVIF, kein SVG) liefert `/notiz/bild?pfad=…` nur angemeldet

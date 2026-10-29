@@ -8,7 +8,7 @@ import { compilePolicy } from '../src/vault/policy.js';
 import { createEditor } from '../src/vault/edit.js';
 import { createNoteDesk } from '../src/cockpit/notes.js';
 import { createSettingsStore } from '../src/cockpit/settings.js';
-import { renderMarkdown, inlineMd } from '../src/web/markdown-render.js';
+import { renderMarkdown, inlineMd, parseMarkdown } from '../src/web/markdown-render.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
 const policy = compilePolicy({ exclude: ['^privat/'], sensitive: { '20-bereiche/Gesundheit': 'gesundheit' } });
@@ -129,6 +129,63 @@ test('move: nennt vorher betroffene Links, passt sie beim Ablegen an und kann um
   assert.equal(read('10-projekte/Hund/Plan.md'), '# Plan\n\n[[40-archiv/Preise]] und [[Preise]]\n');
   assert.equal(read('20-bereiche/Gesundheit/Werte.md'), '# Werte\n\n[[00-inbox/Idee]]\n');
   assert.throws(() => desk.move('40-archiv/Preise.md', '40-archiv', 'A#B'), (e) => e.status === 400);
+});
+
+test('get: eingebettete Notizen zeigen ihren Inhalt, mit Tiefengrenze, ohne Kreise, nie vertraulich (VCP-63)', () => {
+  put('10-projekte/A.md', '# A\n\n![[B]]\n\n![[Werte]]\n\n![[Abschnitte#Zwei]]\n');
+  put('10-projekte/B.md', '---\ntags: [b]\n---\nText aus B\n\n- [ ] Box in B\n\n![[C]]\n');
+  put('10-projekte/C.md', 'Text aus C\n\n![[A]]\n');
+  put('10-projekte/Abschnitte.md', '# Eins\n\nerster\n\n## Zwei\n\nzweiter\n\n### Drei\n\ndritter\n\n## Vier\n\nvierter\n');
+  for (const p of ['10-projekte/A.md', '10-projekte/B.md', '10-projekte/C.md', '10-projekte/Abschnitte.md']) idx.refresh(p);
+  idx.relinkAll();
+  const note = desk.get('10-projekte/A.md');
+  const blocks = parseMarkdown(note.body, { links: note.links });
+  const embeds = blocks.filter((b) => b.type === 'embed');
+  assert.equal(embeds.length, 3);
+  const [b, werte, section] = embeds;
+  // B ohne Frontmatter, Checkboxen nur zur Anzeige, darin C (Tiefe 2), in C nur noch der Link auf A.
+  assert.equal(b.children[0].content[0].text, 'Text aus B');
+  assert.deepEqual(b.children[1].items[0].task, { done: false, n: null, line: null });
+  const c = b.children.find((x) => x.type === 'embed');
+  assert.equal(c.children[0].content[0].text, 'Text aus C');
+  assert.equal(c.children.find((x) => x.type === 'embed').children, undefined);
+  // Vertraulich: bleibt „fehlt“, ohne Inhalt.
+  assert.equal(werte.link.status, 'missing');
+  assert.equal(werte.children, undefined);
+  // Nur der Abschnitt, mit Unterabschnitt, ohne den nächsten gleicher Ebene.
+  const html = renderMarkdown(note.body, { links: desk.get('10-projekte/A.md').links });
+  assert.match(html, /<div class="note-embed"><p class="note-embed-head"><a href="\/notiz\?pfad=10-projekte%2FB\.md"/);
+  assert.match(html, /zweiter[^]*dritter/);
+  assert.doesNotMatch(html, /erster|vierter/);
+  assert.equal(section.children.length, 3);
+});
+
+test('embedNow: eine Notiz ohne Embeddings gleich einbetten, mit Zeitgrenze (VCP-63)', async () => {
+  const embedded = new Set();
+  const scheduled = [];
+  let slow = false;
+  const semantic = {
+    has: (p) => embedded.has(p),
+    similarTo: () => null,
+    schedule(paths) {
+      scheduled.push(...paths);
+      if (slow) return new Promise(() => {});
+      for (const p of paths) embedded.add(p);
+      return Promise.resolve();
+    },
+  };
+  const settings = createSettingsStore({ defaults: { inboxFolder: '00-inbox' }, logger: quiet });
+  const withSem = createNoteDesk({ index: idx, editor: createEditor({ vaultPath: root, index: idx }), policy, settings, semantic: () => semantic });
+  assert.equal(await withSem.embedNow('00-inbox/Idee.md'), true);
+  assert.deepEqual(scheduled, ['00-inbox/Idee.md']);
+  // Schon eingebettet: nichts zu tun. Vertraulich: nie.
+  assert.equal(await withSem.embedNow('00-inbox/Idee.md'), false);
+  assert.equal(await withSem.embedNow('20-bereiche/Gesundheit/Werte.md'), false);
+  assert.equal(scheduled.length, 1);
+  // Dauert es zu lang, gibt die Seite nach der Zeitgrenze auf.
+  slow = true;
+  assert.equal(await withSem.embedNow('10-projekte/Hund/Plan.md', { waitMs: 20 }), false);
+  assert.equal(await desk.embedNow('00-inbox/Idee.md'), false);
 });
 
 test('setTags, append, toggle schreiben in die Notiz', () => {

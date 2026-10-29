@@ -30,9 +30,10 @@ export function renderMarkdown(body, { checkbox = null, links = null, ids = new 
  *
  * - `{ type: 'heading', level, id, content }`: `level` wie im Markdown (1–6), `id` der Anker
  * - `{ type: 'paragraph', content }`: Zeilen getrennt durch `{ type: 'break' }`
- * - `{ type: 'image', … }` / `{ type: 'embed', link }`: ein Absatz, der nur aus
+ * - `{ type: 'image', … }` / `{ type: 'embed', link, children? }`: ein Absatz, der nur aus
  *   einem eingebetteten Bild (`![[bild.png]]`) bzw. einer eingebetteten Notiz
- *   oder Datei (`![[Notiz]]`) besteht
+ *   oder Datei (`![[Notiz]]`) besteht; `children` sind die Blöcke der
+ *   eingebetteten Notiz, wenn das Cockpit sie zeigen darf
  * - `{ type: 'list', ordered, items: [{ depth, task, content }] }`: `task` ist
  *   null oder `{ done, n, line }`, `n` und `line` (getrimmt) sind genau die
  *   Felder für `/aktion/notiz/checkbox`; in Callouts null (nur Anzeige)
@@ -55,7 +56,7 @@ export function parseMarkdown(body, { links = null, ids = new Map(), checkboxes 
   const inline = (s) => parseInline(s, links);
 
   const flushPara = () => {
-    if (para.length) out.push(media({ type: 'paragraph', content: joinLines(para.map(inline)) }));
+    if (para.length) out.push(media({ type: 'paragraph', content: joinLines(para.map(inline)) }, links, ids));
     para = [];
   };
   const flushList = () => {
@@ -147,12 +148,20 @@ export function parseMarkdown(body, { links = null, ids = new Map(), checkboxes 
 /** Zeilen eines Absatzes oder Zitats: Inline-Teile mit `break` dazwischen. */
 const joinLines = (rows) => rows.flatMap((r, i) => (i ? [{ type: 'break' }, ...r] : r));
 
-/** Ein Absatz aus nur einem eingebetteten Bild oder einer eingebetteten Notiz wird ein eigener Block. */
-function media(block) {
+/**
+ * Ein Absatz aus nur einem eingebetteten Bild oder einer eingebetteten Notiz
+ * wird ein eigener Block. Eine eingebettete Notiz bringt ihren Inhalt als
+ * `children` mit, wenn der Auflöser ihn hergibt (`links.embed`, VCP-63);
+ * Checkboxen darin sind nur Anzeige, abgehakt wird in der Notiz selbst.
+ */
+function media(block, links = null, ids = new Map()) {
   const [only, ...rest] = block.content;
   if (!only || rest.length) return block;
   if (only.type === 'image') return only;
-  if (only.type === 'wikilink' && only.embed) return { type: 'embed', link: only };
+  if (only.type === 'wikilink' && only.embed) {
+    const inner = only.status === 'note' && !only.self ? links?.embed?.(only.path, only.heading) : null;
+    return inner ? { type: 'embed', link: only, children: parseMarkdown(inner.body, { links: inner.links, ids, checkboxes: false }) } : { type: 'embed', link: only };
+  }
   return block;
 }
 
@@ -173,6 +182,7 @@ function blockHtml(b, checkbox) {
     case 'image':
       return `<p>${inlineHtml(b)}</p>`;
     case 'embed':
+      if (b.children) return `<div class="note-embed"><p class="note-embed-head">${inlineHtml(b.link)}</p>${b.children.length ? renderBlocks(b.children) : '<p class="empty">Leer.</p>'}</div>`;
       return `<p>${inlineHtml(b.link)}</p>`;
     case 'list': {
       const tag = b.ordered ? 'ol' : 'ul';
