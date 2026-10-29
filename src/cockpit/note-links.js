@@ -158,6 +158,41 @@ export function createAttachments({ vaultPath, policy, ttlMs = 60_000, retryMs =
   };
 }
 
+/** So tief werden Notizen in Notizen eingebettet (`![[A]]` in `![[B]]`). */
+export const MAX_EMBED_DEPTH = 2;
+/** Höchstens so viele eingebettete Notizen je Seite, und so viel Text je Einbettung. */
+const MAX_EMBEDS = 20;
+const MAX_EMBED_CHARS = 50_000;
+
+/**
+ * Text unter einer Überschrift bis zur nächsten gleicher oder höherer Ebene
+ * (wie Obsidian bei `![[Notiz#Überschrift]]`), ohne die Überschrift; null,
+ * wenn es sie nicht gibt. Codeblöcke zählen nicht.
+ */
+export function sectionOf(body, heading) {
+  const want = String(heading ?? '').trim().toLowerCase();
+  const lines = String(body ?? '').split(/\r?\n/);
+  let fence = null;
+  let start = -1;
+  let level = 0;
+  for (let i = 0; i < lines.length; i += 1) {
+    const f = /^\s*(```|~~~)/.exec(lines[i]);
+    if (f) {
+      fence = fence === null ? f[1] : fence === f[1] ? null : fence;
+      continue;
+    }
+    if (fence) continue;
+    const h = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(lines[i]);
+    if (!h) continue;
+    if (start >= 0 && h[1].length <= level) return lines.slice(start, i).join('\n');
+    if (start < 0 && h[2].trim().toLowerCase() === want) {
+      start = i + 1;
+      level = h[1].length;
+    }
+  }
+  return start >= 0 ? lines.slice(start).join('\n') : null;
+}
+
 /**
  * Auflöser für die Verweise einer Notiz, wie ihn `renderMarkdown` erwartet.
  * `visible(path)` liefert die Zeile einer Notiz, die das Cockpit zeigen darf.
@@ -165,8 +200,14 @@ export function createAttachments({ vaultPath, policy, ttlMs = 60_000, retryMs =
  * - `wikilink(target, { embed })` → `{ kind: 'note', path, title, self }`,
  *   `{ kind: 'image', path }`, `{ kind: 'file' }` (nur in Obsidian) oder null (fehlt)
  * - `image(src)` → `{ kind: 'image', path }` oder null für Markdown-Bilder
+ * - `embed(path, heading)` → `{ body, links }` für eine eingebettete Notiz
+ *   (`![[Notiz]]`, VCP-63): ihr Text ohne Frontmatter (mit `heading` nur dieser
+ *   Abschnitt) und der Auflöser für Verweise darin. Null ohne `read`, für die
+ *   eigene Notiz, im Kreis, ab `MAX_EMBED_DEPTH` und nach `MAX_EMBEDS` je Seite.
+ *   `read(path)` liefert den Text nur für Notizen, die das Cockpit zeigen darf;
+ *   vertrauliche bleiben damit ein Link.
  */
-export function createLinkResolver({ index, visible, attachments = null }, notePath) {
+export function createLinkResolver({ index, visible, attachments = null, read = null }, notePath, { depth = 0, seen = [notePath], budget = { left: MAX_EMBEDS } } = {}) {
   const from = folderOf(notePath);
   const titleOf = (row) => row.title ?? row.path.split('/').pop().replace(/\.md$/i, '');
   const asImage = (name) => {
@@ -193,6 +234,19 @@ export function createLinkResolver({ index, visible, attachments = null }, noteP
         return null;
       }
       return asImage(s.split(/[?#]/)[0]);
+    },
+
+    embed(path, heading = null) {
+      if (!read || depth >= MAX_EMBED_DEPTH || seen.includes(path) || budget.left <= 0) return null;
+      const text = read(path);
+      if (text == null) return null;
+      const body = heading ? sectionOf(text, heading) : text;
+      if (body == null) return null;
+      budget.left -= 1;
+      return {
+        body: body.length > MAX_EMBED_CHARS ? `${body.slice(0, MAX_EMBED_CHARS)}\n\n…` : body,
+        links: createLinkResolver({ index, visible, attachments, read }, path, { depth: depth + 1, seen: [...seen, path], budget }),
+      };
     },
 
     /** Markdown-Link auf eine Notiz (`[Text](Ordner/Notiz.md)`), relativ zur Notiz oder ab Vault. */

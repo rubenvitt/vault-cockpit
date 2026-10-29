@@ -87,6 +87,25 @@ export function createNoteDesk({ index, editor, policy, settings, vaultPath = nu
     visible: (path) => Boolean(visible(path)),
     archiveFolder,
 
+    /**
+     * Eine Notiz ohne Embeddings jetzt einbetten statt erst beim nächsten
+     * Abgleich (VCP-63, für eben erfasste Inbox-Notizen). Wartet höchstens
+     * `waitMs`; dauert es länger, läuft der Abgleich im Hintergrund weiter und
+     * die Seite zeigt Volltext-Vorschläge. Ohne Embeddings tut es nichts.
+     */
+    async embedNow(path, { waitMs = 4000 } = {}) {
+      const sem = typeof semantic === 'function' ? semantic() : semantic;
+      const known = () => (sem.has ? sem.has(path) : sem.similarTo(path, { limit: 1 }) !== null);
+      if (!sem?.schedule || !visible(path) || known()) return false;
+      let timer;
+      const done = await Promise.race([
+        sem.schedule([path]).then(() => true, () => false),
+        new Promise((resolve) => (timer = setTimeout(() => resolve(false), waitMs))),
+      ]);
+      clearTimeout(timer);
+      return done && known();
+    },
+
     /** Backlinks und ähnliche Notizen (siehe `createRelated`); null für unsichtbare Notizen. */
     related: (path, opts) => (visible(path) ? related.of(String(path), opts) : null),
 
@@ -126,7 +145,8 @@ export function createNoteDesk({ index, editor, policy, settings, vaultPath = nu
         tags: parsed.tags,
         body: parsed.body,
         inInbox: folder === inboxFolder || folder.startsWith(`${inboxFolder}/`),
-        links: createLinkResolver({ index, visible: listed, attachments }, row.path),
+        // Eingebettete Notizen (`![[…]]`) nur, wenn das Cockpit sie zeigen darf (VCP-63).
+        links: createLinkResolver({ index, visible: listed, attachments, read: (p) => { const r = visible(p); return r ? parseNote(r.content).body : null; } }, row.path),
         // Was das Ablegen an eingehenden Links trifft, für die Warnung davor (VCP-58).
         impact: linkImpact(index, row.path),
       };

@@ -238,6 +238,9 @@ header .meta a { color: inherit; }
 .wikilink.missing { color: var(--muted); border-bottom: 1px dashed var(--line); }
 .wikilink.missing .missing-mark { font-size: 12px; }
 .wikilink.file { color: var(--muted); }
+.md .note-embed { margin: 0 0 12px; padding: 8px 12px 2px; border-left: 3px solid var(--accent-line); background: var(--surface-2); border-radius: 0 var(--r-sm) var(--r-sm) 0; }
+.md .note-embed-head { font-size: 13px; margin-bottom: 6px; }
+.md .note-embed .note-embed { background: var(--surface); }
 .md img { max-width: 100%; height: auto; border-radius: var(--r-md); vertical-align: middle; }
 .md mark { background: var(--accent-soft); color: inherit; padding: 0 2px; border-radius: 3px; }
 .md .table-wrap { overflow-x: auto; margin: 0 0 12px; }
