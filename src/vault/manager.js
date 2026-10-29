@@ -76,7 +76,8 @@ export function createIndexManager({ vaultPath, dbPath, policy = DEFAULT_POLICY,
     }
     if (presenceChanged) current.relinkAll();
     changedAt = Date.now();
-    notify({ full: false, paths: [...new Set(paths)].filter((p) => !isImagePath(p)) });
+    const notes = [...new Set(paths)].filter((p) => !isImagePath(p));
+    if (notes.length) notify({ full: false, paths: notes });
   });
 
   rebuild();
