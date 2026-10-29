@@ -316,6 +316,13 @@ sync.start({
 const flameNote = createFlameNote({ vaultPath: VAULT_PATH, index, editor, policy: POLICY, settings: cockpitSettings, zunder });
 setInterval(() => flameNote.round(), Number(process.env.REINDEX_INTERVAL_MIN ?? 15) * 60_000).unref();
 flameNote.round();
+// Eingeschaltet in den Einstellungen: gleich schreiben, nicht erst im nächsten Intervall (VCP-61).
+let flameNoteOn = Boolean(cockpitSettings.get().flameNote?.enabled);
+cockpitSettings.onChange(() => {
+  const on = Boolean(cockpitSettings.get().flameNote?.enabled);
+  if (on && !flameNoteOn) flameNote.round();
+  flameNoteOn = on;
+});
 // Zustand der Hintergrunddienste: Seite /zustand, Hinweis in der Kopfzeile und
 // `degraded` in /health. Dieselben Quellen wie vault_stats.
 const health = createHealth({

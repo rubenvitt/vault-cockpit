@@ -9,7 +9,7 @@ import { createEditor } from '../src/vault/edit.js';
 import { createSettingsStore } from '../src/cockpit/settings.js';
 import { createCockpitActions } from '../src/cockpit/actions.js';
 import { createStateStore } from '../src/capture/state.js';
-import { createFlameNote, flameRows, renderFlameTable, planFlameUpdate, flameBlock } from '../src/cockpit/flammen-notiz.js';
+import { createFlameNote, flameRows, renderFlameTable, planFlameUpdate, flameBlock, flameBlocks, flameMinutes } from '../src/cockpit/flammen-notiz.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
 const tz = 'Europe/Berlin';
@@ -72,6 +72,33 @@ test('Zeilen: Tag der Messung, geplanter Tag aus due, Minuten und Status; nur Fl
   );
   assert.match(renderFlameTable(rows), /^\| Tag \| Flamme \| geplant \| gemessen \(min\) \| Status \|\n\|-----/);
   assert.equal(renderFlameTable([]), 'Keine Flammen für diese Woche in Zunder.');
+});
+
+test('Blöcke: alle Blöcke aus dem Verlauf zählen, ohne Verlauf der letzte (VCP-61)', () => {
+  const history = [
+    { seq: 1, field: 'title', value: 'Folien' },
+    { seq: 2, field: 'flame_started_at', value: '2026-10-12T08:00:00Z' },
+    { seq: 3, field: 'flame_ended_at', value: null },
+    { seq: 5, field: 'flame_ended_at', value: '2026-10-12T08:30:00Z' },
+    // Ein abgebrochener Start ohne Stopp zählt nicht, der nächste Start ersetzt ihn.
+    { seq: 6, field: 'flame_started_at', value: '2026-10-13T09:00:00Z' },
+    { seq: 7, field: 'flame_ended_at', value: null },
+    { seq: 8, field: 'flame_started_at', value: '2026-10-13T13:00:00Z' },
+    { seq: 9, field: 'flame_ended_at', value: null },
+    { seq: 10, field: 'flame_ended_at', value: '2026-10-13T14:30:00Z' },
+  ];
+  const blocks = flameBlocks([...history].reverse());
+  assert.deepEqual(blocks, [
+    { start: '2026-10-12T08:00:00Z', end: '2026-10-12T08:30:00Z' },
+    { start: '2026-10-13T13:00:00Z', end: '2026-10-13T14:30:00Z' },
+  ]);
+  assert.equal(flameMinutes(tasks[0], blocks), 120);
+  assert.equal(flameMinutes(tasks[0]), 90);
+  assert.equal(flameMinutes(tasks[0], []), 90);
+  assert.equal(flameMinutes(tasks[1]), null);
+  // Der Tag ist der des ersten Blocks.
+  const [row] = flameRows([tasks[0]], { tz, blocks: new Map([['f1', blocks]]) });
+  assert.deepEqual([row.day, row.measured], ['Mo 12.10.', '120']);
 });
 
 test('Plan: Marker einfügen, aktuell lassen, ersetzen, von Hand Geändertes und kaputte Marker nicht anfassen', () => {
@@ -157,6 +184,44 @@ test('Lauf: von Hand im Bereich geändert oder gleichzeitig vom Sync geändert �
   const raced = await make({ editor: racing }).update('2026-W42');
   assert.equal(raced.state, 'fehler');
   assert.equal(read(FEUER), synced);
+});
+
+test('Lauf: zweimal gebrannte Flamme zeigt die Summe, der Verlauf wird nur bei Änderung gefragt (VCP-61)', async () => {
+  const asked = [];
+  const history = {
+    f1: [
+      { seq: 1, field: 'flame_started_at', value: '2026-10-12T08:00:00Z' },
+      { seq: 2, field: 'flame_ended_at', value: '2026-10-12T08:30:00Z' },
+      { seq: 3, field: 'flame_started_at', value: '2026-10-13T13:00:00Z' },
+      { seq: 4, field: 'flame_ended_at', value: null },
+      { seq: 5, field: 'flame_ended_at', value: '2026-10-13T14:30:00Z' },
+    ],
+  };
+  const withHistory = { ...zunder, async taskHistory(id) { asked.push(id); return history[id] ?? []; } };
+  const note = make({ zunder: () => withHistory });
+  assert.equal((await note.update('2026-W42')).state, 'geschrieben');
+  assert.match(read(FEUER), /\| Mo 12\.10\. \| \[Folien[^\n]*\| 120 \| erledigt \|/);
+  assert.deepEqual(asked, ['f1']);
+  assert.equal((await note.update('2026-W42')).state, 'aktuell');
+  assert.deepEqual(asked, ['f1']);
+
+  // Verlauf nicht abrufbar: der letzte Block wie bisher.
+  const broken = { ...zunder, async taskHistory() { throw new Error('HTTP 500'); } };
+  writeFileSync(join(root, FEUER), feuerNote());
+  await make({ zunder: () => broken }).update('2026-W42');
+  assert.match(read(FEUER), /\| 90 \| erledigt \|/);
+});
+
+test('Lauf: dieselbe Warnung nur einmal ins Log, nach einem guten Lauf wieder (VCP-61)', async () => {
+  const warnings = [];
+  const note = make({ logger: { ...quiet, warn: (m) => warnings.push(m) } });
+  await note.update('2026-W42');
+  const edited = read(FEUER).replace('| 90 |', '| 100 |');
+  writeFileSync(join(root, FEUER), edited);
+  tasks[1] = { ...tasks[1], status: 'done' };
+  for (let i = 0; i < 3; i++) assert.equal((await note.update('2026-W42')).state, 'fehler');
+  assert.equal(warnings.length, 1);
+  assert.match(note.status().lastError.message, /von Hand/);
 });
 
 test('Lauf: aus in den Einstellungen, ohne Feuer-Notiz, ohne Zunder oder vertraulich → nichts schreiben, nichts anlegen', async () => {

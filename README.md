@@ -461,7 +461,12 @@ Cockpit davon ab, ihn zu überschreiben (zum Neuschreiben den Bereich zwischen
 den Markern leeren). Ändert der Sync die Notiz gleichzeitig, bricht der
 Schreibvorgang ab und der nächste Lauf versucht es wieder. Ohne Feuer-Notiz der
 Woche legt das Cockpit keine an, in vertraulichen Ordnern schreibt es nicht.
-Abschalten unter **Einstellungen → Feuer-Notiz**.
+Brennt eine Flamme mehrmals, zählt die Summe aller Blöcke: Zunder hält an der
+Aufgabe nur den letzten, die übrigen holt das Cockpit aus dem Verlauf
+(`get_task_history`), und das nur, wenn sich der letzte Block geändert hat. Ein
+Fehler, der bleibt (etwa Handarbeit im Bereich), steht einmal im Log und auf
+`/zustand`, nicht in jedem Intervall. Abschalten unter **Einstellungen →
+Feuer-Notiz**; Einschalten schreibt sofort.
 Die Marker-Mechanik ist allgemein (`src/vault/generated-section.js`, „generierter
 Bereich“ `<!-- cockpit:<name>:start -->` … `<!-- cockpit:<name>:ende <prüfsumme> -->`)
 und taugt auch für andere Notizen, etwa die des Lesestapels.
