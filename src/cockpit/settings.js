@@ -48,7 +48,7 @@ const EMPTY = {
   zunder: { url: null, token: null },
   bridge: { enabled: null, tag: null },
   flameNote: { enabled: null },
-  readingNotes: { folder: null },
+  readingNotes: { folder: null, trashDays: null },
   sync: { adapter: null },
   mail: { token: null, senders: [], mailbox: null, doneMailbox: null, pollMinutes: null },
   embed: { url: null, model: null },
@@ -107,6 +107,12 @@ export function validateSettings(input) {
   const readingFolder = text(input.readingNotes?.folder, 200, 'Lesestapel-Ordner', 'readingNotes.folder')?.replace(/^\/+|\/+$/g, '') || null;
   if (readingFolder && readingFolder.split('/').some((p) => p.startsWith('.') || !p.trim())) {
     throw new SettingsError('Lesestapel-Ordner muss ein Pfad im Vault sein', 'readingNotes.folder');
+  }
+  // Verworfenes („Weg“ vor dem Lesen) nach so vielen Tagen löschen; 0 = nie.
+  const trash = input.readingNotes?.trashDays;
+  const trashDays = trash === null || trash === undefined || trash === '' ? null : Number(trash);
+  if (trashDays !== null && !(Number.isInteger(trashDays) && trashDays >= 0 && trashDays <= 3650)) {
+    throw new SettingsError('Verworfenes aufräumen: ganze Tage zwischen 0 (nie) und 3650', 'readingNotes.trashDays');
   }
 
   const zunderUrl = httpUrl(input.zunder?.url, 'Zunder-Adresse', { field: 'zunder.url' });
@@ -207,7 +213,7 @@ export function validateSettings(input) {
     ? [...new Set(input.hiddenEvents.map((t) => text(t, 200, 'Ausgeblendeter Termin', 'hiddenEvents')).filter(Boolean))].slice(0, 50)
     : null;
 
-  return { tz, vaultName: text(input.vaultName, 200, 'Vault-Name', 'vaultName'), inboxFolder, zunder: { url: zunderUrl, token: zunderToken }, bridge, flameNote, readingNotes: { folder: readingFolder }, sync: { adapter: syncAdapter }, mail, embed, tts, episodes, ingest, calendars, hiddenEvents, session: validateSession(input.session) };
+  return { tz, vaultName: text(input.vaultName, 200, 'Vault-Name', 'vaultName'), inboxFolder, zunder: { url: zunderUrl, token: zunderToken }, bridge, flameNote, readingNotes: { folder: readingFolder, trashDays }, sync: { adapter: syncAdapter }, mail, embed, tts, episodes, ingest, calendars, hiddenEvents, session: validateSession(input.session) };
 }
 
 const days = (v, what, field) => {
@@ -260,6 +266,7 @@ export function createSettingsStore({ file = null, defaults = {}, logger = conso
     flameNoteEnabled: true,
     readingNotesFolder: 'raw',
     syncAdapter: 'obsidian-headless',
+    readingTrashDays: 30,
     mailToken: null,
     mailSenders: [],
     mailbox: 'Vault',
@@ -308,7 +315,7 @@ export function createSettingsStore({ file = null, defaults = {}, logger = conso
         // Ohne Zunder-Zugang ruht die Brücke trotzdem; `enabled` sagt nur, ob sie darf.
         bridge: { enabled: stored.bridge.enabled ?? d.bridgeEnabled, tag: stored.bridge.tag ?? d.bridgeTag },
         flameNote: { enabled: stored.flameNote.enabled ?? d.flameNoteEnabled },
-        readingNotes: { folder: stored.readingNotes?.folder ?? d.readingNotesFolder },
+        readingNotes: { folder: stored.readingNotes?.folder ?? d.readingNotesFolder, trashDays: stored.readingNotes?.trashDays ?? d.readingTrashDays },
         sync: { adapter: stored.sync?.adapter ?? d.syncAdapter },
         // Mail-Abruf nur mit Token und freigegebenen Absendern, damit eine fremde Mail nichts anlegt.
         mail:
