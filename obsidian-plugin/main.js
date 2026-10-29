@@ -133,12 +133,11 @@ function createSyncEngine({ fs, api, state, save = async () => {}, log = () => {
    * undefined = egal); sonst bleibt sie fürs Schicken liegen.
    */
   async function download(path, expect) {
-    if (expect !== undefined) {
-      const now = await local(path);
-      if ((now?.hash ?? null) !== expect) return false;
-    }
+    const unchanged = async () => expect === undefined || ((await local(path))?.hash ?? null) === expect;
+    if (!(await unchanged())) return false;
     const got = await api.get(path);
-    if (!got) return false;
+    // Während des Holens lokal geändert: nicht überschreiben, das nächste Schicken nimmt es mit.
+    if (!got || !(await unchanged())) return false;
     await fs.write(path, got.data, got.mtime);
     remember(path, got.hash, await fs.stat(path));
     stats.down += 1;

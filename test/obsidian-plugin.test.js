@@ -52,6 +52,10 @@ function device(name, files = {}) {
     },
   };
   const request = async (method, path, params = {}, body) => {
+    if (path === '/sync/v1/file' && method === 'GET' && dev.raceOnGet) {
+      dev.raceOnGet();
+      dev.raceOnGet = null;
+    }
     const r = await fetch(`${base}${path}?${new URLSearchParams(params)}`, {
       method,
       headers: { authorization: `Bearer ${token}`, 'x-sync-client': 'obsidian-plugin/test' },
@@ -61,7 +65,7 @@ function device(name, files = {}) {
   };
   const state = {};
   const engine = createSyncEngine({ fs, api: createApi(request), state });
-  return {
+  const dev = {
     sync: () => engine.sync(),
     text: (p) => (mem.has(p) ? mem.get(p).data.toString('utf8') : null),
     edit: (p, t) => void mem.set(p, { data: Buffer.from(t), mtime: (clock += 1) }),
@@ -69,7 +73,9 @@ function device(name, files = {}) {
     paths: () => [...mem.keys()].sort(),
     state,
     trash,
+    raceOnGet: null,
   };
+  return dev;
 }
 
 const onServer = (p) => (existsSync(join(vault, p)) ? readFileSync(join(vault, p), 'utf8') : null);
@@ -246,4 +252,21 @@ test('Schattenbetrieb: vergleichen schreibt nichts und meldet Abweichungen mit D
   j.close();
   rmSync(v, { recursive: true, force: true });
   rmSync(d, { recursive: true, force: true });
+});
+
+test('eine lokale Änderung während des Holens wird nicht überschrieben', async () => {
+  const mac = device('Mac6');
+  const phone = device('iPhone6');
+  mac.edit('Race.md', 'eins\n');
+  await mac.sync();
+  await phone.sync();
+  mac.edit('Race.md', 'zwei\n');
+  await mac.sync();
+  // Das iPhone schreibt, während seine Anfrage nach der neuen Fassung unterwegs ist.
+  phone.raceOnGet = () => phone.edit('Race.md', 'eins\nlokal\n');
+  const s = await phone.sync();
+  // Dieselbe Stelle geändert: Server behält „zwei“, die lokale Fassung liegt als Kopie daneben.
+  assert.equal(s.conflicts.length, 1);
+  assert.equal(phone.text('Race.md'), 'zwei\n');
+  assert.equal(phone.text(s.conflicts[0]), 'eins\nlokal\n', 'die lokale Änderung ist nicht verloren');
 });
