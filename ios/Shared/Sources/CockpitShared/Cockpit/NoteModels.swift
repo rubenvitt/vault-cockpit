@@ -459,12 +459,15 @@ public indirect enum NoteBlock: Decodable, Equatable, Sendable {
     case rule
     /// Absatz, der nur aus einem Bild besteht.
     case image(NoteImage)
-    /// Absatz, der nur aus einer Einbettung besteht (`![[Notiz]]`, Datei, fehlend).
-    case embed(NoteWikilink)
+    /// Absatz, der nur aus einer Einbettung besteht (`![[Notiz]]`, Datei, fehlend). Eine
+    /// eingebettete Notiz bringt ihren Inhalt als `children` mit (VCP-63), sonst nil: fehlt,
+    /// vertraulich, im Kreis oder über den Grenzen des Servers (Tiefe 2, 20 je Seite, 50.000
+    /// Zeichen). Checkboxen darin sind nur Anzeige.
+    case embed(NoteWikilink, children: [NoteBlock]?)
     /// Unbekannter Typ eines neueren Servers: wird nicht gezeigt.
     case unknown(String)
 
-    enum CodingKeys: String, CodingKey { case type, level, id, content, lang, text, link }
+    enum CodingKeys: String, CodingKey { case type, level, id, content, lang, text, link, children }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -480,7 +483,7 @@ public indirect enum NoteBlock: Decodable, Equatable, Sendable {
         case "code": self = .code(lang: try c.decodeIfPresent(String.self, forKey: .lang), text: try c.decodeIfPresent(String.self, forKey: .text) ?? "")
         case "rule": self = .rule
         case "image": self = .image(try NoteImage(from: decoder))
-        case "embed": self = .embed(try c.decode(NoteWikilink.self, forKey: .link))
+        case "embed": self = .embed(try c.decode(NoteWikilink.self, forKey: .link), children: try c.decodeIfPresent([NoteBlock].self, forKey: .children))
         default: self = .unknown(type)
         }
     }
