@@ -1,4 +1,5 @@
 import { createObsidianHeadlessAdapter } from './headless.js';
+import { createCockpitSyncAdapter } from './cockpit.js';
 
 /**
  * Sync-Adapter: hält das Cockpit über den Sync des Vaults auf dem Laufenden.
@@ -8,10 +9,12 @@ import { createObsidianHeadlessAdapter } from './headless.js';
  * - status() liefert den Zustand des Syncs (state, letzter Abgleich, Fehler),
  * - stop().
  *
- * Ein eigener Sync (Roadmap Schritt 5) ist nur ein weiterer Eintrag hier.
+ * `cockpit` ist der eigene Sync (Roadmap Schritt 5, VCP-13): Das Cockpit ist
+ * selbst der Server, der Adapter bringt dafür sein Journal mit (`journal`).
  */
 const ADAPTERS = {
   'obsidian-headless': createObsidianHeadlessAdapter,
+  cockpit: createCockpitSyncAdapter,
   none: () => ({
     name: 'none',
     start() {},

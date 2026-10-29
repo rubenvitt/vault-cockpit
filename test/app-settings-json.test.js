@@ -237,7 +237,7 @@ test('Einstellungen als JSON: Felder, Stände, Kalender, Tokens, Kurzbefehle, Si
 
       assert.deepEqual(body.tokens.map((t) => [t.name, t.scope, t.scopeLabel, t.current]), [['Rubens iPhone', 'app', 'App', true]]);
       assert.equal(body.tokens[0].id, device.id);
-      assert.deepEqual(body.scopes.map((s) => s.value), ['search', 'capture', 'lesestapel', 'app']);
+      assert.deepEqual(body.scopes.map((s) => s.value), ['search', 'capture', 'lesestapel', 'app', 'sync']);
       assert.deepEqual(body.shortcuts.map((s) => s.file), ['/kurzbefehle/notiz.shortcut', '/kurzbefehle/sprachmemo.shortcut', '/kurzbefehle/lesestapel.shortcut']);
       assert.equal(body.captureEnabled, false);
       assert.equal(body.backup.empty, false);
@@ -405,7 +405,7 @@ test('API-Tokens als JSON: Liste ohne Hash, Klartext nur beim Anlegen, Fehler mi
     const list = await get('/api/einstellungen/tokens');
     keep('tokens', list.body);
     assert.deepEqual(list.body.tokens, [{ id: device.id, name: 'Rubens iPhone', scope: 'app', scopeLabel: 'App', createdAt: '2026-10-25T08:30:00.000Z', current: true }]);
-    assert.equal(list.body.scopes.length, 4);
+    assert.equal(list.body.scopes.length, 5);
 
     const created = await post('/api/einstellungen/tokens', { name: 'Raycast', scope: 'search' });
     assert.equal(created.status, 200);

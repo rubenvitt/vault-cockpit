@@ -88,7 +88,7 @@ Der Service liefert nur Werkzeuge und Zustand. Intelligenz kommt von außen per 
 2. Capture mit Zunder-Weiterleitung (umgesetzt: `src/capture/`, Endpunkte `/capture` und `/funke`, Mail über JMAP, Zunder-Brücke)
 3. Cockpit-Web-UI (umgesetzt: `src/web/`, `src/cockpit/`, Wochenansicht unter `/` mit OIDC-Login, Kalender per iCal/CalDAV und Einstellungen im Browser, Big Rocks aus Zunder je Bereich)
 4. Graph + semantische Suche (umgesetzt: `src/semantic/`, `src/graph/`, Embeddings mit bge-m3 über einen Ollama-Sidecar, hybride `vault_search`, `vault_similar`, `vault_graph`, Seite `/graph`)
-5. Eigener Sync (eigenes Projekt: Konflikte, mobile Clients, E2E)
+5. Eigener Sync (eigenes Projekt: Konflikte, mobile Clients, E2E), zerlegt in VCP-120 bis VCP-126. Umgesetzt: Server im Cockpit (VCP-120: `src/sync/server/`, Adapter `cockpit`, Protokoll `/sync/v1` mit Basis-Hash statt stillem Überschreiben). Offen: Obsidian-Plugin als Client für Desktop und Mobil (VCP-121), 3-Wege-Merge (VCP-122), Geräte im Web-Cockpit (VCP-123), Verlauf und Papierkorb (VCP-124), E2E (VCP-125), Umstieg (VCP-126).
 
 Obsidian selbst zu ersetzen ist kein Ziel — Editor und Apps sind der teure Teil.
 
