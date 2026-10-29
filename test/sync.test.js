@@ -186,6 +186,12 @@ test('Watcher plant für versteckte Pfade und andere Anhänge kein Paket ein', (
     handlers[0]('rename', 'notes/bild.png');
     t.mock.timers.tick(100);
     assert.deepEqual(batches, [{ paths: ['notes/a.md', 'notes/bild.png'] }]);
+
+    // Ein Ordner mit Bildendung verschiebt, was darin liegt: Komplettaufbau.
+    mkdirSync(join(dir, 'skizzen.png'));
+    handlers[0]('rename', 'skizzen.png');
+    t.mock.timers.tick(100);
+    assert.deepEqual(batches.at(-1), { full: true });
   } finally {
     w.stop();
     rmSync(dir, { recursive: true, force: true });
