@@ -140,6 +140,13 @@ export function createCaptureRouter({ capture, zunder = null, state, tz = 'Europ
   }
 
   function toVault({ text, title, source, captureId, created }) {
+    // Der Vault erkennt eine Wiederholung nur, solange die Notiz noch im
+    // Capture-Ordner liegt. Der Merkzettel hält sie auch nach dem Ablegen
+    // fest, wie bei Aufgaben (VCP-56).
+    const key = captureId ? `capture-note:${source}:${captureId}` : null;
+    const known = key ? state?.get(key) : null;
+    if (known) return { kind: 'note', path: known.path, duplicate: true };
+
     // Ohne eigenen Titel heißt die Notiz nach Quelle und Zeitpunkt; der Text
     // gehört in den Inhalt, nicht in Dateiname oder Titel (ZUN-12).
     const noteTitle = cleanTitle(title) || null;
@@ -149,6 +156,7 @@ export function createCaptureRouter({ capture, zunder = null, state, tz = 'Europ
     } catch (err) {
       throw new CaptureError(err.message);
     }
+    if (key) state?.set(key, { path: r.path });
     if (!r.duplicate) logger.info?.(`Capture (${source}) → ${r.path}`);
     return { kind: 'note', path: r.path, duplicate: Boolean(r.duplicate) };
   }
