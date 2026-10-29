@@ -28,6 +28,8 @@ export function noteOrigin(param, referer, origin) {
   }
   if (!url || url.origin !== origin || url.pathname.startsWith('/notiz') || url.pathname.startsWith('/aktion/')) return null;
   const path = url.pathname + url.search;
+  // Nach dem Normalisieren (`/x/..//evil.test`) darf daraus kein Link nach außen werden.
+  if (!/^\/(?!\/)[^\\\s]*$/.test(path)) return null;
   const label = ORIGIN_LABELS[url.pathname] ?? 'Zurück';
   return { path, href: url.pathname === '/' ? `${path}#inbox` : path, label };
 }
@@ -145,7 +147,7 @@ ${head(note.title, { script: Boolean(write) })}
 ${appHeader({ user })}
 <div class="page-head">
   <div><h1>${esc(note.title)}</h1><p class="meta">${esc(note.path)}${graph ? ` · <a href="${esc(graphHref(note.path))}">Graph</a>` : ''}${obsidian ? ` · <a href="${esc(obsidian)}">In Obsidian öffnen</a>` : ''}</p></div>
-  <a href="${esc(origin?.href ?? '/')}" class="btn quiet">← ${esc(origin?.label ?? 'Zur Woche')}</a>
+  <a href="${esc(origin?.href ?? '/')}" class="btn quiet"${origin ? ` data-zurueck="${esc(origin.path)}"` : ''}>← ${esc(origin?.label ?? 'Zur Woche')}</a>
 </div>
 <main class="note-page">
   <div class="note-main">

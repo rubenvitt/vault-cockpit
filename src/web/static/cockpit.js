@@ -6,6 +6,16 @@
   'use strict';
 
   const toasts = document.querySelector('.toasts');
+
+  // Notizseite: Die Herkunft (Inbox, Graph …) kommt in die Adresse, damit das Neuladen nach einer Aktion sie behält.
+  const zurueck = document.querySelector('[data-zurueck]')?.dataset.zurueck;
+  if (zurueck) {
+    const here = new URL(location.href);
+    if (!here.searchParams.has('zurueck')) {
+      here.searchParams.set('zurueck', zurueck);
+      history.replaceState(history.state, '', here);
+    }
+  }
   // Rückmeldung bei Seitenwechseln und Haptik in der App: `/static/ui.js` auf jeder Seite.
   const haptik = (art) => window.cockpitHaptik?.(art);
   const go = (url) => (window.cockpitWechsel ? window.cockpitWechsel(url) : location.assign(url));
@@ -107,11 +117,14 @@
   }
 
   // Dieselbe Aufgabe kann zweimal auf der Seite stehen (Heute und Big Rocks): beide folgen.
-  function show(li, status) {
+  function copiesOf(li) {
     const id = li.dataset.id;
-    const copies = id ? document.querySelectorAll(`li.task[data-id="${CSS.escape(id)}"]`) : [];
-    for (const copy of copies) if (copy !== li && copy.querySelector('form.tick')) showOne(copy, status);
-    showOne(li, status);
+    const all = id ? [...document.querySelectorAll(`li.task[data-id="${CSS.escape(id)}"]`)].filter((c) => c.querySelector('form.tick')) : [];
+    return all.includes(li) ? all : [li, ...all];
+  }
+
+  function show(li, status) {
+    for (const copy of copiesOf(li)) showOne(copy, status);
   }
 
   function showOne(li, status) {
@@ -130,8 +143,10 @@
   async function setStatus(li, status) {
     const form = li.querySelector('form.tick');
     const before = li.dataset.status;
-    if (li.classList.contains('busy')) return;
-    li.classList.add('busy');
+    // Eine Änderung je Aufgabe auf einmal, auch über ihre Kopien hinweg.
+    const copies = copiesOf(li);
+    if (copies.some((c) => c.classList.contains('busy'))) return;
+    for (const c of copies) c.classList.add('busy');
     show(li, status);
     if (status === 'done') li.classList.add('just-done');
     try {
@@ -145,7 +160,7 @@
       haptik('fehler');
       toast(err.message, { kind: 'error' });
     } finally {
-      li.classList.remove('busy');
+      for (const c of copies) c.classList.remove('busy');
       setTimeout(() => li.classList.remove('just-done'), 700);
     }
   }

@@ -416,6 +416,7 @@ test('renderWeek: Fälligkeit als Schild, erledigte Bereiche eingeklappt, Heute 
     ...TASKS,
     { id: 'h1', title: 'Heute fällig', status: 'open', due: '2026-10-14', location: loc('Finanzen') },
     { id: 'h2', title: 'Seit Montag fällig', status: 'open', due: '2026-10-12', location: loc('Finanzen') },
+    { id: 'h3', title: 'Alter Schritt', status: 'open', due: '2026-10-01', location: loc('Finanzen'), phoenix: { fire: '2026-W42', role: 'feuer_schritt' } },
   ];
   const cockpit = createCockpit({ index: fakeIndex([feuerNote()]), settings: settingsWith(), zunderFor: () => fakeZunder(tasks), now: fixedNow, logger: quiet });
   const m = await cockpit.week();
@@ -435,6 +436,9 @@ test('renderWeek: Fälligkeit als Schild, erledigte Bereiche eingeklappt, Heute 
   assert.match(heute, /Heute fällig/);
   assert.match(heute, /Seit Montag fällig/);
   assert.doesNotMatch(heute, /Helfermappe/);
+  // Älter als die Woche (Phönix-Schritt mit altem Datum) gehört nicht zu Heute.
+  assert.match(html, /Alter Schritt/);
+  assert.doesNotMatch(heute, /Alter Schritt/);
 
   const other = await cockpit.week('2026-W43');
   assert.doesNotMatch(renderWeek(other), /class="heute"|today-first/);
@@ -449,6 +453,9 @@ test('noteOrigin: Zurück zur Herkunft aus Adresse oder Referer, nie nach außen
   assert.equal(noteOrigin(null, 'https://evil.test/graph', o), null);
   assert.equal(noteOrigin('//evil.test/x', null, o), null);
   assert.equal(noteOrigin(null, 'kaputt', o), null);
+  // Normalisiert zu `//evil.test`: kein Link nach außen.
+  assert.equal(noteOrigin('/x/..//evil.test', null, o), null);
+  assert.equal(noteOrigin(null, 'https://cockpit.test/x/..//evil.test', o), null);
   assert.equal(noteOrigin(null, null, o), null);
 });
 

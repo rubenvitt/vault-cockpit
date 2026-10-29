@@ -451,7 +451,7 @@ public struct WeekModel: Decodable, Equatable, Sendable {
         let tz = timeZone
         return groups.flatMap(\.tasks).filter { task in
             guard task.status != .dropped, let due = task.due, let day = CockpitFormat.localDay(due, timeZone: tz) else { return false }
-            return day == today || (day < today && !task.isDone)
+            return day == today || (day >= week.monday && day < today && !task.isDone)
         }
     }
 

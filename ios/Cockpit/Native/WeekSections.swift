@@ -293,7 +293,8 @@ struct FlamesSection: View {
                         TaskRow(
                             task: flame,
                             env: env,
-                            meta: CockpitFormat.meta([CockpitFormat.dueLabel(flame.due, timeZone: env.timeZone), Self.measured(flame)]),
+                            meta: CockpitFormat.meta([Self.measured(flame)]),
+                            due: CockpitFormat.dueTag(flame, today: env.today, timeZone: env.timeZone),
                             live: flame.running,
                             showsFlame: true,
                             menu: .flame,
@@ -365,10 +366,16 @@ struct RockCard: View {
     }
 
     var body: some View {
-        if collapsible && group.allDone {
-            collapsed
-        } else {
-            card
+        Group {
+            if collapsible && group.allDone {
+                collapsed
+            } else {
+                card
+            }
+        }
+        // Einmal wieder geöffnet, bleibt die Karte offen, auch wenn sie danach wieder fertig ist.
+        .onChange(of: group.allDone) { _, done in
+            if !done { collapsible = false }
         }
     }
 
