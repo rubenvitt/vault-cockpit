@@ -147,3 +147,10 @@ test('Markdown: verschachtelte Listen, Sonderzeichen und Markdown-Zeichen im Tex
     ].join('\n\n'),
   );
 });
+
+test('extractArticle: Canonical auf die Startseite gilt bei einem Artikel nicht, bei der Startseite selbst schon', () => {
+  const html = (href) => `<!doctype html><html><head><title>T</title><link rel="canonical" href="${href}"></head><body><article><p>Text.</p></article></body></html>`;
+  assert.equal(extractArticle(html('https://beispiel.test/'), 'https://beispiel.test/2026/artikel').canonical_url, null);
+  assert.equal(extractArticle(html('/'), 'https://beispiel.test/?seite=2').canonical_url, 'https://beispiel.test/');
+  assert.equal(extractArticle(html('/2026/artikel'), 'https://beispiel.test/2026/artikel?utm=x').canonical_url, 'https://beispiel.test/2026/artikel');
+});

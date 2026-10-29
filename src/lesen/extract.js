@@ -88,6 +88,18 @@ export const readingMinutes = (wordCount) => Math.max(1, Math.round(wordCount / 
 const squash = (s) => String(s ?? '').replace(/\s+/g, ' ').trim();
 
 /**
+ * Kanonische Adresse, wenn sie taugt: nur gleiche Herkunft (sonst könnte eine
+ * Seite sich über einen fremden Artikel legen) und nicht die Startseite für
+ * einen Artikel darunter (website-weite Canonical, die alles zusammenlegte).
+ */
+function ownCanonical(canonical, url) {
+  if (!canonical || canonical === url) return null;
+  const [c, u] = [new URL(canonical), new URL(url)];
+  if (c.origin !== u.origin) return null;
+  return c.pathname === '/' && !c.search && u.pathname !== '/' ? null : canonical;
+}
+
+/**
  * `html` der Seite, `url` nach allen Weiterleitungen. Liefert die Felder für
  * `store.addDocument` (ohne Status und Herkunft).
  */
@@ -107,8 +119,7 @@ export function extractArticle(html, url) {
   const text = textFields(sanitizeHtml(article?.content ?? '', url));
   return {
     url,
-    // Nur gleiche Herkunft: Sonst könnte eine Seite sich per Canonical über einen fremden Artikel legen.
-    canonical_url: canonical && canonical !== url && new URL(canonical).origin === new URL(url).origin ? canonical : null,
+    canonical_url: ownCanonical(canonical, url),
     title: squash(article?.title) || pageTitle || new URL(url).hostname,
     author: squash(article?.byline) || null,
     site: squash(article?.siteName) || new URL(url).hostname.replace(/^www\./, ''),
