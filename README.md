@@ -583,9 +583,10 @@ ist, mit letztem erfolgreichem Lauf und letztem Fehler samt Zeitpunkt und Text:
 Sync (Status, letzter Abgleich, Lebenszeichen des Sidecars), Index (Notizen,
 letzter Aufbau), Embeddings (Modell, Fortschritt), Mail-Abruf, Zunder-Brücke (neue
 Checkboxen und Abgleich getrennt), Zunder-Zugang (nimmt Zunder den Token an?) und
-Kalender (je Kalender) und Feeds (je Feed). Die Daten sind dieselben wie in `vault_stats`; Mail-Abruf,
-Brücke, Kalender und Zunder-Zugang merken sich ihren letzten Lauf im Speicher, nach
-einem Neustart also erst ab dem nächsten Lauf. Beim Laden der Seite werden Zunder
+Kalender (je Kalender) und Feeds (je Feed). `vault_stats` liefert dieselben Dienste
+unter `services`. Letzten Erfolg und letzten Fehler je Dienst hält
+`/data/dienste-zustand.json` fest: Nach einem Neustart steht der Dienst bis zu
+seinem nächsten Lauf auf „unbekannt“, die Zeiten davor bleiben sichtbar. Beim Laden der Seite werden Zunder
 und Kalender einmal frisch geprüft. Fehlertexte erscheinen maskiert: Adressen nur
 mit Host, Tokens und Passwörter als `•••`. Meldet ein Dienst einen Fehler (etwa
 Sync `error`/`stale` oder ein gescheiterter Mail-Abruf), steht in der Kopfzeile der

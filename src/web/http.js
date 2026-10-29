@@ -700,6 +700,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       user: session.name ?? session.sub,
       csrf: csrfOf(req),
       backup: backup?.status() ?? null,
+      health: Boolean(health),
     });
     return send(res, status, html);
   }

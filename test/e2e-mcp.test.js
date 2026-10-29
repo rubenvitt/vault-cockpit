@@ -44,6 +44,7 @@ before(async () => {
     editor: createEditor({ vaultPath: root, index }),
     policy: compilePolicy({ sensitive: { 'areas/Gesundheit': 'gesundheit' } }),
     graph: createGraph({ index, logger: { warn() {} } }),
+    health: { services: () => [{ id: 'mail', name: 'Mail-Abruf', state: 'error', summary: 'Abruf fehlgeschlagen', lastOkAt: null, lastErrorAt: '2026-10-18T12:00:00.000Z', lastError: 'HTTP 401', facts: [{ label: 'Ordner', value: 'Vault' }] }] },
     verifyToken: (token) => principals.get(token),
   });
 
@@ -150,6 +151,8 @@ test('vault_graph liefert den Graphen, vault_similar meldet fehlende Embeddings'
   const stats = (await rpc('tools/call', { name: 'vault_stats', arguments: {} })).body.result.structuredContent;
   assert.equal(stats.semantic.state, 'disabled');
   assert.equal(stats.zunder.state, 'disabled');
+  // Dieselben Dienste wie /zustand, ohne Anzeigedetails (VCP-60).
+  assert.deepEqual(stats.services, [{ id: 'mail', name: 'Mail-Abruf', state: 'error', summary: 'Abruf fehlgeschlagen', lastOkAt: null, lastErrorAt: '2026-10-18T12:00:00.000Z', lastError: 'HTTP 401' }]);
 });
 
 test('vault_read liefert den Inhalt', async () => {

@@ -27,6 +27,18 @@ const EDITS = { readOnlyHint: false, destructiveHint: true, idempotentHint: fals
 const READ_SCOPE_MISSING = 'Für diese Aktion fehlt die Berechtigung "vault:read". Der Connector muss in Claude neu verbunden werden.';
 const EDIT_SCOPE_MISSING = 'Für diese Aktion fehlt die Berechtigung "vault:edit". Der Connector muss in Claude neu verbunden werden.';
 
+/** Ein Dienst von /zustand für vault_stats: ohne Anzeigedetails, Teile ebenso. */
+const serviceForStats = ({ id, name, state, summary = null, lastOkAt, lastErrorAt, lastError, items }) => ({
+  id,
+  name,
+  state,
+  summary,
+  lastOkAt,
+  lastErrorAt,
+  lastError,
+  ...(items ? { items: items.map(serviceForStats) } : {}),
+});
+
 export function createVaultMcpHandler({
   index,
   capture,
@@ -36,6 +48,8 @@ export function createVaultMcpHandler({
   semantic: semanticOrGetter = null,
   graph = null,
   zunderStatus = null,
+  // Zustand der Hintergrunddienste (src/health/collect.js), wie auf /zustand.
+  health = null,
   verifyToken,
   captureFolder = 'inbox',
   layoutHint = null,
@@ -255,7 +269,9 @@ export function createVaultMcpHandler({
         description:
           'Kennzahlen des Vaults: Anzahl Notizen je Klasse, Tags, Verlinkungsgrad. Gut zur ersten Orientierung. ' +
           'Dazu der Zustand des Syncs (läuft, letzter Abgleich, letzter Fehler), wann der Index zuletzt aktualisiert wurde, der Stand der Embeddings ' +
-          'und ob Zunder angebunden ist (Quelle des Zugangs: Einstellungen oder Umgebung).',
+          'und ob Zunder angebunden ist (Quelle des Zugangs: Einstellungen oder Umgebung). Unter services stehen alle Hintergrunddienste ' +
+          '(Sync, Index, Embeddings, Mail-Abruf, Zunder-Brücke, Feuer-Notiz, Zunder-Zugang, Kalender, Feeds) mit Zustand, letztem Erfolg und ' +
+          'letztem Fehler, genau wie auf der Seite /zustand.',
         inputSchema: {},
         annotations: READ_ONLY,
       },
@@ -267,6 +283,7 @@ export function createVaultMcpHandler({
           sync: sync?.status() ?? { adapter: 'none', state: 'disabled' },
           semantic: semantic?.status() ?? { state: 'disabled' },
           zunder: zunderStatus?.() ?? { state: 'disabled' },
+          ...(health ? { services: health.services().map(serviceForStats) } : {}),
         });
       }),
     );

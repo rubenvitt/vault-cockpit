@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { maskSecrets } from '../src/health/mask.js';
@@ -324,6 +324,40 @@ test('Zustand: aus, wenn nicht eingerichtet; unbekannt vor dem ersten Lauf', () 
 
   const fresh = setup({ zunderAccess: createRunLog() }).health;
   assert.deepEqual(fresh.services().find((s) => s.id === 'zunder').state, 'unknown');
+});
+
+test('Zustand: letzter Erfolg und Fehler überstehen einen Neustart (VCP-60)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'zustand-'));
+  const file = join(dir, 'dienste-zustand.json');
+  try {
+    const at = new Date(NOW - 300_000).toISOString();
+    const access = createRunLog({ now: () => NOW });
+    access.fail(new Error('Zunder antwortet mit HTTP 401 (Token zt_geheim123456 unbekannt)'));
+    const before = setup({ file, zunderAccess: access }).health;
+    const was = Object.fromEntries(before.services().map((s) => [s.id, s]));
+    assert.ok(readFileSync(file, 'utf8').includes('"mail"'));
+    assert.doesNotMatch(readFileSync(file, 'utf8'), /geheim/);
+
+    // Neustart: Mail, Brücke und Zunder haben noch keinen Lauf, die Datei kennt ihn.
+    const after = setup({
+      file,
+      zunderAccess: createRunLog(),
+      mail: () => ({ state: 'idle', mailbox: 'Vault', lastOkAt: null, lastErrorAt: null, lastError: null }),
+      bridge: { enabled: () => true, active: () => true, tag: 'zunder', status: () => ({ transfer: { okAt: null, errorAt: null, error: null, failing: false }, sync: { okAt: null, errorAt: null, error: null, failing: false } }) },
+    }).health;
+    const now = Object.fromEntries(after.services().map((s) => [s.id, s]));
+    assert.equal(now.mail.state, 'unknown');
+    assert.equal(now.mail.lastOkAt, was.mail.lastOkAt);
+    assert.equal(now.bridge.items[0].lastOkAt, was.bridge.items[0].lastOkAt);
+    assert.equal(now.zunder.state, 'unknown');
+    assert.equal(now.zunder.lastErrorAt, was.zunder.lastErrorAt);
+    assert.equal(now.zunder.lastError, was.zunder.lastError);
+    // Ein neuer Lauf gilt vor dem gemerkten.
+    const fresh = setup({ file, mail: () => ({ state: 'ok', mailbox: 'Vault', lastOkAt: at, lastErrorAt: null, lastError: null }) }).health;
+    assert.equal(fresh.services().find((s) => s.id === 'mail').lastOkAt, at);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('Zustand: Kalender je Teil, Adresse mit Geheimnis wird maskiert; check() prüft Zunder und Kalender frisch', async () => {

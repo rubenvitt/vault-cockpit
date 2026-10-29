@@ -1,4 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { maskSecrets } from './mask.js';
+import { writePrivate } from '../cockpit/settings.js';
 import { describeWeek, weekOf } from '../cockpit/week.js';
 
 const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
@@ -50,6 +52,17 @@ const latest = (...times) => times.filter(Boolean).sort().at(-1) ?? null;
 /** Zustand einer Liste von Teilen: Fehler schlägt alles, sonst ok, wenn eins lief. */
 const worst = (items) => (items.some((i) => i.state === 'error') ? 'error' : items.some((i) => i.state === 'ok') ? 'ok' : 'unknown');
 
+/** Gemerkter Stand aus `file`; fehlt sie oder ist sie kaputt, ein leerer. */
+function loadRemembered(file) {
+  if (!file) return {};
+  try {
+    const data = JSON.parse(readFileSync(file, 'utf8'));
+    return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+  } catch {
+    return {};
+  }
+}
+
 /**
  * Zustand der Hintergrunddienste für die Seite „Zustand“, den Hinweis in der
  * Kopfzeile und `/health`.
@@ -60,6 +73,10 @@ const worst = (items) => (items.some((i) => i.state === 'error') ? 'error' : ite
  * Merkzettel am Client (`zunderAccess`, gefüllt bei jedem Aufruf an Zunder).
  * `services()` liest nur diesen Stand und fragt nichts im Netz ab; `check()`
  * prüft vorher Zunder und Kalender einmal frisch.
+ *
+ * Mit `file` überstehen letzter Erfolg und letzter Fehler je Dienst einen
+ * Neustart: Bis zum ersten Lauf danach ist der Zustand `unknown`, die Zeiten
+ * stehen aber da. Die Datei schreibt `services()`, sobald sich etwas ändert.
  *
  * Je Dienst: `state` (`ok` läuft, `error` Fehler, `off` aus, `unknown` noch
  * kein Lauf), ein kurzer Satz, letzter Erfolg und letzter Fehler mit Text,
@@ -80,8 +97,46 @@ export function createHealth({
   flameNote = null,
   // Feeds des Lesestapels (src/lesen/feeds.js): liefert den Dienst fertig, je Feed ein Teil.
   feeds = null,
+  // Datei unter /data, die letzten Erfolg und letzten Fehler je Dienst über einen Neustart rettet (VCP-60).
+  file = null,
   now = () => Date.now(),
+  logger = console,
 }) {
+  const remembered = loadRemembered(file);
+  let lastSaved = JSON.stringify(remembered);
+
+  /**
+   * Was ein Dienst seit dem Start noch nicht weiß (letzter Erfolg, letzter
+   * Fehler), aus der Datei ergänzen, und Neues dort festhalten. Abgeschaltete
+   * Dienste bleiben, wie sie sind. Fehlertexte sind schon maskiert.
+   */
+  function remember(s) {
+    const items = s.items?.map(remember);
+    if (s.state === 'off') return items ? { ...s, items } : s;
+    const prev = remembered[s.id] ?? {};
+    const filled = {
+      ...s,
+      lastOkAt: s.lastOkAt ?? prev.lastOkAt ?? null,
+      lastErrorAt: s.lastErrorAt ?? prev.lastErrorAt ?? null,
+      lastError: s.lastErrorAt || s.lastError ? s.lastError : (prev.lastError ?? null),
+      ...(items ? { items } : {}),
+    };
+    remembered[s.id] = { lastOkAt: filled.lastOkAt, lastErrorAt: filled.lastErrorAt, lastError: filled.lastError };
+    return filled;
+  }
+
+  function persist() {
+    if (!file) return;
+    const text = JSON.stringify(remembered);
+    if (text === lastSaved) return;
+    try {
+      writePrivate(file, `${JSON.stringify(remembered, null, 2)}\n`);
+      lastSaved = text;
+    } catch (err) {
+      logger.warn?.(`Zustand: ${file} nicht geschrieben — ${err.message}`);
+    }
+  }
+
   function secrets() {
     const s = settings.get();
     const d = settings.defaults?.() ?? {};
@@ -304,7 +359,11 @@ export function createHealth({
       ...(s.summary ? { summary: maskSecrets(s.summary, { secrets: hidden, max: 200 }) } : {}),
       ...(s.items ? { items: s.items.map(clean) } : {}),
     });
-    return [syncService(), ...(index ? [indexService()] : []), embedService(), mailService(), bridgeService(), ...(flameNote ? [flameNoteService()] : []), zunderService(), calendarService(), ...(feeds ? [feeds()] : [])].map(clean);
+    const list = [syncService(), ...(index ? [indexService()] : []), embedService(), mailService(), bridgeService(), ...(flameNote ? [flameNoteService()] : []), zunderService(), calendarService(), ...(feeds ? [feeds()] : [])]
+      .map(clean)
+      .map(remember);
+    persist();
+    return list;
   }
 
   return {
