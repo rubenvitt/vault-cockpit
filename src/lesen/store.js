@@ -142,6 +142,9 @@ export const MIGRATIONS = [
     last_error TEXT,
     updated_at TEXT NOT NULL
   );`,
+  // Feed-Pflege (VCP-86): wann zuletzt ein Icon gesucht wurde; Einträge, die der Stichwort-Filter aussortiert hat.
+  `ALTER TABLE feeds ADD COLUMN icon_checked_at TEXT;
+  ALTER TABLE feed_entries ADD COLUMN filtered INTEGER NOT NULL DEFAULT 0;`,
 ];
 
 /** Zustände eines Ingest-Entwurfs (src/lesen/ingest.js). */
@@ -152,7 +155,7 @@ export class ReadingError extends Error {}
 
 const DOC_FIELDS = ['url', 'canonical_url', 'comments_url', 'title', 'author', 'site', 'kind', 'origin', 'client_id', 'excerpt', 'content_html', 'content_text', 'word_count', 'reading_minutes', 'status', 'topics'];
 const HIGHLIGHT_EDIT = ['quote', 'prefix', 'suffix', 'start_hint', 'note', 'color', 'review_box', 'review_due', 'review_state', 'reviewed_at', 'review_prev'];
-const FEED_EDIT = ['url', 'site_url', 'title', 'icon', 'paused', 'to_stack', 'keyword_filter', 'interval_minutes', 'etag', 'last_modified', 'last_fetch_at', 'last_error', 'error_count', 'next_fetch_at', 'group_id'];
+const FEED_EDIT = ['url', 'site_url', 'title', 'icon', 'paused', 'to_stack', 'keyword_filter', 'interval_minutes', 'etag', 'last_modified', 'last_fetch_at', 'last_error', 'error_count', 'next_fetch_at', 'group_id', 'icon_checked_at'];
 const GROUP_EDIT = ['name', 'paused', 'to_stack'];
 /** Filter `group` für `list`/`counts`: Gruppen-ID oder `ohne` (nicht aus einem Feed: Gespeichertes, Mail). */
 export const NO_FEED = 'ohne';
@@ -254,6 +257,21 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
     const groupId = patch.group_id || null;
     if (groupId && !getGroup(groupId)) throw new ReadingError('Diese Gruppe gibt es nicht');
     return { ...patch, group_id: groupId };
+  };
+  /**
+   * Was eine Änderung am Feed nebenbei mitbringt: Ein geänderter
+   * Stichwort-Filter vergisst die aussortierten Einträge, damit der nächste
+   * Abruf sie neu prüft (soweit sie noch im Feed stehen). Wieder eingeschaltet
+   * ist ein Feed gleich dran, alte Fehler zählen nicht mehr (sonst pausierte
+   * ein automatisch pausierter Feed beim nächsten Fehler sofort wieder).
+   */
+  const feedPatch = (feed, patch) => {
+    if (!patch) return patch;
+    if ('keyword_filter' in patch && (patch.keyword_filter || null) !== (feed.keyword_filter || null)) {
+      db.prepare('DELETE FROM feed_entries WHERE feed_id = ? AND filtered = 1').run(feed.id);
+    }
+    if (patch.paused === false && feed.paused) return { last_error: null, error_count: 0, next_fetch_at: null, ...patch };
+    return patch;
   };
   const must = (row, what) => {
     if (!row) throw new ReadingError(`${what} gibt es nicht`);
@@ -532,8 +550,8 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
       return db.prepare(`${FEED_SELECT} ${where} ORDER BY f.title COLLATE NOCASE, f.url`).all(...args).map(feedRow);
     },
     updateFeed(id, patch) {
-      must(getFeed(id), 'Diesen Feed');
-      update('feeds', id, withGroup(patch), FEED_EDIT);
+      const feed = must(getFeed(id), 'Diesen Feed');
+      inTransaction(() => update('feeds', id, feedPatch(feed, withGroup(patch)), FEED_EDIT));
       return getFeed(id);
     },
     deleteFeed: (id) => db.prepare('DELETE FROM feeds WHERE id = ?').run(String(id ?? '')).changes > 0,
@@ -544,7 +562,7 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
     updateFeeds(ids, patch) {
       const checked = withGroup(patch);
       const known = [...new Set(ids.map(String))].filter((id) => getFeed(id));
-      inTransaction(() => known.forEach((id) => update('feeds', id, checked, FEED_EDIT)));
+      inTransaction(() => known.forEach((id) => update('feeds', id, feedPatch(getFeed(id), checked), FEED_EDIT)));
       return known.map(getFeed);
     },
     /** Entfernt viele Feeds auf einmal; liefert die Zahl der entfernten. */
@@ -608,9 +626,12 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
       return Object.fromEntries(rows.map((r) => [r.g, r.n]));
     },
 
-    /** Merkt sich einen Feed-Eintrag; `false`, wenn er schon bekannt war. */
-    rememberEntry(feedId, guid, docId = null) {
-      return db.prepare('INSERT OR IGNORE INTO feed_entries (feed_id, guid, doc_id) VALUES (?, ?, ?)').run(feedId, guid, docId).changes > 0;
+    /**
+     * Merkt sich einen Feed-Eintrag; `false`, wenn er schon bekannt war.
+     * `filtered`: vom Stichwort-Filter aussortiert, ein geänderter Filter prüft ihn neu.
+     */
+    rememberEntry(feedId, guid, docId = null, { filtered = false } = {}) {
+      return db.prepare('INSERT OR IGNORE INTO feed_entries (feed_id, guid, doc_id, filtered) VALUES (?, ?, ?, ?)').run(feedId, guid, docId, filtered ? 1 : 0).changes > 0;
     },
     /** Alle bekannten Einträge eines Feeds (GUID bzw. Adresse) als Set; leer heißt: noch nie abgerufen. */
     knownEntries: (feedId) => new Set(db.prepare('SELECT guid FROM feed_entries WHERE feed_id = ?').all(String(feedId ?? '')).map((r) => r.guid)),

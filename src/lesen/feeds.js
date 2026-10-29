@@ -33,7 +33,12 @@ const FIRST_FETCH = 5;
 // Ab so vielen Wörtern gilt der Inhalt im Feed als Volltext, sonst wird die Seite geholt.
 const FULL_TEXT_WORDS = 150;
 const MAX_BACKOFF_MINUTES = 24 * 60;
+// So viele Fehler hintereinander (mit Backoff gut fünf Tage), dann pausiert der Feed von selbst.
+export const AUTO_PAUSE_ERRORS = 10;
+// Kein Icon gefunden: nach so vielen Tagen noch einmal suchen.
+const ICON_RETRY_DAYS = 7;
 const ICON_TYPES = ['image/png', 'image/x-icon', 'image/vnd.microsoft.icon', 'image/jpeg', 'image/gif', 'image/webp'];
+const ATOM_NS = 'http://www.w3.org/2005/Atom';
 const FEED_LINK = /^application\/(?:(?:rss|atom|feed)\+(?:xml|json)|json)$/i;
 
 /** Feeds kommen als xml, rss+xml, json, oft auch als text/plain: Der Inhalt entscheidet, nicht der Typ. */
@@ -136,6 +141,9 @@ function parseAny(body, baseUrl) {
   const root = new DOMParser().parseFromString(src, 'text/xml').documentElement;
   const type = root?.tagName?.toLowerCase();
   if (type === 'feed') return parseAtom(root, baseUrl);
+  // Atom mit Präfix (`<atom:feed xmlns:atom="http://www.w3.org/2005/Atom">`): dieselben Elemente, jeweils mit `atom:`.
+  const prefixed = /^([\w.-]+:)feed$/.exec(type ?? '')?.[1];
+  if (prefixed && root.getAttribute(`xmlns:${prefixed.slice(0, -1)}`) === ATOM_NS) return parseAtom(root, baseUrl, prefixed);
   const channel = type === 'rss' || type === 'rdf:rdf' ? kid(root, 'channel') : null;
   if (!channel) throw new ReadingError('Kein RSS-, Atom- oder JSON-Feed');
   // RSS 1.0 hat die Einträge neben dem Kanal, RSS 2.0 darin.
@@ -161,23 +169,28 @@ function parseAny(body, baseUrl) {
   };
 }
 
-function parseAtom(root, baseUrl) {
+/** `p`: Präfix der Atom-Elemente samt Doppelpunkt (`atom:`), ohne Präfix leer. */
+function parseAtom(root, baseUrl, p = '') {
+  const names = (list) => list.map((n) => p + n);
+  const pkids = (el, name) => kids(el, p + name);
+  const pkid = (el, ...list) => kid(el, ...names(list));
+  const ptext = (el, ...list) => text(el, ...names(list));
   const alternate = (el) => {
-    const link = kids(el, 'link').find((l) => (xmlAttr(l, 'rel') ?? 'alternate') === 'alternate');
+    const link = pkids(el, 'link').find((l) => (xmlAttr(l, 'rel') ?? 'alternate') === 'alternate');
     return absolute(xmlAttr(link, 'href'), baseUrl);
   };
   const content = (el) => {
-    const c = kid(el, 'content', 'summary');
+    const c = pkid(el, 'content', 'summary');
     const type = xmlAttr(c, 'type') ?? 'text';
     return type === 'xhtml' ? c.innerHTML : type === 'text' ? esc(c?.textContent ?? '') : c.textContent;
   };
   return {
-    title: text(root, 'title'),
+    title: ptext(root, 'title'),
     siteUrl: alternate(root),
-    icon: absolute(text(root, 'icon', 'logo'), baseUrl),
-    entries: kids(root, 'entry').map((entry) => {
+    icon: absolute(ptext(root, 'icon', 'logo'), baseUrl),
+    entries: pkids(root, 'entry').map((entry) => {
       const url = alternate(entry);
-      return { key: text(entry, 'id') ?? url, url, title: text(entry, 'title'), author: text(kid(entry, 'author'), 'name'), html: content(entry), published: time(text(entry, 'published', 'updated')) };
+      return { key: ptext(entry, 'id') ?? url, url, title: ptext(entry, 'title'), author: ptext(pkid(entry, 'author'), 'name'), html: content(entry), published: time(ptext(entry, 'published', 'updated')) };
     }),
   };
 }
@@ -295,6 +308,8 @@ const hostOf = (url) => {
  * anderen nicht. Danach ist der Feed nach `interval_minutes` wieder dran, nach
  * Fehlern später (doppelter Abstand je Fehler, höchstens ein Tag).
  *
+ * Nach `AUTO_PAUSE_ERRORS` Fehlern hintereinander pausiert der Feed.
+ *
  * `last_fetch_at` ist der letzte Versuch; ob er klappte, sagt `error_count`.
  * `fetchFeed`, `fetchPage` und `now` setzen Tests, `start()` braucht es nur im
  * Betrieb.
@@ -318,8 +333,7 @@ export function createFeedPoller({ store, fetchFeed = fetchFeedDefault, fetchPag
     return own;
   }
 
-  /** Icon als `data:`-Adresse (die CSP lädt keine fremden Bilder); `''` heißt: keins gefunden. */
-  // shortcut: Ein nicht gefundenes Icon (`''`) wird nie wieder versucht; nachrüsten, wenn Feeds später eins bekommen.
+  /** Icon als `data:`-Adresse (die CSP lädt keine fremden Bilder); `''` heißt: keins gefunden, nach `ICON_RETRY_DAYS` neu versuchen. */
   async function icon(feed, parsed, auth) {
     try {
       const url = parsed.icon ?? new URL('/favicon.ico', parsed.siteUrl ?? feed.url).href;
@@ -351,9 +365,9 @@ export function createFeedPoller({ store, fetchFeed = fetchFeedDefault, fetchPag
     for (const entry of [...take].reverse()) {
       if (known.has(entry.key)) continue;
       known.add(entry.key);
-      // shortcut: Gefilterte Einträge bleiben für immer bekannt, ein gelockerter Filter holt sie nicht nach; ändern, wenn das stört.
+      // Aussortiert merken: Ändert sich der Filter, vergisst der Store sie und der nächste Abruf prüft sie neu.
       if (!entry.url || !matchesFilter(feed.keyword_filter, entry)) {
-        store.rememberEntry(feed.id, entry.key, null);
+        store.rememberEntry(feed.id, entry.key, null, { filtered: Boolean(entry.url) });
         continue;
       }
       const { doc, duplicate } = store.addDocument({ ...(await article(entry, site, auth ? { url: feed.url, auth } : null)), kind: 'feed', origin: `feed:${feed.id}`, status: feed.to_stack || feed.group_to_stack ? 'stapel' : 'eingang' });
@@ -365,10 +379,13 @@ export function createFeedPoller({ store, fetchFeed = fetchFeedDefault, fetchPag
       last_modified: res.headers?.['last-modified'] ?? null,
       ...(feed.title ? {} : { title: parsed.title }),
       ...(parsed.siteUrl ? { site_url: parsed.siteUrl } : {}),
-      ...(feed.icon == null ? { icon: await icon(feed, parsed, auth) } : {}),
+      ...(iconDue(feed) ? { icon: await icon(feed, parsed, auth), icon_checked_at: iso(now()) } : {}),
     };
     return { added, patch };
   }
+
+  /** Noch nie gesucht, oder keins gefunden und die letzte Suche ist `ICON_RETRY_DAYS` her. */
+  const iconDue = (feed) => feed.icon == null || (feed.icon === '' && (!feed.icon_checked_at || now() - Date.parse(feed.icon_checked_at) >= ICON_RETRY_DAYS * 24 * 60 * 60_000));
 
   async function runFeed(feed) {
     const at = now();
@@ -381,8 +398,10 @@ export function createFeedPoller({ store, fetchFeed = fetchFeedDefault, fetchPag
     } catch (err) {
       const errors = feed.error_count + 1;
       const wait = Math.min(minutes * 2 ** errors, MAX_BACKOFF_MINUTES);
-      if (store.getFeed(feed.id)) store.updateFeed(feed.id, { last_fetch_at: iso(at), last_error: String(err?.message ?? err), error_count: errors, next_fetch_at: iso(at + wait * 60_000) });
-      logger.warn?.(`Feeds: ${feed.title ?? hostOf(feed.url)} fehlgeschlagen (${errors}×): ${err?.message ?? err}`);
+      // Dauerhaft tot: pausieren, statt `/zustand` auf Dauer auf Störung zu halten. Wieder einschalten setzt die Fehler zurück.
+      const pause = errors >= AUTO_PAUSE_ERRORS;
+      if (store.getFeed(feed.id)) store.updateFeed(feed.id, { last_fetch_at: iso(at), last_error: String(err?.message ?? err), error_count: errors, next_fetch_at: iso(at + wait * 60_000), ...(pause ? { paused: true } : {}) });
+      logger.warn?.(`Feeds: ${feed.title ?? hostOf(feed.url)} fehlgeschlagen (${errors}×)${pause ? ', jetzt pausiert' : ''}: ${err?.message ?? err}`);
       return 0;
     }
   }
@@ -421,12 +440,12 @@ export function createFeedPoller({ store, fetchFeed = fetchFeedDefault, fetchPag
     const feeds = store.listFeeds();
     if (!feeds.length) return { ...base, state: 'off', summary: 'keine Feeds abonniert', facts: [] };
     // Name nie die Adresse: private Feeds tragen gern einen Token darin.
-    // shortcut: Ein dauerhaft toter Feed hält den Dienst auf „Fehler“ (Störung in der Kopfzeile, `degraded`), bis man ihn pausiert oder entfernt; wie bei den Kalendern.
+    // Ein dauerhaft toter Feed pausiert nach `AUTO_PAUSE_ERRORS` Fehlern von selbst und zählt dann als aus, nicht als Störung.
     const items = feeds.map((f) => ({
       id: `feed-${f.id}`,
       name: f.title || hostOf(f.url),
       state: f.paused || f.group_paused ? 'off' : f.error_count ? 'error' : f.last_fetch_at ? 'ok' : 'unknown',
-      summary: f.paused || f.group_paused ? 'pausiert' : f.error_count ? `${f.error_count}× fehlgeschlagen` : f.last_fetch_at ? null : 'noch nicht abgerufen',
+      summary: f.paused && f.error_count >= AUTO_PAUSE_ERRORS ? `nach ${f.error_count} Fehlern pausiert` : f.paused || f.group_paused ? 'pausiert' : f.error_count ? `${f.error_count}× fehlgeschlagen` : f.last_fetch_at ? null : 'noch nicht abgerufen',
       lastOkAt: f.error_count ? null : f.last_fetch_at,
       lastErrorAt: f.error_count ? f.last_fetch_at : null,
       lastError: f.error_count ? f.last_error : null,
