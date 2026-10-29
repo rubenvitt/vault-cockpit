@@ -471,13 +471,18 @@ test('Service Worker: neue Version holt gespeicherte Leseansichten sofort neu, o
     const text = async (key) => (await cache.match(key))?.text();
 
     // Ohne Netz: Aktivieren scheitert still, die alten Fassungen bleiben lesbar.
+    // `activate` wartet nicht aufs Befüllen; das Befüllen danach ist dasselbe (`filling`).
+    const activate = async () => {
+      await sw.dispatch('activate');
+      await sw.dispatch('message', { data: { type: 'lesen-offline' } });
+    };
     online = false;
     await sw.dispatch('install');
-    await sw.dispatch('activate');
+    await activate();
     assert.match(await text('/lesen/doc?id=a'), /Alt a/);
 
     online = true;
-    await sw.dispatch('activate');
+    await activate();
     assert.deepEqual(fetched, ['/api/lesen/offline', '/lesen/doc?id=a', '/lesen/doc?id=b']);
     assert.match(await text('/lesen/doc?id=a'), /Neu \/lesen\/doc\?id=a/);
     assert.match(await text('/lesen/doc?id=b'), /Neu \/lesen\/doc\?id=b/);

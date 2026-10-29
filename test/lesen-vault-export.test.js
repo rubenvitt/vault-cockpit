@@ -678,3 +678,28 @@ test('Gesperrte Notiz: In den Vault und Ablegen melden es, schreiben nichts und 
   assert.deepEqual(readdirSync(join(root, FOLDER)), []);
   assert.equal(exporter.locked('gibt-es-nicht'), null);
 });
+
+test('Kurzfassung nachtragen: gleicht sie dem Titel, kommt sie trotzdem; ohne eindeutiges „## Markierungen“ bleibt die Notiz', async () => {
+  const { act } = decideRoutes();
+  const old = (d) => {
+    store.setStatus(d.id, 'archiv');
+    store.addHighlight({ doc_id: d.id, quote: 'Stelle' });
+    exporter.changed(d.id);
+    exporter.flush();
+    return exporter.notePath(d.id);
+  };
+  const path = old(doc);
+  store.updateDocument(doc.id, { excerpt: 'Vom Lesen: Über Stapel' });
+  await act('/aktion/lesen/doc/vault', { id: doc.id });
+  assert.equal(findSection(read(path), 'kurzfassung').inner, 'Vom Lesen: Über Stapel');
+
+  for (const [n, change] of [['ohne', (t) => t.replace('## Markierungen', '## Zitate')], ['doppelt', (t) => `${t}\n## Markierungen\n`]]) {
+    const { doc: d } = store.addDocument({ url: `https://blatt.test/${n}`, title: n, status: 'stapel' });
+    const p = old(d);
+    writeFileSync(join(root, p), change(read(p)));
+    idx.refresh(p);
+    store.updateDocument(d.id, { excerpt: 'Kurz.' });
+    await act('/aktion/lesen/doc/vault', { id: d.id });
+    assert.equal(findSection(read(p), 'kurzfassung'), null, n);
+  }
+});

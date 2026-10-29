@@ -220,7 +220,7 @@ export function createReadingExport({ vaultPath, index, editor, policy, store, s
    * Kurzfassung in eine bestehende Notiz nachtragen (VCP-98): Steht sie schon
    * im Text (Notiz ab VCP-96) oder fehlt sie im Lesestapel, bleibt die Notiz,
    * wie sie ist; einen schon nachgetragenen Bereich frischt sie auf. Neu kommt
-   * er vor „## Markierungen“, ohne den Abschnitt ans Ende der Notiz.
+   * er vor „## Markierungen“; fehlt der Abschnitt oder steht er doppelt, gar nicht.
    */
   function addSummary(path, content, doc) {
     const excerpt = excerptOf(doc);
@@ -228,15 +228,17 @@ export function createReadingExport({ vaultPath, index, editor, policy, store, s
       if (excerpt) writeSection({ vaultPath, editor, path, name: SUMMARY_SECTION, inner: excerpt, label: SUMMARY_LABEL, create: false });
       return;
     }
-    // Nur im Kopf suchen (bis zum ersten Abschnitt): Im Volltext steht die Kurzfassung oft wörtlich.
-    const top = content.split(/^## /m)[0];
+    // Nur im Kopf suchen (nach Frontmatter und Titel, bis zum ersten Abschnitt): Im Volltext steht
+    // die Kurzfassung oft wörtlich, und gleicht sie dem Titel, zählt der nicht.
+    const top = content.replace(/^---\r?\n[^]*?\r?\n---[ \t]*(?:\r?\n|$)/, '').split(/^## /m)[0].replace(/^# .*$/gm, '');
     if (!excerpt || top.includes(excerpt)) return;
+    const lines = content.match(new RegExp(`^##[ \\t]+${HEADING}[ \\t\\r]*$`, 'gm')) ?? [];
+    // Der Editor ersetzt Text, keine Zeilen. Ohne eindeutige Überschrift bleibt die Notiz, wie sie ist:
+    // Ans Ende gehängt, landete die Kurzfassung unter „## Eigene Gedanken“.
+    if (lines.length !== 1 || content.split(lines[0]).length !== 2) return;
     const eol = content.includes('\r\n') ? '\r\n' : '\n';
     const block = sectionBlock(SUMMARY_SECTION, excerpt, { label: SUMMARY_LABEL, eol });
-    const lines = content.match(new RegExp(`^##[ \\t]+${HEADING}[ \\t\\r]*$`, 'gm')) ?? [];
-    // Der Editor ersetzt Text, keine Zeilen: nur, wenn die Überschrift genau einmal vorkommt.
-    if (lines.length === 1 && content.split(lines[0]).length === 2) editor.replace({ path, oldText: lines[0], newText: `${block}${eol}${eol}${lines[0]}` });
-    else editor.append({ path, text: `${eol}${block}` });
+    editor.replace({ path, oldText: lines[0], newText: `${block}${eol}${eol}${lines[0]}` });
   }
 
   /**

@@ -54,8 +54,9 @@ self.addEventListener('activate', (event) => {
     (async () => {
       for (const name of await caches.keys()) if (name.startsWith('cockpit-shell-') && name !== SHELL) await caches.delete(name);
       await self.clients.claim();
-      // Gespeicherte Leseansichten der alten Version jetzt auffrischen, solange Netz da ist; ohne bleiben sie.
-      await fill();
+      // Gespeicherte Leseansichten der alten Version auffrischen, solange Netz da ist; ohne bleiben sie.
+      // Nicht abwarten: Bis `activate` fertig ist, warten alle Abrufe der Seiten, auch der Offline-Weg.
+      fill();
     })(),
   );
 });
