@@ -172,7 +172,7 @@ export function createEditor({ vaultPath, index }) {
       const old = String(from ?? '');
       const next = String(to ?? '');
       if (!old || !next || /[\]|#^\n]/.test(next)) throw new Error(`„${to}“ ist kein gültiges Linkziel`);
-      const pattern = new RegExp(`(!?\\[\\[)${old.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=[|#\\]])`, 'g');
+      const pattern = new RegExp(`(!?\\[\\[)${old.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=[|#^\\]])`, 'g');
       return modify(path, (content) => {
         const eol = content.includes('\r\n') ? '\r\n' : '\n';
         const lines = content.split(/\r?\n/);

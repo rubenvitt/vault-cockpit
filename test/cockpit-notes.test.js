@@ -173,6 +173,18 @@ test('get: Abschnitt mit formatierter Überschrift, Anker der Einbettung stören
   assert.equal(blocks.find((b) => b.type === 'heading').id, 'h-thema');
 });
 
+test('get: [[#Abschnitt]] in einer Einbettung führt auf die eingebettete Notiz (VCP-63)', () => {
+  put('10-projekte/H.md', '## Thema\n\nsiehe [[#Thema]]\n');
+  put('10-projekte/I.md', '![[H]]\n\n## Thema\n');
+  for (const p of ['10-projekte/H.md', '10-projekte/I.md']) idx.refresh(p);
+  idx.relinkAll();
+  const note = desk.get('10-projekte/I.md');
+  const html = renderMarkdown(note.body, { links: note.links });
+  assert.match(html, /href="\/notiz\?pfad=10-projekte%2FH\.md#h-thema"/);
+  assert.equal(desk.get('10-projekte/H.md').path, '10-projekte/H.md');
+  assert.match(renderMarkdown(desk.get('10-projekte/H.md').body, { links: desk.get('10-projekte/H.md').links }), /href="#h-thema"/);
+});
+
 test('embedNow: eine Notiz ohne Embeddings gleich einbetten, mit Zeitgrenze (VCP-63)', async () => {
   const embedded = new Set();
   const scheduled = [];

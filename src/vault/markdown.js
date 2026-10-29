@@ -153,8 +153,10 @@ function extractLinks(clean) {
       alias = inner.slice(pipe + 1).trim();
       inner = inner.slice(0, pipe);
     }
-    const target = inner.split(/[#^]/)[0].trim();
-    if (target) links.push({ target, alias, embed });
+    // `raw`: das Ziel so, wie es im Text steht (mit Leerzeichen), für das Umschreiben.
+    const raw = inner.split(/[#^]/)[0];
+    const target = raw.trim();
+    if (target) links.push({ target, raw, alias, embed });
   }
   return links;
 }
