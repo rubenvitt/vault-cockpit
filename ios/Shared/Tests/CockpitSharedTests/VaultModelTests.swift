@@ -137,11 +137,20 @@ final class VaultModelTests: XCTestCase {
         XCTAssertEqual(table.rows[0][1], [.code("a|b")])
         XCTAssertEqual(note.blocks[10], .code(lang: "swift", text: "let x = 1"))
         XCTAssertEqual(note.blocks[11], .rule)
-        guard case .embed(let embed) = note.blocks[12], case .embed(let file) = note.blocks[13], case .embed(let gone) = note.blocks[14] else { return XCTFail("Einbettungen erwartet") }
+        guard case .embed(let embed, let inner) = note.blocks[12], case .embed(let file, let none) = note.blocks[13], case .embed(let gone, nil) = note.blocks[14] else { return XCTFail("Einbettungen erwartet") }
         XCTAssertTrue(embed.embed)
         XCTAssertEqual(embed.destination, .note(path: "wiki/Hund.md", anchor: nil))
         XCTAssertEqual(file.status, .file)
+        XCTAssertNil(none)
         XCTAssertEqual(gone.status, .missing)
+        // Eingebettete Notiz mit Inhalt (VCP-115): eigene Anker, Checkboxen nur Anzeige, darin eine weitere.
+        let children = try XCTUnwrap(inner)
+        XCTAssertEqual(children.first?.anchor, "e1-h-über-den-hund")
+        guard case .list(let boxes) = children[2], case .embed(let nested, let nestedChildren) = children[3] else { return XCTFail("Liste und Einbettung erwartet") }
+        XCTAssertEqual(boxes.items[0].task, NoteCheckbox(done: false, n: nil, line: nil))
+        XCTAssertFalse(boxes.items[0].task?.isToggleable ?? true)
+        XCTAssertEqual(nested.destination, .note(path: "wiki/Futter.md", anchor: nil))
+        XCTAssertEqual(nestedChildren, [.paragraph([.text("Zweimal täglich.")])])
         guard case .image(let image) = note.blocks[15] else { return XCTFail("Bild erwartet") }
         XCTAssertEqual(image.alt, "Skizze")
     }
