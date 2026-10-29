@@ -78,7 +78,7 @@ ${body}
 }
 
 /** Adresse, die ohne JavaScript nicht gespeichert werden konnte (kommt mit der Fehlermeldung zurück), sonst leer. */
-export const keptUrl = (ctx) => (ctx.flash?.kind === 'error' && typeof ctx.flash.draft === 'string' ? ctx.flash.draft : '');
+export const keptUrl = (ctx) => (ctx.flash?.kind === 'error' && typeof ctx.flash.url === 'string' ? ctx.flash.url : '');
 
 /** Formular „URL speichern“; `cid` macht doppeltes Absenden harmlos. Nach einem Fehler steht die Adresse wieder drin. */
 export const saveForm = (ctx) => `<form method="post" action="/aktion/lesen/speichern" class="lesen-save">

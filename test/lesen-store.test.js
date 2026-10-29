@@ -295,6 +295,13 @@ test('Lesestapel: Aufräumen löscht nur ungelesen Verworfenes vor dem Stichtag,
   store.setStatus(markiert.id, 'weg');
   store.markHeard([gehoert.id]);
   store.setStatus(gehoert.id, 'weg');
+  // Ein offener Ingest-Entwurf hält das Dokument, ein verworfener nicht.
+  const ingest = add('https://a.test/ingest');
+  store.saveIngest(ingest.id, { status: 'bereit', draft: '{}' });
+  store.setStatus(ingest.id, 'weg');
+  const altIngest = add('https://a.test/alt-ingest');
+  store.saveIngest(altIngest.id, { status: 'verworfen' });
+  store.setStatus(altIngest.id, 'weg');
   store.addFeed({ url: 'https://a.test/feed' });
   const feed = store.listFeeds()[0];
   store.rememberEntry(feed.id, 'guid-1', weg.id);
@@ -302,9 +309,10 @@ test('Lesestapel: Aufräumen löscht nur ungelesen Verworfenes vor dem Stichtag,
   const spaet = add('https://a.test/spaet');
   store.setStatus(spaet.id, 'weg');
 
-  assert.equal(store.purgeDiscarded(new Date(c.now() - 24 * 60 * 60_000).toISOString()), 1);
+  assert.equal(store.purgeDiscarded(new Date(c.now() - 24 * 60 * 60_000).toISOString()), 2);
   assert.equal(store.get(weg.id), null);
-  for (const d of [gelesen, markiert, gehoert, stapel, spaet, fertig]) assert.ok(store.get(d.id), d.url);
+  assert.equal(store.get(altIngest.id), null);
+  for (const d of [gelesen, markiert, gehoert, stapel, spaet, fertig, ingest]) assert.ok(store.get(d.id), d.url);
   assert.ok(store.knownEntries(feed.id).has('guid-1'), 'der Feed-Eintrag bleibt bekannt und kommt nicht wieder');
   assert.equal(store.purgeDiscarded(new Date(c.now() - 24 * 60 * 60_000).toISOString()), 0);
 });
