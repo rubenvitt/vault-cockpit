@@ -148,7 +148,7 @@ test('Lesestapel: abgeschnittener Newsletter wird als Blob ganz nachgeholt, im Z
   const fetch = async (url, init) => {
     if (url.endsWith('/session')) return Response.json({ apiUrl: 'https://jmap.test/api', downloadUrl: 'https://jmap.test/download/{accountId}/{blobId}/{name}?type={type}', primaryAccounts: { 'urn:ietf:params:jmap:mail': 'acc1' } });
     if (url.startsWith('https://jmap.test/download/')) {
-      downloads.push({ url, auth: init.headers.authorization });
+      downloads.push({ url, auth: init.headers.authorization, redirect: init.redirect });
       return new Response(Buffer.from(long, 'latin1'));
     }
     return jmap.fetch(url, init);
@@ -164,7 +164,7 @@ test('Lesestapel: abgeschnittener Newsletter wird als Blob ganz nachgeholt, im Z
     logger: quiet,
   });
   assert.equal(await capture.runOnce(), 1);
-  assert.deepEqual(downloads, [{ url: 'https://jmap.test/download/acc1/blob-2/teil?type=text%2Fhtml', auth: 'Bearer t' }]);
+  assert.deepEqual(downloads, [{ url: 'https://jmap.test/download/acc1/blob-2/teil?type=text%2Fhtml', auth: 'Bearer t', redirect: 'error' }]);
   assert.equal(saved[0].bodyValues[2].value, long);
   assert.equal(saved[0].bodyValues[2].isTruncated, false);
 });
