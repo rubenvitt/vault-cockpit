@@ -106,3 +106,43 @@ test('ein ungültiger neuer Name oder ein belegtes Ziel wird abgelehnt', () => {
   assert.throws(() => move({ path: 'inbox/Idee.md', folder: 'projects', name: 'Beta' }), /schon eine Notiz/);
   assert.ok(existsSync(join(root, 'inbox/Idee.md')));
 });
+
+test('update_links schreibt Links per Pfad um, vertrauliche Notizen nie (VCP-58)', () => {
+  put('projects/Gamma.md', '# Gamma\n\n```\n[[inbox/Idee]] im Code bleibt\n```\n[[inbox/Idee]] und [[inbox/Idee#Teil|Teil]]\n');
+  index.applyChanges(['projects/Gamma.md']);
+  const r = move({ path: 'inbox/Idee.md', folder: 'projects/Alpha', update_links: true });
+  assert.equal(r.links_to_update, undefined);
+  assert.deepEqual(r.links_updated.map((l) => [l.path, l.old_target, l.new_target, l.count]).sort(), [
+    ['projects/Alpha/Plan.md', 'inbox/Idee', 'projects/Alpha/Idee', 1],
+    ['projects/Beta.md', 'inbox/Idee.md', 'projects/Alpha/Idee.md', 1],
+    ['projects/Gamma.md', 'inbox/Idee', 'projects/Alpha/Idee', 2],
+  ]);
+  assert.equal(readFileSync(join(root, 'projects/Alpha/Plan.md'), 'utf8'), '# Plan\n\nSiehe [[Idee]] und [[projects/Alpha/Idee|die Idee]].\n');
+  assert.equal(readFileSync(join(root, 'projects/Beta.md'), 'utf8'), '# Beta\n\n![[projects/Alpha/Idee.md#Abschnitt]]\n');
+  assert.equal(readFileSync(join(root, 'projects/Gamma.md'), 'utf8'), '# Gamma\n\n```\n[[inbox/Idee]] im Code bleibt\n```\n[[projects/Alpha/Idee]] und [[projects/Alpha/Idee#Teil|Teil]]\n');
+  assert.equal(readFileSync(join(root, 'areas/Gesundheit/Werte.md'), 'utf8'), '# Werte\n\nVgl. [[inbox/Idee]].\n');
+  assert.match(r.hint, /1 Notiz\(en\) in vertraulichen Ordnern/);
+  // Kein Pfad-Link zeigt mehr ins Leere: die Backlinks hängen am neuen Pfad.
+  assert.deepEqual(index.backlinks('projects/Alpha/Idee.md').map((b) => b.path).filter((p) => !p.startsWith('areas/')).sort(), ['projects/Alpha/Plan.md', 'projects/Beta.md', 'projects/Gamma.md']);
+});
+
+test('update_links beim Umbenennen: Links per Name auf den neuen Namen', () => {
+  const r = move({ path: 'inbox/Idee.md', folder: 'projects', name: 'Wärmepumpe', update_links: true });
+  assert.equal(r.new_path, 'projects/Wärmepumpe.md');
+  assert.equal(readFileSync(join(root, 'projects/Alpha/Plan.md'), 'utf8'), '# Plan\n\nSiehe [[Wärmepumpe]] und [[projects/Wärmepumpe|die Idee]].\n');
+});
+
+test('Verschieben bleibt atomar: ein inzwischen belegtes Ziel wird nicht überschrieben (VCP-59)', () => {
+  const editor = createEditor({ vaultPath: root, index });
+  put('projects/Idee.md', '# Andere\n');
+  assert.throws(() => editor.move({ path: 'inbox/Idee.md', folder: 'projects' }), /gibt es schon/);
+  assert.equal(readFileSync(join(root, 'projects/Idee.md'), 'utf8'), '# Andere\n');
+  assert.ok(existsSync(join(root, 'inbox/Idee.md')));
+});
+
+test('Anlegen prüft Dateinamen wie das Umbenennen (VCP-59)', () => {
+  const editor = createEditor({ vaultPath: root, index });
+  assert.throws(() => editor.create({ folder: 'projects', name: 'A#B.md', content: 'x' }), /kein gültiger Dateiname/);
+  assert.throws(() => editor.create({ folder: 'projects', name: 'a/b.md', content: 'x' }), /kein gültiger Dateiname/);
+  assert.equal(editor.create({ folder: 'projects', name: 'Neu', content: 'x' }).path, 'projects/Neu.md');
+});

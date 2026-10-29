@@ -380,17 +380,20 @@ export function createVaultMcpHandler({
           'vault_list oder vault_search finden, dann ablegen, z.B. "inbox/2026-10-18 - Idee.md" nach "projects/Alpha" oder ' +
           '"areas/Haushalt" (mit name z.B. "Idee Wärmepumpe"). Bestehende Ordner bevorzugen; ein fehlender wird angelegt (new_folder: true). ' +
           'Eine vorhandene Notiz am Ziel wird nie überschrieben. Vertrauliche und ausgeschlossene Ordner sind als Quelle und Ziel gesperrt, ' +
-          'Readwise-Importe ebenso. Die Antwort nennt alten und neuen Pfad und in links_to_update die Notizen, deren Wikilinks danach ' +
-          'ins Leere zeigen (Links per Pfad wie [[inbox/Idee]] und beim Umbenennen auch per Name); die Links mit vault_edit anpassen.',
+          'Readwise-Importe ebenso. Die Antwort nennt alten und neuen Pfad. Wikilinks, die danach ins Leere zeigen (Links per Pfad wie ' +
+          '[[inbox/Idee]] und beim Umbenennen auch per Name), schreibt update_links: true gleich um (links_updated); ohne stehen sie in ' +
+          'links_to_update und sind mit vault_edit anzupassen. Vertrauliche Notizen werden nie angefasst.',
         inputSchema: {
           path: z.string().describe('Pfad der Notiz relativ zur Vault-Wurzel, z.B. "inbox/2026-10-18 - Idee.md".'),
           folder: z.string().describe('Zielordner relativ zur Vault-Wurzel, ohne Dateinamen, z.B. "projects/Alpha" oder "wiki/concepts".'),
           name: z.string().optional()
             .describe('Neuer Dateiname, z.B. "Idee Wärmepumpe"; ".md" wird ergänzt. Ohne Angabe bleibt der Dateiname.'),
+          update_links: z.boolean().optional()
+            .describe('true: eingehende Wikilinks, die sonst ins Leere zeigen, in den verweisenden Notizen gleich umschreiben. Standard false.'),
         },
         annotations: EDITS,
       },
-      edit((args) => moveNote({ index, editor, policy }, { path: args.path, folder: args.folder, name: args.name ?? null }), 'Die Notiz wurde nicht verschoben'),
+      edit((args) => moveNote({ index, editor, policy }, { path: args.path, folder: args.folder, name: args.name ?? null, update_links: args.update_links === true }), 'Die Notiz wurde nicht verschoben'),
     );
 
     return server;

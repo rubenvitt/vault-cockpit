@@ -558,14 +558,25 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
           ? {
               async '/aktion/notiz/ablegen'(form, session) {
                 const back = safeNext(form.get('back'));
-                const r = notes.move(form.get('pfad'), form.get('ordner'));
+                const r = { updated: [], left: [], hidden: 0, ...notes.move(form.get('pfad'), form.get('ordner'), form.get('name')) };
                 const folder = r.path.slice(0, r.path.lastIndexOf('/'));
                 const from = r.from.includes('/') ? r.from.slice(0, r.from.lastIndexOf('/')) : '';
-                logger.info?.(`Cockpit: ${r.from} → ${r.path} (${session.sub})`);
+                const stem = (p) => p.split('/').pop().replace(/\.md$/i, '');
+                const renamed = stem(r.path) !== stem(r.from);
+                logger.info?.(`Cockpit: ${r.from} → ${r.path}${r.updated.length ? `, Links in ${new Set(r.updated.map((u) => u.path)).size} Notiz(en) angepasst` : ''} (${session.sub})`);
                 // Von der Notizseite aus geht es zur neuen Adresse der Notiz.
                 const redirect = back.startsWith('/notiz') ? notePageOf(r.path, back) : null;
-                const undo = r.changed && from ? { action: '/aktion/notiz/ablegen', fields: { pfad: r.path, ordner: from, back: redirect ? notePageOf(r.from, back) : back } } : null;
-                return { message: r.changed ? `Abgelegt in ${folder}/` : `Liegt schon in ${folder}/`, path: r.path, from: r.from, folder, redirect, undo };
+                const undo = r.changed && from ? { action: '/aktion/notiz/ablegen', fields: { pfad: r.path, ordner: from, ...(renamed ? { name: stem(r.from) } : {}), back: redirect ? notePageOf(r.from, back) : back } } : null;
+                // Links: angepasst, nicht anpassbar, vertraulich (VCP-58).
+                const touched = new Set(r.updated.map((u) => u.path)).size;
+                const links = [
+                  touched ? `Links in ${touched === 1 ? '1 Notiz' : `${touched} Notizen`} angepasst` : '',
+                  r.left.length ? `nicht angepasst: ${[...new Set(r.left.map((l) => l.title ?? l.path))].join(', ')}` : '',
+                  r.hidden ? `${r.hidden === 1 ? '1 vertrauliche Notiz verlinkt' : `${r.hidden} vertrauliche Notizen verlinken`} ins Leere` : '',
+                ].filter(Boolean).join(', ');
+                const where = renamed ? `${folder}/${stem(r.path)}` : `${folder}/`;
+                const message = r.changed ? `${renamed ? 'Abgelegt als' : 'Abgelegt in'} ${where}${links ? ` · ${links}` : ''}` : `Liegt schon in ${folder}/`;
+                return { message, path: r.path, from: r.from, folder, redirect, undo };
               },
               async '/aktion/notiz/tags'(form) {
                 const r = notes.setTags(form.get('pfad'), form.get('tags'));

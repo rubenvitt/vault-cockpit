@@ -5,6 +5,7 @@ import { describeWeek, parseWeekId } from './week.js';
 import { createAttachments, createLinkResolver } from './note-links.js';
 import { createRelated } from './related.js';
 import { suggestFiling } from './suggest.js';
+import { moveNote, linkImpact } from '../mcp/move.js';
 
 /** Abschnitte der Feuer-Notiz, die das Cockpit bearbeitet. */
 export const FEUER_FIELDS = { ziel: 'Feuer-Ziel', zug: 'Erster Zug' };
@@ -126,6 +127,8 @@ export function createNoteDesk({ index, editor, policy, settings, vaultPath = nu
         body: parsed.body,
         inInbox: folder === inboxFolder || folder.startsWith(`${inboxFolder}/`),
         links: createLinkResolver({ index, visible: listed, attachments }, row.path),
+        // Was das Ablegen an eingehenden Links trifft, für die Warnung davor (VCP-58).
+        impact: linkImpact(index, row.path),
       };
     },
 
@@ -135,10 +138,18 @@ export function createNoteDesk({ index, editor, policy, settings, vaultPath = nu
       return index.folders().filter((f) => f !== here && !policy.isExcluded(`${f}/_.md`) && !policy.sensitivityOf(`${f}/_.md`));
     },
 
-    move(path, folder) {
+    /**
+     * Ablegen, mit `name` auch umbenennen. Eingehende Links, die sonst ins
+     * Leere zeigten, schreibt es gleich um (wie `vault_move` mit
+     * `update_links`, VCP-58). `{ path, from, changed, updated, left, hidden }`:
+     * angepasste Notizen, nicht anpassbare und vertrauliche (nur gezählt).
+     */
+    move(path, folder, name = null) {
       mustSee(path);
       const target = allowedFolder(folder);
-      return edit(() => editor.move({ path, folder: target }));
+      const rename = String(name ?? '').trim() || null;
+      const r = edit(() => moveNote({ index, editor, policy }, { path, folder: target, name: rename, update_links: true }));
+      return { path: r.new_path, from: r.old_path, changed: r.changed, updated: r.links_updated ?? [], left: r.links_to_update ?? [], hidden: r.links_hidden ?? 0 };
     },
 
     /** Tags als Liste (Komma oder Leerzeichen getrennt, `#` optional); leer entfernt das Feld. */

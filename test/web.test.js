@@ -1077,9 +1077,10 @@ function fakeNotes() {
     get: (p) => (p === note.path ? note : null),
     targets: () => ['10-projekte/Hund', '40-archiv'],
     archiveFolder: () => '40-archiv',
-    move(p, folder) {
-      calls.push(['move', p, folder]);
+    move(p, folder, name = null) {
+      calls.push(['move', p, folder, ...(name ? [name] : [])]);
       if (folder === 'privat') throw new ActionError('„privat“ ist vertraulich oder ausgeschlossen; dorthin legt das Cockpit nichts ab', 403);
+      if (name) return { path: `${folder}/${name}.md`, from: p, changed: true, updated: [{ path: 'a.md' }, { path: 'b.md' }], left: [{ path: 'c.md', title: 'C' }], hidden: 1 };
       return { path: `${folder}/Idee.md`, from: p, changed: true };
     },
     setTags(p, raw) {
@@ -1159,6 +1160,11 @@ test('Notiz ablegen: JSON führt zur neuen Adresse, Meldung kommt per Cookie mit
       assert.equal(body.redirect, '/notiz?pfad=40-archiv%2FIdee.md');
       assert.deepEqual(body.undo, { action: '/aktion/notiz/ablegen', fields: { pfad: '40-archiv/Idee.md', ordner: '00-inbox', back } });
       assert.match(res.headers.get('set-cookie'), /vc_flash=/);
+
+      // Mit neuem Namen: Meldung nennt Namen und Links, Rückgängig nimmt den alten Namen mit (VCP-58).
+      const renamed = await (await call('/aktion/notiz/ablegen', { method: 'POST', form: { pfad: '00-inbox/Idee.md', ordner: '40-archiv', name: 'Wärmepumpe', back, csrf }, accept: 'application/json' })).json();
+      assert.equal(renamed.message, 'Abgelegt als 40-archiv/Wärmepumpe · Links in 2 Notizen angepasst, nicht angepasst: C, 1 vertrauliche Notiz verlinkt ins Leere');
+      assert.deepEqual(renamed.undo.fields, { pfad: '40-archiv/Wärmepumpe.md', ordner: '00-inbox', name: 'Idee', back: '/notiz?pfad=00-inbox%2FIdee.md' });
 
       // Ohne JavaScript: Weiterleitung zur neuen Adresse.
       const plain = await call('/aktion/notiz/ablegen', { method: 'POST', form: { pfad: '00-inbox/Idee.md', ordner: '10-projekte/Hund', back, csrf } });

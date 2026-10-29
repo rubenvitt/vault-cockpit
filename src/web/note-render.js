@@ -63,6 +63,24 @@ function relatedSection(related) {
 }
 
 /**
+ * Warnung vor dem Ablegen (VCP-58): welche Notizen per Pfad (immer betroffen)
+ * und per Name (nur beim Umbenennen) hierher verlinken. Das Ablegen passt ihre
+ * Links an; vertrauliche Notizen fasst es nicht an, sie stehen nur als Anzahl da.
+ */
+function impactHint(impact) {
+  if (!impact) return '';
+  const names = (list) => list.map((l) => `<a href="${esc(noteHref(l.path))}">${esc(l.title ?? l.path)}</a>`).join(', ');
+  const count = (n) => (n === 1 ? '1 vertraulichen Notiz' : `${n} vertraulichen Notizen`);
+  const rows = [
+    impact.byPath.length ? `Per Pfad verlinkt aus ${names(impact.byPath)}: Ablegen passt diese Links an.` : '',
+    impact.hiddenByPath ? `Links per Pfad aus ${count(impact.hiddenByPath)} zeigen danach ins Leere.` : '',
+    impact.byName.length ? `Per Name verlinkt aus ${names(impact.byName)}: nur mit neuem Namen betroffen, dann ebenfalls angepasst.` : '',
+    impact.hiddenByName ? `Mit neuem Namen zeigen Links aus ${count(impact.hiddenByName)} ins Leere.` : '',
+  ].filter(Boolean);
+  return rows.length ? `<p class="hint move-links">${rows.join('<br>')}</p>` : '';
+}
+
+/**
  * Vorschläge für eine Inbox-Notiz (`notes.suggest`): Tags, Zielordner und
  * ähnliche, noch nicht verlinkte Notizen, jeweils als Knopf auf die
  * bestehenden Aktionen. Tags kommen zuerst, weil die Notiz nach dem Ablegen
@@ -121,7 +139,9 @@ export function renderNote(note, { user = null, write = null, back = '/', flash 
       <h2>Ablegen</h2>
       ${formHead(ctx, '/aktion/notiz/ablegen', { pfad: note.path })}
         <div class="assign-row"><label><span class="sr-only">Zielordner</span><input name="ordner" list="ordner" required placeholder="Zielordner …" autocomplete="off"></label><button type="submit" class="chip">Ablegen</button></div>
+        <div class="assign-row"><label><span class="sr-only">Neuer Name (optional)</span><input name="name" placeholder="Neuer Name (optional)" autocomplete="off" maxlength="200"></label></div>
         <datalist id="ordner">${targets.map((f) => `<option value="${esc(f)}">`).join('')}</datalist>
+        ${impactHint(note.impact)}
       </form>
       ${archive && note.folder !== archive && !note.folder.startsWith(`${archive}/`) ? `${formHead(ctx, '/aktion/notiz/ablegen', { pfad: note.path, ordner: archive })}<button type="submit" class="chip quiet archive">Ins Archiv <span class="hint">${esc(archive)}/</span></button></form>` : ''}
     </section>
