@@ -441,7 +441,8 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
     purgeDiscarded(before) {
       return db
         .prepare(`DELETE FROM documents WHERE status = 'weg' AND status_changed_at < ? AND read_at IS NULL AND heard_at IS NULL AND progress < 1
-          AND NOT EXISTS (SELECT 1 FROM highlights h WHERE h.doc_id = documents.id)`)
+          AND NOT EXISTS (SELECT 1 FROM highlights h WHERE h.doc_id = documents.id)
+          AND NOT EXISTS (SELECT 1 FROM ingests i WHERE i.doc_id = documents.id AND i.status NOT IN ('uebernommen', 'verworfen'))`)
         .run(String(before)).changes;
     },
 

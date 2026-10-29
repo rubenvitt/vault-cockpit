@@ -141,6 +141,11 @@ test('Lesen: URL speichern erscheint mit Titel, Quelle und Lesezeit im Eingang; 
       assert.doesNotMatch(await (await call('/lesen/eingang')).text(), /value="http:\/\/192\.168/);
       await call('/aktion/lesen/speichern', { method: 'POST', form: { url: 'http://192.168.1.2/', csrf, back: '/lesen/hinzufuegen' } });
       assert.match(await (await call('/lesen/hinzufuegen')).text(), /name="url"[^>]*value="http:\/\/192\.168\.1\.2\/"/);
+      // Wird das Cookie mit Adresse zu groß (JSON-Escapes), bleibt nur die Meldung.
+      await call('/aktion/lesen/speichern', { method: 'POST', form: { url: `http://192.168.1.3/${'"'.repeat(1400)}`, csrf, back: '/lesen/hinzufuegen' } });
+      const big = await (await call('/lesen/hinzufuegen')).text();
+      assert.match(big, /class="toast error"/);
+      assert.doesNotMatch(big, /value="http:\/\/192\.168\.1\.3/);
       const localhost = await call('/aktion/lesen/speichern', { method: 'POST', form: { url: 'http://localhost:3000/', csrf }, accept: 'application/json' });
       assert.equal(localhost.status, 400);
       const v6 = await call('/aktion/lesen/speichern', { method: 'POST', form: { url: 'http://[::1]:3000/', csrf }, accept: 'application/json' });

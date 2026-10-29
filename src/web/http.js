@@ -119,6 +119,7 @@ const LOGIN = 'vc_login';
 const FLASH = 'vc_flash';
 // Adresse im Flash-Cookie: höchstens so viele UTF-8-Bytes, damit das Cookie samt Meldung und Signatur unter 4 KB bleibt.
 const DRAFT_BYTES = 1500;
+const COOKIE_BYTES = 4000;
 /** Text auf höchstens `max` UTF-8-Bytes gekürzt, ohne ein Zeichen zu zerteilen. */
 const cutBytes = (s, max) => {
   if (Buffer.byteLength(s) <= max) return s;
@@ -486,10 +487,12 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   /** Seite hinter `back` mit Meldung (Weg ohne JavaScript, wenn eine Aktion scheitert). */
   const backPage = (req, res, back, session, opts) => {
     const url = new URL(back, publicUrl);
-    // Graph- und Lesen-Seiten rendern sich aus der Meldung im Cookie neu; die eingegebene Adresse geht mit (`draft`).
+    // Graph- und Lesen-Seiten rendern sich aus der Meldung im Cookie neu; eine eingegebene Adresse geht mit (`url`).
     if (url.pathname === '/graph' || READING_PAGES[url.pathname]) {
-      const draft = opts.draft && url.pathname !== '/graph' ? cutBytes(String(opts.draft), DRAFT_BYTES) : null;
-      return redirect(res, back, [flashCookie(draft ? { ...opts.flash, draft } : opts.flash)]);
+      const kept = opts.url && url.pathname !== '/graph' ? cutBytes(String(opts.url), DRAFT_BYTES) : null;
+      const withUrl = kept ? flashCookie({ ...opts.flash, url: kept }) : null;
+      // Passt das fertige Cookie nicht in 4 KB, bleibt wenigstens die Meldung.
+      return redirect(res, back, [withUrl && Buffer.byteLength(withUrl) <= COOKIE_BYTES ? withUrl : flashCookie(opts.flash)]);
     }
     if (url.pathname === '/planen' && plan) return planPage(req, res, url, session, opts);
     return url.pathname === '/notiz' && notes ? notePage(req, res, url, session, opts) : page(req, res, url, session, opts);
@@ -671,8 +674,9 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       if (!(err instanceof ActionError)) throw err;
       logger.warn?.(`Cockpit-Aktion ${path} fehlgeschlagen: ${err.message}`);
       if (wantsJson) return json(res, err.status, { error: 'action_failed', message: err.message });
-      const draft = path === '/aktion/erfassen' || path === '/aktion/notiz/anhaengen' ? form.get('text') : path === '/aktion/lesen/speichern' ? form.get('url') : null;
-      return backPage(req, res, back, session, { status: err.status, flash: { kind: 'error', message: err.message }, draft });
+      const draft = path === '/aktion/erfassen' || path === '/aktion/notiz/anhaengen' ? form.get('text') : null;
+      const kept = path === '/aktion/lesen/speichern' ? form.get('url') : null;
+      return backPage(req, res, back, session, { status: err.status, flash: { kind: 'error', message: err.message }, draft, url: kept });
     }
     // `link`: Ziel zum Weitergehen in der Meldung (etwa die neue Source-Page nach dem Ingest), nur eigene Pfade.
     const flash = flashCookie({ kind: 'ok', message: body.message, undo: body.undo ?? null, link: body.link ?? null });
