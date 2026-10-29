@@ -248,6 +248,17 @@ test('Schattenbetrieb: vergleichen schreibt nichts und meldet Abweichungen mit D
   assert.match(md, /## iPhone-Schatten/);
   assert.match(md, /\| `NurServer\.md` \| only_server \|/);
 
+  // Ein gekürzter Bericht löst Fehlendes nicht auf; ein unsinniges `since` gilt als „jetzt“.
+  const raw = await fetch(`${at}/sync/v1/report`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${t.token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ compared: 3, diffs: [{ path: 'Neu.md', kind: 'only_local', since: -1e300 }], truncated: true }),
+  });
+  assert.equal(raw.status, 200);
+  const after = j.shadow()[0].diffs;
+  assert.deepEqual(after.filter((x) => !x.resolvedAt).map((x) => x.path).sort(), ['Anders.md', 'Neu.md', 'NurLokal.md']);
+  assert.equal(after.find((x) => x.path === 'Neu.md').since, new Date(clock).toISOString());
+
   srv.close();
   j.close();
   rmSync(v, { recursive: true, force: true });

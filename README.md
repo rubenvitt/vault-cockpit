@@ -222,9 +222,11 @@ Headless. Das Cockpit führt das Journal dann nur lesend mit (`/sync/v1` lehnt
 Schreiben mit 403 ab), das Plugin im Modus „Nur vergleichen“ vergleicht den
 Vault jedes Geräts mit dem Stand im Cockpit und meldet Abweichungen. Unter
 **Zustand → Sync** steht je Gerät, was abweicht; länger als 10 Minuten offen
-gilt als Störung. Der ganze Bericht (offen und aufgelöst, 30 Tage) lädt sich
-als Markdown oder JSON herunter (`/zustand/sync-bericht.md`, `.json`), etwa um
-ihn vor dem Umstieg von Claude auswerten zu lassen.
+gilt als Störung. Der Bericht mit offenen und in den letzten 30 Tagen
+aufgelösten Abweichungen lädt sich als Markdown oder JSON herunter
+(`/zustand/sync-bericht.md`, `.json`), etwa um ihn vor dem Umstieg von Claude
+auswerten zu lassen. Markdown zeigt je Gerät höchstens 500 aufgelöste
+Abweichungen, JSON ist vollständig.
 
 Protokoll (Bearer-Token, nur GET und POST):
 

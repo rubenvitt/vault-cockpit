@@ -169,10 +169,10 @@ export function createSyncHttp({ tokens, journal: journalOf, onWrite = () => {},
       const clean = [];
       for (const d of diffs) {
         if (typeof d?.path !== 'string' || !d.path || d.path.length > 1024 || !SHADOW_KINDS.includes(d.kind)) return json(res, 400, { error: 'Abweichung braucht „path“ und „kind“' });
-        clean.push({ path: d.path, kind: d.kind, since: Number.isFinite(d.since) ? d.since : null });
+        clean.push({ path: d.path, kind: d.kind, since: Number.isSafeInteger(d.since) && d.since > 0 ? d.since : null });
       }
       const compared = Number.isInteger(body.compared) && body.compared >= 0 ? body.compared : 0;
-      journal.report(dev, { compared, diffs: clean });
+      journal.report(dev, { compared, diffs: clean, truncated: body.truncated === true });
       journal.seen(dev, { pulled: true });
       return json(res, 200, { ok: true, open: clean.length });
     },
