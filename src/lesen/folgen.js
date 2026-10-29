@@ -1019,11 +1019,12 @@ export function createEpisodes({
    * Folge gehört (`true`) oder doch nicht (`false`). Gehört: `heard_at` jetzt,
    * Stelle vergessen; die Texte bekommen (noch einmal) den Vermerk „gehört“.
    * Ungehört nimmt nur den Vermerk an der Folge zurück, die Texte bleiben gehört.
+   * Ein reines Transkript (ohne Audio) lässt sich genauso als erledigt markieren.
    */
   function setHeard(id, value = true) {
     const ep = find(id);
     if (!ep) throw new EpisodeError('Diese Folge gibt es nicht', 404);
-    if (ep.status !== 'fertig') throw new EpisodeError('Nur eine fertige Folge lässt sich als gehört markieren', 409);
+    if (!['fertig', 'transkript'].includes(ep.status)) throw new EpisodeError('Nur eine fertige Folge oder ein Transkript lässt sich als erledigt markieren', 409);
     if (!value) {
       update(ep, { heard_at: null });
       return { ...ep };
@@ -1192,7 +1193,8 @@ export function createEpisodes({
       if (ep.status !== 'transkript') throw new EpisodeError('Audio gibt es nur zu einem fertigen Transkript', 409);
       const missing = availability().vorlesen ?? (existsSync(scriptPath(ep.id)) ? null : availability()[ep.kind]);
       if (missing) throw new EpisodeError(missing, 409);
-      update(ep, { status: 'wartet', audio: true, error: null });
+      // Erledigtes Transkript: Mit Audio steht die Folge wieder unter „Zum Hören“.
+      update(ep, { status: 'wartet', audio: true, error: null, heard_at: null });
       queue.push(ep.id);
       return Object.assign({ ...ep }, { done: next() });
     },

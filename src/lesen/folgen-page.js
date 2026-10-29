@@ -23,7 +23,8 @@ import { worklogHtml, worklogJson } from './worklog.js';
  * - `/lesen/folgen`: alle Folgen als Karten, in Gruppen: „Zum Hören“ (fertig,
  *   noch nicht gehört, angefangene zuerst), „Entsteht“ (auch fehlgeschlagene),
  *   „Nur Transkript“ und eingeklappt „Gehört“ (kleine Karten). Fertige mit
- *   „Als gehört markieren“ bzw. „Doch nicht gehört“; der Player meldet die
+ *   „Als gehört markieren“ bzw. „Doch nicht gehört“, reine Transkripte mit
+ *   „Als erledigt markieren“ (dann ebenfalls unter „Gehört“); der Player meldet die
  *   Stelle (`/aktion/lesen/folge/stelle`), kurz vor Schluss ist die Folge gehört.
  *   Fertige mit Abspiel-Knopf
  *   (/static/lesen-folgen.js: eigener Player mit Sperrbildschirm über die
@@ -216,8 +217,12 @@ export function progressOf(ep, at = Date.now()) {
 /** Dauer der fertigen MP3 (feste Bitrate), sonst null. */
 const secondsOf = (ep) => (ep.bytes ? Math.round(ep.bytes / BYTES_PER_SECOND) : null);
 
-/** Hörstand einer fertigen Folge: `gehoert`, `angefangen` (Stelle gemeldet) oder `neu`; sonst null. */
+/**
+ * Hörstand einer fertigen Folge: `gehoert`, `angefangen` (Stelle gemeldet) oder `neu`;
+ * eines Transkripts `gehoert` (erledigt) oder `neu`; sonst null.
+ */
 export function listenOf(ep) {
+  if (ep.status === 'transkript') return ep.heard_at ? 'gehoert' : 'neu';
   if (ep.status !== 'fertig') return null;
   if (ep.heard_at) return 'gehoert';
   return ep.position > 0 ? 'angefangen' : 'neu';
@@ -627,14 +632,17 @@ export function episodeCard(ep, { ctx, resumable = false, at = Date.now(), inges
 
   if (ep.status === 'transkript') {
     const speak = speakOf(ep);
+    const done = Boolean(ep.heard_at);
+    const mark = `<form method="post" action="${GEHOERT}" class="inline">${hidden({ csrf: ctx.write.csrf, back: '/lesen/folgen', id: ep.id, gehoert: done ? '0' : '1' })}<button type="submit" class="btn quiet">${done ? 'Doch nicht erledigt' : 'Als erledigt markieren'}<span class="sr-only">: ${esc(ep.title)}</span></button></form>`;
     const note = ep.note
       ? `<a href="/notiz?pfad=${esc(encodeURIComponent(ep.note))}" class="btn">Transkript lesen</a>`
       : '<span class="meta">Das Transkript ließ sich nicht im Vault anlegen; das Skript liegt im Cockpit.</span>';
     // Ohne JavaScript öffnet „Text kopieren“ das Markdown; mit kopiert es (/static/lesen-folgen.js).
     const share = `<a href="${TRANSKRIPT}?id=${esc(id)}" class="btn quiet" data-copy>Text kopieren<span class="sr-only">: ${esc(ep.title)}</span></a><form method="post" action="${TEILEN}" class="inline" data-share>${hidden({ csrf: ctx.write.csrf, back: '/lesen/folgen', id: ep.id })}<button type="submit" class="btn quiet">Einmal-Link<span class="sr-only">: ${esc(ep.title)}</span></button></form>`;
-    return `<li class="folge is-transcript" data-folge="${esc(ep.id)}" data-status="transkript">
-    <div class="folge-card"><span class="folge-play folge-play-doc" aria-hidden="true"><svg viewBox="0 0 24 24">${KIND_ICONS.report}</svg></span>${head(['Transkript', ep.minutes ? `${ep.minutes} Min.` : null, created])}</div>
+    return `<li class="folge is-transcript${done ? ' is-gehoert' : ''}" data-folge="${esc(ep.id)}" data-status="transkript" data-listen="${done ? 'gehoert' : 'neu'}">
+    <div class="folge-card"><span class="folge-play folge-play-doc" aria-hidden="true"><svg viewBox="0 0 24 24">${KIND_ICONS.report}</svg></span>${head(['Transkript', ep.minutes ? `${ep.minutes} Min.` : null, done ? `erledigt ${shortDay(ep.heard_at, ctx.tz)}` : null, created])}</div>
     <div class="folge-actions">
+      ${mark}
       ${note}
       <form method="post" action="/aktion/lesen/folge/sprechen" class="inline">${hidden({ csrf: ctx.write.csrf, back: '/lesen/folgen', id: ep.id })}<button type="submit" class="btn primary">${esc(speak.label)}</button></form>
       ${share}
@@ -675,15 +683,15 @@ export function episodeCard(ep, { ctx, resumable = false, at = Date.now(), inges
 
 /**
  * Folgen in Gruppen: Zum Hören (angefangene zuerst), Entsteht, Nur Transkript,
- * eingeklappt Gehört. Leere Gruppen fehlen.
+ * eingeklappt Gehört (auch erledigte Transkripte). Leere Gruppen fehlen.
  */
 export function episodeGroups(list) {
   const toHear = list.filter(unheard).sort((a, b) => (b.position > 0) - (a.position > 0));
   return {
     hoeren: toHear,
     entsteht: list.filter((ep) => BUSY.includes(ep.status) || ep.status === 'fehler'),
-    transkript: list.filter((ep) => ep.status === 'transkript'),
-    gehoert: list.filter((ep) => ep.status === 'fertig' && ep.heard_at),
+    transkript: list.filter((ep) => ep.status === 'transkript' && !ep.heard_at),
+    gehoert: list.filter((ep) => ['fertig', 'transkript'].includes(ep.status) && ep.heard_at),
   };
 }
 
@@ -944,7 +952,9 @@ export function folgenRoutes({ store, episodes, ingest = null, readNote = null, 
       async [GEHOERT](form) {
         const value = form.get('gehoert') !== '0';
         const ep = asAction(() => episodes.setHeard(form.get('id') ?? '', value));
-        return { message: `${value ? 'Gehört' : 'Wieder zum Hören'}: ${ep.title}`, undo: { action: GEHOERT, fields: { id: ep.id, gehoert: value ? '0' : '1' } }, listen: listenOf(ep) };
+        const transcript = ep.status === 'transkript';
+        const message = value ? (transcript ? 'Erledigt' : 'Gehört') : transcript ? 'Wieder offen' : 'Wieder zum Hören';
+        return { message: `${message}: ${ep.title}`, undo: { action: GEHOERT, fields: { id: ep.id, gehoert: value ? '0' : '1' } }, listen: listenOf(ep) };
       },
       /** Stelle vom Player (`stelle`, `dauer` in Sekunden), still; kurz vor Schluss gehört (`heard`). */
       async '/aktion/lesen/folge/stelle'(form) {

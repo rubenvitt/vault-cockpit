@@ -100,6 +100,8 @@ struct FolgenTranscriptCard: View {
     let isBusy: Bool
     let openNote: (String) -> Void
     let speak: () -> Void
+    /// „Als erledigt markieren“ bzw. „Doch nicht erledigt“; nil bei Servern ohne Hörstand.
+    var markDone: (() -> Void)?
     /// „Einmal-Link“; nil bei Vorlesen (dort gibt es kein Skript zum Teilen).
     var share: (() -> Void)?
     let ingest: () -> Void
@@ -115,9 +117,15 @@ struct FolgenTranscriptCard: View {
                     .frame(width: 48, height: 48)
                     .background(Theme.accentSoft, in: Circle())
                     .accessibilityHidden(true)
-                FolgenHead(episode: episode, meta: CockpitFormat.meta(["Transkript", FolgenFormat.meta(episode, withChars: false)]))
+                FolgenHead(episode: episode, meta: CockpitFormat.meta(["Transkript", episode.doneLabel(), FolgenFormat.meta(episode, withChars: false)]))
             }
             FolgenActions {
+                if let markDone {
+                    Button(action: markDone) {
+                        Label(episode.isHeard ? "Doch nicht erledigt" : "Als erledigt markieren", systemImage: episode.isHeard ? "arrow.uturn.backward" : "checkmark")
+                    }
+                    .buttonStyle(LesenQuietButtonStyle())
+                }
                 if let note = episode.note, !note.isEmpty {
                     Button {
                         openNote(note)
