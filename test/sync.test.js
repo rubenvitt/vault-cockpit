@@ -47,7 +47,7 @@ async function settle(batches, quietMs) {
 async function startLiveWatcher(dir, batches, debounceMs) {
   const w = createVaultWatcher({ vaultPath: dir, onBatch: (b) => batches.push(b), debounceMs });
   const deadline = Date.now() + 5000;
-  for (let i = 0; !batches.some((b) => b.full || b.paths.includes('probe.md')); i++) {
+  for (let i = 0; !batches.some((b) => b.paths?.includes('probe.md')); i++) {
     if (Date.now() > deadline) {
       w.stop();
       throw new Error('Watcher liefert keine Ereignisse');
@@ -131,6 +131,34 @@ test('Watcher verlangt einen Komplettaufbau, wenn ein Ordner umbenannt wird', as
     renameSync(join(dir, 'alt'), join(dir, 'neu'));
     const batch = await nextBatch(batches);
     assert.equal(batch.full, true);
+  } finally {
+    w.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Watcher plant für versteckte Pfade und Anhänge kein Paket ein', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'vault-watch-'));
+  mkdirSync(join(dir, 'notes'));
+  writeFileSync(join(dir, 'notes/bild.png'), 'x');
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const handlers = [];
+  const fakeWatch = (_p, _o, cb) => {
+    handlers.push(cb);
+    return { close() {}, on() {} };
+  };
+  const batches = [];
+  const w = createVaultWatcher({ vaultPath: dir, onBatch: (b) => batches.push(b), debounceMs: 100, watch: fakeWatch });
+  try {
+    handlers[0]('change', '.obsidian/workspace.json');
+    handlers[0]('rename', '.trash/alt.md');
+    handlers[0]('change', 'notes/bild.png');
+    t.mock.timers.tick(10_000);
+    assert.deepEqual(batches, []);
+
+    handlers[0]('change', 'notes/a.md');
+    t.mock.timers.tick(100);
+    assert.deepEqual(batches, [{ paths: ['notes/a.md'] }]);
   } finally {
     w.stop();
     rmSync(dir, { recursive: true, force: true });
