@@ -268,7 +268,8 @@ test('Adapter „cockpit“ liefert Journal und Zustand mit Geräten', () => {
   assert.ok(s.lastSyncAt);
   adapter.notifyWrite('a/b.md');
   adapter.notifyWrite('a/b.png');
-  assert.deepEqual(seen, [{ paths: ['a/b.md'] }]);
+  adapter.notifyWrite('a/b.pdf');
+  assert.deepEqual(seen, [{ paths: ['a/b.md'] }, { paths: ['a/b.png'] }]);
   adapter.stop();
   rmSync(d, { recursive: true, force: true });
 });
