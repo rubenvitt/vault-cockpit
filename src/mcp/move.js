@@ -56,7 +56,7 @@ export function moveNote({ index, editor, policy = DEFAULT_POLICY }, { path, fol
       path: l.source,
       title: l.title,
       old_target: l.raw,
-      new_target: !l.byPath && unique ? stem : l.raw.endsWith('.md') ? r.path : stripMd(r.path),
+      new_target: !l.byPath && unique ? stem : l.target.endsWith('.md') ? r.path : stripMd(r.path),
     }));
   }
   if (updateLinks && result.links_to_update) {
@@ -107,7 +107,7 @@ export function moveNote({ index, editor, policy = DEFAULT_POLICY }, { path, fol
  */
 export function linkImpact(index, path) {
   const incoming = index.getNote(path) ? incomingLinks(index, path) : [];
-  const shown = (list) => list.filter((l) => !l.sensitive).map((l) => ({ path: l.source, title: l.title, target: l.raw }));
+  const shown = (list) => list.filter((l) => !l.sensitive).map((l) => ({ path: l.source, title: l.title, target: l.target }));
   return {
     byPath: shown(incoming.filter((l) => l.byPath)),
     byName: shown(incoming.filter((l) => !l.byPath)),
@@ -128,12 +128,14 @@ function incomingLinks(index, path) {
     if (!row?.content) continue;
     const seen = new Set();
     for (const link of parseNote(row.content).links) {
-      const raw = link.target;
-      const byPath = (raw.endsWith('.md') ? raw : `${raw}.md`) === path;
-      const byName = !byPath && stripMd(raw).toLowerCase() === stripMd(path.split('/').pop()).toLowerCase();
+      const { target } = link;
+      // Je Schreibweise einmal: `[[ inbox/Idee ]]` braucht ein eigenes Umschreiben.
+      const raw = link.raw ?? target;
+      const byPath = (target.endsWith('.md') ? target : `${target}.md`) === path;
+      const byName = !byPath && stripMd(target).toLowerCase() === stripMd(path.split('/').pop()).toLowerCase();
       if ((!byPath && !byName) || seen.has(raw)) continue;
       seen.add(raw);
-      found.push({ source, title, raw, byPath, sensitive: Boolean(row.sensitivity) });
+      found.push({ source, title, raw, target, byPath, sensitive: Boolean(row.sensitivity) });
     }
   }
   return found;

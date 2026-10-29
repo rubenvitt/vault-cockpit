@@ -52,6 +52,9 @@
     return data;
   }
 
+  /** Aktionen, deren Text der Server über den Login rettet (wie `DRAFT_ACTIONS` in http.js). */
+  const DRAFT_ACTIONS = new Set(['/aktion/erfassen', '/aktion/notiz/anhaengen']);
+
   /**
    * Abgelaufene Sitzung bei einem Formular mit Text: noch einmal als normales
    * Formular absenden. Der Server legt den Text verschlüsselt ab, schickt über
@@ -60,7 +63,8 @@
    */
   function fallBack(form, err) {
     const text = form.elements.text;
-    if (!err.expired || !(text instanceof HTMLTextAreaElement) || !text.value.trim()) return false;
+    if (!err.expired || !DRAFT_ACTIONS.has(new URL(form.action, location.href).pathname)) return false;
+    if (!(text instanceof HTMLTextAreaElement) || !text.value.trim()) return false;
     toast('Die Anmeldung ist abgelaufen. Der Text kommt mit über den Login.');
     // Die Methode des Formulars selbst: löst kein `submit` aus, also auch nicht diesen Weg noch einmal.
     HTMLFormElement.prototype.submit.call(form);

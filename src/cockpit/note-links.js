@@ -222,6 +222,9 @@ function headingKey(text) {
 export function createLinkResolver({ index, visible, attachments = null, read = null }, notePath, { depth = 0, seen = [notePath], budget = { left: MAX_EMBEDS } } = {}) {
   const from = folderOf(notePath);
   const titleOf = (row) => row.title ?? row.path.split('/').pop().replace(/\.md$/i, '');
+  // In einer Einbettung ist „selbst“ die eingebettete Notiz, nicht die Seite: Ihre
+  // Überschriften tragen dort andere Anker, `[[#Abschnitt]]` führt deshalb auf ihre Seite.
+  const own = (path) => depth === 0 && path === notePath;
   const asImage = (name) => {
     const path = attachments?.find(name, from);
     return path ? { kind: 'image', path } : null;
@@ -230,12 +233,12 @@ export function createLinkResolver({ index, visible, attachments = null, read = 
   return {
     wikilink(target) {
       const t = String(target ?? '').trim();
-      if (!t) return { kind: 'note', path: notePath, title: null, self: true };
+      if (!t) return { kind: 'note', path: notePath, title: null, self: own(notePath) };
       if (IMAGE_TYPES[extOf(t)]) return asImage(t);
       if (OTHER_FILES.test(t)) return { kind: 'file' };
       const path = index.resolveLink(t);
       const row = path ? visible(path) : null;
-      return row ? { kind: 'note', path: row.path, title: titleOf(row), self: row.path === notePath } : null;
+      return row ? { kind: 'note', path: row.path, title: titleOf(row), self: own(row.path) } : null;
     },
 
     image(src) {
@@ -273,7 +276,7 @@ export function createLinkResolver({ index, visible, attachments = null, read = 
       if (!/\.md$/i.test(target)) return null;
       for (const p of [cleanPath(posix.normalize(posix.join(from, target))), cleanPath(target.replace(/^\/+/, ''))]) {
         const row = p ? visible(p) : null;
-        if (row) return { kind: 'note', path: row.path, title: titleOf(row), self: row.path === notePath, anchor };
+        if (row) return { kind: 'note', path: row.path, title: titleOf(row), self: own(row.path), anchor };
       }
       return null;
     },

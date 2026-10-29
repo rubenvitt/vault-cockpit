@@ -126,13 +126,12 @@ test('update_links schreibt Links per Pfad um, vertrauliche Notizen nie (VCP-58)
   assert.deepEqual(index.backlinks('projects/Alpha/Idee.md').map((b) => b.path).filter((p) => !p.startsWith('areas/')).sort(), ['projects/Alpha/Plan.md', 'projects/Beta.md', 'projects/Gamma.md']);
 });
 
-test('update_links: Links in anderer Schreibweise bleiben gemeldet statt still zu verschwinden', () => {
-  put('projects/Delta.md', '# Delta\n\n[[ inbox/Idee ]]\n');
+test('update_links: jede Schreibweise und Blockverweise werden umgeschrieben', () => {
+  put('projects/Delta.md', '# Delta\n\n[[inbox/Idee]] und [[ inbox/Idee ]] und [[inbox/Idee^b1]]\n');
   index.applyChanges(['projects/Delta.md']);
   const r = move({ path: 'inbox/Idee.md', folder: 'projects/Alpha', update_links: true });
-  const left = r.links_to_update.find((l) => l.path === 'projects/Delta.md');
-  assert.match(left.error, /Schreibweise/);
-  assert.equal(readFileSync(join(root, 'projects/Delta.md'), 'utf8'), '# Delta\n\n[[ inbox/Idee ]]\n');
+  assert.equal(r.links_to_update, undefined);
+  assert.equal(readFileSync(join(root, 'projects/Delta.md'), 'utf8'), '# Delta\n\n[[projects/Alpha/Idee]] und [[projects/Alpha/Idee]] und [[projects/Alpha/Idee^b1]]\n');
 });
 
 test('update_links: Codeblöcke enden nur am passenden Zaun', () => {

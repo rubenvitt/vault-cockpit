@@ -153,11 +153,13 @@ export function createFlameNote({ vaultPath, index, editor, policy, settings, zu
   let queue = Promise.resolve();
   // Blöcke je Flamme, gültig solange sich der letzte Block nicht ändert: Nicht jedes Intervall fragt den Verlauf.
   const blockCache = new Map();
+  // Wo der nächste Lauf je Woche weiterfragt, damit eine Frist nicht immer dieselben trifft.
+  const historyStarts = new Map();
   // Dieselbe Warnung (etwa Handarbeit im Bereich einer Notiz) nur einmal ins Log, nicht jedes Intervall.
   let lastWarning = null;
 
   /** Alle Blöcke der Flammen, die schon einmal gebrannt haben; ohne Verlauf bleibt es beim letzten Block. */
-  async function blocksOf(z, tasks) {
+  async function blocksOf(z, tasks, weekId) {
     const out = new Map();
     if (!z.taskHistory) return out;
     const pending = [];
@@ -171,10 +173,11 @@ export function createFlameNote({ vaultPath, index, editor, policy, settings, zu
     // Wenige Abrufe gleichzeitig und eine Frist für alle: Hängt Zunder, wartet die
     // Notiz nicht Minuten. Was nicht drankommt, zählt diesmal nur den letzten Block.
     const deadline = Date.now() + HISTORY_BUDGET_MS;
+    const start = pending.length ? (historyStarts.get(weekId) ?? 0) % pending.length : 0;
     let next = 0;
     const worker = async () => {
       while (next < pending.length && Date.now() < deadline) {
-        const { t, key } = pending[next++];
+        const { t, key } = pending[(start + next++) % pending.length];
         try {
           const blocks = flameBlocks(await z.taskHistory(t.id));
           blockCache.set(t.id, { key, blocks });
@@ -185,6 +188,7 @@ export function createFlameNote({ vaultPath, index, editor, policy, settings, zu
       }
     };
     await Promise.all(Array.from({ length: Math.min(HISTORY_PARALLEL, pending.length) }, worker));
+    if (pending.length) historyStarts.set(weekId, (start + next) % pending.length);
     return out;
   }
 
@@ -206,7 +210,7 @@ export function createFlameNote({ vaultPath, index, editor, policy, settings, zu
     }
 
     const tasks = await z.filterTasks({ phoenix_fire: week.id, include_closed: true, limit: 200 });
-    const rows = flameRows(tasks, { tz: config.tz, taskUrl: z.taskUrl, blocks: await blocksOf(z, tasks) });
+    const rows = flameRows(tasks, { tz: config.tz, taskUrl: z.taskUrl, blocks: await blocksOf(z, tasks, week.id) });
     const inner = renderFlameTable(rows);
 
     // Ab hier synchron: frisch lesen, planen, über den Editor schreiben.
