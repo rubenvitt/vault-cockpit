@@ -459,7 +459,9 @@ gibt.
 **Flammen in der Feuer-Notiz:** Das Cockpit trägt die Flammen der Woche aus
 Zunder in den Abschnitt „## Flammen“ der Feuer-Notiz ein (Tag, Flamme mit Link,
 geplanter Tag aus der Fälligkeit, gemessene Minuten, Status), damit Obsidian
-und Claude über MCP die Zahlen sehen. Das passiert nach Start oder Stopp einer
+und Claude über MCP die Zahlen sehen. Hat in der Woche eine Flamme an einer
+Aufgabe ohne Flammen-Markierung gebrannt, steht sie als „ungeplant“ mit in der
+Tabelle, mit den Minuten der Blöcke dieser Woche. Das passiert nach Start oder Stopp einer
 Flamme im Cockpit und im Reindex-Intervall (laufende und vorige Woche, also
 auch für Flammen, die in Zunder oder per MCP gestoppt wurden). Geschrieben wird
 nur zwischen den Markern `<!-- cockpit:flammen:start … -->` und

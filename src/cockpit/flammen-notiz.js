@@ -8,7 +8,9 @@ import { sectionBlock, planSection, writeSection } from '../vault/generated-sect
  * Zunder misst die Flammen (mit Timing, falls angebunden); das Cockpit trägt
  * sie in den Abschnitt „## Flammen“ der Feuer-Notiz der Woche ein, damit der
  * Rückblick in Obsidian und Claude über MCP die Zahlen sehen. Erfasst wird
- * nichts doppelt: Die Tabelle entsteht bei jedem Lauf neu aus Zunder.
+ * nichts doppelt: Die Tabelle entsteht bei jedem Lauf neu aus Zunder. Neben
+ * den Flammen der Woche stehen Aufgaben ohne Markierung, an denen in der Woche
+ * eine Flamme gebrannt hat, als „ungeplant“ (VCP-117).
  *
  * Geschrieben wird nur zwischen zwei Kommentar-Markern:
  *
@@ -85,18 +87,23 @@ export function flameBlocks(entries) {
  * keine geplante Dauer, „geplant“ ist deshalb der geplante Tag (`due`, mit
  * Uhrzeit, wenn es eine gibt). „Tag“ ist der Tag, an dem die Flamme gebrannt
  * hat, sonst der geplante.
+ *
+ * `burned`: Aufgaben ohne Flammen-Markierung der Woche, die trotzdem gebrannt
+ * haben (`burnedInWeek`, VCP-117); sie stehen mit „ungeplant“ in der Tabelle,
+ * ihre `blocks` sind schon auf die Woche beschränkt.
  */
-export function flameRows(tasks, { tz, taskUrl = null, blocks = null }) {
-  return tasks
-    .filter((t) => t.phoenix?.role === 'flamme' && t.status !== 'dropped')
+export function flameRows(tasks, { tz, taskUrl = null, blocks = null, burned = [] }) {
+  const flames = tasks.filter((t) => t.phoenix?.role === 'flamme' && t.status !== 'dropped');
+  const unplanned = new Set(burned.map((t) => t.id));
+  return [...flames, ...burned.filter((t) => !flames.some((f) => f.id === t.id))]
     .map((t) => {
       const due = t.due ? String(t.due) : null;
       const dueDate = due ? (due.length > 10 ? localDate(new Date(due), tz) : due.slice(0, 10)) : null;
-      const planned = dueDate ? `${dayLabel(dueDate)}${due.length > 10 ? ` ${localTime(new Date(due), tz)}` : ''}` : '–';
+      const planned = unplanned.has(t.id) ? 'ungeplant' : dueDate ? `${dayLabel(dueDate)}${due.length > 10 ? ` ${localTime(new Date(due), tz)}` : ''}` : '–';
       // Der Tag des ersten Blocks, nicht des letzten.
       const first = blocks?.get(t.id)?.[0]?.start ?? t.flame_started_at;
       const startDate = first ? localDate(new Date(first), tz) : null;
-      const day = startDate ?? dueDate;
+      const day = startDate ?? (unplanned.has(t.id) ? null : dueDate);
       const minutes = flameMinutes(t, blocks?.get(t.id) ?? null);
       const running = Boolean(t.flame_running);
       const url = taskUrl ? taskUrl(t.id) : null;
@@ -137,6 +144,58 @@ export function planFlameUpdate(content, inner, { hasRows = true } = {}) {
 /** Verlaufsabrufe je Lauf: gleichzeitig und insgesamt (ms) (VCP-61). */
 const HISTORY_PARALLEL = 4;
 const HISTORY_BUDGET_MS = 20_000;
+/** So viele Aufgaben merkt sich der Block-Cache höchstens. */
+const BLOCK_CACHE_MAX = 1000;
+/** Suche nach ungeplant gebrannten Aufgaben: Seitengröße und höchstens so viele Seiten (VCP-117). */
+const RECENT_PAGE = 200;
+const RECENT_PAGES = 5;
+
+/**
+ * Aufgaben, die seit dem Wochenbeginn gebrannt haben könnten (VCP-117).
+ * Zunder filtert nicht nach Flammen-Zeit, aber jeder Start und Stopp ändert
+ * `updated_at`, und der letzte Start einer Aufgabe liegt nie vor einem
+ * früheren. Also nach `updated_at` absteigend holen, bis die Aufgaben vor dem
+ * Wochenbeginn zuletzt geändert wurden, und die behalten, deren letzter Start
+ * nicht davor liegt. Flammen anderer Wochen bleiben weg: Ihre Zeit steht in
+ * deren Notiz.
+ */
+export async function burnedSince(z, week) {
+  const from = week.start.getTime();
+  const out = [];
+  for (let page = 0; page < RECENT_PAGES; page++) {
+    const tasks = await z.filterTasks({ order_by: 'updated', reverse: true, include_closed: true, limit: RECENT_PAGE, offset: page * RECENT_PAGE });
+    for (const t of tasks) {
+      const started = t.flame_started_at ? Date.parse(t.flame_started_at) : NaN;
+      if (started >= from && t.status !== 'dropped' && t.phoenix?.role !== 'flamme') out.push(t);
+    }
+    const last = tasks.at(-1)?.updated_at;
+    if (tasks.length < RECENT_PAGE || (last && Date.parse(last) < from)) break;
+  }
+  return out;
+}
+
+/**
+ * Was von ungeplant gebrannten Aufgaben in die Woche gehört: nur Blöcke, die in
+ * der Woche begonnen haben. Ohne Verlauf zählt der letzte Block, wenn er in der
+ * Woche liegt; eine laufende Flamme zählt, wenn sie in der Woche angefangen hat.
+ * Liefert die Aufgaben mit etwas in der Woche und ihre Blöcke.
+ */
+export function burnedInWeek(tasks, blocks, week) {
+  const inWeek = (iso) => {
+    const ms = Date.parse(iso);
+    return ms >= week.start.getTime() && ms < week.end.getTime();
+  };
+  const burned = [];
+  const weekBlocks = new Map();
+  for (const t of tasks) {
+    const all = blocks.get(t.id) ?? (t.flame_started_at && t.flame_ended_at ? [{ start: t.flame_started_at, end: t.flame_ended_at }] : []);
+    const mine = all.filter((b) => inWeek(b.start));
+    if (!mine.length && !(t.flame_running && inWeek(t.flame_started_at))) continue;
+    burned.push(t);
+    weekBlocks.set(t.id, mine);
+  }
+  return { burned, blocks: weekBlocks };
+}
 
 /**
  * Hintergrunddienst: `update(weekId?)` trägt die Flammen einer Woche (Standard:
@@ -158,13 +217,13 @@ export function createFlameNote({ vaultPath, index, editor, policy, settings, zu
   // Dieselbe Warnung (etwa Handarbeit im Bereich einer Notiz) nur einmal ins Log, nicht jedes Intervall.
   let lastWarning = null;
 
-  /** Alle Blöcke der Flammen, die schon einmal gebrannt haben; ohne Verlauf bleibt es beim letzten Block. */
+  /** Alle Blöcke der Aufgaben, die schon einmal gebrannt haben; ohne Verlauf bleibt es beim letzten Block. */
   async function blocksOf(z, tasks, weekId) {
     const out = new Map();
     if (!z.taskHistory) return out;
     const pending = [];
     for (const t of tasks) {
-      if (t.phoenix?.role !== 'flamme' || !t.flame_started_at) continue;
+      if (!t.flame_started_at) continue;
       const key = `${t.flame_started_at} ${t.flame_ended_at ?? ''}`;
       const hit = blockCache.get(t.id);
       if (hit?.key === key) out.set(t.id, hit.blocks);
@@ -180,7 +239,9 @@ export function createFlameNote({ vaultPath, index, editor, policy, settings, zu
         const { t, key } = pending[(start + next++) % pending.length];
         try {
           const blocks = flameBlocks(await z.taskHistory(t.id));
+          blockCache.delete(t.id);
           blockCache.set(t.id, { key, blocks });
+          if (blockCache.size > BLOCK_CACHE_MAX) blockCache.delete(blockCache.keys().next().value);
           out.set(t.id, blocks);
         } catch (err) {
           logger.warn?.(`Feuer-Notiz: Verlauf von ${t.ref ?? t.id} nicht abrufbar, nur der letzte Block zählt — ${err.message}`);
@@ -210,7 +271,13 @@ export function createFlameNote({ vaultPath, index, editor, policy, settings, zu
     }
 
     const tasks = await z.filterTasks({ phoenix_fire: week.id, include_closed: true, limit: 200 });
-    const rows = flameRows(tasks, { tz: config.tz, taskUrl: z.taskUrl, blocks: await blocksOf(z, tasks, week.id) });
+    const flames = tasks.filter((t) => t.phoenix?.role === 'flamme' && t.status !== 'dropped');
+    // Auch Blöcke an Aufgaben ohne Flammen-Markierung zählen (VCP-117).
+    const others = (await burnedSince(z, week)).filter((t) => !flames.some((f) => f.id === t.id));
+    const blocks = await blocksOf(z, [...flames, ...others], week.id);
+    const extra = burnedInWeek(others, blocks, week);
+    for (const [id, b] of extra.blocks) blocks.set(id, b);
+    const rows = flameRows(tasks, { tz: config.tz, taskUrl: z.taskUrl, blocks, burned: extra.burned });
     const inner = renderFlameTable(rows);
 
     // Ab hier synchron: frisch lesen, planen, über den Editor schreiben.
