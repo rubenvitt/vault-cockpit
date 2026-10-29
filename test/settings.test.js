@@ -253,3 +253,15 @@ test('Ausgeblendete Termine: „Blockiert“ fehlt standardmäßig, eigene Liste
   settings.save({ calendars: cal, hiddenEvents: [] });
   assert.equal((await titles()).length, 2);
 });
+
+test('Einstellungen: Verworfenes im Lesestapel aufräumen, leer = 30 Tage, 0 = nie, Prüfung', () => {
+  const s = createSettingsStore({ logger: quiet });
+  assert.equal(s.get().readingNotes.trashDays, 30);
+  s.save({ readingNotes: { trashDays: '0' }, calendars: [] });
+  assert.equal(s.get().readingNotes.trashDays, 0);
+  s.save({ readingNotes: { trashDays: '7' }, calendars: [] });
+  assert.equal(s.get().readingNotes.trashDays, 7);
+  s.save({ readingNotes: { trashDays: '' }, calendars: [] });
+  assert.equal(s.get().readingNotes.trashDays, 30);
+  for (const v of ['-1', '2.5', 'bald', '3651']) assert.throws(() => validateSettings({ readingNotes: { trashDays: v } }), (e) => e instanceof SettingsError && e.field === 'readingNotes.trashDays');
+});

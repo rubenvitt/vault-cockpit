@@ -365,6 +365,20 @@ const health = createHealth({
 // Festhalten, was die Dienste melden, auch wenn gerade niemand /zustand ansieht.
 setInterval(() => health.services(), 60_000).unref();
 
+// Lesestapel aufräumen: ungelesen Verworfenes nach `readingNotes.trashDays` Tagen löschen (0 = nie).
+const sweepReading = () => {
+  try {
+    const days = cockpitSettings.get().readingNotes.trashDays;
+    if (!(days > 0)) return;
+    const n = reading.purgeDiscarded(new Date(Date.now() - days * 24 * 60 * 60_000).toISOString());
+    if (n) console.log(`Lesestapel: ${n} verworfene ${n === 1 ? 'Text' : 'Texte'} älter als ${days} Tage gelöscht`);
+  } catch (err) {
+    console.error(`Lesestapel: Aufräumen fehlgeschlagen: ${err.message}`);
+  }
+};
+sweepReading();
+setInterval(sweepReading, 60 * 60_000).unref();
+
 const graph = createGraph({ index, semantic: currentSemantic, zunder, calendar: calendarForGraph(calendars), tz: () => cockpitSettings.get().tz });
 // Ganzer Vault als Graph (VCP-40): Layout im Worker, Positionen neben dem Index gespeichert.
 const wholeGraph = createWholeGraph({ index, file: join(dirname(INDEX_DB), 'graph-layout.json') });

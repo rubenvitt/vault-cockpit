@@ -749,7 +749,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       zunder: clear ? { url: null, token: null } : { url: field('zunder.url'), token: field('zunder.token') || stored.zunder.token },
       bridge: { enabled: choice('bridge.enabled'), tag: field('bridge.tag') },
       flameNote: { enabled: choice('flameNote.enabled') },
-      readingNotes: { folder: field('readingNotes.folder') },
+      readingNotes: { folder: field('readingNotes.folder'), trashDays: field('readingNotes.trashDays') },
       sync: { adapter: SYNC_ADAPTERS.includes(field('sync.adapter')) ? field('sync.adapter') : null },
       mail: {
         token: form.get('mail.clear') ? null : field('mail.token') || stored.mail.token,

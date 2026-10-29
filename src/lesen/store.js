@@ -411,6 +411,20 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
 
     deleteDocument: (id) => db.prepare('DELETE FROM documents WHERE id = ?').run(String(id ?? '')).changes > 0,
 
+    /**
+     * Aufräumen (VCP-86): löscht Verworfenes, das seit vor `before` (ISO) auf
+     * `weg` steht und nie gelesen oder gehört wurde und keine Markierung hat.
+     * „Fertig, weg“ nach dem Lesen (`read_at`) bleibt samt Markierungen.
+     * Feed-Einträge bleiben bekannt (`feed_entries.doc_id` wird leer), kommen
+     * also nicht wieder. Liefert die Zahl gelöschter Dokumente.
+     */
+    purgeDiscarded(before) {
+      return db
+        .prepare(`DELETE FROM documents WHERE status = 'weg' AND status_changed_at < ? AND read_at IS NULL AND heard_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM highlights h WHERE h.doc_id = documents.id)`)
+        .run(String(before)).changes;
+    },
+
     // --- Markierungen ---------------------------------------------------------
 
     /**
