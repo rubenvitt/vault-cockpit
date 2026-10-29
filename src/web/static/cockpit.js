@@ -137,6 +137,17 @@
     form.elements.prev.value = status;
     button.setAttribute('aria-pressed', String(done));
     button.setAttribute('aria-label', `${done ? 'Wieder öffnen' : 'Abhaken'}: ${li.dataset.title}`);
+    // Das Statusmenü der Kopie mitziehen, sonst schickt es ein veraltetes prev.
+    const menu = li.querySelector('form[action="/aktion/status"]:not(.tick)');
+    if (menu) {
+      menu.elements.prev.value = status;
+      for (const chip of menu.querySelectorAll('button[name="status"]')) {
+        const current = chip.value === status;
+        chip.disabled = current;
+        if (current) chip.setAttribute('aria-current', 'true');
+        else chip.removeAttribute('aria-current');
+      }
+    }
     recount(li);
   }
 
