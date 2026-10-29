@@ -443,6 +443,24 @@ public struct WeekModel: Decodable, Equatable, Sendable {
         return WeekCapabilities(actions: can.actions, notes: can.actions && can.notes, plan: can.actions && can.plan)
     }
 
+    /// „Heute“ (VCP-54, `heuteSection` in render.js): Big Rocks, die heute fällig sind (auch
+    /// schon erledigte) oder seit Wochenbeginn überfällig und noch offen; leer außerhalb der
+    /// laufenden Woche.
+    public var todayTasks: [ZunderTask] {
+        guard week.current, let groups = rocks.value?.groups else { return [] }
+        let tz = timeZone
+        return groups.flatMap(\.tasks).filter { task in
+            guard task.status != .dropped, let due = task.due, let day = CockpitFormat.localDay(due, timeZone: tz) else { return false }
+            return day == today || (day < today && !task.isDone)
+        }
+    }
+
+    /// Termine von heute; nil, wenn heute nicht in der Woche liegt oder der Kalender fehlt.
+    public var todayCalendar: CalendarDay? {
+        guard week.current, let calendar = calendar.value, let index = calendar.todayIndex else { return nil }
+        return calendar.days[index]
+    }
+
     /// Alle Aufgaben mit dieser ID, in allen Listen (eine Aufgabe kann in mehreren stehen).
     public func tasks(withID id: String) -> [ZunderTask] {
         var found: [ZunderTask] = []

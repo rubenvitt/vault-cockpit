@@ -54,6 +54,22 @@ final class CockpitFormatTests: XCTestCase {
         XCTAssertEqual(CockpitFormat.dueLabel("kaputt", timeZone: berlin), "")
     }
 
+    func testDueTag() {
+        func tag(_ due: String?, _ status: TaskStatus = .open, overdue: Bool = false, today: String? = "2026-10-14") -> DueTag? {
+            CockpitFormat.dueTag(ZunderTask(id: "x", title: "X", status: status, due: due, overdue: overdue), today: today, timeZone: berlin)
+        }
+        XCTAssertNil(tag(nil))
+        XCTAssertEqual(tag("2026-10-14"), DueTag(text: "Heute", label: "Mi 14.10.", tone: .today))
+        XCTAssertEqual(tag("2026-10-15T07:30:00Z"), DueTag(text: "Morgen 09:30", label: "Do 15.10. 09:30", tone: .plain))
+        XCTAssertEqual(tag("2026-10-16")?.text, "Fr 16.10.")
+        XCTAssertEqual(tag("2026-10-12")?.tone, .overdue)
+        XCTAssertEqual(tag("2026-10-12")?.accessibilityText, "Überfällig seit Mo 12.10.")
+        XCTAssertEqual(tag("2026-10-12", .done)?.tone, .plain)
+        // Ohne heutiges Datum zählt `overdue` vom Server.
+        XCTAssertEqual(tag("2026-07-05", overdue: true, today: nil)?.tone, .overdue)
+        XCTAssertEqual(CockpitFormat.localDay("2026-10-14T23:30:00Z", timeZone: berlin), "2026-10-15")
+    }
+
     func testDurations() {
         XCTAssertEqual(CockpitFormat.hours(45), "45 min")
         XCTAssertEqual(CockpitFormat.hours(60), "1 h")

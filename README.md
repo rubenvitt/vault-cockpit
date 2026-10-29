@@ -333,6 +333,14 @@ die **Termine** der Woche aus allen eingestellten Kalendern, **Aufgaben** in
 Arbeit oder überfällig und die **Inbox** (Ordner im Vault und Zunder-Inbox). Mit
 `?woche=2026-W43` blättert man; dieselben Daten gibt es als JSON unter `/api/woche`.
 
+Auf dem iPhone (Web bis 900 px Breite und native App) beginnt die laufende Woche
+mit **Heute**: Termine von heute und die Big Rocks, die heute fällig oder seit
+Wochenbeginn überfällig sind; danach Aufgaben, Feuer, Big Rocks, Termine und Inbox.
+Fälligkeiten stehen als kleines Schild hinter dem Titel („Heute“, „Morgen“,
+überfällig rot), komplett erledigte Bereiche der Big Rocks klappen auf eine Zeile
+zusammen. „← Zurück“ auf einer Notizseite führt dorthin, woher man kam (Inbox,
+Graph, Wissen …).
+
 Einrichtung:
 
 1. In Pocket ID einen OIDC-Client anlegen, Callback `<PUBLIC_URL>/auth/callback`,

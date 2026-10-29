@@ -10,6 +10,8 @@ struct WeekEnv {
 
     var timeZone: TimeZone { store.model?.timeZone ?? .current }
     var can: WeekCapabilities { store.model?.capabilities ?? .all }
+    /// Heute in der Zeitzone des Cockpits (`JJJJ-MM-TT`), für „Heute“ und „Morgen“ an Fälligkeiten.
+    var today: String? { store.model?.today }
 
     /// Titel einer Aufgabe: Zunder im `SFSafariViewController`.
     func open(_ task: ZunderTask) {
@@ -81,6 +83,42 @@ struct CardSection<Content: View>: View {
         .overlay {
             RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
                 .strokeBorder(Theme.line)
+        }
+    }
+}
+
+/// Fälligkeit als Schild (`.due` im Web, VCP-54): heute in Akzent, überfällig rot.
+struct DueBadge: View {
+    let tag: DueTag
+    /// Erledigt: ruhig, ohne Farbe.
+    var muted = false
+
+    var body: some View {
+        Text(tag.text)
+            .font(.caption.weight(tag.tone == .overdue && !muted ? .semibold : .medium).monospacedDigit())
+            .foregroundStyle(foreground)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 1)
+            .background(background, in: Capsule())
+            .fixedSize()
+            .accessibilityLabel(tag.accessibilityText)
+    }
+
+    private var foreground: Color {
+        if muted { return Theme.text3 }
+        switch tag.tone {
+        case .overdue: return Theme.danger
+        case .today: return Theme.accent
+        case .plain: return Theme.text2
+        }
+    }
+
+    private var background: Color {
+        if muted { return .clear }
+        switch tag.tone {
+        case .overdue: return Theme.dangerSoft
+        case .today: return Theme.accentSoft
+        case .plain: return Theme.bgSunk
         }
     }
 }

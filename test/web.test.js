@@ -1121,6 +1121,16 @@ test('Notizseite: Vorschau mit Checkbox-Knöpfen und Verarbeiten; unbekannte Not
       assert.match(html, /name="ordner" value="40-archiv"[^]*?Ins Archiv/);
       assert.match(html, /name="tags" value="alt"/);
       assert.equal((await call('/notiz?pfad=privat%2Fgeheim.md')).status, 404);
+      assert.match(html, /<a href="\/" class="btn quiet">← Zur Woche<\/a>/);
+
+      // Zurück zur Herkunft (VCP-54): aus dem Referer, und sie wandert in `back`, damit Aktionen ohne JavaScript sie behalten.
+      const fromGraph = await (await call('/notiz?pfad=00-inbox%2FIdee.md', { headers: { referer: 'https://vault.test/graph?pfad=a.md' } })).text();
+      assert.match(fromGraph, /<a href="\/graph\?pfad=a\.md" class="btn quiet">← Zum Graphen<\/a>/);
+      assert.match(fromGraph, /name="back" value="\/notiz\?pfad=00-inbox%2FIdee\.md&amp;zurueck=%2Fgraph%3Fpfad%3Da\.md"/);
+      const fromInbox = await (await call('/notiz?pfad=00-inbox%2FIdee.md', { headers: { referer: 'https://vault.test/' } })).text();
+      assert.match(fromInbox, /<a href="\/#inbox" class="btn quiet">← Zur Inbox<\/a>/);
+      const foreign = await (await call('/notiz?pfad=00-inbox%2FIdee.md', { headers: { referer: 'https://evil.test/graph' } })).text();
+      assert.match(foreign, /← Zur Woche/);
 
       // Die Wochenansicht verlinkt Inbox-Notizen auf die Vorschau.
       assert.ok((await (await call('/')).text()).includes('/static/cockpit.js'));
@@ -1147,6 +1157,9 @@ test('Notiz ablegen: JSON führt zur neuen Adresse, Meldung kommt per Cookie mit
       // Ohne JavaScript: Weiterleitung zur neuen Adresse.
       const plain = await call('/aktion/notiz/ablegen', { method: 'POST', form: { pfad: '00-inbox/Idee.md', ordner: '10-projekte/Hund', back, csrf } });
       assert.equal(plain.headers.get('location'), '/notiz?pfad=10-projekte%2FHund%2FIdee.md');
+      // Die Herkunft geht zur neuen Adresse mit.
+      const withOrigin = await (await call('/aktion/notiz/ablegen', { method: 'POST', form: { pfad: '00-inbox/Idee.md', ordner: '40-archiv', back: `${back}&zurueck=%2Fgraph`, csrf }, accept: 'application/json' })).json();
+      assert.equal(withOrigin.redirect, '/notiz?pfad=40-archiv%2FIdee.md&zurueck=%2Fgraph');
       // Aus der Woche abgelegt: zurück zur Woche.
       const fromWeek = await call('/aktion/notiz/ablegen', { method: 'POST', form: { pfad: '00-inbox/Idee.md', ordner: '40-archiv', back: '/', csrf } });
       assert.equal(fromWeek.headers.get('location'), '/');

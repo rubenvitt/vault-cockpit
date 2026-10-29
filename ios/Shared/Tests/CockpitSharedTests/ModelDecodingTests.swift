@@ -9,6 +9,21 @@ final class ModelDecodingTests: XCTestCase {
         try JSONDecoder().decode(T.self, from: try fixture(name))
     }
 
+    /// „Heute“ (VCP-54): heute Fälliges auch erledigt, Überfälliges nur offen, Späteres nicht.
+    func testWeekToday() throws {
+        var model = try decode(WeekModel.self, "woche")
+        XCTAssertEqual(model.todayCalendar?.date, "2026-10-14")
+        XCTAssertEqual(model.todayCalendar?.events.count, 1)
+        // Erledigt und gestern fällig, offen und Freitag fällig: beides nicht heute.
+        XCTAssertEqual(model.todayTasks.map(\.title), [])
+        let rocks = try XCTUnwrap(model.rocks.value).groups.flatMap(\.tasks)
+        let done = try XCTUnwrap(rocks.first { $0.title == "Steuerberater anrufen" })
+        let later = try XCTUnwrap(rocks.first { $0.title == "Steuererklärung abgeben" })
+        model.updateTask(id: done.id) { $0.status = .open }
+        model.updateTask(id: later.id) { $0.due = "2026-10-14T16:00:00+02:00"; $0.status = .done }
+        XCTAssertEqual(model.todayTasks.map(\.title), ["Steuerberater anrufen", "Steuererklärung abgeben"])
+    }
+
     func testWeek() throws {
         let model = try decode(WeekModel.self, "woche")
         XCTAssertEqual(model.tz, "Europe/Berlin")

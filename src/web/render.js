@@ -39,6 +39,39 @@ export function dueLabel(due, tz) {
   return `${wd} ${String(p.day).padStart(2, '0')}.${String(p.month).padStart(2, '0')}. ${localTime(date, tz)}`;
 }
 
+/** Kalendertag (JJJJ-MM-TT) einer Fälligkeit in der Zeitzone des Cockpits. */
+function dueDay(due, tz) {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(due)) return due;
+  const date = new Date(due);
+  if (Number.isNaN(date.getTime())) return null;
+  const p = zonedParts(date, tz);
+  return `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`;
+}
+
+const nextDay = (day) => new Date(Date.parse(`${day}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+
+/**
+ * Fälligkeit als eigenes Schild neben dem Titel (VCP-54): „Heute“ und
+ * „Morgen“ als Wort, sonst Wochentag und Datum; überfällig (`tone`) ist rot,
+ * solange die Aufgabe offen ist. Ohne `today` zählt `t.overdue` aus den Daten.
+ */
+export function dueTag(t, tz, today = null) {
+  const label = t.due ? dueLabel(t.due, tz) : '';
+  if (!label) return { html: '', tone: '' };
+  const day = dueDay(t.due, tz);
+  const closed = t.status === 'done' || t.status === 'dropped';
+  const time = label.match(/ (\d{2}:\d{2})$/)?.[1];
+  let tone = '';
+  let text = label;
+  if (today && day) {
+    if (day === today) [tone, text] = ['today', time ? `Heute ${time}` : 'Heute'];
+    else if (day === nextDay(today)) text = time ? `Morgen ${time}` : 'Morgen';
+    if (day < today && !closed) tone = 'overdue';
+  } else if (t.overdue && !closed) tone = 'overdue';
+  const title = tone === 'overdue' ? `Überfällig seit ${label}` : `Fällig ${label}`;
+  return { html: `<span class="due${tone ? ` ${tone}` : ''}" title="${esc(title)}">${esc(text)}</span>`, tone };
+}
+
 function weekTitle(w) {
   const [y1, m1, d1] = w.monday.split('-').map(Number);
   const [y2, m2, d2] = w.sunday.split('-').map(Number);
@@ -189,14 +222,15 @@ function burningBar(model, tz, ctx) {
 }
 
 function taskItem(t, tz, ctx = {}, { area = false, mark = null, live = false, inbox = false, flame = false } = {}) {
-  const meta = [t.ref, area ? t.area : t.project, dueLabel(t.due, tz), ...(t.extra ? [t.extra] : [])].filter(Boolean).map(esc).join(' · ');
+  const meta = [t.ref, area ? t.area : t.project, ...(t.extra ? [t.extra] : [])].filter(Boolean).map(esc).join(' · ');
+  const due = dueTag(t, tz, ctx.today);
   const writable = ctx.write && t.id;
   const lead = writable
     ? tickForm(t, ctx)
     : `<span class="mark" aria-label="${esc(t.status)}">${mark ?? STATUS_MARK[t.status] ?? '○'}</span>`;
-  return `<li class="task status-${esc(t.status)}${t.overdue ? ' overdue' : ''}" data-id="${esc(t.id ?? '')}" data-status="${esc(t.status)}" data-title="${esc(t.title)}">
+  return `<li class="task status-${esc(t.status)}${due.tone === 'overdue' ? ' overdue' : ''}" data-id="${esc(t.id ?? '')}" data-status="${esc(t.status)}" data-title="${esc(t.title)}">
     ${lead}
-    <span class="body"><a href="${esc(t.url)}">${esc(t.title)}</a>${meta || live ? `<span class="meta">${meta}${live ? `${meta ? ' · ' : ''}<span class="live">läuft</span>` : ''}</span>` : ''}</span>
+    <span class="body"><a href="${esc(t.url)}">${esc(t.title)}</a>${due.html ? ` ${due.html}` : ''}${meta || live ? `<span class="meta">${meta}${live ? `${meta ? ' · ' : ''}<span class="live">läuft</span>` : ''}</span>` : ''}</span>
     ${writable && flame && t.status !== 'done' && t.status !== 'dropped' ? flameButton(t, ctx) : ''}
     ${writable ? taskMenu(t, { ...ctx, tz }, { inbox }) : ''}
   </li>`;
@@ -280,21 +314,32 @@ function rocksSection(model, tz, ctx) {
   else {
     body = `<div class="rocks">${r.data
       .map(
-        (g) => `<article class="rock${g.tasks.length && g.done === g.tasks.length ? ' all-done' : ''}">
-          <h3>${esc(g.area)} <span class="count" data-count>${g.done}/${g.tasks.length}</span></h3>
+        (g) => {
+          const items = `<ul>${g.tasks.map((t) => taskItem(t, tz, ctx, { flame: true, live: t.running })).join('')}</ul>`;
+          const count = `<span class="count" data-count>${g.done}/${g.tasks.length}</span>`;
+          // Komplett erledigte Bereiche klappen auf eine Zeile zusammen (VCP-54); aufklappen geht ohne JavaScript.
+          if (g.tasks.length && g.done === g.tasks.length) {
+            return `<details class="rock all-done">
+          <summary><h3>${esc(g.area)} ${count}</h3></summary>
+          ${items}
+        </details>`;
+          }
+          return `<article class="rock">
+          <h3>${esc(g.area)} ${count}</h3>
           <progress class="rock-progress" value="${g.done}" max="${g.tasks.length}" aria-hidden="true"></progress>
-          <ul>${g.tasks.map((t) => taskItem(t, tz, ctx, { flame: true, live: t.running })).join('')}</ul>
-        </article>`,
+          ${items}
+        </article>`;
+        },
       )
       .join('')}</div>`;
     if (r.partial) body += '<p class="problem">Nicht alle Zunder-Abfragen haben geantwortet; die Liste ist unvollständig.</p>';
   }
-  return `<section><h2>Big Rocks${planLink(ctx, 'Woche planen')}</h2>${body}</section>`;
+  return `<section class="big-rocks"><h2>Big Rocks${planLink(ctx, 'Woche planen')}</h2>${body}</section>`;
 }
 
 function calendarSection(model, tz) {
   const c = model.calendar;
-  if (!c.ok) return `<section><h2>Termine</h2>${problem(c)}</section>`;
+  if (!c.ok) return `<section class="termine"><h2>Termine</h2>${problem(c)}</section>`;
   // Vergangene Tage der laufenden Woche treten zurück; auf dem iPhone bleibt nur die Zahl.
   const todayAt = c.data.findIndex((d) => d.today);
   const days = c.data
@@ -321,7 +366,41 @@ function calendarSection(model, tz) {
     .map((e) => `<p class="problem">${esc(e.calendar)}: ${esc(e.error)}</p>`)
     .join('');
   const today = todayAt >= 0 ? c.data[todayAt].events.length : null;
-  return `<section><h2>Termine${today != null ? ` <span class="hint">heute ${today ? `${today} ${today === 1 ? 'Termin' : 'Termine'}` : 'frei'}</span>` : ''}</h2>${failed}<div class="week">${days}</div></section>`;
+  return `<section class="termine"><h2>Termine${today != null ? ` <span class="hint">heute ${today ? `${today} ${today === 1 ? 'Termin' : 'Termine'}` : 'frei'}</span>` : ''}</h2>${failed}<div class="week">${days}</div></section>`;
+}
+
+/**
+ * „Heute“ für die laufende Woche (VCP-54): Termine von heute und die Big
+ * Rocks, die heute fällig (auch schon erledigt) oder seit Wochenbeginn
+ * überfällig sind, kompakt an
+ * einer Stelle. Nur auf schmalen Bildschirmen sichtbar und dort ganz oben; der
+ * Desktop zeigt dasselbe in Termine und Big Rocks. Älteres Überfälliges steht
+ * direkt darunter in „Aufgaben“.
+ */
+function heuteSection(model, tz, ctx) {
+  if (!model.week.current || !model.today) return '';
+  const day = model.calendar.ok ? model.calendar.data.find((d) => d.today) : null;
+  const events = day?.events ?? [];
+  const tasks = model.rocks.ok
+    ? model.rocks.data.flatMap((g) => g.tasks).filter((t) => {
+        const day = t.due && t.status !== 'dropped' ? dueDay(t.due, tz) : null;
+        return day === model.today || (day && day < model.today && t.status !== 'done');
+      })
+    : [];
+  const list = [
+    ...events.map(
+      (e) => `<li class="event${e.allDay ? ' all-day' : ''}">
+        <span class="time">${e.allDay ? 'ganztags' : localTime(e.start, tz)}</span>
+        <span class="title">${esc(e.title)}</span>
+        ${e.location ? `<span class="meta">${esc(e.location)}</span>` : ''}
+      </li>`,
+    ),
+  ].join('');
+  const body =
+    events.length || tasks.length
+      ? `${list ? `<ul class="heute-events">${list}</ul>` : ''}${tasks.length ? `<ul class="heute-tasks">${tasks.map((t) => taskItem(t, tz, ctx, { area: true, flame: true, live: t.running })).join('')}</ul>` : ''}`
+      : `<p class="empty">${model.calendar.ok ? 'Keine Termine, nichts fällig.' : 'Nichts fällig.'}</p>`;
+  return `<section class="heute" aria-label="Heute"><h2>Heute <span class="hint">${esc(day?.label ?? dueLabel(model.today, tz))}</span></h2>${body}</section>`;
 }
 
 function tasksSection(model, tz, ctx) {
@@ -330,7 +409,7 @@ function tasksSection(model, tz, ctx) {
   if (!t.ok) body = problem(t);
   else if (!t.data.length) body = '<p class="empty">Nichts in Arbeit, nichts überfällig.</p>';
   else body = `<ul>${t.data.map((x) => taskItem(x, tz, ctx, { area: true })).join('')}</ul>`;
-  return `<section><h2>Aufgaben <span class="hint">in Arbeit und überfällig</span>${t.ok && t.data.length ? ` <span class="count-badge">${t.data.length}</span>` : ''}</h2>${body}</section>`;
+  return `<section class="tasks"><h2>Aufgaben <span class="hint">in Arbeit und überfällig</span>${t.ok && t.data.length ? ` <span class="count-badge">${t.data.length}</span>` : ''}</h2>${body}</section>`;
 }
 
 /** Liste, die das Script nach dem Erfassen ergänzt; leer zeigt sie „Leer.“. */
@@ -357,7 +436,7 @@ function inboxSection(model, tz, vaultName, ctx) {
   if (!zunder.ok) tasks = problem(zunder);
   else tasks = inboxList('zunder-inbox', zunder.data.map((x) => taskItem(x, tz, { ...ctx, targets: model.inbox.targets }, { inbox: true })));
   const open = (vault.ok ? vault.data.length : 0) + (zunder.ok ? zunder.data.length : 0);
-  return `<section><h2>Inbox${open ? ` <span class="count-badge" data-inbox-count>${open}</span>` : ''}</h2>
+  return `<section id="inbox" class="inbox"><h2>Inbox${open ? ` <span class="count-badge" data-inbox-count>${open}</span>` : ''}</h2>
     <h3>Vault <span class="hint">${esc(folder)}/</span></h3>${notes}
     <h3>Zunder</h3>${tasks}
   </section>`;
@@ -409,7 +488,7 @@ export function renderWeek(model, { user = null, write = null, back = '/', flash
   const { tz, vaultName } = model;
   const w = model.week;
   const title = weekTitle(w);
-  const ctx = { write, back, week: w };
+  const ctx = { write, back, week: w, today: model.today ?? null };
   const prev = Number(w.prev.slice(6));
   const next = Number(w.next.slice(6));
   return `<!doctype html>
@@ -426,8 +505,9 @@ ${appHeader({ current: 'woche', user, links: { rueckblick: `/rueckblick?woche=${
   </nav>
 </div>
 ${write ? `<div class="capture-wrap">${captureBar(ctx, draft, focus)}</div>` : ''}
-<main>
+<main class="week-main${w.current ? ' today-first' : ''}">
 ${burningBar(model, tz, ctx)}
+${heuteSection(model, tz, ctx)}
 ${feuerSection(model, tz, vaultName, ctx)}
 ${rocksSection(model, tz, ctx)}
 ${calendarSection(model, tz)}

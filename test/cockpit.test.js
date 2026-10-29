@@ -6,7 +6,8 @@ import { parseEvents } from '../src/cockpit/ics.js';
 import { createSettingsStore } from '../src/cockpit/settings.js';
 import { findFeuer, sectionParagraph } from '../src/cockpit/feuer.js';
 import { createCockpit, areaOf } from '../src/cockpit/data.js';
-import { renderWeek, inline } from '../src/web/render.js';
+import { renderWeek, inline, dueTag } from '../src/web/render.js';
+import { noteOrigin } from '../src/web/note-render.js';
 import { buildIndex, openIndex } from '../src/vault/index.js';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -395,6 +396,60 @@ test('renderWeek: vergangene Tage treten zurück, heute steht im Kopf der Termin
   assert.match(html, /<div class="day past">\s*<h3>Mo 12\.10\. <span class="day-count">1 Termin<\/span><\/h3>/);
   assert.match(html, /<div class="day today">/);
   assert.match(html, /<h2>Termine <span class="hint">heute frei<\/span><\/h2>/);
+});
+
+test('dueTag: Heute und Morgen als Wort, überfällig nur offen, ohne Fälligkeit leer', () => {
+  const today = '2026-10-14';
+  assert.deepEqual(dueTag({ due: null, status: 'open' }, TZ, today), { html: '', tone: '' });
+  assert.match(dueTag({ due: '2026-10-14', status: 'open' }, TZ, today).html, /class="due today"[^>]*>Heute</);
+  assert.match(dueTag({ due: '2026-10-15T09:30:00+02:00', status: 'open' }, TZ, today).html, />Morgen 09:30</);
+  const late = dueTag({ due: '2026-10-12', status: 'open' }, TZ, today);
+  assert.equal(late.tone, 'overdue');
+  assert.match(late.html, /title="Überfällig seit Mo 12\.10\."/);
+  assert.equal(dueTag({ due: '2026-10-12', status: 'done' }, TZ, today).tone, '');
+  // Ohne heutiges Datum zählt das Feld aus den Daten.
+  assert.equal(dueTag({ due: '2026-07-05', status: 'open', overdue: true }, TZ).tone, 'overdue');
+});
+
+test('renderWeek: Fälligkeit als Schild, erledigte Bereiche eingeklappt, Heute für die laufende Woche', async () => {
+  const tasks = [
+    ...TASKS,
+    { id: 'h1', title: 'Heute fällig', status: 'open', due: '2026-10-14', location: loc('Finanzen') },
+    { id: 'h2', title: 'Seit Montag fällig', status: 'open', due: '2026-10-12', location: loc('Finanzen') },
+  ];
+  const cockpit = createCockpit({ index: fakeIndex([feuerNote()]), settings: settingsWith(), zunderFor: () => fakeZunder(tasks), now: fixedNow, logger: quiet });
+  const m = await cockpit.week();
+  m.calendar = { ok: true, data: [{ label: 'Mi 14.10.', today: true, events: [{ title: 'Workshop', start: new Date('2026-10-14T12:00:00Z'), allDay: false }] }] };
+  const html = renderWeek(m);
+  // Datum steht nicht mehr in der Meta-Zeile, sondern als Schild hinter dem Titel.
+  assert.match(html, /Helfermappe drucken<\/a> <span class="due" title="Fällig Fr 16\.10\.">Fr 16\.10\.<\/span><span class="meta">Gruppe I&amp;K<\/span>/);
+  assert.match(html, /<li class="task status-open overdue"[^>]*data-title="Seite für Personalentwicklung"/);
+  // Arbeitnehmer ist komplett erledigt: eine Zeile zum Aufklappen.
+  assert.match(html, /<details class="rock all-done">\s*<summary><h3>Arbeitnehmer <span class="count" data-count>1\/1<\/span><\/h3><\/summary>/);
+  assert.match(html, /<article class="rock">\s*<h3>Finanzen/);
+  // Heute: Termin, heute Fälliges und Überfälliges aus der Woche, nichts Späteres.
+  assert.match(html, /<main class="week-main today-first">/);
+  const heute = html.match(/<section class="heute"[\s\S]*?<\/section>/)[0];
+  assert.match(heute, /<h2>Heute <span class="hint">Mi 14\.10\.<\/span><\/h2>/);
+  assert.match(heute, /14:00<\/span>\s*<span class="title">Workshop/);
+  assert.match(heute, /Heute fällig/);
+  assert.match(heute, /Seit Montag fällig/);
+  assert.doesNotMatch(heute, /Helfermappe/);
+
+  const other = await cockpit.week('2026-W43');
+  assert.doesNotMatch(renderWeek(other), /class="heute"|today-first/);
+});
+
+test('noteOrigin: Zurück zur Herkunft aus Adresse oder Referer, nie nach außen', () => {
+  const o = 'https://cockpit.test';
+  assert.deepEqual(noteOrigin(null, 'https://cockpit.test/?woche=2026-W42', o), { path: '/?woche=2026-W42', href: '/?woche=2026-W42#inbox', label: 'Zur Inbox' });
+  assert.deepEqual(noteOrigin('/graph?pfad=a.md', 'https://cockpit.test/', o), { path: '/graph?pfad=a.md', href: '/graph?pfad=a.md', label: 'Zum Graphen' });
+  assert.equal(noteOrigin(null, 'https://cockpit.test/lesen/stapel', o).label, 'Zurück');
+  assert.equal(noteOrigin(null, 'https://cockpit.test/notiz?pfad=b.md', o), null);
+  assert.equal(noteOrigin(null, 'https://evil.test/graph', o), null);
+  assert.equal(noteOrigin('//evil.test/x', null, o), null);
+  assert.equal(noteOrigin(null, 'kaputt', o), null);
+  assert.equal(noteOrigin(null, null, o), null);
 });
 
 test('inline: Wikilinks, Code, Betonung, Escaping', () => {

@@ -18,6 +18,8 @@ struct TaskRow: View {
     let task: ZunderTask
     let env: WeekEnv
     var meta = ""
+    /// Fälligkeit als Schild vor der Meta-Zeile (VCP-54).
+    var due: DueTag?
     /// „läuft“ hinter der Meta-Zeile.
     var live = false
     /// Flamme starten/stoppen (Flammen und Big Rocks).
@@ -39,12 +41,15 @@ struct TaskRow: View {
             lead
             VStack(alignment: .leading, spacing: 2) {
                 title
-                if !meta.isEmpty || live {
+                if !meta.isEmpty || live || due != nil {
                     HStack(spacing: 6) {
+                        if let due {
+                            DueBadge(tag: due, muted: task.isDone)
+                        }
                         if !meta.isEmpty {
                             Text(meta)
                                 .font(.footnote)
-                                .foregroundStyle(task.overdue ? Theme.warn : Theme.text2)
+                                .foregroundStyle(due == nil && task.overdue ? Theme.warn : Theme.text2)
                         }
                         if live { LivePill() }
                     }

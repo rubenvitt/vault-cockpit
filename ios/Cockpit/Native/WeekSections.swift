@@ -1,7 +1,9 @@
 import CockpitShared
 import SwiftUI
 
-/// Alle Abschnitte der Woche in der Reihenfolge des Webs (`renderWeek`).
+/// Alle Abschnitte der Woche in der Reihenfolge des Webs auf dem iPhone (`renderWeek`, VCP-54):
+/// in der laufenden Woche zuerst „Heute“ und „Aufgaben“, dann Feuer, Big Rocks, Termine,
+/// Inbox; andere Wochen wie auf dem Desktop.
 @MainActor
 struct WeekSections: View {
     let week: WeekModel
@@ -13,11 +15,20 @@ struct WeekSections: View {
                 BurningBar(task: burning, env: env)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
-            FeuerSection(week: week, env: env)
-            FlamesSection(week: week, env: env)
-            RocksSection(week: week, env: env)
-            CalendarSection(week: week, env: env)
-            TasksSection(week: week, env: env)
+            if week.week.current {
+                TodaySection(week: week, env: env)
+                TasksSection(week: week, env: env)
+                FeuerSection(week: week, env: env)
+                FlamesSection(week: week, env: env)
+                RocksSection(week: week, env: env)
+                CalendarSection(week: week, env: env)
+            } else {
+                FeuerSection(week: week, env: env)
+                FlamesSection(week: week, env: env)
+                RocksSection(week: week, env: env)
+                CalendarSection(week: week, env: env)
+                TasksSection(week: week, env: env)
+            }
             InboxSection(week: week, env: env)
         }
         .animation(.snappy, value: week.burning?.id)
@@ -41,7 +52,8 @@ struct TaskList: View {
                 TaskRow(
                     task: task,
                     env: env,
-                    meta: CockpitFormat.meta([task.ref, showArea ? task.area : task.project, CockpitFormat.dueLabel(task.due, timeZone: env.timeZone)]),
+                    meta: CockpitFormat.meta([task.ref, showArea ? task.area : task.project]),
+                    due: CockpitFormat.dueTag(task, today: env.today, timeZone: env.timeZone),
                     live: task.running,
                     showsFlame: showsFlame,
                     menu: menu
@@ -335,13 +347,55 @@ struct RocksSection: View {
     }
 }
 
-/// Karte eines Lebensbereichs: Zähler und Fortschritt folgen dem Abhaken sofort.
+/// Karte eines Lebensbereichs: Zähler und Fortschritt folgen dem Abhaken sofort. Ein Bereich,
+/// der beim Laden schon komplett erledigt ist, steht als eine Zeile da und klappt per Tipp auf
+/// (VCP-54); wer gerade das letzte abhakt, sieht die Karte weiter offen.
 @MainActor
 struct RockCard: View {
     let group: RockGroup
     let env: WeekEnv
 
+    @State private var collapsible: Bool
+    @State private var expanded = false
+
+    init(group: RockGroup, env: WeekEnv) {
+        self.group = group
+        self.env = env
+        _collapsible = State(initialValue: group.allDone)
+    }
+
     var body: some View {
+        if collapsible && group.allDone {
+            collapsed
+        } else {
+            card
+        }
+    }
+
+    private var collapsed: some View {
+        DisclosureGroup(isExpanded: $expanded) {
+            TaskList(tasks: group.tasks, env: env, showsFlame: true)
+                .padding(.top, 4)
+        } label: {
+            HStack(alignment: .firstTextBaseline) {
+                Text(group.area)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.text)
+                Spacer()
+                Label("\(group.done)/\(group.tasks.count)", systemImage: "checkmark")
+                    .labelStyle(.titleAndIcon)
+                    .font(.subheadline.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(Theme.ok)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(group.area), alle \(group.tasks.count) erledigt")
+        }
+        .tint(Theme.text3)
+        .padding(12)
+        .background(Theme.okSoft, in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
+    }
+
+    private var card: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
                 Text(group.area)
@@ -363,6 +417,56 @@ struct RockCard: View {
         .padding(12)
         .background(group.allDone ? Theme.okSoft : Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
         .animation(.snappy, value: group.done)
+    }
+}
+
+// MARK: Heute
+
+/// „Heute“ der laufenden Woche (VCP-54, `heuteSection` im Web): Termine von heute und die
+/// Big Rocks, die heute fällig oder seit Wochenbeginn überfällig sind.
+@MainActor
+struct TodaySection: View {
+    let week: WeekModel
+    let env: WeekEnv
+
+    var body: some View {
+        let day = week.todayCalendar
+        let tasks = week.todayTasks
+        CardSection("Heute", hint: day?.label) {
+            if let day, !day.events.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(day.events) { event in
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            Text(event.allDay ? "ganztags" : event.startDate.map { CockpitFormat.time($0, timeZone: env.timeZone) } ?? "")
+                                .font(.footnote.monospacedDigit())
+                                .foregroundStyle(Theme.text2)
+                                .frame(width: 56, alignment: .leading)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(event.title)
+                                    .font(.subheadline)
+                                    .foregroundStyle(Theme.text)
+                                if let location = event.location, !location.isEmpty {
+                                    Text(location)
+                                        .font(.footnote)
+                                        .foregroundStyle(Theme.text2)
+                                }
+                            }
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+                if !tasks.isEmpty { Divider() }
+            }
+            if !tasks.isEmpty {
+                TaskList(tasks: tasks, env: env, showArea: true, showsFlame: true)
+            } else if day?.events.isEmpty ?? true {
+                EmptyText(week.calendar.value == nil ? "Nichts fällig." : "Keine Termine, nichts fällig.")
+            }
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                .strokeBorder(Theme.accentLine)
+        }
     }
 }
 

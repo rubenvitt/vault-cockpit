@@ -8,6 +8,30 @@ import { fmText, fmPlain, visibleFrontmatter } from './note-json.js';
 const noteHref = (path) => `/notiz?pfad=${encodeURIComponent(path)}`;
 const graphHref = (path) => `/graph?pfad=${encodeURIComponent(path)}`;
 
+/** Beschriftung des Zurück-Links je nach Herkunftsseite. */
+const ORIGIN_LABELS = { '/': 'Zur Inbox', '/graph': 'Zum Graphen', '/graph/alles': 'Zum Graphen', '/wissen': 'Zu Wissen', '/planen': 'Zur Planung', '/rueckblick': 'Zum Rückblick' };
+
+/**
+ * Wohin „← Zurück“ auf der Notizseite führt (VCP-54): `zurueck` aus der
+ * Adresse, sonst der Referer, wenn er von diesem Cockpit kommt und keine
+ * andere Notizseite ist. Von der Woche aus geht es zur Inbox, von wo die
+ * Notizen verlinkt sind. Ohne Herkunft `null`, die Seite zeigt dann „Zur Woche“.
+ */
+export function noteOrigin(param, referer, origin) {
+  let url = null;
+  if (typeof param === 'string' && /^\/(?!\/)[^\\\s]*$/.test(param)) url = new URL(param, origin);
+  else if (referer) {
+    try {
+      const r = new URL(referer);
+      if (r.origin === origin) url = r;
+    } catch { /* kaputter Referer: keine Herkunft */ }
+  }
+  if (!url || url.origin !== origin || url.pathname.startsWith('/notiz') || url.pathname.startsWith('/aktion/')) return null;
+  const path = url.pathname + url.search;
+  const label = ORIGIN_LABELS[url.pathname] ?? 'Zurück';
+  return { path, href: url.pathname === '/' ? `${path}#inbox` : path, label };
+}
+
 /**
  * Frontmatter kompakt: eine Zeile mit den ersten Feldern, aufgeklappt alle.
  * Werte mit Wikilinks (`"[[Feuersturm]]"`) werden Links wie im Text.
@@ -74,9 +98,10 @@ function suggestSection(s, note, ctx) {
  * `graph` verlinkt den Graphen der Notiz, `suggestions` (nur Inbox) kommt von
  * `notes.suggest`. Eine Synthese (`type: synthesis`) bekommt oben ihren Kopf
  * (siehe `synthesisHead`); `zunder` sagt, ob ein Zunder-Zugang eingerichtet ist,
- * `evidence` sind passende neue Markierungen (src/lesen/synthesis-evidence.js).
+ * `evidence` sind passende neue Markierungen (src/lesen/synthesis-evidence.js),
+ * `origin` ist das Ziel von „← Zurück“ (`noteOrigin`).
  */
-export function renderNote(note, { user = null, write = null, back = '/', flash = null, draft = null, targets = [], archive = null, vaultName = null, related = null, graph = false, suggestions = null, zunder = false, evidence = null } = {}) {
+export function renderNote(note, { user = null, write = null, back = '/', flash = null, draft = null, targets = [], archive = null, vaultName = null, related = null, graph = false, suggestions = null, zunder = false, evidence = null, origin = null } = {}) {
   const ctx = { write, back };
   const obsidian = obsidianLink(note.path, vaultName);
   const checkbox = write
@@ -120,7 +145,7 @@ ${head(note.title, { script: Boolean(write) })}
 ${appHeader({ user })}
 <div class="page-head">
   <div><h1>${esc(note.title)}</h1><p class="meta">${esc(note.path)}${graph ? ` · <a href="${esc(graphHref(note.path))}">Graph</a>` : ''}${obsidian ? ` · <a href="${esc(obsidian)}">In Obsidian öffnen</a>` : ''}</p></div>
-  <a href="/" class="btn quiet">← Zur Woche</a>
+  <a href="${esc(origin?.href ?? '/')}" class="btn quiet">← ${esc(origin?.label ?? 'Zur Woche')}</a>
 </div>
 <main class="note-page">
   <div class="note-main">
