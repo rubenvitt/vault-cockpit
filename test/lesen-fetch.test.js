@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { safeFetch, isPublicAddress, normalizeUrl, splitCredentials, sameHost, FetchError } from '../src/lesen/fetch.js';
+import { safeFetch, isPublicAddress, normalizeUrl, splitCredentials, sameHost, decode, FetchError } from '../src/lesen/fetch.js';
 import { createSecretBox } from '../src/cockpit/secret-box.js';
 
 test('SSRF: private, lokale und reservierte Adressen gelten nicht als öffentlich', () => {
@@ -194,4 +194,16 @@ test('Secret-Box: nur mit demselben Schlüssel und Kontext zu öffnen', () => {
   assert.equal(box.open(`${sealed.slice(0, -2)}AA`, 'feed:1'), null);
   assert.equal(box.open('kaputt', 'feed:1'), null);
   assert.throws(() => createSecretBox('kurz'), /32 Zeichen/);
+});
+
+test('Zeichensatz: Header vor <meta charset> und <?xml encoding?>, BOM vor allem, sonst UTF-8', () => {
+  const latin = (s) => Buffer.from(s, 'latin1');
+  assert.equal(decode(latin('<html><head><meta charset="iso-8859-1"></head><p>Grüße</p>'), 'text/html'), '<html><head><meta charset="iso-8859-1"></head><p>Grüße</p>');
+  assert.match(decode(latin('<meta http-equiv="Content-Type" content="text/html; charset=windows-1252"><p>Straße</p>'), 'text/html'), /Straße/);
+  assert.match(decode(latin('<?xml version="1.0" encoding="ISO-8859-1"?><rss><title>Bär</title></rss>'), 'application/xml'), /Bär/);
+  // Der Header gewinnt gegen die Angabe im Dokument.
+  assert.match(decode(Buffer.from('<meta charset="iso-8859-1"><p>Grüße</p>'), 'text/html; charset=utf-8'), /Grüße/);
+  assert.match(decode(Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('<p>Öl</p>')]), 'text/html; charset=iso-8859-1'), /Öl/);
+  assert.equal(decode(Buffer.from('<p>Kühn</p>'), null), '<p>Kühn</p>');
+  assert.equal(decode(Buffer.from('<p>Kühn</p>'), 'text/html; charset=quatsch'), '<p>Kühn</p>');
 });

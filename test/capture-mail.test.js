@@ -134,3 +134,51 @@ test('fehlender Ordner wird als Fehler gemeldet', async () => {
   await capture.runOnce();
   assert.match(capture.status().lastError, /Gibtsnicht/);
 });
+
+test('Lesestapel: abgeschnittener Newsletter wird als Blob ganz nachgeholt, im Zeichensatz des Teils', async () => {
+  const long = '<p>Anfang</p>' + '<p>Mitte</p>'.repeat(10) + '<p>Schluss mit Größe</p>';
+  const email = {
+    ...mail('n1', 'news@fremd.test', 'Langer Newsletter', ''),
+    textBody: [],
+    htmlBody: [{ partId: '2', blobId: 'blob-2', type: 'text/html', charset: 'iso-8859-1' }],
+    bodyValues: { 2: { value: '<p>Anfang</p><p>Mi', isTruncated: true } },
+  };
+  const jmap = fakeJmap([email]);
+  const downloads = [];
+  const fetch = async (url, init) => {
+    if (url.endsWith('/session')) return Response.json({ apiUrl: 'https://jmap.test/api', downloadUrl: 'https://jmap.test/download/{accountId}/{blobId}/{name}?type={type}', primaryAccounts: { 'urn:ietf:params:jmap:mail': 'acc1' } });
+    if (url.startsWith('https://jmap.test/download/')) {
+      downloads.push({ url, auth: init.headers.authorization });
+      return new Response(Buffer.from(long, 'latin1'));
+    }
+    return jmap.fetch(url, init);
+  };
+  const saved = [];
+  const capture = createMailCapture({
+    token: 't',
+    sessionUrl: 'https://jmap.test/session',
+    allowedSenders: ['r@x.test'],
+    router: { route: async () => {} },
+    readingMail: { matches: () => true, save: async (e) => saved.push(e) },
+    fetch,
+    logger: quiet,
+  });
+  assert.equal(await capture.runOnce(), 1);
+  assert.deepEqual(downloads, [{ url: 'https://jmap.test/download/acc1/blob-2/teil?type=text%2Fhtml', auth: 'Bearer t' }]);
+  assert.equal(saved[0].bodyValues[2].value, long);
+  assert.equal(saved[0].bodyValues[2].isTruncated, false);
+});
+
+test('Lesestapel: scheitert das Nachholen, bleibt der gekürzte Text', async () => {
+  const email = { ...mail('n2', 'r@x.test', '[lesen] Kurz', ''), bodyValues: { 1: { value: 'gekürzt', isTruncated: true } }, textBody: [{ partId: '1', blobId: 'b1', type: 'text/plain' }] };
+  const jmap = fakeJmap([email]);
+  const fetch = async (url, init) => {
+    if (url.endsWith('/session')) return Response.json({ apiUrl: 'https://jmap.test/api', downloadUrl: 'https://jmap.test/dl/{blobId}', primaryAccounts: { 'urn:ietf:params:jmap:mail': 'acc1' } });
+    if (url.startsWith('https://jmap.test/dl/')) return new Response('nein', { status: 500 });
+    return jmap.fetch(url, init);
+  };
+  const saved = [];
+  const capture = createMailCapture({ token: 't', sessionUrl: 'https://jmap.test/session', allowedSenders: ['r@x.test'], router: { route: async () => {} }, readingMail: { matches: () => true, save: async (e) => saved.push(e) }, fetch, logger: quiet });
+  assert.equal(await capture.runOnce(), 1);
+  assert.equal(saved[0].bodyValues[1].value, 'gekürzt');
+});
