@@ -164,7 +164,7 @@ test('renderMarkdown: Tabellen, Callouts und Anker, alles maskiert', () => {
   assert.match(html, /<div class="table-wrap"><table><thead><tr><th>Name<\/th><th class="al-r">Wert \| roh<\/th><\/tr><\/thead>/);
   assert.match(html, /<td>&lt;b&gt;x&lt;\/b&gt;<\/td><td class="al-r"><code>a\|b<\/code><\/td>/);
   assert.match(html, /<td><span class="wikilink" title="Ziel">Anzeige<\/span><\/td><td class="al-r"><\/td>/);
-  assert.match(html, /<details class="callout callout-warn" data-callout="warning"><summary class="callout-title">Achtung &lt;i&gt;<\/summary><div class="callout-body"><ul>\n<li class="todo"><span class="box">☐<\/span><span>innen<\/span>/);
+  assert.match(html, /<details class="callout callout-warn" data-callout="warning"><summary class="callout-title">Achtung &lt;i&gt;<\/summary><div class="callout-body"><ul>\n<li class="todo"><span class="box" role="img" aria-label="offen">☐<\/span><span>innen<\/span>/);
   assert.match(html, /<div class="callout callout-info" data-callout="unbekannt"><p class="callout-title">Unbekannt<\/p><\/div>/);
   assert.match(html, /<blockquote>Zitat<\/blockquote>/);
   // Checkboxen im Callout zählt der Editor nicht, die Nummern bleiben gleich.

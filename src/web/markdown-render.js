@@ -213,7 +213,7 @@ function blockHtml(b, checkbox) {
 function itemHtml({ depth, task, content }, checkbox) {
   if (!task) return `<li${depth ? ` class="d${depth}"` : ''}>${renderInline(content)}</li>`;
   const { done, n, line } = task;
-  const control = checkbox && n != null ? checkbox(n, line, done) : `<span class="box">${done ? '☑' : '☐'}</span>`;
+  const control = checkbox && n != null ? checkbox(n, line, done) : `<span class="box${done ? ' on' : ''}" role="img" aria-label="${done ? 'erledigt' : 'offen'}">${done ? '☑' : '☐'}</span>`;
   return `<li class="todo${done ? ' done' : ''}${depth ? ` d${depth}` : ''}">${control}<span>${renderInline(content)}</span></li>`;
 }
 
