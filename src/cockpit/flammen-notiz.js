@@ -48,10 +48,36 @@ function dayLabel(date) {
 /** Text für eine Tabellenzelle: einzeilig, `|` und eckige Klammern maskiert. */
 const cell = (text) => String(text ?? '').replace(/\s+/g, ' ').trim().replace(/([|[\]\\])/g, '\\$1');
 
-/** Gemessene Minuten eines abgeschlossenen Blocks, sonst null. */
-export function flameMinutes(t) {
+const spanMinutes = (start, end) => Math.max(0, Math.round((Date.parse(end) - Date.parse(start)) / 60_000));
+
+/**
+ * Gemessene Minuten einer Flamme, `null` ohne abgeschlossenen Block. Zunder
+ * liefert an der Aufgabe nur den letzten Block; mit `blocks` (aus dem Verlauf,
+ * `flameBlocks`) zählt die Summe aller (VCP-61). Die einzige Stelle, die
+ * Flammen-Minuten rechnet; der Rückblick (`data.js`) nutzt sie auch (VCP-59).
+ */
+export function flameMinutes(t, blocks = null) {
+  if (blocks?.length) return blocks.reduce((sum, b) => sum + spanMinutes(b.start, b.end), 0);
   if (!t.flame_started_at || !t.flame_ended_at) return null;
-  return Math.max(0, Math.round((Date.parse(t.flame_ended_at) - Date.parse(t.flame_started_at)) / 60_000));
+  return spanMinutes(t.flame_started_at, t.flame_ended_at);
+}
+
+/**
+ * Abgeschlossene Blöcke einer Flamme aus dem Verlauf der Aufgabe
+ * (`get_task_history`): Jeder Start setzt `flame_started_at` und leert
+ * `flame_ended_at`, jeder Stopp setzt `flame_ended_at`. `[{ start, end }]`.
+ */
+export function flameBlocks(entries) {
+  const blocks = [];
+  let start = null;
+  for (const e of [...(entries ?? [])].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))) {
+    if (e.field === 'flame_started_at') start = typeof e.value === 'string' ? e.value : null;
+    else if (e.field === 'flame_ended_at' && typeof e.value === 'string' && start) {
+      if (!Number.isNaN(Date.parse(start)) && !Number.isNaN(Date.parse(e.value))) blocks.push({ start, end: e.value });
+      start = null;
+    }
+  }
+  return blocks;
 }
 
 /**
@@ -60,16 +86,18 @@ export function flameMinutes(t) {
  * Uhrzeit, wenn es eine gibt). „Tag“ ist der Tag, an dem die Flamme gebrannt
  * hat, sonst der geplante.
  */
-export function flameRows(tasks, { tz, taskUrl = null }) {
+export function flameRows(tasks, { tz, taskUrl = null, blocks = null }) {
   return tasks
     .filter((t) => t.phoenix?.role === 'flamme' && t.status !== 'dropped')
     .map((t) => {
       const due = t.due ? String(t.due) : null;
       const dueDate = due ? (due.length > 10 ? localDate(new Date(due), tz) : due.slice(0, 10)) : null;
       const planned = dueDate ? `${dayLabel(dueDate)}${due.length > 10 ? ` ${localTime(new Date(due), tz)}` : ''}` : '–';
-      const startDate = t.flame_started_at ? localDate(new Date(t.flame_started_at), tz) : null;
+      // Der Tag des ersten Blocks, nicht des letzten.
+      const first = blocks?.get(t.id)?.[0]?.start ?? t.flame_started_at;
+      const startDate = first ? localDate(new Date(first), tz) : null;
       const day = startDate ?? dueDate;
-      const minutes = flameMinutes(t);
+      const minutes = flameMinutes(t, blocks?.get(t.id) ?? null);
       const running = Boolean(t.flame_running);
       const url = taskUrl ? taskUrl(t.id) : null;
       return {
@@ -119,6 +147,33 @@ export function planFlameUpdate(content, inner, { hasRows = true } = {}) {
 export function createFlameNote({ vaultPath, index, editor, policy, settings, zunder, now = () => new Date(), logger = console }) {
   const status = { lastRun: null, lastOkAt: null, lastError: null, lastWrite: null };
   let queue = Promise.resolve();
+  // Blöcke je Flamme, gültig solange sich der letzte Block nicht ändert: Nicht jedes Intervall fragt den Verlauf.
+  const blockCache = new Map();
+  // Dieselbe Warnung (etwa Handarbeit im Bereich einer Notiz) nur einmal ins Log, nicht jedes Intervall.
+  let lastWarning = null;
+
+  /** Alle Blöcke der Flammen, die schon einmal gebrannt haben; ohne Verlauf bleibt es beim letzten Block. */
+  async function blocksOf(z, tasks) {
+    const out = new Map();
+    if (!z.taskHistory) return out;
+    for (const t of tasks) {
+      if (t.phoenix?.role !== 'flamme' || !t.flame_started_at) continue;
+      const key = `${t.flame_started_at} ${t.flame_ended_at ?? ''}`;
+      const hit = blockCache.get(t.id);
+      if (hit?.key === key) {
+        out.set(t.id, hit.blocks);
+        continue;
+      }
+      try {
+        const blocks = flameBlocks(await z.taskHistory(t.id));
+        blockCache.set(t.id, { key, blocks });
+        out.set(t.id, blocks);
+      } catch (err) {
+        logger.warn?.(`Feuer-Notiz: Verlauf von ${t.ref ?? t.id} nicht abrufbar, nur der letzte Block zählt — ${err.message}`);
+      }
+    }
+    return out;
+  }
 
   async function run(id) {
     const config = settings.get();
@@ -138,7 +193,7 @@ export function createFlameNote({ vaultPath, index, editor, policy, settings, zu
     }
 
     const tasks = await z.filterTasks({ phoenix_fire: week.id, include_closed: true, limit: 200 });
-    const rows = flameRows(tasks, { tz: config.tz, taskUrl: z.taskUrl });
+    const rows = flameRows(tasks, { tz: config.tz, taskUrl: z.taskUrl, blocks: await blocksOf(z, tasks) });
     const inner = renderFlameTable(rows);
 
     // Ab hier synchron: frisch lesen, planen, über den Editor schreiben.
@@ -156,10 +211,12 @@ export function createFlameNote({ vaultPath, index, editor, policy, settings, zu
       try {
         const result = await run(id);
         status.lastOkAt = status.lastRun;
+        lastWarning = null;
         return result;
       } catch (err) {
         status.lastError = { at: status.lastRun, message: err.message };
-        logger.warn?.(`Feuer-Notiz: Flammen nicht eingetragen — ${err.message}`);
+        if (err.message !== lastWarning) logger.warn?.(`Feuer-Notiz: Flammen nicht eingetragen — ${err.message}`);
+        lastWarning = err.message;
         return { state: 'fehler', error: err.message };
       }
     });

@@ -1,5 +1,6 @@
 import { describeWeek, weekOf, parseWeekId, weekId, localDate, addDays } from './week.js';
 import { findFeuer } from './feuer.js';
+import { flameMinutes } from './flammen-notiz.js';
 
 const OPEN = ['open', 'in_progress', 'blocked'];
 
@@ -57,8 +58,7 @@ export function createCockpit({ index, settings, zunderFor, calendars = null, no
 
   const notConfigured = (what) => ({ ok: false, error: `${what} ist nicht eingerichtet`, unconfigured: true });
 
-  const minutesOf = (t) =>
-    t.flame_started_at && t.flame_ended_at ? Math.max(0, Math.round((Date.parse(t.flame_ended_at) - Date.parse(t.flame_started_at)) / 60_000)) : 0;
+  const minutesOf = (t) => flameMinutes(t) ?? 0;
 
   return {
     /**
@@ -193,10 +193,7 @@ export function createCockpit({ index, settings, zunderFor, calendars = null, no
               startedAt: t.flame_started_at ?? null,
               endedAt: t.flame_ended_at ?? null,
               running: Boolean(t.flame_running),
-              minutes:
-                t.flame_started_at && t.flame_ended_at
-                  ? Math.round((Date.parse(t.flame_ended_at) - Date.parse(t.flame_started_at)) / 60_000)
-                  : null,
+              minutes: flameMinutes(t),
             }))
             .sort(byDue)
         : null;

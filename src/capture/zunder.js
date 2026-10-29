@@ -63,6 +63,12 @@ export function createZunderClient({ url, token, fetch = globalThis.fetch, timeo
       return out?.tasks ?? [];
     },
 
+    /** Änderungsverlauf einer Aufgabe (`get_task_history`), älteste zuerst; für alle Blöcke einer Flamme. */
+    async taskHistory(id, { limit = 1000 } = {}) {
+      const out = await callTool('get_task_history', { task_id: id, limit });
+      return out?.entries ?? [];
+    },
+
     /** Eine Aufgabe (`get_task`), für Aufgaben-Knoten im Graphen. */
     async getTask(id) {
       const out = await callTool('get_task', { task_id: id });
