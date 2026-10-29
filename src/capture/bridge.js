@@ -302,7 +302,11 @@ export function createZunderBridge({ index, editor, zunder, state, tag = 'zunder
     /** Ob die Brücke gerade arbeitet: eingeschaltet und mit Zunder-Zugang. */
     active: () => Boolean(isEnabled()) && Boolean(currentZunder()),
     /** Nur diese Notizen prüfen (nach gemeldeten Änderungen). */
-    scan: (paths) => enqueue(paths.filter((p) => p.toLowerCase().endsWith('.md'))),
+    scan: (paths) => {
+      // Ein Paket nur aus Bildern (VCP-114) ist kein Lauf der Brücke.
+      const notes = paths.filter((p) => p.toLowerCase().endsWith('.md'));
+      return notes.length ? enqueue(notes) : Promise.resolve(0);
+    },
     /** Alle Notizen mit dem Tag prüfen (Start, periodisch). */
     scanAll: () => enqueue(index.pathsWithTag(normalized())),
     /** Erledigt-Stand in beide Richtungen abgleichen (Start, periodisch). */
