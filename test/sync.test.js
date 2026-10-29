@@ -65,7 +65,24 @@ test('applyChanges übernimmt geänderten Inhalt', () => {
   assert.equal(mgr.search('Leuchtturm').total, 1);
 });
 
-test('Watcher bündelt Notizänderungen und ignoriert versteckte Pfade und Anhänge', async () => {
+test('applyChanges führt Bilder in der Tabelle images, ohne Beobachter zu wecken', () => {
+  const heard = [];
+  const off = mgr.onChange((c) => heard.push(c));
+  try {
+    writeFileSync(join(root, 'projects/Foto.PNG'), 'x');
+    mgr.applyChanges(['projects/Foto.PNG']);
+    assert.deepEqual(mgr.imagesNamed('foto.png'), ['projects/Foto.PNG']);
+    assert.ok(mgr.hasImage('projects/Foto.PNG'));
+    unlinkSync(join(root, 'projects/Foto.PNG'));
+    mgr.applyChanges(['projects/Foto.PNG', 'projects/Erste.md']);
+    assert.deepEqual(mgr.imagesNamed('foto.png'), []);
+    assert.deepEqual(heard.map((c) => c.paths), [[], ['projects/Erste.md']]);
+  } finally {
+    off();
+  }
+});
+
+test('Watcher bündelt Notiz- und Bildänderungen und ignoriert versteckte Pfade und andere Anhänge', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'vault-watch-'));
   mkdirSync(join(dir, 'notes'));
   mkdirSync(join(dir, '.obsidian'));
@@ -74,14 +91,16 @@ test('Watcher bündelt Notizänderungen und ignoriert versteckte Pfade und Anhä
   try {
     await sleep(50);
     writeFileSync(join(dir, '.obsidian/workspace.json'), '{}');
-    writeFileSync(join(dir, 'notes/bild.png'), 'x');
+    writeFileSync(join(dir, '.obsidian/x.png'), 'x');
+    writeFileSync(join(dir, 'notes/doku.pdf'), 'x');
     await sleep(150);
-    assert.equal(batches.length, 0, 'versteckte Dateien und Anhänge lösen nichts aus');
+    assert.equal(batches.length, 0, 'versteckte Dateien und andere Anhänge lösen nichts aus');
 
     writeFileSync(join(dir, 'notes/a.md'), 'a');
     writeFileSync(join(dir, 'notes/b.md'), 'b');
+    writeFileSync(join(dir, 'notes/bild.png'), 'x');
     const batch = await nextBatch(batches);
-    assert.deepEqual(batch.paths.sort(), ['notes/a.md', 'notes/b.md']);
+    assert.deepEqual(batch.paths.sort(), ['notes/a.md', 'notes/b.md', 'notes/bild.png']);
   } finally {
     w.stop();
     rmSync(dir, { recursive: true, force: true });

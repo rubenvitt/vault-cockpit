@@ -93,6 +93,28 @@ test('Vorschau: Bilder aus dem Vault, nächstgelegenes zuerst; vertraulich, ausg
   assert.ok(!html.includes('<script'));
 });
 
+test('Index: Bilder stehen in der Tabelle images, ausgeschlossene, versteckte und Symlinks nicht', () => {
+  const rows = idx.db.prepare('SELECT path, name, folder, size FROM images ORDER BY path').all().map((r) => ({ ...r }));
+  assert.deepEqual(rows, [
+    { path: '00-inbox/bilder/foto.png', name: 'foto.png', folder: '00-inbox/bilder', size: PNG.length },
+    { path: '20-bereiche/Gesundheit/gesund.png', name: 'gesund.png', folder: '20-bereiche/Gesundheit', size: PNG.length },
+    { path: 'anhang/foto.png', name: 'foto.png', folder: 'anhang', size: PNG.length },
+    { path: 'anhang/skizze.png', name: 'skizze.png', folder: 'anhang', size: PNG.length },
+  ]);
+  assert.deepEqual(idx.imagesNamed('FOTO.png'), ['00-inbox/bilder/foto.png', 'anhang/foto.png']);
+});
+
+test('Vorschau: Bilder kommen aus dem Index, ein neues erst nach dem Nachlesen', () => {
+  put('anhang/neu.png', PNG);
+  put('00-inbox/Neu.md', '# Neu\n\n![[neu.png]]\n');
+  idx.refresh('00-inbox/Neu.md');
+  const before = desk.get('00-inbox/Neu.md');
+  assert.match(renderMarkdown(before.body, { links: before.links }), /wikilink missing/);
+  idx.refresh('anhang/neu.png');
+  const after = desk.get('00-inbox/Neu.md');
+  assert.match(renderMarkdown(after.body, { links: after.links }), /<img src="\/notiz\/bild\?pfad=anhang%2Fneu\.png"/);
+});
+
 test('openImage: nur Bilder im Vault, ohne Symlinks, Traversal, vertrauliche und versteckte Ordner', () => {
   const ok = desk.openImage('anhang/foto.png');
   assert.equal(ok.type, 'image/png');
