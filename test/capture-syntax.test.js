@@ -115,6 +115,22 @@ test('Syntax: +woche ist ein Phönix-Schritt der laufenden Woche', () => {
   assert.equal(plan('Folien +wochen').phoenix, null);
 });
 
+test('Syntax: Satzzeichen am Zeilenende stören nicht (VCP-62)', () => {
+  const p = plan('Zahnarzt anrufen morgen.');
+  assert.equal(p.title, 'Zahnarzt anrufen');
+  assert.equal(p.due, '2026-10-15');
+  assert.equal(plan('Folien bauen bis Freitag!').due, '2026-10-16');
+  assert.equal(plan('Folien bauen bis Freitag!').title, 'Folien bauen');
+  assert.equal(plan('Folien bauen +woche.').phoenix.fire, '2026-W42');
+  assert.equal(plan('Arzt anrufen morgen #gesundheit.').location.id, 'a-ges');
+  // Der Punkt gehört zum Datum.
+  assert.equal(plan('Abgabe 16.10.').due, '2026-10-16');
+  // Kein Kürzel: der Satz bleibt, wie er ist.
+  assert.equal(plan('Zahnarzt anrufen.').title, 'Zahnarzt anrufen.');
+  assert.equal(plan('Termin für morgen.').title, 'Termin für morgen.');
+  assert.equal(plan('Termin für morgen.').due, null);
+});
+
 // --- Ziel -------------------------------------------------------------------
 
 test('Ziel: exakt, Schlüssel, Anfang, Wortanfang und Tippfehler', () => {

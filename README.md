@@ -233,7 +233,8 @@ hinten, solange die Wörter Kürzel sind; das erste Wort bleibt immer Titel. „
 für morgen vorbereiten“ bleibt also, wie es ist. Auch am Ende bleibt eine
 Datumsangabe Text, wenn ein Wort davor sie zum Satzteil macht („für morgen“,
 „ab Montag“, „jeden Freitag“, „am morgen“). Zwei Fälligkeiten („Freitag morgen“)
-setzen keine. Passt ein `#name` zu keinem oder zu mehreren Zielen, wird nicht
+setzen keine. Ein Satzzeichen am Zeilenende („…anrufen morgen.“, typisch für
+transkribierte Sprachmemos) stört nicht. Passt ein `#name` zu keinem oder zu mehreren Zielen, wird nicht
 geraten: Es bleibt im Titel, die Aufgabe kommt in die Zunder-Inbox und die
 Meldung sagt warum. Ohne Kürzel ist alles wie bisher. Notizen (ohne `!`) bleiben
 immer unverändert. „Heute“ und die laufende Woche gelten in der Zeitzone aus den
