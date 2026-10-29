@@ -140,7 +140,7 @@
       }
       const fields = kind === 'note' ? { pfad: hit.path, abschnitt: hit.heading ?? '' } : { zu: hit.id };
       const data = await send('/aktion/lesen/verbinden', new URLSearchParams({ markierung: id, ...fields, csrf: csrf() }));
-      toast(data.message, data.undo ? { action: { label: 'Rückgängig', run: () => unlink(data.undo, s) } } : {});
+      toast(data.message, data.undo ? { action: { label: 'Rückgängig', run: () => unlink(data.undo) } } : {});
       // Neu laden, damit „Schon verknüpft“ oben und an den Treffern stimmt.
       if (state === s) return load({ ...s.req, highlightId: id, anchor: null });
     } catch (err) {
@@ -150,11 +150,13 @@
   }
 
   /** Rückgängig nach „Verknüpfen“: Link wieder heraus, offene Liste neu laden (VCP-85). */
-  async function unlink(undo, s) {
+  async function unlink(undo) {
     try {
       const data = await send(undo.action, new URLSearchParams({ ...undo.fields, csrf: csrf() }));
       toast(data.message);
-      if (state === s) await load({ ...s.req, highlightId: undo.fields.markierung, anchor: null });
+      // Nach dem Verknüpfen hat `load` einen neuen Stand angelegt; maßgeblich ist, ob noch dieselbe Markierung offen ist.
+      const current = state?.req?.highlightId ?? state?.data?.highlightId;
+      if (state?.open && current === undo.fields.markierung) await load({ ...state.req, highlightId: current, anchor: null });
     } catch (err) {
       toast(err.message, { kind: 'error' });
     }

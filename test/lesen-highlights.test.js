@@ -28,6 +28,16 @@ test('Markierung entfernt (VCP-85): Rückgängig stellt auch den Stand im Wieder
   const back = store.getHighlight(h.id);
   assert.deepEqual([back.review_box, back.review_due, back.review_state, back.note], [3, '2026-11-10T08:00:00.000Z', 'losgelassen', 'n']);
 
+  // Heute schon entschieden: Zählung und Rückgängig im Wiedersehen bleiben erhalten.
+  const prev = JSON.stringify({ ziel: 'worte', box: 1, due: '2026-10-21T08:00:00.000Z', state: 'aktiv', inbox: 'inbox/x.md' });
+  store.updateHighlight(h.id, { reviewed_at: '2026-10-20T09:00:00.000Z', review_prev: prev });
+  const again = await act('/aktion/lesen/markierung/loeschen', { id: h.id });
+  await act(again.undo.action, again.undo.fields);
+  const seen = store.getHighlight(h.id);
+  assert.equal(seen.reviewed_at, '2026-10-20T09:00:00.000Z');
+  assert.deepEqual(JSON.parse(seen.review_prev), JSON.parse(prev));
+  await assert.rejects(act('/aktion/lesen/markierung/neu', { id: doc.id, quote: 'X', box: '1', faellig: '', zustand: 'aktiv', gesehen: '2026-10-20T09:00:00.000Z', vorher: '{"ziel":"weg"}' }), /Ungültiger Stand/);
+
   // Ohne Stand wie bisher (Box 1, morgen fällig); halbe oder falsche Angaben lehnt es ab.
   const fresh = await act('/aktion/lesen/markierung/neu', { id: doc.id, quote: 'Neu' });
   assert.equal(store.getHighlight(fresh.highlight.id).review_box, 0);

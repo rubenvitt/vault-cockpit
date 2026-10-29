@@ -216,6 +216,11 @@ test('Querverbindungen (VCP-85): Verknüpfen kommt mit Rückgängig, das den Lin
   const r = await connect(routes, { markierung: hl.a.id, pfad: 'wiki/obst.md' });
   assert.deepEqual(r.undo, { action: '/aktion/lesen/verbinden/loesen', fields: { markierung: hl.a.id, ziel: 'obst' } });
   assert.equal((await connect(routes, { markierung: hl.a.id, pfad: 'wiki/obst.md' })).undo, null, 'schon verknüpft: kein Rückgängig');
+  // Auch wenn eine andere vorgemerkte Änderung den Bereich neu schreibt, bleibt es „schon verknüpft“.
+  store.addHighlight({ doc_id: docs.a.id, quote: 'Noch eine Stelle', start_hint: 99 });
+  const rewritten = await connect(routes, { markierung: hl.a.id, pfad: 'wiki/obst.md' });
+  assert.equal(rewritten.message, 'Schon verknüpft mit Obst');
+  assert.equal(rewritten.undo, null);
 
   const undo = (fields) => routes.actions[r.undo.action](new URLSearchParams(fields), { sub: 'ruben' });
   assert.equal((await undo(r.undo.fields)).message, 'Verknüpfung gelöst');
