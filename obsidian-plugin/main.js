@@ -304,7 +304,8 @@ function createCompare({ fs, api, state, save = async () => {}, now = () => Date
       state.since = Object.fromEntries(diffs.map((d) => [`${d.kind}:${d.path}`, d.since]));
       diffs.sort((a, b) => a.path.localeCompare(b.path));
       // Mehr nimmt das Cockpit nicht an; dann stimmt ohnehin Grundsätzliches nicht.
-      await api.report({ compared: local.size, diffs: diffs.slice(0, 2000) });
+      // `truncated` sagt ihm, dass Fehlendes deshalb nicht aufgelöst ist.
+      await api.report({ compared: local.size, diffs: diffs.slice(0, 2000), truncated: diffs.length > 2000 });
       await save();
       return { compared: local.size, diffs };
     },

@@ -432,21 +432,24 @@ export function createSyncJournal({
     /**
      * Vergleichsbericht eines Geräts im Schattenbetrieb: `diffs` sind alle
      * Abweichungen, die es gerade sieht (`since` = zuerst gesehen, ms). Was
-     * vorher offen war und fehlt, gilt ab jetzt als aufgelöst.
+     * vorher offen war und fehlt, gilt ab jetzt als aufgelöst, außer die Liste
+     * ist gekürzt (`truncated`).
      */
-    report(dev, { compared = 0, diffs = [] }) {
+    report(dev, { compared = 0, diffs = [], truncated = false }) {
       const t = now();
       const key = (d) => `${d.kind}\u0000${d.path}`;
       const current = new Map(diffs.map((d) => [key(d), d]));
       db.exec('BEGIN');
       try {
-        for (const d of stmt.openDiffs.all(dev.id)) {
-          if (!current.has(key(d))) stmt.resolveDiff.run(t, dev.id, d.path, d.kind);
+        if (!truncated) {
+          for (const d of stmt.openDiffs.all(dev.id)) {
+            if (!current.has(key(d))) stmt.resolveDiff.run(t, dev.id, d.path, d.kind);
+          }
         }
         for (const d of current.values()) {
           if (stmt.seeDiff.run(t, dev.id, d.path, d.kind).changes === 0) stmt.addDiff.run(dev.id, d.path, d.kind, Math.min(d.since ?? t, t), t);
         }
-        stmt.setReport.run(dev.id, t, compared, current.size);
+        stmt.setReport.run(dev.id, t, compared, truncated ? stmt.openDiffs.all(dev.id).length : current.size);
         // Aufgelöstes nach 30 Tagen vergessen.
         stmt.pruneDiffs.run(t - 30 * 86_400_000);
         db.exec('COMMIT');
