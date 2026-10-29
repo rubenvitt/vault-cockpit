@@ -117,13 +117,18 @@ test('zwei Geräte gleichen sich ab, ein veralteter Stand überschreibt nichts',
   assert.equal(got.text, 'eins\n');
   const h1 = got.hash;
 
-  // A ändert, B ändert auf alter Basis: Konflikt, Datei bleibt die von A.
+  // A ändert, B ändert dieselbe Zeile auf alter Basis: Datei bleibt die von A,
+  // die Fassung von B liegt als Konfliktkopie daneben.
   assert.equal((await a.put('projekte/Neu.md', 'zwei\n', h1)).status, 200);
+  written.length = 0;
   const conflict = await b.put('projekte/Neu.md', 'drei\n', h1);
-  assert.equal(conflict.status, 409);
-  assert.equal(conflict.body.error, 'conflict');
-  assert.equal(conflict.body.current.hash, sha('zwei\n'));
+  assert.equal(conflict.status, 200);
+  assert.equal(conflict.body.resolution, 'copy');
+  assert.equal(conflict.body.entry.hash, sha('zwei\n'));
+  assert.match(conflict.body.copy.path, /^projekte\/Neu \(Konflikt iPhone \d{4}-\d{2}-\d{2}\)\.md$/);
   assert.equal(readFileSync(join(vault, 'projekte/Neu.md'), 'utf8'), 'zwei\n');
+  assert.equal(readFileSync(join(vault, conflict.body.copy.path), 'utf8'), 'drei\n');
+  assert.deepEqual(written, [conflict.body.copy.path], 'nur die Kopie ist neu');
 
   // Die alte Basis bleibt als Blob abrufbar (für den Merge auf dem Gerät).
   assert.equal((await b.get('projekte/Neu.md', h1)).text, 'eins\n');
@@ -135,8 +140,11 @@ test('zwei Geräte gleichen sich ab, ein veralteter Stand überschreibt nichts',
   assert.equal(again.status, 200);
   assert.equal(again.body.entry.seq, resolved.body.entry.seq);
 
-  // Neu anlegen, wo schon etwas liegt, ist ebenfalls ein Konflikt.
-  assert.equal((await a.put('projekte/Neu.md', 'anders\n', null)).status, 409);
+  // Neu anlegen, wo schon etwas liegt, gibt ebenfalls eine Konfliktkopie (mit Zähler).
+  const twice = await a.put('projekte/Neu.md', 'anders\n', null);
+  assert.equal(twice.body.resolution, 'copy');
+  assert.match(twice.body.copy.path, /^projekte\/Neu \(Konflikt r-mac \d{4}-\d{2}-\d{2}\)\.md$/);
+  assert.equal(readFileSync(join(vault, 'projekte/Neu.md'), 'utf8'), 'zwei\ndrei\n');
 });
 
 test('Löschen braucht die aktuelle Basis und landet als Grabstein im Feed', async () => {
@@ -145,7 +153,11 @@ test('Löschen braucht die aktuelle Basis und landet als Grabstein im Feed', asy
   await a.put('tmp/weg/Kurz.md', 'kurz\n', null);
   const since = journal.cursor();
 
-  assert.equal((await b.del('tmp/weg/Kurz.md', sha('alt\n'))).status, 409);
+  // Löschen gegen Ändern: Ändern gewinnt, die Datei bleibt.
+  const kept = await b.del('tmp/weg/Kurz.md', sha('alt\n'));
+  assert.equal(kept.status, 200);
+  assert.equal(kept.body.resolution, 'kept');
+  assert.equal(kept.body.entry.hash, sha('kurz\n'));
   assert.ok(existsSync(join(vault, 'tmp/weg/Kurz.md')));
 
   const gone = await b.del('tmp/weg/Kurz.md', sha('kurz\n'));
@@ -165,8 +177,11 @@ test('was das Cockpit selbst schreibt, sehen Geräte, und es wird nicht übersch
   // Wie vault_edit: direkt auf der Platte, am Journal vorbei.
   writeFileSync(join(vault, 'projekte/Alt.md'), '# Alt\n\nvom Cockpit\n');
   const stale = await a.put('projekte/Alt.md', '# Alt\n\nvom Gerät\n', before);
-  assert.equal(stale.status, 409);
-  assert.equal(stale.body.current.hash, sha('# Alt\n\nvom Cockpit\n'));
+  assert.equal(stale.body.resolution, 'copy');
+  assert.equal(stale.body.entry.hash, sha('# Alt\n\nvom Cockpit\n'));
+  assert.equal(readFileSync(join(vault, 'projekte/Alt.md'), 'utf8'), '# Alt\n\nvom Cockpit\n');
+  unlinkSync(join(vault, stale.body.copy.path));
+  journal.scan();
 
   const since = journal.cursor();
   writeFileSync(join(vault, 'projekte/Extern.md'), 'extern\n');
@@ -361,4 +376,40 @@ test('ein Symlink auf einen versteckten Ordner im Vault liefert nichts aus', asy
   assert.ok(!existsSync(join(vault, '.privat/neu.txt')));
   unlinkSync(join(vault, 'alias'));
   rmSync(join(vault, '.privat'), { recursive: true, force: true });
+});
+
+test('veraltete Basis: getrennte Änderungen werden zusammengeführt, gelöschte Dateien kommen zurück', async () => {
+  const a = client(mac);
+  const b = client(phone);
+  const base = '# Plan\n\nMontag\n\nDienstag\n';
+  const h0 = (await a.put('merge/Plan.md', base, null)).body.entry.hash;
+  assert.equal((await a.put('merge/Plan.md', '# Plan\n\nMontag: Hund\n\nDienstag\n', h0)).status, 200);
+  written.length = 0;
+  const merged = await b.put('merge/Plan.md', '# Plan\n\nMontag\n\nDienstag: Sport\n', h0);
+  assert.equal(merged.status, 200);
+  assert.equal(merged.body.resolution, 'merged');
+  const result = '# Plan\n\nMontag: Hund\n\nDienstag: Sport\n';
+  assert.equal(readFileSync(join(vault, 'merge/Plan.md'), 'utf8'), result);
+  assert.equal(merged.body.entry.hash, sha(result), 'das Gerät sieht am Hash, dass es neu holen muss');
+  assert.deepEqual(written, ['merge/Plan.md']);
+
+  // Auf dem Server gelöscht, auf dem Gerät geändert: Ändern gewinnt.
+  const h1 = merged.body.entry.hash;
+  assert.equal((await a.del('merge/Plan.md', h1)).status, 200);
+  const back = await b.put('merge/Plan.md', `${result}\nMittwoch\n`, h1);
+  assert.equal(back.body.resolution, 'restored');
+  assert.equal(readFileSync(join(vault, 'merge/Plan.md'), 'utf8'), `${result}\nMittwoch\n`);
+
+  // Anhänge werden nie gemergt: Konfliktkopie.
+  const p0 = (await a.call('POST', '/sync/v1/file', { path: 'merge/bild.png', base: '' }, Buffer.from([1, 2]))).status;
+  assert.equal(p0, 200);
+  await a.call('POST', '/sync/v1/file', { path: 'merge/bild.png', base: sha(Buffer.from([1, 2])) }, Buffer.from([1, 3]));
+  const res = await b.call('POST', '/sync/v1/file', { path: 'merge/bild.png', base: sha(Buffer.from([1, 2])) }, Buffer.from([4, 2]));
+  const body = await res.json();
+  assert.equal(body.resolution, 'copy');
+  assert.match(body.copy.path, /^merge\/bild \(Konflikt iPhone .*\)\.png$/);
+  assert.deepEqual(readFileSync(join(vault, 'merge/bild.png')), Buffer.from([1, 3]));
+  assert.deepEqual(readFileSync(join(vault, body.copy.path)), Buffer.from([4, 2]));
+  rmSync(join(vault, 'merge'), { recursive: true, force: true });
+  journal.scan();
 });

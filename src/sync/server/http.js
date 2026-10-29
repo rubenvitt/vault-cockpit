@@ -21,11 +21,16 @@ import { SyncPathError, MAX_FILE_BYTES } from './journal.js';
  *   `base` ist die Fassung, die das Gerät zuletzt kannte, leer für „neu“.
  * - `POST /sync/v1/delete?path=…&base=<hash>` — löschen.
  *
- * Schreiben und Löschen antworten mit `{entry}` (neuer Stand) oder mit 409
- * `{error: "conflict", current}`, wenn der Server inzwischen eine andere
- * Fassung hat; dann zuerst holen, zusammenführen und mit der neuen Basis
- * erneut schicken. Bei `error: "case"` gibt es den Pfad schon in anderer
- * Groß-/Kleinschreibung. Die Kopfzeile `x-sync-client` (z. B.
+ * Schreiben und Löschen antworten mit `{entry}`, dem Stand auf dem Server.
+ * Hat der Server inzwischen eine andere Fassung, löst er das selbst und sagt
+ * es in `resolution` (VCP-122): `merged` (zusammengeführt, `entry` ist das
+ * Ergebnis), `copy` (Server behält seine Fassung, die des Geräts liegt als
+ * `copy` daneben), `restored` (war gelöscht, die Änderung gewinnt) oder
+ * `kept` (Löschen auf veralteter Basis, die Datei bleibt). Weicht
+ * `entry.hash` von dem ab, was das Gerät hat, holt es die Datei neu. Ein
+ * 409 `{error: "conflict", current}` kommt nur noch, wenn sich die Datei
+ * gerade während des Abgleichs ändert: dann erneut versuchen. Bei
+ * `error: "case"` gibt es den Pfad schon in anderer Groß-/Kleinschreibung. Die Kopfzeile `x-sync-client` (z. B.
  * `obsidian-plugin/0.1.0`) landet in der Geräteliste.
  */
 export function createSyncHttp({ tokens, journal: journalOf, onWrite = () => {}, maxFileBytes = MAX_FILE_BYTES, logger = console }) {
@@ -75,7 +80,11 @@ export function createSyncHttp({ tokens, journal: journalOf, onWrite = () => {},
   function result(res, out, path) {
     if (out.ok) {
       if (!out.unchanged) onWrite(path);
-      return json(res, 200, { entry: out.entry });
+      if (out.copy) onWrite(out.copy.path);
+      const body = { entry: out.entry };
+      if (out.resolution) body.resolution = out.resolution;
+      if (out.copy) body.copy = out.copy;
+      return json(res, 200, body);
     }
     if (out.reason === 'too_large') return json(res, 413, { error: 'too_large' });
     return json(res, 409, { error: out.reason, current: out.current ?? null });
@@ -131,7 +140,7 @@ export function createSyncHttp({ tokens, journal: journalOf, onWrite = () => {},
         if (err.tooLarge) return json(res, 413, { error: 'too_large' });
         throw err;
       }
-      const out = journal.put(path, data, { base, mtime, device: dev.id });
+      const out = journal.put(path, data, { base, mtime, device: dev.id, deviceName: dev.name });
       journal.seen(dev, { pushed: true });
       return result(res, out, path);
     },

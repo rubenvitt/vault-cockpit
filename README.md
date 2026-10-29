@@ -197,9 +197,9 @@ der Compose-Datei des Servers nachziehen.
 
 Der eigene Sync (VCP-13) soll Obsidian Sync ablösen: Das Cockpit ist selbst der
 Sync-Server, die Geräte gleichen sich über `/sync/v1` mit dem Vault-Ordner auf dem
-Server ab, ohne Sidecar. Fertig ist der Server (VCP-120); der Client als
-Obsidian-Plugin, der Merge bei Konflikten, Geräte im Web-Cockpit, Verlauf,
-Verschlüsselung und der Umstieg folgen (VCP-121 bis VCP-126). Bis dahin bleibt
+Server ab, ohne Sidecar. Fertig sind der Server (VCP-120) und der Merge bei
+Konflikten (VCP-122); der Client als Obsidian-Plugin, Geräte im Web-Cockpit,
+Verlauf, Verschlüsselung und der Umstieg folgen (VCP-121, VCP-123 bis VCP-126). Bis dahin bleibt
 Obsidian Headless der Standard.
 
 - Einschalten im Web-Cockpit unter **Einstellungen → Sync** („Eigener Sync“),
@@ -225,13 +225,24 @@ Protokoll (Bearer-Token, nur GET und POST):
 | `POST /sync/v1/file?path=…&base=<hash>[&mtime=<ms>]` | Datei schreiben, Body = Bytes; `base` leer = neu |
 | `POST /sync/v1/delete?path=…&base=<hash>` | Datei löschen |
 
-Geschrieben und gelöscht wird nur, wenn `base` die aktuelle Fassung auf dem Server
-ist (SHA-256). Sonst kommt `409 {error: "conflict", current}` und nichts wird
-überschrieben; das Gerät holt dann die neue Fassung, führt zusammen und schickt
-mit der neuen Basis erneut. Auch was das Cockpit selbst schreibt (Bearbeiten,
-Capture, Brücke), zählt dabei: Der Server sieht vor jeder Prüfung auf die Platte.
-`409 {error: "case"}` heißt, der Pfad existiert schon in anderer Groß- und
-Kleinschreibung (auf macOS und iOS wäre das dieselbe Datei).
+`base` ist die Fassung (SHA-256), die das Gerät zuletzt vom Server kannte. Stimmt
+sie mit dem Server überein, wird einfach geschrieben bzw. gelöscht. Sonst löst der
+Server den Konflikt selbst, überschreibt aber nie etwas, und sagt in `resolution`,
+was er getan hat:
+
+| `resolution` | Fall | Ergebnis |
+|---|---|---|
+| `merged` | Markdown/Text, Änderungen berühren sich nicht | zeilenweiser 3-Wege-Merge, Frontmatter feldweise; `entry` ist das Ergebnis |
+| `copy` | dieselben Zeilen oder dasselbe Feld verschieden geändert, Anhänge, Canvas | Server behält seine Fassung, die des Geräts liegt als `Notiz (Konflikt <Gerät> <Datum>).md` daneben (`copy`) |
+| `restored` | auf dem Server gelöscht, auf dem Gerät geändert | Ändern gewinnt, die Datei ist wieder da |
+| `kept` | auf dem Gerät gelöscht, auf dem Server inzwischen geändert | Ändern gewinnt, die Datei bleibt |
+
+Weicht `entry.hash` danach von der Fassung auf dem Gerät ab, holt es die Datei neu.
+Auch was das Cockpit selbst schreibt (Bearbeiten, Capture, Brücke), zählt dabei:
+Der Server sieht vor jeder Prüfung auf die Platte. `409 {error: "conflict"}` kommt
+nur noch, wenn sich die Datei genau während des Abgleichs ändert (erneut
+versuchen); `409 {error: "case"}` heißt, der Pfad existiert schon in anderer Groß-
+und Kleinschreibung (auf macOS und iOS wäre das dieselbe Datei).
 
 ### Capture
 
