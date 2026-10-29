@@ -68,6 +68,9 @@ export function isPublicAddress(ip) {
   return family === 4 ? !BLOCKED_V4.check(ip, 'ipv4') : !BLOCKED_V6.check(ip, 'ipv6');
 }
 
+/** Größte Seite, die `safeFetch` ohne eigene Grenze annimmt. */
+export const MAX_PAGE = 5 * 1024 * 1024;
+
 const defaultResolve = (hostname) => dnsLookup(hostname, { all: true, verbatim: true });
 
 /**
@@ -83,7 +86,7 @@ const defaultResolve = (hostname) => dnsLookup(hostname, { all: true, verbatim: 
  * Host der Ausgangsadresse: Eine Weiterleitung auf einen anderen Host oder von
  * https auf http bekommt sie nicht.
  */
-export async function safeFetch(input, { resolve = defaultResolve, isAllowed = isPublicAddress, maxBytes = 5 * 1024 * 1024, timeoutMs = 15_000, maxRedirects = 5, accept = ['text/html', 'application/xhtml+xml'], headers = {}, auth = null } = {}) {
+export async function safeFetch(input, { resolve = defaultResolve, isAllowed = isPublicAddress, maxBytes = MAX_PAGE, timeoutMs = 15_000, maxRedirects = 5, accept = ['text/html', 'application/xhtml+xml'], headers = {}, auth = null } = {}) {
   const deadline = Date.now() + timeoutMs;
   let url = parseTarget(input);
   const start = url;
@@ -249,13 +252,30 @@ function request(url, { resolve, isAllowed, maxBytes, deadline, headers }) {
   });
 }
 
-/** Text nach dem Zeichensatz aus dem Inhaltstyp, sonst UTF-8. */
-function decode(buf, contentType) {
-  // shortcut: `<meta charset>` im Dokument wird nicht ausgewertet, nur der Header; nachrüsten, wenn Seiten mit falschen Umlauten auftauchen.
-  const charset = /charset="?([\w-]+)/i.exec(contentType ?? '')?.[1];
+/**
+ * Text nach dem Zeichensatz: Byte Order Mark, sonst der Inhaltstyp, sonst die
+ * Angabe im Dokument (`<meta charset>`, `<meta http-equiv="Content-Type">`,
+ * `<?xml encoding?>` in den ersten 1024 Bytes, wie Browser sie suchen), sonst UTF-8.
+ */
+export function decode(buf, contentType) {
+  const bytes = Buffer.from(buf ?? []);
+  const bom = bytes.subarray(0, 3).equals(Buffer.from([0xef, 0xbb, 0xbf])) ? 'utf-8' : bytes[0] === 0xff && bytes[1] === 0xfe ? 'utf-16le' : bytes[0] === 0xfe && bytes[1] === 0xff ? 'utf-16be' : null;
+  const charset = bom ?? /charset\s*=\s*["']?([\w.:-]+)/i.exec(contentType ?? '')?.[1] ?? declaredCharset(bytes);
   try {
-    return new TextDecoder(charset ?? 'utf-8').decode(buf);
+    return new TextDecoder(charset ?? 'utf-8').decode(bytes);
   } catch {
-    return new TextDecoder('utf-8').decode(buf);
+    return new TextDecoder('utf-8').decode(bytes);
   }
+}
+
+/** Zeichensatz aus dem Kopf des Dokuments oder `null`. */
+function declaredCharset(bytes) {
+  const head = bytes.subarray(0, 1024).toString('latin1');
+  const xml = /^\s*<\?xml[^>]*\bencoding\s*=\s*["']([\w.:-]+)["']/i.exec(head)?.[1];
+  if (xml) return xml;
+  for (const [tag] of head.matchAll(/<meta\b[^>]*>/gi)) {
+    const direct = /\bcharset\s*=\s*["']?([\w.:-]+)/i.exec(tag)?.[1];
+    if (direct) return direct;
+  }
+  return null;
 }

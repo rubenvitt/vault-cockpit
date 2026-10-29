@@ -9,6 +9,8 @@ import { createReadingStore, ReadingError } from '../src/lesen/store.js';
 import { readingRoutes } from '../src/lesen/http.js';
 import { createReadingApi } from '../src/lesen/api.js';
 import { savePdf, paragraphsOf, MAX_PDF, LIMITS } from '../src/lesen/pdf.js';
+import { saveUrl } from '../src/lesen/save.js';
+import { MAX_PAGE } from '../src/lesen/fetch.js';
 import { makePdf } from './fixtures/make-pdf.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
@@ -159,4 +161,30 @@ test('PDF im Cockpit: Seite /lesen/hinzufuegen und Upload über /aktion/lesen/pd
   } finally {
     app.close();
   }
+});
+
+test('PDF aus Safari geteilt: saveUrl holt die Datei hinter der Adresse und legt ihren Text ab', async () => {
+  const store = createReadingStore({ path: ':memory:' });
+  const calls = [];
+  const fetchPage = async (url, opts) => {
+    calls.push({ url, opts });
+    const bytes = makePdf(TEXT, { title: 'Bericht' });
+    return { url: 'https://beispiel.test/bericht.pdf', status: 200, contentType: 'application/pdf', body: '', bytes };
+  };
+  const { doc, duplicate } = await saveUrl({ store, url: 'https://beispiel.test/bericht.pdf', origin: 'kurzbefehl', clientId: 's-1', fetchPage });
+  assert.equal(duplicate, false);
+  assert.equal(doc.kind, 'pdf');
+  assert.equal(doc.title, 'Bericht');
+  assert.equal(doc.url, 'https://beispiel.test/bericht.pdf');
+  assert.equal(doc.origin, 'kurzbefehl');
+  assert.ok(doc.word_count > 0);
+  assert.equal(calls[0].opts.maxBytes, MAX_PDF, 'Grenzen wie beim PDF-Upload');
+  assert.equal((await saveUrl({ store, url: 'https://beispiel.test/bericht.pdf', fetchPage })).duplicate, true);
+  assert.equal(calls.length, 1);
+
+  // Anderes als HTML oder PDF bleibt „Kein Artikel“, eine HTML-Seite über der Seiten-Grenze zu groß.
+  const image = async () => ({ url: 'https://beispiel.test/b.png', contentType: 'image/png', body: '', bytes: Buffer.from('png') });
+  await assert.rejects(saveUrl({ store, url: 'https://beispiel.test/b.png', fetchPage: image }), (err) => err.status === 415 && /Kein Artikel/.test(err.message));
+  const huge = async () => ({ url: 'https://beispiel.test/riesig', contentType: 'text/html', body: '<p>x</p>', bytes: Buffer.alloc(MAX_PAGE + 1) });
+  await assert.rejects(saveUrl({ store, url: 'https://beispiel.test/riesig', fetchPage: huge }), (err) => err.status === 413);
 });

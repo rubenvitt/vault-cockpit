@@ -20,6 +20,16 @@ import { createHash } from 'node:crypto';
  * abonnierte Newsletter); ohne werden sie unverarbeitet verschoben.
  */
 const MAIL = 'urn:ietf:params:jmap:mail';
+// Längster Mail-Teil, den der Abruf ganz nachholt (lange Newsletter).
+const MAX_BLOB = 5 * 1024 * 1024;
+
+const decodePart = (buf, charset) => {
+  try {
+    return new TextDecoder(charset || 'utf-8').decode(buf);
+  } catch {
+    return new TextDecoder('utf-8').decode(buf);
+  }
+};
 const USING = ['urn:ietf:params:jmap:core', MAIL];
 
 export function createMailCapture({
@@ -49,7 +59,7 @@ export function createMailCapture({
     if (!res.ok) throw new Error(`JMAP-Session: HTTP ${res.status}`);
     const s = await res.json();
     if (!s.primaryAccounts?.[MAIL]) throw new Error('JMAP-Session ohne Mail-Konto');
-    session = { apiUrl: s.apiUrl, accountId: s.primaryAccounts[MAIL] };
+    session = { apiUrl: s.apiUrl, downloadUrl: s.downloadUrl ?? null, accountId: s.primaryAccounts[MAIL] };
     return session;
   }
 
@@ -82,6 +92,35 @@ export function createMailCapture({
     return { source: source.id, done: done.id };
   }
 
+  /**
+   * Abgeschnittene Teile (`isTruncated`, über `maxBodyValueBytes`) ganz holen:
+   * den Blob des Teils über `downloadUrl`, höchstens `MAX_BLOB` Bytes, im
+   * Zeichensatz des Teils. Klappt das nicht, bleibt der gekürzte Text.
+   */
+  async function completeBodies(email) {
+    const parts = [...(email.textBody ?? []), ...(email.htmlBody ?? [])].filter((p) => email.bodyValues?.[p.partId]?.isTruncated && p.blobId);
+    if (!parts.length || !session.downloadUrl) return email;
+    const bodyValues = { ...email.bodyValues };
+    for (const part of parts) {
+      try {
+        const url = session.downloadUrl
+          .replace('{accountId}', encodeURIComponent(session.accountId))
+          .replace('{blobId}', encodeURIComponent(part.blobId))
+          .replace('{type}', encodeURIComponent(part.type ?? 'application/octet-stream'))
+          .replace('{name}', encodeURIComponent(part.name ?? 'teil'));
+        const res = await fetch(url, { headers: { authorization: headers.authorization }, signal: AbortSignal.timeout(30_000) });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (Number(res.headers.get?.('content-length')) > MAX_BLOB) throw new Error('zu groß');
+        const buf = Buffer.from(await res.arrayBuffer());
+        if (buf.length > MAX_BLOB) throw new Error('zu groß');
+        bodyValues[part.partId] = { value: decodePart(buf, part.charset), isTruncated: false };
+      } catch (err) {
+        logger.warn?.(`Mail-Capture: Teil ${part.partId} von Mail ${email.id} nur gekürzt (${err.message})`);
+      }
+    }
+    return { ...email, bodyValues };
+  }
+
   async function poll() {
     await ensureSession();
     const ids = await mailboxIds();
@@ -95,8 +134,7 @@ export function createMailCapture({
           '#ids': { resultOf: 'q', name: 'Email/query', path: '/ids' },
           properties: ['id', 'messageId', 'from', 'subject', 'receivedAt', 'textBody', 'htmlBody', 'bodyValues'],
           fetchTextBodyValues: true,
-          // HTML für Newsletter im Lesestapel.
-          // shortcut: JMAP schneidet Werte über 500 KB ab, der Rest eines langen Newsletters fehlt; bei Bedarf den Blob über downloadUrl holen.
+          // HTML für Newsletter im Lesestapel; was JMAP abschneidet, holt `completeBodies` als Blob nach.
           fetchHTMLBodyValues: Boolean(readingMail),
           maxBodyValueBytes: readingMail ? 500_000 : 100_000,
         },
@@ -114,11 +152,11 @@ export function createMailCapture({
           // Direkt abonnierte Newsletter: fremde Absender landen im Lese-Eingang, nie als Notiz oder Aufgabe,
           // und lösen keinen Abruf einer Adresse aus.
           if (readingMail) {
-            await readingMail.save(email, { fetch: false });
+            await readingMail.save(await completeBodies(email), { fetch: false });
             processed += 1;
           } else logger.warn?.(`Mail-Capture: Absender nicht freigegeben, Mail wird nur verschoben (${email.id})`);
         } else if (readingMail?.matches(email)) {
-          await readingMail.save(email);
+          await readingMail.save(await completeBodies(email));
           processed += 1;
         } else {
           await router.route(toCapture(email));
