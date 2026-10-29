@@ -94,7 +94,11 @@ export function createEditor({ vaultPath, index }) {
       if (to === relPath) return { path: relPath, from: relPath, changed: false };
       const destination = join(vaultPath, to);
       const taken = () => new Error(`In „${target}“ gibt es schon eine Notiz „${name}“`);
-      if (existsSync(destination) && !sameFile(absolute, destination)) throw taken();
+      // Dieselbe Datei unter dem Ziel zählt nur als frei, wenn sich bloß die Schreibweise
+      // ändert; ein zweiter harter Link mit anderem Namen ist eine belegte Notiz.
+      const caseOnly = to.toLowerCase() === relPath.toLowerCase();
+      const occupied = () => existsSync(destination) && !(caseOnly && sameFile(absolute, destination));
+      if (occupied()) throw taken();
       // Auch der Zielordner darf nicht per Symlink aus dem Vault herausführen:
       // den tiefsten vorhandenen Ordner prüfen, bevor etwas angelegt wird.
       let existing = dirname(destination);
@@ -113,11 +117,11 @@ export function createEditor({ vaultPath, index }) {
         linkSync(absolute, destination);
         linked = true;
       } catch (err) {
-        if (err.code === 'EEXIST' && !sameFile(absolute, destination)) throw taken();
+        if (err.code === 'EEXIST' && occupied()) throw taken();
         // Nur die Schreibweise geändert (Dateisystem ohne Groß/klein) oder keine harten
         // Links (manche Freigaben): umbenennen, die Prüfung oben hat das Ziel gesehen.
         if (err.code !== 'EEXIST' && !['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'EMLINK', 'ENOSYS'].includes(err.code)) throw err;
-        if (existsSync(destination) && !sameFile(absolute, destination)) throw taken();
+        if (occupied()) throw taken();
         renameSync(absolute, destination);
       }
       if (linked) {

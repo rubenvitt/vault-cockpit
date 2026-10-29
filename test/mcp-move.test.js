@@ -1,6 +1,6 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, linkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createIndexManager } from '../src/vault/manager.js';
@@ -168,6 +168,21 @@ test('Verschieben bleibt atomar: ein inzwischen belegtes Ziel wird nicht übersc
   assert.throws(() => editor.move({ path: 'inbox/Idee.md', folder: 'projects' }), /gibt es schon/);
   assert.equal(readFileSync(join(root, 'projects/Idee.md'), 'utf8'), '# Andere\n');
   assert.ok(existsSync(join(root, 'inbox/Idee.md')));
+});
+
+test('Ein zweiter harter Link unter anderem Namen gilt als belegtes Ziel', () => {
+  const editor = createEditor({ vaultPath: root, index });
+  linkSync(join(root, 'inbox/Idee.md'), join(root, 'inbox/Zweit.md'));
+  assert.throws(() => editor.move({ path: 'inbox/Idee.md', folder: 'inbox', name: 'Zweit' }), /gibt es schon/);
+  assert.ok(existsSync(join(root, 'inbox/Idee.md')));
+});
+
+test('update_links: ein Selbstlink per Pfad wird am neuen Ort umgeschrieben', () => {
+  put('inbox/Idee.md', '# Idee\n\n[[inbox/Idee#Oben]]\n');
+  index.applyChanges(['inbox/Idee.md']);
+  const r = move({ path: 'inbox/Idee.md', folder: 'projects', update_links: true });
+  assert.equal(r.links_to_update, undefined);
+  assert.equal(readFileSync(join(root, 'projects/Idee.md'), 'utf8'), '# Idee\n\n[[projects/Idee#Oben]]\n');
 });
 
 test('Anlegen prüft Dateinamen wie das Umbenennen (VCP-59)', () => {
