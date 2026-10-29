@@ -2,7 +2,7 @@ import { ActionError } from '../cockpit/actions.js';
 import { zonedParts, zonedToUtc } from '../cockpit/week.js';
 import { esc, assets } from '../web/layout.js';
 import { hidden } from '../web/render.js';
-import { readingPage, saveForm } from './pages.js';
+import { readingPage, saveForm, keptUrl } from './pages.js';
 import { groupChips, groupFilter } from './stack.js';
 import { KIND_LABELS, docJson, groupsJson, jsonReply } from './json.js';
 import { NO_FEED } from './store.js';
@@ -99,7 +99,7 @@ export function renderInboxPage({ doc, left, today, filter }, ctx, { getFeed, va
   const row = undo || file ? `<div class="inbox-row">${undo}${file}</div>` : '';
   const actions = row || decide ? `<div class="inbox-actions">${row}${decide}</div>` : '';
   const body = `${groupChips('/lesen/eingang', filter)}<div class="inbox">${progress}${stack}${actions}</div>
-<details class="more inbox-save"${doc ? '' : ' open'}><summary>Adresse speichern</summary>${saveForm(ctx)}</details>`;
+<details class="more inbox-save"${doc && !keptUrl(ctx) ? '' : ' open'}><summary>Adresse speichern</summary>${saveForm(ctx)}</details>`;
   return readingPage(ctx, { key: 'eingang', title: 'Eingang', body, scripts: [assets.inbox] });
 }
 

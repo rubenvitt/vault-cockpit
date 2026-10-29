@@ -77,9 +77,12 @@ ${body}
 </html>`;
 }
 
-/** Formular „URL speichern“; `cid` macht doppeltes Absenden harmlos. */
+/** Adresse, die ohne JavaScript nicht gespeichert werden konnte (kommt mit der Fehlermeldung zurück), sonst leer. */
+export const keptUrl = (ctx) => (ctx.flash?.kind === 'error' && typeof ctx.flash.draft === 'string' ? ctx.flash.draft : '');
+
+/** Formular „URL speichern“; `cid` macht doppeltes Absenden harmlos. Nach einem Fehler steht die Adresse wieder drin. */
 export const saveForm = (ctx) => `<form method="post" action="/aktion/lesen/speichern" class="lesen-save">
     ${hidden({ csrf: ctx.write.csrf, back: ctx.write.back, cid: randomUUID() })}
-    <label class="lesen-url"><span class="sr-only">Adresse des Artikels</span><input type="url" name="url" required placeholder="https://… Artikel speichern" inputmode="url" autocomplete="off" spellcheck="false" enterkeyhint="go"></label>
+    <label class="lesen-url"><span class="sr-only">Adresse des Artikels</span><input type="url" name="url" required placeholder="https://… Artikel speichern" inputmode="url" autocomplete="off" spellcheck="false" enterkeyhint="go"${keptUrl(ctx) ? ` value="${esc(keptUrl(ctx))}"` : ''}></label>
     <button type="submit" class="btn primary">Speichern</button>
   </form>`;

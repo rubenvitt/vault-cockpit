@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { ActionError } from '../cockpit/actions.js';
 import { hidden } from '../web/render.js';
-import { readingPage } from './pages.js';
+import { readingPage, saveForm } from './pages.js';
 import { savePdf, MAX_PDF } from './pdf.js';
 
 /**
@@ -33,11 +33,7 @@ function renderAdd(ctx) {
   const fields = () => hidden({ csrf: ctx.write.csrf, back: ctx.write.back, cid: randomUUID() });
   const body = `<section>
   <h2>Adresse</h2>
-  <form method="post" action="/aktion/lesen/speichern" class="lesen-save">
-    ${fields()}
-    <label class="lesen-url"><span class="sr-only">Adresse des Artikels</span><input type="url" name="url" required placeholder="https://… Artikel speichern" inputmode="url" autocomplete="off" spellcheck="false" enterkeyhint="go"></label>
-    <button type="submit" class="btn primary">Speichern</button>
-  </form>
+  ${saveForm(ctx)}
 </section>
 <section>
   <h2>PDF</h2>
