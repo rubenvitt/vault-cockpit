@@ -1475,10 +1475,19 @@ zeigt `vault_stats` unter `semantic`. Bis dahin und wenn Ollama ausfällt, sucht
   Notiz auf, Doppelklick macht sie zur Mitte, Filter nach Art, und „Verlinken“
   hängt `- [[Ziel]]` an eine ähnliche Notiz an. Ohne JavaScript bleibt das
   SVG-Bild mit Links. Als JSON unter `/api/graph?pfad=…`.
+- **Ganzer Vault** (Seite `<PUBLIC_URL>/graph/alles`): alle eigenen Notizen mit ihren
+  Wikilinks in einem Bild, gefärbt nach oberstem Ordner oder Frontmatter-`type`.
+  Vertrauliche, ausgeschlossene und Readwise-Notizen fehlen. Das Layout rechnet der
+  Server mit ForceAtlas2 in einem Worker-Thread, beim Start und gebündelt nach
+  Änderungen am Index; die Positionen liegen neben dem Index in
+  `graph-layout.json`, damit ein Neustart sofort ein Bild hat und neue Notizen sich
+  ins bekannte Bild einfügen. Der Browser zeichnet nur (sigma.js): Beschriftungen
+  beim Hineinzoomen, die Suche oben springt zur Notiz, ein Klick zeigt Weg zur
+  Nachbarschaft und zur Notiz. JSON unter `/api/graph/alles` (gzip, ETag).
 
   Die Graph-Bibliothek liegt gebündelt unter `src/web/static/vendor/graph-lib.js`
-  (eingecheckt, kein Build im Betrieb). Nach einem Versionswechsel in
-  `devDependencies`: `npm run vendor`.
+  (eingecheckt, kein Build im Betrieb). Nach einem Versionswechsel von sigma,
+  graphology oder ForceAtlas2 in `package.json`: `npm run vendor`.
 
 Einrichtung: Dienst `ollama` wie im Compose-Beispiel, dann im Web-Cockpit unter
 **Einstellungen → Embeddings** die Adresse `http://ollama:11434` eintragen; das
@@ -1507,7 +1516,7 @@ npm ci && npm test
 - `src/cockpit/` — Wochenmodell: ISO-Wochen, Feuer-Notiz (mit Flammen aus Zunder), Kalender (iCal mit Serienauflösung, CalDAV), Einstellungen, Zusammenstellung aus Zunder
 - `src/semantic/` — Embeddings (Ollama), Abschnitte, Vektorspeicher, hybride Suche
 - `src/search/` — lesender Such-Endpunkt `/api/search` mit eigenem Token
-- `src/graph/` — Graph um eine Notiz mit Aufgaben- und Termin-Knoten
+- `src/graph/` — Graph um eine Notiz mit Aufgaben- und Termin-Knoten, Graph über den ganzen Vault mit vorberechnetem Layout (`whole.js`)
 - `src/health/` — Zustand der Hintergrunddienste für `/zustand` und `/health`, Maskieren von Fehlertexten
 - `src/lesen/` — Lesestapel: SQLite-Speicher (`store.js`), SSRF-sicheres Holen (`fetch.js`), Readability und Säubern (`extract.js`), Seiten und Routen (`pages.js`, `http.js`), Leseansicht und Markierungen (`doc.js`, `highlights.js`, Textanker in `anchor.js`), Wiedersehen (Planung und Clustering in `review.js`, Seite in `review-page.js`), Querverbindungen (`connections.js`, Embeddings der Markierungen in `embed-cache.js`)
 - `src/fragen/` — Fragen an den Vault: Gespräche und Claudes Lauf (`chat.js`), Bausteine der Antworten mit Schema, Prüfung und HTML (`ui.js`), Seiten und Aktionen (`page.js`)

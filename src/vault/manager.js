@@ -126,5 +126,6 @@ export function createIndexManager({ vaultPath, dbPath, policy = DEFAULT_POLICY,
     pathsContaining: (...a) => current.pathsContaining(...a),
     resolveLink: (...a) => current.resolveLink(...a),
     tagsOf: (...a) => current.tagsOf(...a),
+    wholeGraph: (...a) => current.wholeGraph(...a),
   };
 }

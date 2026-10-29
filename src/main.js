@@ -50,6 +50,7 @@ import { createOllamaEmbedder } from './semantic/embedder.js';
 import { createSemanticIndex } from './semantic/index.js';
 import { hybridSearch } from './semantic/search.js';
 import { createGraph } from './graph/graph.js';
+import { createWholeGraph } from './graph/whole.js';
 import { createHealth, createRunLog } from './health/collect.js';
 
 function required(name) {
@@ -332,6 +333,9 @@ const health = createHealth({
 });
 
 const graph = createGraph({ index, semantic: currentSemantic, zunder, calendar: calendarForGraph(calendars), tz: () => cockpitSettings.get().tz });
+// Ganzer Vault als Graph (VCP-40): Layout im Worker, Positionen neben dem Index gespeichert.
+const wholeGraph = createWholeGraph({ index, file: join(dirname(INDEX_DB), 'graph-layout.json') });
+wholeGraph.warm();
 
 // Abhaken und Schnelleingabe: Zunder-Zugang und Inbox-Ordner aus den Einstellungen.
 const cockpitActions = createCockpitActions({
@@ -449,6 +453,7 @@ const webHttp = process.env.WEB_CLIENT_ID
       captureEnabled,
       calendars,
       graph,
+      wholeGraph,
       search: (query, { type = null, paths = null } = {}) => hybridSearch({ index, semantic: currentSemantic, query, type, paths, limit: 30 }),
       // Synthesen: passende neue Markierungen als Belege anhängen (VCP-82).
       evidence: createSynthesisEvidence({ notes: noteDesk, index, store: reading, exporter: readingExport, embedCache, semantic: currentSemantic, vaultPath: VAULT_PATH, editor }),

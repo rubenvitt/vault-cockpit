@@ -393,6 +393,31 @@ export function openIndex(dbOrPath, { vaultPath = process.env.VAULT_PATH ?? '/va
       return new Set(db.prepare(`SELECT path FROM notes WHERE ${where.join(' AND ')}`).all(...params).map((r) => r.path));
     },
 
+    /**
+     * Alle eigenen, nicht vertraulichen Notizen mit ihren aufgelösten Wikilinks
+     * untereinander, für den Graphen über den ganzen Vault: `notes` nach Pfad
+     * sortiert, `links` als Paare `[source, target]` ohne Selbstlinks.
+     */
+    wholeGraph() {
+      const notes = db
+        .prepare("SELECT path, title, basename, folder, type FROM notes WHERE class = 'core' AND sensitivity IS NULL ORDER BY path")
+        .all();
+      const links = db
+        .prepare(
+          `SELECT DISTINCT l.source AS s, l.target_path AS t
+             FROM links l
+             JOIN notes a ON a.path = l.source
+             JOIN notes b ON b.path = l.target_path
+            WHERE l.source != l.target_path
+              AND a.class = 'core' AND a.sensitivity IS NULL
+              AND b.class = 'core' AND b.sensitivity IS NULL
+            ORDER BY l.source, l.target_path`,
+        )
+        .all()
+        .map((r) => [r.s, r.t]);
+      return { notes, links };
+    },
+
     /** Eigene Notizen, die eingebettet werden (auch vertrauliche, gefiltert wird beim Ausliefern). */
     embeddablePaths() {
       return db.prepare("SELECT path FROM notes WHERE class = 'core' ORDER BY path").all().map((r) => r.path);

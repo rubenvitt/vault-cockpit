@@ -9,6 +9,8 @@ import { createCookieSigner, parseCookies } from '../src/web/session.js';
 import { createSettingsStore } from '../src/cockpit/settings.js';
 import { createTokenStore } from '../src/cockpit/tokens.js';
 import { ActionError } from '../src/cockpit/actions.js';
+import { createWholeGraph } from '../src/graph/whole.js';
+import { computeLayout } from '../src/graph/whole-layout.js';
 import { mkdtempSync, writeFileSync, openSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -121,7 +123,7 @@ const graph = {
 };
 const search = async (q) => ({ results: [{ path: 'wiki/a.md', title: 'A', snippet: `zu ${q}`, streams: ['text', 'semantic'] }], total: 1, degraded: null });
 
-async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSubjects = ['ruben'], calendars = null, actions = null, notes = null, shortcuts = [], clock = null, search: searchFn = search, zunder = true } = {}) {
+async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSubjects = ['ruben'], calendars = null, actions = null, notes = null, shortcuts = [], clock = null, search: searchFn = search, zunder = true, wholeGraph = null } = {}) {
   const idp = fakeIdp(idpOptions);
   const settings = createSettingsStore({ defaults: { tz: 'Europe/Berlin', inboxFolder: 'inbox', ...(zunder ? { zunderUrl: 'https://zunder.env', zunderToken: 'zt_env' } : {}) }, logger: quiet });
   const tokens = createTokenStore({ logger: quiet });
@@ -134,6 +136,7 @@ async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSu
     shortcuts,
     calendars,
     graph,
+    wholeGraph,
     search: searchFn,
     oidc: createOidcLogin({ issuer: ISSUER, clientId: CLIENT, clientSecret, redirectUri: 'https://vault.test/auth/callback', allowedSubjects, fetch: idp.fetch }),
     sessionSecret: SECRET,
@@ -621,6 +624,75 @@ test('Suche und Graph: nur mit Sitzung, Treffer verlinken auf den Graphen, JSON 
 
     const css = await (await call('/static/cockpit.css')).text();
     assert.match(css, /\.graph \.edge\.semantic/);
+  });
+});
+
+test('Ganzer Vault: Seite und JSON nur mit Sitzung, gzip und ETag, Link aus dem Graphen um eine Notiz', async () => {
+  const index = {
+    wholeGraph: () => ({
+      notes: [
+        { path: 'Start.md', title: 'Start <1>', basename: 'Start', folder: '', type: null },
+        { path: 'wiki/a.md', title: 'A', basename: 'a', folder: 'wiki', type: 'konzept' },
+        { path: 'wiki/b.md', title: null, basename: 'b', folder: 'wiki', type: null },
+      ],
+      links: [['wiki/a.md', 'wiki/b.md'], ['Start.md', 'wiki/a.md']],
+    }),
+  };
+  const wholeGraph = createWholeGraph({ index, layout: async (input) => computeLayout(input), logger: quiet });
+  await withServer(
+    async ({ call, login }) => {
+      assert.equal((await call('/graph/alles')).status, 303);
+      assert.equal((await call('/api/graph/alles')).status, 401);
+      await login('/graph/alles');
+
+      const page = await call('/graph/alles?pfad=wiki%2Fa.md');
+      assert.equal(page.status, 200);
+      const html = await page.text();
+      assert.match(html, /<h1>Ganzer Vault<\/h1>/);
+      assert.match(html, /data-whole="\/api\/graph\/alles"/);
+      assert.match(html, /data-focus="wiki\/a\.md"/);
+      assert.match(html, /<script src="\/static\/vendor\/graph-lib\.js\?v=[\w-]+" defer><\/script>\n<script src="\/static\/graph-alles\.js\?v=[\w-]+" defer>/);
+      assert.match(html, /class="search whole-search"/);
+      assert.match(html, /braucht JavaScript und WebGL/);
+      assert.equal((await call('/static/graph-alles.js')).status, 200);
+
+      const plain = await call('/api/graph/alles', { headers: { 'accept-encoding': 'identity' } });
+      assert.equal(plain.status, 200);
+      assert.equal(plain.headers.get('content-encoding'), null);
+      const etag = plain.headers.get('etag');
+      assert.match(etag, /^"[\w-]{16}"$/);
+      const data = await plain.json();
+      assert.deepEqual(data.nodes.map((n) => n.slice(0, 4)), [
+        ['Start.md', 'Start <1>', 0, -1],
+        ['wiki/a.md', 'A', 1, 0],
+        ['wiki/b.md', 'b', 1, -1],
+      ]);
+      assert.deepEqual(data.folders, ['', 'wiki']);
+      assert.deepEqual(data.types, ['konzept']);
+      assert.deepEqual(data.links, [1, 2, 0, 1]);
+      assert.ok(data.nodes.every((n) => Number.isFinite(n[4]) && Number.isFinite(n[5])));
+
+      // fetch packt gzip selbst aus; hier zählt der Header.
+      const packed = await call('/api/graph/alles', { headers: { 'accept-encoding': 'gzip' } });
+      assert.equal(packed.headers.get('content-encoding'), 'gzip');
+      assert.deepEqual(await packed.json(), data);
+      assert.equal((await call('/api/graph/alles', { headers: { 'if-none-match': etag } })).status, 304);
+
+      const around = await (await call('/graph?pfad=wiki%2Fa.md')).text();
+      assert.match(around, /<a href="\/graph\/alles\?pfad=wiki%2Fa\.md">Im ganzen Vault zeigen<\/a>/);
+      assert.match(await (await call('/graph')).text(), /href="\/graph\/alles" class="chip">Ganzen Vault als Graph zeigen/);
+    },
+    {},
+    { wholeGraph },
+  );
+  wholeGraph.stop();
+});
+
+test('Ganzer Vault: ohne Graph keine Route und kein Link', async () => {
+  await withServer(async ({ call, login }) => {
+    await login('/graph');
+    assert.equal((await call('/graph/alles')).status, 404);
+    assert.doesNotMatch(await (await call('/graph?pfad=wiki%2Fa.md')).text(), /Im ganzen Vault zeigen/);
   });
 });
 

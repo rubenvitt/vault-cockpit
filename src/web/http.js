@@ -6,7 +6,7 @@ import { createAppAccess, APP_CALLBACK_PATH, SITE_ASSOCIATION_PATH } from './app
 import { renderDraftRescue } from './session-render.js';
 import { renderWeek, renderMessage, renderSettings, dueLabel } from './render.js';
 import { versionAssets, THEME } from './layout.js';
-import { renderGraph, renderSearch, graphJson, GRAPH_CSS } from './graph-render.js';
+import { renderGraph, renderSearch, renderWholeGraph, graphJson, GRAPH_CSS } from './graph-render.js';
 import { renderNote, NOTE_CSS } from './note-render.js';
 import { noteJson } from './note-json.js';
 import { renderReview, REVIEW_CSS } from './review-render.js';
@@ -30,6 +30,7 @@ const UI_JS = staticFile('ui.js', 'utf8');
 const PLAYER_JS = staticFile('player.js', 'utf8');
 const CLIENT_JS = staticFile('cockpit.js', 'utf8');
 const GRAPH_JS = staticFile('graph.js', 'utf8');
+const WHOLE_GRAPH_JS = staticFile('graph-alles.js', 'utf8');
 const OFFLINE_JS = staticFile('offline.js', 'utf8');
 const INBOX_JS = staticFile('lesen-eingang.js', 'utf8');
 const LESEN_DOC_JS = staticFile('lesen-doc.js', 'utf8');
@@ -44,7 +45,7 @@ const GRAPH_LIB = staticFile('vendor/graph-lib.js', 'utf8');
 // Design-System (Tokens, Bausteine, Wochenansicht) plus die Teile der übrigen Seiten.
 const CSS = staticFile('cockpit.css', 'utf8') + GRAPH_CSS + NOTE_CSS + REVIEW_CSS + PLAN_CSS + HEALTH_CSS + OFFLINE_CSS;
 const hash = (s) => createHash('sha256').update(s).digest('base64url').slice(0, 10);
-const VERSION = { css: hash(CSS), ui: hash(UI_JS), player: hash(PLAYER_JS), js: hash(CLIENT_JS), graph: hash(GRAPH_JS), graphLib: hash(GRAPH_LIB), offline: hash(OFFLINE_JS), inbox: hash(INBOX_JS), lesenDoc: hash(LESEN_DOC_JS), lesenHoeren: hash(LESEN_HOEREN_JS), lesenFolgen: hash(LESEN_FOLGEN_JS), lesenLinks: hash(LESEN_LINKS_JS), lesenFeeds: hash(LESEN_FEEDS_JS), lesenIngest: hash(LESEN_INGEST_JS), fragen: hash(FRAGEN_JS) };
+const VERSION = { css: hash(CSS), ui: hash(UI_JS), player: hash(PLAYER_JS), js: hash(CLIENT_JS), graph: hash(GRAPH_JS), wholeGraph: hash(WHOLE_GRAPH_JS), graphLib: hash(GRAPH_LIB), offline: hash(OFFLINE_JS), inbox: hash(INBOX_JS), lesenDoc: hash(LESEN_DOC_JS), lesenHoeren: hash(LESEN_HOEREN_JS), lesenFolgen: hash(LESEN_FOLGEN_JS), lesenLinks: hash(LESEN_LINKS_JS), lesenFeeds: hash(LESEN_FEEDS_JS), lesenIngest: hash(LESEN_INGEST_JS), fragen: hash(FRAGEN_JS) };
 versionAssets(VERSION);
 
 /** Web-App-Manifest: Das Cockpit startet auf dem iPhone und unter Android wie eine App. */
@@ -77,6 +78,7 @@ const PUBLIC = new Map([
   ['/static/player.js', { type: 'text/javascript; charset=utf-8', body: PLAYER_JS, version: VERSION.player }],
   ['/static/cockpit.js', { type: 'text/javascript; charset=utf-8', body: CLIENT_JS, version: VERSION.js }],
   ['/static/graph.js', { type: 'text/javascript; charset=utf-8', body: GRAPH_JS, version: VERSION.graph }],
+  ['/static/graph-alles.js', { type: 'text/javascript; charset=utf-8', body: WHOLE_GRAPH_JS, version: VERSION.wholeGraph }],
   ['/static/vendor/graph-lib.js', { type: 'text/javascript; charset=utf-8', body: GRAPH_LIB, version: VERSION.graphLib }],
   ['/static/offline.js', { type: 'text/javascript; charset=utf-8', body: OFFLINE_JS, version: VERSION.offline }],
   ['/static/lesen-eingang.js', { type: 'text/javascript; charset=utf-8', body: INBOX_JS, version: VERSION.inbox }],
@@ -141,7 +143,9 @@ for (const [path, file] of offlineFiles(PUBLIC, { html: HTML_HEADERS }).entries)
  *   eine Notiz; `GET /api/graph?pfad=…` liefert ihn als JSON, `GET /api/suche?q=…`
  *   die besten Treffer für die Live-Suche. Mit JavaScript wird der Graph
  *   interaktiv (`/static/graph.js` mit sigma aus `/static/vendor/graph-lib.js`),
- *   ohne bleibt das SVG.
+ *   ohne bleibt das SVG. `GET /graph/alles` zeigt den ganzen Vault als Graph
+ *   (`/static/graph-alles.js`), Knoten und vorberechnete Positionen kommen aus
+ *   `GET /api/graph/alles` (src/graph/whole.js).
  * - `GET /login` → Pocket ID → `GET /auth/callback` setzt die Sitzung. Sie
  *   verlängert sich bei Nutzung und endet nach 30 Tagen ohne Nutzung, spätestens
  *   nach 90 (einstellbar, siehe `sessions.js`).
@@ -207,7 +211,7 @@ for (const [path, file] of offlineFiles(PUBLIC, { html: HTML_HEADERS }).entries)
  * Die Sitzung ist ein signiertes Cookie und nur für diese Routen gültig; die
  * MCP-Schnittstelle prüft weiter ausschließlich Bearer-Tokens.
  */
-export function createWebHttp({ cockpit, settings, actions = null, notes = null, plan = null, reading = null, tokens = null, shortcuts = [], captureEnabled = false, calendars = null, graph = null, search = null, evidence = null, health = null, backup = null, restart = () => {}, oidc, sessionSecret, publicUrl, appId = undefined, allowDevScheme = false, allowedSubjects = [], logger = console, now = () => Date.now() }) {
+export function createWebHttp({ cockpit, settings, actions = null, notes = null, plan = null, reading = null, tokens = null, shortcuts = [], captureEnabled = false, calendars = null, graph = null, wholeGraph = null, search = null, evidence = null, health = null, backup = null, restart = () => {}, oidc, sessionSecret, publicUrl, appId = undefined, allowDevScheme = false, allowedSubjects = [], logger = console, now = () => Date.now() }) {
   const signer = createCookieSigner(sessionSecret);
   const secure = publicUrl.startsWith('https://');
   const sessions = createSessions({ signer, settings, allowedSubjects, secure, now });
@@ -1053,12 +1057,30 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     if (!path) {
       const q = (url.searchParams.get('q') ?? '').trim().slice(0, 500);
       const result = q && search ? await search(q) : { results: [], total: 0 };
-      return send(res, 200, renderSearch(q, result, { user, notes: Boolean(notes) }));
+      return send(res, 200, renderSearch(q, result, { user, notes: Boolean(notes), whole: Boolean(wholeGraph) }));
     }
     const g = graph ? await graph.around(path) : null;
     if (!g) return send(res, 404, renderMessage('Notiz nicht gefunden', `„${path}“ gibt es nicht im Index.`, { link: { href: '/graph', label: 'Zur Suche' } }));
     const { vaultName, tz } = settings.get();
-    return send(res, 200, renderGraph(g, { vaultName, user, tz, write: writeContext(req), back: url.pathname + url.search, flash: takeFlash(req, res), notes: Boolean(notes) }));
+    return send(res, 200, renderGraph(g, { vaultName, user, tz, write: writeContext(req), back: url.pathname + url.search, flash: takeFlash(req, res), notes: Boolean(notes), whole: Boolean(wholeGraph) }));
+  }
+
+  /**
+   * Ganzer Vault (VCP-40): Knoten mit vorberechneten Positionen. Der Stand
+   * ändert sich nur mit dem Index, deshalb ETag (304 ohne Daten) und gzip,
+   * wenn der Browser es kann; ein paar tausend Notizen gehen so in wenigen
+   * hundert Kilobyte übers Netz.
+   */
+  async function wholeGraphApi(req, res) {
+    const s = await wholeGraph.get();
+    const head = { 'content-type': 'application/json', 'cache-control': 'private, no-cache', etag: s.etag, vary: 'accept-encoding', 'x-content-type-options': 'nosniff' };
+    if (String(req.headers['if-none-match'] ?? '').split(/,\s*/).includes(s.etag)) {
+      res.writeHead(304, head);
+      return res.end();
+    }
+    const gzip = /\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''));
+    res.writeHead(200, { ...head, ...(gzip ? { 'content-encoding': 'gzip' } : {}) });
+    return res.end(gzip ? s.gzip : s.body);
   }
 
   /**
@@ -1104,7 +1126,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   const BACKUP_ROUTES = backup ? { '/einstellungen/sicherung': downloadBackup, '/einstellungen/sicherung/wiederherstellen': restoreBackup } : {};
   const ACTION_ROUTES = new Set(Object.keys(ACTIONS));
   const SHORTCUT_ROUTES = new Map(shortcuts.map((s) => [`/kurzbefehle/${s.slug}.shortcut`, s]));
-  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...Object.keys(SETTINGS_API), ...PUBLIC.keys(), '/', '/api/woche', '/api/rueckblick', ...(plan ? ['/api/planen'] : []), '/api/sitzung', '/api/suche', ...(actions ? ['/api/erfassen/vorschau'] : []), '/rueckblick', ...(notes ? ['/notiz', '/notiz/bild'] : []), ...(plan ? ['/planen'] : []), '/graph', '/api/graph', ...Object.keys(READING_PAGES), '/einstellungen', ...(health ? ['/zustand'] : []), ...(tokens ? Object.keys(TOKEN_ROUTES) : []), ...Object.keys(BACKUP_ROUTES), '/einstellungen/abmelden', '/login', '/auth/callback', '/logout']);
+  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...Object.keys(SETTINGS_API), ...PUBLIC.keys(), '/', '/api/woche', '/api/rueckblick', ...(plan ? ['/api/planen'] : []), '/api/sitzung', '/api/suche', ...(actions ? ['/api/erfassen/vorschau'] : []), '/rueckblick', ...(notes ? ['/notiz', '/notiz/bild'] : []), ...(plan ? ['/planen'] : []), '/graph', '/api/graph', ...(wholeGraph ? ['/graph/alles', '/api/graph/alles'] : []), ...Object.keys(READING_PAGES), '/einstellungen', ...(health ? ['/zustand'] : []), ...(tokens ? Object.keys(TOKEN_ROUTES) : []), ...Object.keys(BACKUP_ROUTES), '/einstellungen/abmelden', '/login', '/auth/callback', '/logout']);
   if (notes) for (const p of ['/wissen', '/api/wissen', '/api/notiz']) ROUTES.add(p);
   if (health) ROUTES.add('/api/zustand');
   if (notes || reading) ROUTES.add('/api/lesen/offline');
@@ -1221,6 +1243,10 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
         if (!session) return json(res, 401, { error: 'unauthorized', error_description: 'Anmeldung unter /login nötig' });
         return graphApi(req, res, url);
       }
+      if (path === '/api/graph/alles' && wholeGraph) {
+        if (!session) return json(res, 401, { error: 'unauthorized', error_description: 'Anmeldung unter /login nötig' });
+        return wholeGraphApi(req, res);
+      }
       if (path === '/api/sitzung') {
         if (!session) return json(res, 401, { error: 'unauthorized', message: 'Die Anmeldung ist abgelaufen. Bitte neu anmelden.' });
         return json(res, 200, { ok: true, csrf: csrfOf(req) });
@@ -1252,6 +1278,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       if (path === '/api/zustand') return json(res, 200, await healthApi());
       if (!session) return redirect(res, `/login?next=${encodeURIComponent(url.pathname + url.search)}`);
       if (path === '/graph') return graphPage(req, res, url, session);
+      if (path === '/graph/alles' && wholeGraph) return send(res, 200, renderWholeGraph({ user: session.name ?? session.sub, notes: Boolean(notes), focus: url.searchParams.get('pfad') || null }));
       if (READING_PAGES[path]) return readingPage(req, res, url, session);
       if (path === '/notiz') return notePage(req, res, url, session);
       if (path === '/wissen') return send(res, 200, await wissenPage({ notes, search, evidence, url, user: session.name ?? session.sub, nav: reading?.nav ?? null }), url.search ? {} : { [OFFLINE_MARK]: 'lesen' });
