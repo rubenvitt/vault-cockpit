@@ -38,8 +38,9 @@ make test      # Unit-Tests auf dem ersten verfügbaren iPhone-Simulator
   Reiter zurück. Links aus nativen Inhalten (Notiz, Leseansicht, `redirect` einer Aktion) gehen
   über `NavigationDecision` (`Cockpit/Native/Links.swift`): `/`, `/rueckblick`, `/planen` wechseln
   den Reiter, Seiten des Lesens (auch Wissen und Feeds) den Bereich im Reiter Lesen,
-  `/einstellungen#abschnitt` öffnet den Abschnitt; Notiz, Graph, Suche und Zustand kommen als
-  Blatt mit eigenem Stapel (`AppModel.pageSheet`, Links darin legen die nächste Seite obendrauf).
+  `/einstellungen#abschnitt` öffnet den Abschnitt; Notiz, Graph, ganzer Vault, Suche und Zustand
+  kommen als Blatt mit eigenem Stapel (`AppModel.pageSheet`, Links darin legen die nächste Seite
+  obendrauf).
   Fremde Hosts öffnen sich im `SFSafariViewController`, `mailto:` und `obsidian://` im System.
 - **Woche** (`Cockpit/Native/WeekScreen.swift` und Nachbarn): zeigt sofort den gespeicherten
   Stand („Stand von …“), Abhaken ändert die Zeile vor der Antwort des Servers, Menü ⋯ als Blatt,

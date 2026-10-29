@@ -131,6 +131,8 @@ struct PageView: View {
             GraphScreen(path: path)
         case .search(let query):
             SearchScreen(query: query)
+        case .wholeGraph(let focus):
+            WholeGraphScreen(focus: focus)
         case .wissen(let query):
             WissenScreen(query: query)
                 .navigationTitle("Wissen")

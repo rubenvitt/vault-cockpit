@@ -332,7 +332,7 @@ final class AppModel {
         case .health where tab == .settings && pageSheet == nil:
             // Aus den Einstellungen heraus auf deren Stapel.
             if settingsPath.last != .health { settingsPath.append(.health) }
-        case .note, .graph, .search, .health:
+        case .note, .graph, .wholeGraph, .search, .health:
             if let sheet = pageSheet {
                 if (pageSheetPath.last ?? sheet.root) != route { pageSheetPath.append(route) }
             } else {

@@ -69,7 +69,7 @@ extension CockpitAPI {
     }
 }
 
-/// Die übrigen Seiten des Cockpits, die die App nativ zeigt: Notiz, Graph, Suche, Wissen,
+/// Die übrigen Seiten des Cockpits, die die App nativ zeigt: Notiz, Graph, ganzer Vault, Suche, Wissen,
 /// Zustand, Einstellungen und Feeds. Wie `NativeRoute` und `ReadingRoute` für Links und
 /// `redirect` aus Aktionen (`/notiz?pfad=…` nach dem Ablegen).
 public enum PageRoute: Equatable, Hashable, Sendable {
@@ -79,6 +79,8 @@ public enum PageRoute: Equatable, Hashable, Sendable {
     case graph(path: String)
     /// `/graph?q=…` (Suchseite), auch ohne Begriff.
     case search(String)
+    /// `/graph/alles?pfad=…`: ganzer Vault als Graph, optional mit gewählter Notiz.
+    case wholeGraph(focus: String?)
     /// `/wissen?q=&art=&status=&lesen=1`
     case wissen(WissenQuery)
     /// `/zustand`
@@ -110,6 +112,8 @@ public enum PageRoute: Equatable, Hashable, Sendable {
             self = .note(path: value("pfad"), anchor: fragment)
         case "/graph":
             self = value("pfad").isEmpty ? .search(value("q")) : .graph(path: value("pfad"))
+        case "/graph/alles":
+            self = .wholeGraph(focus: value("pfad").isEmpty ? nil : value("pfad"))
         case "/wissen":
             self = .wissen(WissenQuery(q: value("q"), art: value("art"), status: value("status"), lesen: value("lesen") == "1"))
         case "/zustand":
@@ -138,6 +142,9 @@ public enum PageRoute: Equatable, Hashable, Sendable {
         case .search(let q):
             components.path = "/graph"
             if !q.isEmpty { items = [URLQueryItem(name: "q", value: q)] }
+        case .wholeGraph(let focus):
+            components.path = "/graph/alles"
+            if let focus, !focus.isEmpty { items = CockpitAPI.pathQuery(focus) }
         case .wissen(let query):
             components.path = "/wissen"
             items = CockpitAPI.wissenQuery(query)
