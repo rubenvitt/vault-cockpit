@@ -257,10 +257,11 @@ export function connectionRoutes({ logger = console, ...options }) {
     actions: {
       async '/aktion/lesen/verbinden'(form, session) {
         const r = connections.link({ highlightId: form.get('markierung'), path: form.get('pfad'), heading: form.get('abschnitt'), toHighlight: form.get('zu') });
-        if (r.state !== 'aktuell') logger.info?.(`Lesestapel: [[${r.target}]] in ${r.path} (${session.sub})`);
-        // Schon verknüpft: kein Rückgängig, sonst nähme es einen älteren Link weg.
-        const undo = r.state === 'aktuell' ? null : { action: '/aktion/lesen/verbinden/loesen', fields: { markierung: form.get('markierung'), ziel: r.target } };
-        return { message: `${r.state === 'aktuell' ? 'Schon verknüpft' : 'Verknüpft'} mit ${r.label}`, link: { target: r.target, path: r.path }, undo };
+        if (r.added) logger.info?.(`Lesestapel: [[${r.target}]] in ${r.path} (${session.sub})`);
+        // Schon verknüpft: kein Rückgängig, sonst nähme es einen älteren Link weg. `added`, nicht `state`:
+        // Andere vorgemerkte Änderungen können den Bereich auch dann neu schreiben, wenn der Link schon dastand.
+        const undo = r.added ? { action: '/aktion/lesen/verbinden/loesen', fields: { markierung: form.get('markierung'), ziel: r.target } } : null;
+        return { message: `${r.added ? 'Verknüpft' : 'Schon verknüpft'} mit ${r.label}`, link: { target: r.target, path: r.path }, undo };
       },
       async '/aktion/lesen/verbinden/loesen'(form, session) {
         const r = connections.unlink({ highlightId: form.get('markierung'), target: form.get('ziel') });

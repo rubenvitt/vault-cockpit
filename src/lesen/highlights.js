@@ -16,7 +16,7 @@ import { MAX_BOX } from './review.js';
  * Formularfelder:
  * - `/aktion/lesen/markierung/neu`: `id` (Dokument), `quote`, `prefix`, `suffix`, `start`, `notiz`?,
  *   `cid`? (ID der Markierung vom Gerät; dieselbe `cid` legt nie eine zweite an, VCP-80),
- *   `box`?, `faellig`?, `zustand`? (Stand im Wiedersehen, für das Rückgängig nach dem Entfernen, VCP-85)
+ *   `box`?, `faellig`?, `zustand`?, `gesehen`?, `vorher`? (Stand im Wiedersehen, für das Rückgängig nach dem Entfernen, VCP-85)
  * - `/aktion/lesen/markierung/notiz`: `id` (Markierung), `notiz` (leer löscht sie)
  * - `/aktion/lesen/markierung/loeschen`: `id` (Markierung); Rückgängig legt sie mit ID, Anker und Wiedersehen-Stand neu an
  * - `/aktion/lesen/markierung/inbox`: `markierung` (vorhandene) oder `id` (Dokument) mit `quote`, dazu `notiz`?, `cid`
@@ -37,18 +37,33 @@ function field(form, name, max, label) {
 const noteOf = (form) => field(form, 'notiz', MAX_NOTE, 'Die Notiz').trim() || null;
 const href = (u) => (/^https?:\/\//i.test(u ?? '') ? u : null);
 
+const validReview = (box, due, state) => Number.isInteger(box) && box >= 0 && box <= MAX_BOX && !(due && Number.isNaN(Date.parse(due))) && REVIEW_STATES.includes(state);
+
 /**
- * Wiedersehen-Stand aus dem Formular (`box`, `faellig`, `zustand`) als Patch
- * oder null, wenn keiner mitkam. Halbe oder ungültige Angaben lehnt es ab.
+ * Wiedersehen-Stand aus dem Formular (`box`, `faellig`, `zustand`, dazu
+ * optional `gesehen` und `vorher` für Zählung und Rückgängig von heute) als
+ * Patch oder null, wenn keiner mitkam. Halbe oder ungültige Angaben lehnt es ab.
  */
 export function reviewFields(form) {
   const raw = ['box', 'faellig', 'zustand'].map((k) => form.get(k));
   if (raw.every((v) => v == null)) return null;
   const [box, due, state] = [Number(raw[0]), raw[1] || null, raw[2]];
-  if (raw[0] == null || raw[0] === '' || !Number.isInteger(box) || box < 0 || box > MAX_BOX || (due && Number.isNaN(Date.parse(due))) || !REVIEW_STATES.includes(state)) {
-    throw new ActionError('Ungültiger Stand im Wiedersehen');
+  if (raw[0] == null || raw[0] === '' || !validReview(box, due, state)) throw new ActionError('Ungültiger Stand im Wiedersehen');
+  const patch = { review_box: box, review_due: due, review_state: state };
+  const seen = form.get('gesehen') || null;
+  if (seen && Number.isNaN(Date.parse(seen))) throw new ActionError('Ungültiger Stand im Wiedersehen');
+  let prev = null;
+  if (form.get('vorher')) {
+    try {
+      prev = JSON.parse(form.get('vorher'));
+    } catch {
+      prev = null;
+    }
+    const ok = prev && ['behalten', 'worte', 'loslassen'].includes(prev.ziel) && validReview(prev.box, prev.due, prev.state) && (prev.inbox == null || typeof prev.inbox === 'string');
+    if (!ok) throw new ActionError('Ungültiger Stand im Wiedersehen');
+    prev = { ziel: prev.ziel, box: prev.box, due: prev.due ?? null, state: prev.state, ...(prev.inbox ? { inbox: prev.inbox.slice(0, 500) } : {}) };
   }
-  return { review_box: box, review_due: due, review_state: state };
+  return { ...patch, ...(seen ? { reviewed_at: new Date(seen).toISOString(), review_prev: prev ? JSON.stringify(prev) : null } : {}) };
 }
 
 /**
@@ -180,7 +195,7 @@ export function highlightRoutes({ store, asAction, capture = null, onChange = ()
         onChange(h.doc_id);
         // `cid` = alte ID: Block-ID `^hl-…` und Links darauf bleiben nach dem Rückgängig gültig.
         // Dazu der Stand im Wiedersehen, sonst begänne die Markierung dort wieder bei Box 1.
-        const fields = { id: h.doc_id, cid: h.id, quote: h.quote, prefix: h.prefix, suffix: h.suffix, start: h.start_hint ?? '', notiz: h.note ?? '', box: h.review_box, faellig: h.review_due ?? '', zustand: h.review_state };
+        const fields = { id: h.doc_id, cid: h.id, quote: h.quote, prefix: h.prefix, suffix: h.suffix, start: h.start_hint ?? '', notiz: h.note ?? '', box: h.review_box, faellig: h.review_due ?? '', zustand: h.review_state, gesehen: h.reviewed_at ?? '', vorher: h.review_prev ?? '' };
         return { message: 'Markierung entfernt', undo: { action: '/aktion/lesen/markierung/neu', fields } };
       },
 

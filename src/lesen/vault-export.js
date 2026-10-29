@@ -233,10 +233,12 @@ export function createReadingExport({ vaultPath, index, editor, policy, store, s
       const current = findSection(content, SECTION);
       if (current && !current.broken && !current.edited) links = parseLinks(current.inner);
     }
+    // Neu nur, wenn der Link vorher nicht dastand (für das Rückgängig von „Verknüpfen“).
+    const added = link ? !(links.get(link.id) ?? []).includes(link.target) : undefined;
     if (link) links.set(link.id, [...(links.get(link.id) ?? []), link.target]);
     if (unlink) links.set(unlink.id, (links.get(unlink.id) ?? []).filter((t) => t !== unlink.target));
     const inner = renderHighlights(highlights, links);
-    if (!found) return { ...create(doc, inner, { read: isRead, fullText, markIngest }), doc: doc.id };
+    if (!found) return { ...create(doc, inner, { read: isRead, fullText, markIngest }), doc: doc.id, ...(link ? { added } : {}) };
 
     // Vorzeitig (Verknüpfen) oder ungelesen (Ablegen) angelegt: Lesestand nachtragen, nie zurücknehmen.
     const fm = index.getNote(found.path)?.frontmatter ?? {};
@@ -257,7 +259,7 @@ export function createReadingExport({ vaultPath, index, editor, policy, store, s
       editor.append({ path: found.path, heading: under, text: `\n## ${TEXT_HEADING}\n\n${textBlock(doc)}\n` });
     }
     const r = writeSection({ vaultPath, editor, path: found.path, name: SECTION, inner, label: LABEL, spaced: true, heading: HEADING, createHeading: true });
-    return { ...r, path: found.path, doc: doc.id };
+    return { ...r, path: found.path, doc: doc.id, ...(link ? { added } : {}) };
   }
 
   /** Abstand nach `attempts` Fehlversuchen: `delayMs`, dann jeweils doppelt, höchstens stündlich. */
@@ -325,7 +327,8 @@ export function createReadingExport({ vaultPath, index, editor, policy, store, s
      * Lesestapel-Notiz schreiben (für „Verknüpfen“, VCP-73); legt die Notiz an,
      * wenn es sie noch nicht gibt. `target` wie in Obsidian: Notizname oder
      * Pfad ohne `.md`, auch mit `#Abschnitt` oder `|Alias`. Liefert den Zustand
-     * wie `flush` (`geschrieben`, `aktuell`, `angelegt`, `übersprungen`);
+     * wie `flush` (`geschrieben`, `aktuell`, `angelegt`, `übersprungen`) und
+     * `added` (stand der Link vorher noch nicht da);
      * Fehler des Editors (gleichzeitig geändert) wirft er.
      */
     addLink({ highlightId, target }) {
