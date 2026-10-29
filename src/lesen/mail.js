@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { esc } from '../web/layout.js';
 import { sanitizeHtml, textFields } from './extract.js';
 import { FetchError } from './fetch.js';
+import { ReadingError } from './store.js';
 import { saveUrl } from './save.js';
 
 /**
@@ -17,7 +18,7 @@ import { saveUrl } from './save.js';
  *   werden Links), ohne HTML der Text in Absätzen. Adresse ist `mid:<Message-ID>`
  *   (RFC 2392), die Artikel-Adresse wird nicht geholt.
  *
- * Lässt sich die eine Adresse nicht holen (404, kein HTML, lokal …), wird die
+ * Lässt sich die eine Adresse nicht holen (404, kein Artikel, lokal …), wird die
  * Mail mit dem Link als Dokument gespeichert, statt bei jedem Abruf wieder
  * liegen zu bleiben. Idempotent über die Message-ID (`client_id`).
  */
@@ -65,7 +66,8 @@ export function createMailReader({ store, fetchPage = undefined, logger = consol
       try {
         return await saveUrl({ store, url: only, origin: 'mail', clientId, ...(fetchPage ? { fetchPage } : {}) });
       } catch (err) {
-        if (!(err instanceof FetchError)) throw err;
+        // Auch ein PDF ohne Text (`ReadingError`): sonst bliebe die Mail bei jedem Abruf liegen.
+        if (!(err instanceof FetchError) && !(err instanceof ReadingError)) throw err;
         logger.warn?.(`Lesestapel: ${only} aus einer Mail nicht holbar (${err.message}), speichere die Mail`);
         content = textFields(sanitizeHtml(`<p><a href="${esc(only)}">${esc(only)}</a></p>`));
       }
