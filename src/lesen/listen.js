@@ -4,6 +4,7 @@ import { readingPage } from './pages.js';
 import { htmlText } from './anchor.js';
 import { WINDOWS, fitToWindow, toRead } from './stack.js';
 import { SpeechError } from './tts.js';
+import { listeningMinutes } from './extract.js';
 
 /**
  * Unterwegs hören (VCP-79): `/lesen/hoeren?zeit=15` nimmt die Texte des
@@ -107,12 +108,14 @@ function listenBody(items, zeit, ctx, voice) {
 /**
  * Wiedergabeliste für `zeit` Minuten (ohne gültige Angabe 15), auch für die
  * iOS-App (`/api/app/stapel`). Gelesene oder schon in einer Folge gehörte Texte
- * (`isRead`) fängt sie nicht noch einmal an.
+ * (`isRead`) fängt sie nicht noch einmal an. Gerechnet wird mit der Hördauer
+ * (`listeningMinutes`), nicht der Lesezeit: Vorlesen dauert länger.
  */
 export function listenQueue(store, zeit) {
   const n = Number(zeit);
   const minutes = WINDOWS.includes(n) ? n : 15;
-  return { zeit: minutes, items: fitToWindow(toRead(store.list({ status: 'stapel', limit: -1 })), minutes).items };
+  const spoken = toRead(store.list({ status: 'stapel', limit: -1 })).map((d) => (d.word_count > 0 ? { ...d, reading_minutes: listeningMinutes(d.word_count) } : d));
+  return { zeit: minutes, items: fitToWindow(spoken, minutes).items };
 }
 
 /** Lesetext und Sätze eines Dokuments für die Sprachausgabe, null ohne Dokument; auch für `/api/app/text`. */

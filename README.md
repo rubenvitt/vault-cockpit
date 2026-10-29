@@ -657,7 +657,16 @@ Weiterleitung (höchstens 5). Abgelehnt werden Loopback, private Netze, Link-Loc
 (samt Metadaten-IP `169.254.169.254`), CGNAT, Multicast und reservierte Bereiche,
 für IPv6 `::1`, `::`, `fc00::/7`, `fe80::/10` und IPv4-mapped Adressen. Verbunden
 wird genau mit der geprüften IP (eigene `lookup`-Funktion), DNS-Rebinding läuft
-damit ins Leere. Höchstens 5 MB und 15 Sekunden je Artikel.
+damit ins Leere. Höchstens 5 MB und 15 Sekunden je Artikel. Den Zeichensatz
+nimmt das Cockpit aus dem `Content-Type`, sonst aus `<meta charset>` (auch
+`http-equiv`) oder `<?xml encoding?>` im Dokument, eine BOM geht vor. Steht hinter
+der Adresse ein PDF (etwa aus Safari geteilt), wird dessen Text gespeichert wie
+beim Hochladen (höchstens 20 MB). Gibt eine Website vielen Artikeln dieselbe
+kanonische Adresse (`<link rel="canonical">` auf die Startseite oder eine Rubrik),
+legt das Cockpit sie nicht zusammen: Eine Canonical auf die Startseite zählt für
+Artikel darunter nicht, und über die Canonical gilt ein Text nur als schon
+gespeichert, wenn auch der Titel passt. Ohne JavaScript steht die Adresse nach
+einem Fehler beim Speichern wieder im Feld.
 
 Der Artikeltext wird streng nach Allowlist gesäubert (`sanitizeHtml` in
 `src/lesen/extract.js`, auch für Mails und Feeds gedacht): kein Skript, kein Stil,
@@ -687,8 +696,8 @@ beim Wechsel auf andere Seiten weiterläuft. Den Text liefert der Server (`/lese
 Sätze mit Zeichenpositionen wie in `src/lesen/anchor.js`. Nach jedem Satz
 speichert die Seite den Anfang des nächsten als Lesestelle; die Leseansicht
 springt mit `#weiter` genau dorthin, und das nächste Hören setzt dort fort. Ohne
-JavaScript listet die Seite nur die Texte. Das Zeitfenster rechnet mit 220 Wörtern
-pro Minute; vorgelesen dauert es oft länger. In der iOS-App (erkannt an
+JavaScript listet die Seite nur die Texte. Das Zeitfenster rechnet mit der
+Hördauer, 150 Wörtern pro Minute bei Tempo 1× (Lesen: 220). In der iOS-App (erkannt an
 `window.webkit.messageHandlers.cockpit`) zeigt die Seite nur **Abspielen**, und
 das schickt `{type: 'hoeren', zeit}` an den nativen Player der App (VCP-94)
 statt die Sprachausgabe zu nutzen.
@@ -1002,7 +1011,10 @@ Volltext“). Wer `volltext` nicht mitschickt, bekommt wie bisher keinen; nur di
 Oberflächen setzen das Häkchen vorab. „Fertig, weg“ setzt den Status `weg` mit
 Lesedatum (`read_at`) und schreibt nichts in den Vault; eine schon vorhandene
 Notiz bleibt unangetastet. „Weg“ im Eingang hat kein Lesedatum, das Aufräumen
-kann beides unterscheiden. „In den Vault“ legt die Lesestapel-Notiz an oder
+unterscheidet beides: Stündlich löscht das Cockpit Texte, die seit mehr als
+**Verworfenes löschen nach Tagen** (Einstellungen → Lesestapel, Standard 30,
+0 = nie) ohne Lesedatum auf „Weg“ stehen; Gehörtes und Texte mit Markierungen
+bleiben, Feed-Einträge kommen danach nicht wieder. „In den Vault“ legt die Lesestapel-Notiz an oder
 frischt sie auf, auch ohne Markierungen, mit `lesestatus: gelesen`, `gelesen:`
 und der Kurzfassung; mit Häkchen kommt der Artikel als Markdown in einen
 eigenen generierten Bereich unter „## Text“ (vor „## Eigene Gedanken“) und
@@ -1163,9 +1175,14 @@ beim Speichern; klappt das nicht, bleibt der Feed-Text. Alles geht durch
 `linkedom`, das keine Entitäten aus einer DTD auflöst (kein XXE). Scheitert ein
 Abruf, wartet der Feed doppelt so lange wie üblich, nach jedem weiteren Fehler
 wieder doppelt so lange (höchstens einen Tag); die anderen Feeds laufen weiter,
-und auf `/zustand` steht der Fehler beim Feed. Icons werden einmal geholt und als
+und auf `/zustand` steht der Fehler beim Feed. Nach zehn Fehlern hintereinander
+(gut fünf Tage) pausiert der Feed von selbst und steht als „nach 10 Fehlern
+pausiert“ da; wieder eingeschaltet ist er gleich dran, die alten Fehler zählen
+nicht mehr. Ändert sich der Stichwort-Filter, prüft der nächste Abruf die
+aussortierten Einträge neu, soweit sie noch im Feed stehen. Atom geht auch mit
+Präfix (`<atom:feed xmlns:atom="…">`). Icons werden geholt und als
 `data:`-Adresse gespeichert, weil die Content-Security-Policy keine fremden Bilder
-lädt. Unten auf der Seite: OPML importieren (Datei aus einem anderen Reader,
+lädt; findet sich keins, sucht das Cockpit nach einer Woche noch einmal. Unten auf der Seite: OPML importieren (Datei aus einem anderen Reader,
 Ordner werden flach übernommen) und exportieren.
 
 **Private Feeds** mit Zugangsdaten (HTTP Basic Auth) gehen über die Adresse
@@ -1354,9 +1371,9 @@ Artikel kommen über dieselben Wege wie Notizen in den Eingang (VCP-69):
 
 | Weg | So geht's |
 |---|---|
-| iOS-Kurzbefehl | Unter **Einstellungen → API-Tokens** einen Token mit dem Recht **Lesestapel** anlegen, „Zum Lesestapel“ unter **Einstellungen → Kurzbefehle** laden, importieren und beim Import den Token eintragen. Dann in Safari teilen → „Zum Lesestapel“; die Mitteilung nennt den Titel. |
+| iOS-Kurzbefehl | Unter **Einstellungen → API-Tokens** einen Token mit dem Recht **Lesestapel** anlegen, „Zum Lesestapel“ unter **Einstellungen → Kurzbefehle** laden, importieren und beim Import den Token eintragen. Dann in Safari teilen → „Zum Lesestapel“; die Mitteilung nennt den Titel. Ein in Safari geöffnetes PDF geht genauso, gespeichert wird sein Text. |
 | Schnelleingabe | `> https://…` (nur die Adresse nach `>`) wird ein Artikel statt einer Notiz, die Vorschau zeigt „Artikel · Lesestapel“. Ein Markdown-Zitat wie `> Ein kluger Satz` bleibt eine Notiz. Ohne Netz puffert das Cockpit den Eintrag wie jede Schnelleingabe und sendet ihn mit derselben ID nach; doppelt kommt er nicht an. |
-| Mail | An die Capture-Adresse (siehe [Capture](#capture), gleicher Ordner) von einem freigegebenen Absender mit `[lesen]` irgendwo im Betreff (auch nach „Fwd:“) oder `>` vorn. Steht in der Mail nur eine Adresse, wird der Artikel geholt. Sonst wird die Mail selbst ein Dokument der Art `newsletter`: HTML gesäubert wie Artikel (kein Skript, Zählpixel fallen weg, Bilder werden Links), ohne HTML der Text in Absätzen; die Adresse ist `mid:<Message-ID>`, Titel der Betreff ohne Kürzel. Newsletter lassen sich direkt mit der Adresse abonnieren: Mails fremder Absender gehen immer in den Lesestapel, nie in Notizen oder Aufgaben. Lässt sich die eine Adresse nicht holen, wird die Mail mit dem Link gespeichert, statt bei jedem Abruf liegen zu bleiben. |
+| Mail | An die Capture-Adresse (siehe [Capture](#capture), gleicher Ordner) von einem freigegebenen Absender mit `[lesen]` irgendwo im Betreff (auch nach „Fwd:“) oder `>` vorn. Steht in der Mail nur eine Adresse, wird der Artikel geholt. Sonst wird die Mail selbst ein Dokument der Art `newsletter`: HTML gesäubert wie Artikel (kein Skript, Zählpixel fallen weg, Bilder werden Links), ohne HTML der Text in Absätzen; die Adresse ist `mid:<Message-ID>`, Titel der Betreff ohne Kürzel. Newsletter lassen sich direkt mit der Adresse abonnieren: Mails fremder Absender gehen immer in den Lesestapel, nie in Notizen oder Aufgaben. Lässt sich die eine Adresse nicht holen, wird die Mail mit dem Link gespeichert, statt bei jedem Abruf liegen zu bleiben. Lange Newsletter, die JMAP über 500 KB abschneidet, holt der Abruf als Blob ganz nach (bis 5 MB). |
 | PDF | Im Cockpit unter `/lesen/hinzufuegen` hochladen (dort auch eine Adresse speichern), oder an den Endpunkt mit `Content-Type: application/pdf` (Felder dann als Query: `?title=…&id=…`). Höchstens 20 MB. Das Cockpit zieht den Text heraus und macht daraus Absätze als Lesetext mit Lesezeit; die Datei selbst wird nicht gespeichert. Titel aus den PDF-Metadaten, sonst Dateiname oder erste Zeile. Dieselbe Datei liegt nur einmal im Stapel (Adresse `pdf:sha256-…`). Gescannte PDFs ohne Text werden abgelehnt. |
 
 `POST <PUBLIC_URL>/lesestapel/speichern` mit Header `Authorization: Bearer vct_…`
