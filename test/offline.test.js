@@ -447,3 +447,51 @@ test('Service Worker: Lesestoff nur nach Liste und Freigabe, offline mit Stand, 
     assert.equal(sw.caches.stores.has('cockpit-seiten'), false);
   });
 });
+
+test('Service Worker: neue Version holt gespeicherte Leseansichten sofort neu, ohne Netz bleibt die alte (VCP-98)', async () => {
+  await withCockpit(async ({ call }) => {
+    const body = await (await call('/sw.js', { anon: true })).text();
+    const { version } = swConfig(body);
+    let online = true;
+    const fetched = [];
+    const page = (text) => new Response(`<!doctype html>\n<html lang="de"><body>${text}</body></html>`, { headers: { 'content-type': 'text/html; charset=utf-8', [OFFLINE_MARK]: 'lesen' } });
+    const sw = await loadWorker(body, async (req) => {
+      if (!online) throw new TypeError('Failed to fetch');
+      const u = new URL(typeof req === 'string' ? req : req.url, 'https://vault.test');
+      fetched.push(u.pathname + u.search);
+      if (u.pathname === '/api/lesen/offline') return new Response(JSON.stringify({ ok: true, urls: ['/lesen/doc?id=a', '/lesen/doc?id=b', '/wissen'] }), { headers: { 'content-type': 'application/json' } });
+      return page(`Neu ${u.pathname + u.search}`);
+    });
+    // Vom alten Worker gespeichert, alle noch frisch: a ohne Version (vor VCP-98), b mit alter, Wissen ist keine Leseansicht.
+    const cache = await sw.caches.open('cockpit-seiten');
+    const old = (text, headers = {}) => new Response(`<html lang="de"><body>${text}</body></html>`, { headers: { 'x-cockpit-stand': new Date().toISOString(), ...headers } });
+    await cache.put('/lesen/doc?id=a', old('Alt a'));
+    await cache.put('/lesen/doc?id=b', old('Alt b', { 'x-cockpit-version': 'alt' }));
+    await cache.put('/wissen', old('Alt Wissen'));
+    const text = async (key) => (await cache.match(key))?.text();
+
+    // Ohne Netz: Aktivieren scheitert still, die alten Fassungen bleiben lesbar.
+    // `activate` wartet nicht aufs Befüllen; das Befüllen danach ist dasselbe (`filling`).
+    const activate = async () => {
+      await sw.dispatch('activate');
+      await sw.dispatch('message', { data: { type: 'lesen-offline' } });
+    };
+    online = false;
+    await sw.dispatch('install');
+    await activate();
+    assert.match(await text('/lesen/doc?id=a'), /Alt a/);
+
+    online = true;
+    await activate();
+    assert.deepEqual(fetched, ['/api/lesen/offline', '/lesen/doc?id=a', '/lesen/doc?id=b']);
+    assert.match(await text('/lesen/doc?id=a'), /Neu \/lesen\/doc\?id=a/);
+    assert.match(await text('/lesen/doc?id=b'), /Neu \/lesen\/doc\?id=b/);
+    assert.match(await text('/wissen'), /Alt Wissen/);
+    assert.equal((await cache.match('/lesen/doc?id=a')).headers.get('x-cockpit-version'), version);
+
+    // Mit der aktuellen Version und frisch: nichts mehr zu holen.
+    fetched.length = 0;
+    await sw.dispatch('message', { data: { type: 'lesen-offline' } });
+    assert.deepEqual(fetched, ['/api/lesen/offline']);
+  });
+});

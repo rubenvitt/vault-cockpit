@@ -621,7 +621,11 @@ mit Netz. Abmelden, jeder neue Login und eine abgelaufene Sitzung löschen den
 Lesestoff zusammen mit der Woche (beide liegen im selben Cache).
 
 Nach einem Deploy bringt `/sw.js` eine neue Cache-Version mit (Inhalts-Hash der
-App-Hülle) und räumt die alte weg.
+App-Hülle) und räumt die alte weg. Gespeicherte Leseansichten (`/lesen/doc`)
+tragen die Version, mit der sie gespeichert wurden; beim Aktivieren holt der
+neue Worker alle älteren sofort neu (VCP-98), sonst zeigten sie offline noch die
+Formulare von vorher, die zu den neuen Skripten nicht mehr passen. Ohne Netz
+bleibt die alte Fassung stehen und wird beim nächsten Befüllen ersetzt.
 
 Fällt eine Quelle aus (Zunder nicht erreichbar, ein Kalender antwortet nicht),
 zeigt nur ihr Abschnitt bzw. nur dieser Kalender den Fehler; die Einstellungsseite
@@ -1081,7 +1085,12 @@ Eingang (Knopf, Taste A) und auf dem Stapel (je Eintrag ein Knopf) gibt es
 ohne `gelesen:`; der Text bekommt den Status `abgelegt` und verlässt Eingang
 und Stapel. Wer ihn später doch liest und „In den
 Vault“ wählt, bekommt `lesestatus: gelesen` und `gelesen:` nachgetragen, der
-Volltext bleibt, wie er ist. Alle drei lassen sich rückgängig machen (Status
+Volltext bleibt, wie er ist. Notizen von vor VCP-96 ohne Kurzfassung bekommen
+sie bei „In den Vault“ und „Im Vault ablegen“ nachgetragen (VCP-98), als eigenen
+generierten Bereich `kurzfassung` vor „## Markierungen“, nie in den Text
+darüber. Liegt die Notiz inzwischen in einem vertraulichen oder importierten
+Ordner, schreibt das Cockpit nichts, meldet das und lässt den Status, wie er
+ist (vorher stand der Text dann still im Archiv). Alle drei lassen sich rückgängig machen (Status
 zurück, im Eingang auch mit Z); eine schon geschriebene Notiz bleibt dabei
 stehen. Ohne Netz gehen die Entscheidungen der Leseansicht in den Puffer und
 später raus. Das HTML → Markdown macht `htmlToMarkdown` in
@@ -1093,8 +1102,9 @@ Obsidian etwas auslösen würden (`#`, `[[`, `$`, `==`, `%%` …), sind maskiert
 **Markierungen im Vault** (VCP-75): Der Vault bleibt Quelle der Wahrheit. Wird
 ein Text mit Markierungen archiviert, legt das Cockpit über den Editor eine
 Notiz an, Standard `raw/YYYY-MM-DD_<slug>.md` (Ordner änderbar unter
-**Einstellungen → Lesestapel**, ein dort gesetzter gilt weiter); Fortschritt 1
-allein reicht seit VCP-96 nicht mehr, das entscheidet „In den Vault“. `raw/`
+**Einstellungen → Lesestapel**, ein dort gesetzter gilt weiter). Entschieden
+mit VCP-96: Fortschritt 1 allein legt keine Notiz mehr an, das entscheidet
+„In den Vault“; Archivieren mit Markierungen legt weiterhin eine an. `raw/`
 und der Dateiname folgen den Rohquellen des Wikis: Der Skill `wiki-ingest` holt
 die Notiz von dort, statt die Adresse noch einmal abzurufen. Das Datum ist der
 Tag des Speicherns in der eingestellten Zeitzone (wie `gespeichert`), bei

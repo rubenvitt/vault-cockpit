@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { localDate } from '../cockpit/week.js';
 import { sectionBlock, findSection, writeSection } from '../vault/generated-section.js';
+import { headingsOf } from '../vault/edit.js';
 import { esc } from '../web/layout.js';
 import { htmlToMarkdown } from './extract.js';
 import { safeWikiMarkdown } from './wiki-markdown.js';
@@ -22,6 +23,11 @@ import { safeWikiMarkdown } from './wiki-markdown.js';
  * trägt `lesestatus: gelesen` samt `gelesen:` nach; „## Eigene Gedanken“
  * darunter und alles andere bleibt unberührt.
  *
+ * Notizen von vor VCP-96 haben noch keine Kurzfassung unter dem Link zum
+ * Original. „In den Vault“ und „Im Vault ablegen“ tragen sie nach (VCP-98),
+ * als eigenen generierten Bereich „kurzfassung“ vor „## Markierungen“, nie in
+ * den Text des Nutzers; steht die Kurzfassung schon in der Notiz, bleibt es dabei.
+ *
  * Mit dem Volltext kommt `ingest: offen` ins Frontmatter, wenn das Feld noch
  * fehlt: Der Skill `wiki-ingest` holt die Notiz dann als Rohquelle und setzt
  * dort ein Datum, das Cockpit fasst es danach nicht mehr an. Der Ingest des
@@ -32,7 +38,8 @@ import { safeWikiMarkdown } from './wiki-markdown.js';
  * Gefunden wird die Notiz über `lesestapel_id` im Frontmatter (Index), nicht
  * über einen Pfad: Umbenennen und Verschieben in Obsidian schadet nicht. Liegt
  * sie inzwischen in einem vertraulichen Ordner, schreibt das Cockpit nichts
- * und legt auch keine zweite an.
+ * und legt auch keine zweite an; `locked(docId)` nennt dann den Grund, damit
+ * „In den Vault“ das meldet, statt still zu archivieren (VCP-98).
  *
  * Jede Markierung steht als Zitat mit eigener Block-ID `^hl-<kurz-id>`
  * (`[[notiz#^hl-1a2b3c4d]]`), darunter ihre Notiz und eine Zeile
@@ -58,6 +65,8 @@ const LABEL = 'aus dem Lesestapel, das Cockpit schreibt bis zum Endmarker neu';
 export const TEXT_SECTION = 'text';
 const TEXT_HEADING = 'Text';
 const TEXT_LABEL = 'Volltext aus dem Lesestapel, das Cockpit schreibt bis zum Endmarker neu';
+export const SUMMARY_SECTION = 'kurzfassung';
+const SUMMARY_LABEL = 'Kurzfassung aus dem Lesestapel, das Cockpit schreibt bis zum Endmarker neu';
 const LINKS = 'Verknüpft:';
 const BLOCK_LINE = /^\^(hl-[0-9a-z]+)[ \t]*$/;
 const WIKILINK = /\[\[([^[\]\n]+)\]\]/g;
@@ -118,6 +127,9 @@ export function slugOf(text) {
 /** Volltext des Dokuments als Markdown für den Bereich „text“. */
 export const fullTextOf = (doc) => htmlToMarkdown(doc.content_html) || 'Für diesen Text gibt es keinen Lesetext.';
 
+/** Kurzfassung der Webseite als eine Zeile Markdown, maskiert wie der Volltext; leer ohne. */
+export const excerptOf = (doc) => (doc.excerpt ? htmlToMarkdown(`<p>${esc(doc.excerpt)}</p>`).replace(/\s+/g, ' ').trim() : '');
+
 /** Lokaler Tag eines Zeitpunkts (ISO) oder null. */
 const dayOf = (iso, tz) => (iso ? localDate(new Date(iso), tz) : null);
 /** `gehoert:` setzen? Nur wenn es fehlt oder einen früheren Tag nennt. */
@@ -141,8 +153,7 @@ export function noteContent(doc, inner, { tz, read = false, readAt = null, fullT
   const link = (u) => u.replace(/[<>]/g, encodeURIComponent);
   const gelesen = read ? day(doc.read_at ?? readAt) : null;
   const gehoert = day(doc.heard_at);
-  // Die Kurzfassung kommt von der Webseite: eine Zeile, maskiert wie der Volltext.
-  const excerpt = doc.excerpt ? htmlToMarkdown(`<p>${esc(doc.excerpt)}</p>`).replace(/\s+/g, ' ') : '';
+  const excerpt = excerptOf(doc);
   return [
     '---',
     `type: ${NOTE_TYPE}`,
@@ -211,13 +222,51 @@ export function createReadingExport({ vaultPath, index, editor, policy, store, s
   }
 
   /**
-   * Eine Notiz anlegen oder ihren Bereich neu schreiben; `force` legt auch ohne
-   * Markierungen an, `link` ergänzt einen Wikilink, `unlink` nimmt einen heraus. `read` (Standard: archiviert)
-   * trägt `lesestatus: gelesen` und `gelesen:` nach, `fullText` schreibt den
-   * Bereich „text“ (fehlt er, kommt er vor „## Eigene Gedanken“) und
-   * `ingest: offen`, wenn `ingest` fehlt und `markIngest` gilt; `gehoert:` folgt `heard_at`.
+   * Kurzfassung in eine bestehende Notiz nachtragen (VCP-98): Steht sie schon
+   * im Text (Notiz ab VCP-96) oder fehlt sie im Lesestapel, bleibt die Notiz,
+   * wie sie ist; einen schon nachgetragenen Bereich frischt sie auf. Neu kommt
+   * er vor „## Markierungen“; fehlt der Abschnitt oder steht er doppelt, gar nicht.
    */
-  function exportDoc(docId, { force = false, link = null, unlink = null, read = undefined, fullText = false, markIngest = true } = {}) {
+  function addSummary(path, content, doc) {
+    const excerpt = excerptOf(doc);
+    if (findSection(content, SUMMARY_SECTION)) {
+      if (excerpt) writeSection({ vaultPath, editor, path, name: SUMMARY_SECTION, inner: excerpt, label: SUMMARY_LABEL, create: false });
+      return;
+    }
+    // Überschriften wie beim Editor: außerhalb von Code-Blöcken. Ohne genau ein „## Markierungen“
+    // bleibt die Notiz, wie sie ist: Ans Ende gehängt, landete die Kurzfassung unter „## Eigene Gedanken“.
+    const headings = headingsOf(content);
+    const marks = headings.filter((h) => h.level === 2 && h.text === HEADING);
+    if (!excerpt || marks.length !== 1) return;
+    const lines = content.split(/\r?\n/);
+    // Nur im Kopf suchen (bis zum ersten Abschnitt, ohne Frontmatter und Titel): Im Volltext steht
+    // die Kurzfassung oft wörtlich, und gleicht sie dem Titel, zählt der nicht.
+    const first = headings.find((h) => h.level === 2) ?? marks[0];
+    const top = lines.slice(0, first.line).filter((l) => !/^# /.test(l)).join('\n').replace(/^---\n[^]*?\n---[ \t]*(?:\n|$)/, '');
+    if (top.includes(excerpt)) return;
+    // Der Editor ersetzt Text, keine Zeilen: ab der Überschrift so viele Zeilen, bis der Text eindeutig ist
+    // (dieselbe Zeile kann etwa in einem Zitat stehen).
+    const eol = content.includes('\r\n') ? '\r\n' : '\n';
+    const at = marks[0].line;
+    let oldText = null;
+    for (let end = at + 1; end <= lines.length && !oldText; end += 1) {
+      const span = lines.slice(at, end).join(eol);
+      if (content.split(span).length === 2 && content.indexOf(span) === lines.slice(0, at).join(eol).length + (at ? eol.length : 0)) oldText = span;
+    }
+    if (!oldText) return;
+    const block = sectionBlock(SUMMARY_SECTION, excerpt, { label: SUMMARY_LABEL, eol });
+    editor.replace({ path, oldText, newText: `${block}${eol}${eol}${oldText}` });
+  }
+
+  /**
+   * Eine Notiz anlegen oder ihren Bereich neu schreiben; `force` legt auch ohne
+   * Markierungen an, `link` ergänzt einen Wikilink, `unlink` nimmt einen heraus,
+   * `summary` trägt die Kurzfassung nach. `read` (Standard: archiviert) trägt
+   * `lesestatus: gelesen` und `gelesen:` nach, `fullText` schreibt den Bereich
+   * „text“ (fehlt er, kommt er vor „## Eigene Gedanken“) und `ingest: offen`,
+   * wenn `ingest` fehlt und `markIngest` gilt; `gehoert:` folgt `heard_at`.
+   */
+  function exportDoc(docId, { force = false, link = null, unlink = null, read = undefined, fullText = false, markIngest = true, summary = false } = {}) {
     const doc = store.get(docId);
     if (!doc) return { state: 'weg' };
     const found = locate(doc.id);
@@ -251,6 +300,7 @@ export function createReadingExport({ vaultPath, index, editor, policy, store, s
     const gehoert = dayOf(doc.heard_at, settings.get().tz);
     if (laterThan(fm.gehoert, gehoert)) set.gehoert = gehoert;
     if (Object.keys(set).length) editor.setFrontmatter({ path: found.path, set });
+    if (summary) addSummary(found.path, content, doc);
     if (fullText && findSection(content, TEXT_SECTION)) {
       writeSection({ vaultPath, editor, path: found.path, name: TEXT_SECTION, inner: fullTextOf(doc), label: TEXT_LABEL, spaced: true, create: false });
     } else if (fullText) {
@@ -365,7 +415,16 @@ export function createReadingExport({ vaultPath, index, editor, policy, store, s
      * unberührt; `markIngest: false` lässt `ingest: offen` weg (Ingest des
      * Cockpits). Zustand wie `addLink`; Fehler des Editors wirft er.
      */
-    save: (docId, { read, fullText = false, markIngest = true }) => exportDoc(String(docId), { force: true, read: Boolean(read), fullText, markIngest }),
+    save: (docId, { read, fullText = false, markIngest = true }) => exportDoc(String(docId), { force: true, read: Boolean(read), fullText, markIngest, summary: true }),
+
+    /**
+     * Grund, warum das Cockpit die Notiz zum Dokument nicht schreiben darf
+     * (sie liegt in einem vertraulichen oder importierten Ordner), sonst null.
+     */
+    locked(docId) {
+      const found = locate(String(docId));
+      return found && !found.writable ? `Die Notiz „${found.path}“ liegt in einem vertraulichen oder importierten Ordner; dorthin schreibt das Cockpit nicht` : null;
+    },
 
     /** Pfad der Lesestapel-Notiz zum Dokument oder null. */
     notePath: (docId) => locate(String(docId))?.path ?? null,

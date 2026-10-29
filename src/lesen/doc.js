@@ -209,15 +209,26 @@ export function docRoutes({ store, asAction, onChange = () => {}, exporter = nul
     if (!doc) throw new ActionError('Dieses Dokument gibt es nicht', 404);
     return doc;
   };
-  /** Notiz sofort schreiben; erst danach wechselt der Status, sonst stünde ein Text ohne Notiz im Archiv. */
-  const toVault = (doc, opts) => {
+  /** Darf die Notiz geschrieben werden? Sonst Meldung, und der Status bleibt (VCP-98). */
+  const mustWrite = (doc) => {
     if (!exporter) throw new ActionError('Die Lesestapel-Notizen sind hier nicht angebunden', 503);
+    const reason = exporter.locked?.(doc.id);
+    if (reason) throw new ActionError(`Nicht in den Vault geschrieben: ${reason}`, 409);
+  };
+  /**
+   * Notiz sofort schreiben; erst danach wechselt der Status, sonst stünde ein
+   * Text ohne Notiz im Archiv. Eine gesperrte Notiz oder ein gesperrter
+   * Zielordner ist ein Fehler: Still archivieren hieße, der Text fehlt im Vault.
+   */
+  const toVault = (doc, opts) => {
+    mustWrite(doc);
     let r;
     try {
       r = exporter.save(doc.id, opts);
     } catch (err) {
       throw new ActionError(`Nicht in den Vault geschrieben: ${err.message}`, 409);
     }
+    // Mit Pfad ist die Notiz da und nur ein Bereich blieb stehen (von Hand bearbeitet).
     if (r.state === 'übersprungen' && !r.path) throw new ActionError(r.reason, 409);
     return r;
   };
@@ -262,6 +273,7 @@ export function docRoutes({ store, asAction, onChange = () => {}, exporter = nul
       async '/aktion/lesen/doc/vault'(form) {
         const fullText = form.get('volltext') === '1';
         const doc = must(form.get('id'));
+        mustWrite(doc);
         // Erst gelesen (`read_at`, Datum für `gelesen:`), dann die Notiz, dann der Status.
         store.setStatus(doc.id, doc.status, { read: true });
         toVault(doc, { read: true, fullText });
