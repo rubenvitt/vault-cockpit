@@ -9,6 +9,7 @@
  * Regel gegen Fehldeutungen: Erkannt wird nur am **Ende der Titelzeile**, von
  * hinten nach vorn, solange die Wörter Kürzel sind. Das erste Wort ist immer
  * Titel. Was mitten im Satz steht („Termin für morgen vorbereiten“), bleibt Text.
+ * Ein Satzzeichen am Zeilenende („…anrufen morgen.“) stört nicht.
  *
  * - Fälligkeit: `heute`, `morgen` (klein; „Morgen“ ist auch der Morgen),
  *   `übermorgen`, ein Wochentag (`Freitag`: das nächste Vorkommen ab morgen,
@@ -88,6 +89,12 @@ export function dateToken(word, today) {
 /** Kürzel für ein Ziel: `#` und mindestens ein Buchstabe (`#42` ist eine Nummer, kein Ziel). */
 const TAG = /^#(?=[^#\s]*\p{L})[^#\s]+$/u;
 
+/** Satzzeichen am Ende eines Wortes. */
+const TRAILING = /[.,;:!?…]+$/u;
+
+/** Ist das Wort ein Kürzel, das `parseTaskLine` am Zeilenende auswertet? */
+const recognized = (w, today) => TAG.test(w) || w.toLowerCase() === '+woche' || dateToken(w, today) !== null;
+
 /**
  * Zerlegt die Titelzeile einer Aufgabe. Liefert die Wörter, was am Ende
  * erkannt wurde (Fälligkeit, `+woche`, Ziel-Kürzel) und Hinweise. Ob ein
@@ -102,7 +109,13 @@ export function parseTaskLine(line, { today }) {
   let phoenix = false;
 
   for (let i = words.length - 1; i >= 1; i--) {
-    const w = words[i];
+    let w = words[i];
+    // Satzzeichen am Zeilenende („…morgen.“, häufig in Sprachmemos) zählen
+    // nicht, außer sie gehören zur Angabe selbst (`14.10.`) (VCP-62).
+    if (i === words.length - 1 && !recognized(w, today)) {
+      const bare = w.replace(TRAILING, '');
+      if (bare && bare !== w && recognized(bare, today)) w = bare;
+    }
     if (TAG.test(w)) {
       tags.unshift({ index: i, token: w });
       continue;
