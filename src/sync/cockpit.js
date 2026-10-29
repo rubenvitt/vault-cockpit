@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createVaultWatcher } from './watch.js';
 import { createSyncJournal } from './server/journal.js';
+import { isImagePath } from '../vault/images.js';
 
 /**
  * Sync-Adapter für den eigenen Sync (VCP-13, Schritt 5 der Roadmap): Das
@@ -81,7 +82,8 @@ export function createCockpitSyncAdapter({
 
     /** Ein Gerät hat über die API geschrieben oder gelöscht. */
     notifyWrite(path) {
-      if (path.toLowerCase().endsWith('.md')) notify({ paths: [path] });
+      // Bilder auch: Der Index führt sie in `images` (VCP-114).
+      if (path.toLowerCase().endsWith('.md') || isImagePath(path)) notify({ paths: [path] });
     },
 
     status() {
