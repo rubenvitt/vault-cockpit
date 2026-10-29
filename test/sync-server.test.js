@@ -414,3 +414,29 @@ test('veraltete Basis: getrennte Änderungen werden zusammengeführt, gelöschte
   rmSync(join(vault, 'merge'), { recursive: true, force: true });
   journal.scan();
 });
+
+test('Schattenbetrieb: neben einem anderen Sync läuft das Journal nur lesend mit, der eigene Sync übernimmt es', () => {
+  const d = mkdtempSync(join(tmpdir(), 'sync-shadow-'));
+  const watch = () => ({ close() {}, on() {} });
+  const sw = createSyncSwitch({ kind: 'none', shadow: true, vaultPath: vault, dataDir: d, logger: quiet, watch });
+  sw.start({ onChanges() {} });
+  assert.equal(sw.name, 'none');
+  assert.ok(sw.journal?.readOnly, 'Journal im Schattenbetrieb');
+  assert.deepEqual(sw.journal.put('x.md', Buffer.from('x'), {}), { ok: false, reason: 'read_only' });
+  assert.deepEqual(sw.status().shadow, []);
+
+  sw.switchTo('none', { shadow: false });
+  assert.equal(sw.journal, null);
+  sw.switchTo('none', { shadow: true });
+  assert.ok(sw.journal.readOnly);
+  sw.switchTo('cockpit', { shadow: true });
+  assert.equal(sw.name, 'cockpit');
+  assert.equal(sw.journal.readOnly, false, 'der eigene Sync schreibt, kein Schatten mehr daneben');
+  sw.stop();
+  rmSync(d, { recursive: true, force: true });
+
+  const store = createSettingsStore({});
+  assert.equal(store.get().sync.shadow, false);
+  store.save({ ...store.stored(), sync: { adapter: null, shadow: true } });
+  assert.equal(store.get().sync.shadow, true);
+});

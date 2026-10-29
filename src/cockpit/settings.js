@@ -49,7 +49,7 @@ const EMPTY = {
   bridge: { enabled: null, tag: null },
   flameNote: { enabled: null },
   readingNotes: { folder: null, trashDays: null },
-  sync: { adapter: null },
+  sync: { adapter: null, shadow: null },
   mail: { token: null, senders: [], mailbox: null, doneMailbox: null, pollMinutes: null },
   embed: { url: null, model: null },
   tts: { provider: null, key: null, voice: null, model: null },
@@ -127,6 +127,8 @@ export function validateSettings(input) {
   const flameNote = { enabled: typeof input.flameNote?.enabled === 'boolean' ? input.flameNote.enabled : null };
   const syncAdapter = input.sync?.adapter ?? null;
   if (syncAdapter !== null && !SYNC_ADAPTERS.includes(syncAdapter)) throw new SettingsError(`Unbekannter Sync „${syncAdapter}“`, 'sync.adapter');
+  // Schattenbetrieb (VCP-133): der eigene Sync vergleicht nur, neben Obsidian Sync.
+  const syncShadow = typeof input.sync?.shadow === 'boolean' ? input.sync.shadow : null;
 
   const senders = [...new Set((input.mail?.senders ?? []).map((s) => text(s, 200, 'Absender', 'mail.senders')?.toLowerCase()).filter(Boolean))].slice(0, 50);
   for (const s of senders) {
@@ -213,7 +215,7 @@ export function validateSettings(input) {
     ? [...new Set(input.hiddenEvents.map((t) => text(t, 200, 'Ausgeblendeter Termin', 'hiddenEvents')).filter(Boolean))].slice(0, 50)
     : null;
 
-  return { tz, vaultName: text(input.vaultName, 200, 'Vault-Name', 'vaultName'), inboxFolder, zunder: { url: zunderUrl, token: zunderToken }, bridge, flameNote, readingNotes: { folder: readingFolder, trashDays }, sync: { adapter: syncAdapter }, mail, embed, tts, episodes, ingest, calendars, hiddenEvents, session: validateSession(input.session) };
+  return { tz, vaultName: text(input.vaultName, 200, 'Vault-Name', 'vaultName'), inboxFolder, zunder: { url: zunderUrl, token: zunderToken }, bridge, flameNote, readingNotes: { folder: readingFolder, trashDays }, sync: { adapter: syncAdapter, shadow: syncShadow }, mail, embed, tts, episodes, ingest, calendars, hiddenEvents, session: validateSession(input.session) };
 }
 
 const days = (v, what, field) => {
@@ -266,6 +268,7 @@ export function createSettingsStore({ file = null, defaults = {}, logger = conso
     flameNoteEnabled: true,
     readingNotesFolder: 'raw',
     syncAdapter: 'obsidian-headless',
+    syncShadow: false,
     readingTrashDays: 30,
     mailToken: null,
     mailSenders: [],
@@ -316,7 +319,7 @@ export function createSettingsStore({ file = null, defaults = {}, logger = conso
         bridge: { enabled: stored.bridge.enabled ?? d.bridgeEnabled, tag: stored.bridge.tag ?? d.bridgeTag },
         flameNote: { enabled: stored.flameNote.enabled ?? d.flameNoteEnabled },
         readingNotes: { folder: stored.readingNotes?.folder ?? d.readingNotesFolder, trashDays: stored.readingNotes?.trashDays ?? d.readingTrashDays },
-        sync: { adapter: stored.sync?.adapter ?? d.syncAdapter },
+        sync: { adapter: stored.sync?.adapter ?? d.syncAdapter, shadow: stored.sync?.shadow ?? d.syncShadow ?? false },
         // Mail-Abruf nur mit Token und freigegebenen Absendern, damit eine fremde Mail nichts anlegt.
         mail:
           mailToken && senders.length

@@ -18,6 +18,10 @@ import { isImagePath } from '../vault/images.js';
  *
  * Ein voller Abgleich mit der Platte läuft beim Start und alle `rescanMs`
  * (Netz für Anhänge, die der Watcher bewusst nicht meldet).
+ *
+ * Mit `readOnly` läuft der Adapter im Schattenbetrieb (VCP-133) neben einem
+ * anderen Sync: Das Journal folgt der Platte, Geräte können nur lesen und
+ * Vergleichsberichte schicken.
  */
 export function createCockpitSyncAdapter({
   vaultPath,
@@ -26,11 +30,12 @@ export function createCockpitSyncAdapter({
   watch,
   logger = console,
   journal: givenJournal = null,
+  readOnly = false,
 }) {
   let journal = givenJournal;
   if (!journal) {
     mkdirSync(dataDir, { recursive: true });
-    journal = createSyncJournal({ vaultPath, dbPath: join(dataDir, 'sync.db'), blobDir: join(dataDir, 'sync-blobs'), logger });
+    journal = createSyncJournal({ vaultPath, dbPath: join(dataDir, 'sync.db'), blobDir: join(dataDir, 'sync-blobs'), logger, readOnly });
   }
   let watcher = null;
   let timer = null;
@@ -52,7 +57,7 @@ export function createCockpitSyncAdapter({
   }
 
   return {
-    name: 'cockpit',
+    name: readOnly ? 'cockpit-shadow' : 'cockpit',
     journal,
 
     start({ onChanges }) {
@@ -90,7 +95,7 @@ export function createCockpitSyncAdapter({
       const devices = journal.devices();
       const last = devices.map((d) => [d.pullAt, d.pushAt]).flat().filter(Boolean).sort().at(-1) ?? null;
       return {
-        adapter: 'cockpit',
+        adapter: readOnly ? 'cockpit-shadow' : 'cockpit',
         watching: Boolean(watcher),
         state: lastError ? 'error' : 'synced',
         lastSyncAt: last,
@@ -98,6 +103,7 @@ export function createCockpitSyncAdapter({
         lastError,
         cursor: journal.cursor(),
         devices,
+        shadow: journal.shadow(),
       };
     },
 

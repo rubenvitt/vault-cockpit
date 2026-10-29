@@ -467,12 +467,13 @@ const week = {
 };
 
 /** Web-Cockpit mit einer fertigen Sitzung (signiertes Cookie), ohne Login-Runde. */
-async function withWeb(health, run) {
+async function withWeb(health, run, extra = {}) {
   const SECRET = 'x'.repeat(40);
   const webHttp = createWebHttp({
     cockpit: { week: async () => week },
     settings: createSettingsStore({ logger: quiet }),
     health,
+    ...extra,
     oidc: { start: async () => ({ url: 'https://id.test/authorize', pending: {} }) },
     sessionSecret: SECRET,
     publicUrl: 'https://vault.test',
@@ -529,4 +530,47 @@ test('Web: /zustand nur angemeldet, Wochenansicht zeigt den Hinweis nur bei Fehl
     const settingsPage = await (await call('/einstellungen')).text();
     assert.match(settingsPage, /href="\/zustand"/);
   });
+});
+
+test('Web: Schattenbetrieb zeigt dauerhafte Abweichungen als Störung, Bericht als Markdown und JSON', async () => {
+  const at = new Date().toISOString();
+  const old = new Date(Date.now() - 30 * 60_000).toISOString();
+  const shadow = [
+    {
+      device: 't1',
+      name: 'iPhone',
+      client: 'obsidian-plugin/0.1.0',
+      at,
+      compared: 812,
+      diffs: [
+        { path: 'Inbox/Café.md', kind: 'only_local', since: old, lastSeen: at, resolvedAt: null },
+        { path: 'Neu.md', kind: 'different', since: at, lastSeen: at, resolvedAt: null },
+        { path: 'Alt.md', kind: 'only_server', since: old, lastSeen: old, resolvedAt: at },
+      ],
+    },
+  ];
+  const { health } = setup({ sync: { status: () => ({ state: 'synced', watching: true, lastSyncAt: at, shadow }) }, now: () => Date.now() });
+  await withWeb(
+    health,
+    async (call) => {
+      const html = await (await call('/zustand')).text();
+      assert.match(html, /<section class="svc state-error" id="dienst-sync">/);
+      assert.match(html, /Vergleich iPhone/);
+      assert.match(html, /1 Abweichung länger als 10 min: Inbox\/Café\.md \(nur auf dem Gerät/);
+      assert.match(html, /href="\/zustand\/sync-bericht\.md"/);
+
+      assert.equal((await call('/zustand/sync-bericht.md', { login: false })).status, 303);
+      const md = await call('/zustand/sync-bericht.md');
+      assert.equal(md.status, 200);
+      assert.match(md.headers.get('content-disposition'), /attachment; filename="sync-abweichungen-\d{4}-\d{2}-\d{2}\.md"/);
+      const text = await md.text();
+      assert.match(text, /## iPhone/);
+      assert.match(text, /Offen: 2, davon Probleme: 1/);
+      assert.match(text, /### Aufgelöst/);
+      const data = await (await call('/zustand/sync-bericht.json')).json();
+      assert.equal(data.devices[0].diffs.length, 3);
+      assert.equal(data.graceMinutes, 10);
+    },
+    { syncReport: () => ({ adapter: 'obsidian-headless', shadow }) },
+  );
 });

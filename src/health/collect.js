@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { maskSecrets } from './mask.js';
 import { writePrivate } from '../cockpit/settings.js';
 import { describeWeek, weekOf } from '../cockpit/week.js';
+import { shadowItems } from '../sync/shadow-report.js';
 
 const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
 
@@ -156,12 +157,16 @@ export function createHealth({
 
   function syncService() {
     const s = sync?.status() ?? { adapter: 'none', state: 'disabled' };
-    const [state, summary] = SYNC_STATE[s.state] ?? ['unknown', s.state];
+    const [ownState, summary] = SYNC_STATE[s.state] ?? ['unknown', s.state];
     const stale = s.state === 'stale';
+    // Vergleichsberichte der Geräte (Schattenbetrieb, VCP-133); dauerhafte Abweichungen sind eine Störung.
+    const shadow = s.shadow ? shadowItems(s.shadow, now()) : null;
+    const state = shadow?.some((i) => i.state === 'error') ? 'error' : ownState;
     return {
       id: 'sync',
       name: 'Sync',
       state,
+      ...(shadow ? { items: shadow, links: [{ href: '/zustand/sync-bericht.md', label: 'Abweichungsbericht (Markdown)' }, { href: '/zustand/sync-bericht.json', label: 'JSON' }] } : {}),
       summary: s.state === 'unknown' && s.reason ? s.reason : summary,
       lastOkAt: s.lastSyncAt ?? null,
       // Ohne eigenen Fehlertext gilt beim Stillstand das letzte Lebenszeichen.

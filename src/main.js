@@ -146,13 +146,14 @@ const cockpitSettings = createSettingsStore({
 // wirkt ohne Neustart; der eigene Sync legt Journal und Blobs neben den Index.
 const sync = createSyncSwitch({
   kind: cockpitSettings.get().sync.adapter,
+  shadow: cockpitSettings.get().sync.shadow,
   vaultPath: VAULT_PATH,
   statusFile: process.env.SYNC_STATUS_FILE || null,
   dataDir: dirname(INDEX_DB),
 });
 cockpitSettings.onChange(() => {
   try {
-    sync.switchTo(cockpitSettings.get().sync.adapter);
+    sync.switchTo(cockpitSettings.get().sync.adapter, { shadow: cockpitSettings.get().sync.shadow });
   } catch (err) {
     console.error(`Sync: Wechsel fehlgeschlagen, es läuft weiter ${sync.name}: ${err.message}`);
   }
@@ -505,6 +506,8 @@ const webHttp = process.env.WEB_CLIENT_ID
       // Synthesen: passende neue Markierungen als Belege anhängen (VCP-82).
       evidence: createSynthesisEvidence({ notes: noteDesk, index, store: reading, exporter: readingExport, embedCache, semantic: currentSemantic, vaultPath: VAULT_PATH, editor }),
       health,
+      // Abweichungsbericht des Schattenbetriebs zum Export (VCP-133).
+      syncReport: () => ({ adapter: sync.name, shadow: sync.journal?.shadow() ?? null }),
       // Lesen: Eingang, Stapel, Markiert; Artikel holt src/lesen/fetch.js (SSRF-geschützt).
       // „In Inbox“ aus der Leseansicht nutzt die Schnelleingabe des Cockpits.
       reading: readingRoutes({
@@ -626,7 +629,7 @@ app.listen(PORT, '0.0.0.0', () => {
   const tokenCount = (scope) => apiTokens.list().filter((t) => t.scope === scope).length;
   console.log(`  Capture     : /capture, /funke (${tokenCount('capture')} Capture-Tokens${LEGACY_CAPTURE_TOKEN ? ' + CAPTURE_TOKEN' : ''})${mail ? `, Mail aus „${mail.status().mailbox}“` : ''}`);
   console.log(`  Suche       : /api/search (${tokenCount('search')} Such-Tokens)`);
-  if (sync.journal) console.log(`  Eigener Sync: /sync/v1 (${tokenCount('sync')} Geräte-Tokens)`);
+  if (sync.journal) console.log(`  Eigener Sync: /sync/v1${sync.journal.readOnly ? ' im Schattenbetrieb, nur vergleichen' : ''} (${tokenCount('sync')} Geräte-Tokens)`);
   console.log(`  Lesestapel  : /lesestapel/speichern (${tokenCount('lesestapel')} Lesestapel-Tokens)`);
   const z = zunderSource();
   console.log(`  Zunder      : ${z ? `${z} (! → Inbox, Brücke ${bridgeState()})` : `aus (Einstellungen → Zunder), Brücke ${bridgeState()}`}`);

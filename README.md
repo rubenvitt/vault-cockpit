@@ -216,6 +216,16 @@ Obsidian Headless der Standard.
   neben dem Index unter `/data`. Das Journal lässt sich aus dem Vault neu
   aufbauen, Geräte gleichen dann einmal komplett ab.
 
+**Schattenbetrieb** (VCP-133), solange noch Obsidian Sync abgleicht: unter
+Einstellungen → Sync „Schattenbetrieb“ einschalten, der Sync bleibt Obsidian
+Headless. Das Cockpit führt das Journal dann nur lesend mit (`/sync/v1` lehnt
+Schreiben mit 403 ab), das Plugin im Modus „Nur vergleichen“ vergleicht den
+Vault jedes Geräts mit dem Stand im Cockpit und meldet Abweichungen. Unter
+**Zustand → Sync** steht je Gerät, was abweicht; länger als 10 Minuten offen
+gilt als Störung. Der ganze Bericht (offen und aufgelöst, 30 Tage) lädt sich
+als Markdown oder JSON herunter (`/zustand/sync-bericht.md`, `.json`), etwa um
+ihn vor dem Umstieg von Claude auswerten zu lassen.
+
 Protokoll (Bearer-Token, nur GET und POST):
 
 | Aufruf | Zweck |
@@ -225,6 +235,7 @@ Protokoll (Bearer-Token, nur GET und POST):
 | `GET /sync/v1/file?path=…[&hash=…]` | Inhalt als Bytes (`x-sync-hash`, `x-sync-seq`, `x-sync-mtime`); mit `hash` eine frühere Fassung |
 | `POST /sync/v1/file?path=…&base=<hash>[&mtime=<ms>]` | Datei schreiben, Body = Bytes; `base` leer = neu |
 | `POST /sync/v1/delete?path=…&base=<hash>` | Datei löschen |
+| `POST /sync/v1/report` | Vergleichsbericht im Schattenbetrieb, JSON `{compared, diffs: [{path, kind, since}]}` |
 
 `base` ist die Fassung (SHA-256), die das Gerät zuletzt vom Server kannte. Stimmt
 sie mit dem Server überein, wird einfach geschrieben bzw. gelöscht. Sonst löst der

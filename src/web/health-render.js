@@ -70,6 +70,7 @@ function serviceCard(s, tz, now) {
     <p class="svc-summary">${esc(s.summary ?? '')}</p>
     ${facts.length ? `<dl class="facts">${facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>` : ''}
     ${s.items?.length ? items(s.items, tz, now) : errorBox(s, tz, now)}
+    ${s.links?.length ? `<p class="meta">${s.links.map((l) => `<a href="${esc(l.href)}">${esc(l.label)}</a>`).join(' · ')}</p>` : ''}
   </section>`;
 }
 

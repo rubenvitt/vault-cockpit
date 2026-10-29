@@ -3,7 +3,7 @@ import { DEFAULT_HIDDEN_EVENTS } from '../cockpit/settings.js';
 import { esc, head, appHeader, icon } from './layout.js';
 import { backupSection, backupHint } from './backup-render.js';
 import { sessionSection, revokeForm } from './session-render.js';
-import { sectionStates, sectionNav, maskUrl, hostOf, KIND_LABELS as KIND_LABEL, SCOPE_LABELS as SCOPE_LABEL, languageOptions, syncOptions, SYNC_INTRO } from './settings-json.js';
+import { sectionStates, sectionNav, maskUrl, hostOf, KIND_LABELS as KIND_LABEL, SCOPE_LABELS as SCOPE_LABEL, languageOptions, syncOptions, SYNC_INTRO, SHADOW_HINT } from './settings-json.js';
 
 export { esc };
 
@@ -769,6 +769,11 @@ ${backupHint(backup)}
   <p class="meta">${esc(SYNC_INTRO)}</p>
   <div class="grid">
     <label>Sync<select name="sync.adapter">${syncOptions(d).map((o) => `<option value="${esc(o.value)}"${(stored.sync?.adapter ?? '') === o.value ? ' selected' : ''}>${esc(o.label)}</option>`).join('')}</select></label>
+    <label><span>Schattenbetrieb <span class="hint">${esc(SHADOW_HINT)}</span></span><select name="sync.shadow">
+      <option value=""${(stored.sync?.shadow ?? null) === null ? ' selected' : ''}>Standard (${d.syncShadow ? 'an' : 'aus'})</option>
+      <option value="an"${stored.sync?.shadow === true ? ' selected' : ''}>an</option>
+      <option value="aus"${stored.sync?.shadow === false ? ' selected' : ''}>aus</option>
+    </select></label>
   </div>
 </section>
 <section id="anzeige">

@@ -25,7 +25,20 @@ gehören `main.js` und `manifest.json` aus diesem Ordner.
   übernimmt. Ohne Obsidian Sync: den Ordner über die Dateien-App bzw. iCloud
   an dieselbe Stelle legen.
 
-## Was es tut
+## Modi
+
+- **Nur vergleichen** (Standard), solange noch Obsidian Sync läuft: schreibt
+  nichts, weder im Vault noch im Cockpit. Beim Start, alle paar Minuten und
+  beim Zurückkommen in die App vergleicht es jede Datei per SHA-256 mit dem
+  Stand im Cockpit und meldet, was abweicht (nur hier, nur im Cockpit,
+  verschieden), samt seit wann. Das Cockpit zeigt es unter Zustand → Sync und
+  exportiert es als Bericht. Im Cockpit dafür unter Einstellungen → Sync den
+  „Schattenbetrieb“ einschalten. Befehl „Abweichungen anzeigen“ listet sie hier.
+- **Synchronisieren** erst nach dem Umstieg (Cockpit: „Eigener Sync“,
+  Obsidian Sync aus). Gegen ein Cockpit im Schattenbetrieb verweigert das
+  Plugin das Synchronisieren.
+
+## Was es beim Synchronisieren tut
 
 - Gleicht ab beim Start, kurz nach Änderungen, alle paar Minuten (einstellbar)
   und beim Zurückkommen in die App; per Ribbon-Symbol oder Befehl „Jetzt
