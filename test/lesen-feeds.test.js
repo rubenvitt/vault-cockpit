@@ -942,7 +942,9 @@ test('Feeds: gelockerter Stichwort-Filter holt Aussortiertes nach, das noch im F
   tick(31);
   await poller.runDue();
   assert.equal(docsOf(store, feeds.blog).length, 1);
-  store.updateFeed(feeds.blog.id, { keyword_filter: 'rust, python' });
+  store.updateFeed(feeds.blog.id, { etag: '"v1"', last_modified: 'Mon, 19 Oct 2026 10:00:00 GMT' });
+  const changed = store.updateFeed(feeds.blog.id, { keyword_filter: 'rust, python' });
+  assert.deepEqual([changed.etag, changed.last_modified], [null, null], 'nächster Abruf ohne 304');
   tick(31);
   await poller.runDue();
   assert.deepEqual(docsOf(store, feeds.blog).map((d) => d.title).sort(), ['Beitrag 1', 'Beitrag 2']);
@@ -975,6 +977,9 @@ test('Feeds: fehlendes Icon wird nach einer Woche noch einmal gesucht', async ()
   await poller.runDue();
   assert.equal(store.getFeed(feeds.atom.id).icon, '');
   routes['https://atom.test/favicon.ico'] = async () => ({ url: 'https://atom.test/favicon.ico', status: 200, contentType: 'image/x-icon', bytes: Buffer.from([4, 5]), headers: {} });
+  // Der Feed antwortet sonst mit 304; für die Icon-Suche wird er ohne bedingte Anfrage geholt.
+  store.updateFeed(feeds.atom.id, { etag: '"a1"' });
+  routes['https://atom.test/feed.xml'] = (opts) => (opts.headers?.['if-none-match'] ? { url: 'https://atom.test/feed.xml', status: 304, body: '', headers: {} } : { url: 'https://atom.test/feed.xml', status: 200, body: ATOM, headers: { etag: '"a1"' } });
   tick(31);
   await poller.runDue();
   assert.equal(store.getFeed(feeds.atom.id).icon, '', 'zu früh');

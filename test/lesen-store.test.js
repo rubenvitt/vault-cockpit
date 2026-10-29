@@ -286,6 +286,9 @@ test('Lesestapel: Aufräumen löscht nur ungelesen Verworfenes vor dem Stichtag,
   const markiert = add('https://a.test/markiert');
   const gehoert = add('https://a.test/gehoert');
   const stapel = add('https://a.test/stapel');
+  const fertig = add('https://a.test/fertig');
+  store.setProgress(fertig.id, 1);
+  store.setStatus(fertig.id, 'weg', { read: false });
   store.setStatus(weg.id, 'weg');
   store.setStatus(gelesen.id, 'weg', { read: true });
   store.addHighlight({ doc_id: markiert.id, quote: 'x' });
@@ -301,7 +304,7 @@ test('Lesestapel: Aufräumen löscht nur ungelesen Verworfenes vor dem Stichtag,
 
   assert.equal(store.purgeDiscarded(new Date(c.now() - 24 * 60 * 60_000).toISOString()), 1);
   assert.equal(store.get(weg.id), null);
-  for (const d of [gelesen, markiert, gehoert, stapel, spaet]) assert.ok(store.get(d.id), d.url);
+  for (const d of [gelesen, markiert, gehoert, stapel, spaet, fertig]) assert.ok(store.get(d.id), d.url);
   assert.ok(store.knownEntries(feed.id).has('guid-1'), 'der Feed-Eintrag bleibt bekannt und kommt nicht wieder');
   assert.equal(store.purgeDiscarded(new Date(c.now() - 24 * 60 * 60_000).toISOString()), 0);
 });

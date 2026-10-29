@@ -182,3 +182,27 @@ test('Lesestapel: scheitert das Nachholen, bleibt der gekürzte Text', async () 
   assert.equal(await capture.runOnce(), 1);
   assert.equal(saved[0].bodyValues[1].value, 'gekürzt');
 });
+
+test('Lesestapel: Blob nur über https und höchstens 5 MB, auch ohne Content-Length', async () => {
+  const run = async (downloadUrl, body) => {
+    const email = { ...mail('n3', 'r@x.test', '[lesen] Lang', ''), bodyValues: { 1: { value: 'gekürzt', isTruncated: true } }, textBody: [{ partId: '1', blobId: 'b1', type: 'text/plain' }] };
+    const jmap = fakeJmap([email]);
+    const asked = [];
+    const fetch = async (url, init) => {
+      if (url.endsWith('/session')) return Response.json({ apiUrl: 'https://jmap.test/api', downloadUrl, primaryAccounts: { 'urn:ietf:params:jmap:mail': 'acc1' } });
+      if (url.includes('/dl/')) {
+        asked.push(url);
+        return new Response(body());
+      }
+      return jmap.fetch(url, init);
+    };
+    const saved = [];
+    await createMailCapture({ token: 't', sessionUrl: 'https://jmap.test/session', allowedSenders: ['r@x.test'], router: { route: async () => {} }, readingMail: { matches: () => true, save: async (e) => saved.push(e) }, fetch, logger: quiet }).runOnce();
+    return { asked, value: saved[0].bodyValues[1].value };
+  };
+  const plain = await run('http://jmap.test/dl/{blobId}', () => 'ganz');
+  assert.deepEqual(plain, { asked: [], value: 'gekürzt' }, 'kein Token über http');
+  // Gestreamt ohne Content-Length, über der Grenze: bleibt gekürzt.
+  const huge = () => new ReadableStream({ pull(c) { c.enqueue(new Uint8Array(1024 * 1024)); } });
+  assert.equal((await run('https://jmap.test/dl/{blobId}', huge)).value, 'gekürzt');
+});
