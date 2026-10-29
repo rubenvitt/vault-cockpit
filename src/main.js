@@ -337,7 +337,11 @@ const health = createHealth({
   calendars,
   flameNote,
   feeds: () => feedPoller.health(),
+  // Letzter Erfolg und Fehler je Dienst überstehen einen Neustart (VCP-60).
+  file: join(dirname(COCKPIT_SETTINGS_FILE), 'dienste-zustand.json'),
 });
+// Festhalten, was die Dienste melden, auch wenn gerade niemand /zustand ansieht.
+setInterval(() => health.services(), 60_000).unref();
 
 const graph = createGraph({ index, semantic: currentSemantic, zunder, calendar: calendarForGraph(calendars), tz: () => cockpitSettings.get().tz });
 // Ganzer Vault als Graph (VCP-40): Layout im Worker, Positionen neben dem Index gespeichert.
@@ -543,6 +547,8 @@ const mcpHttp = createVaultMcpHandler({
   sync,
   semantic: currentSemantic,
   graph,
+  // vault_stats zeigt dieselben Dienste wie /zustand (VCP-60).
+  health,
   zunderStatus: () => {
     const z = cockpitSettings.get().zunder;
     const b = bridge.enabled() ? `#${bridge.tag}${z ? '' : ' (ruht)'}` : 'off';

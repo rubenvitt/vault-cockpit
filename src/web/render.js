@@ -612,7 +612,7 @@ function shortcutSection(shortcuts, captureEnabled) {
  * zurückgegeben: Ein leeres Feld behält den gespeicherten Wert. Links eine
  * Sprungleiste mit dem Stand jedes Abschnitts, auf dem iPhone oben als Leiste.
  */
-export function renderSettings({ stored, defaults, checks = {}, notice = null, error = null, tokens = null, created = null, shortcuts = [], captureEnabled = false, tz = 'Europe/Berlin', user = null, csrf = '', backup = null }) {
+export function renderSettings({ stored, defaults, checks = {}, notice = null, error = null, tokens = null, created = null, shortcuts = [], captureEnabled = false, tz = 'Europe/Berlin', user = null, csrf = '', backup = null, health = false }) {
   const d = defaults;
   const token = `<input type="hidden" name="csrf" value="${esc(csrf)}">`;
   // Stand je Abschnitt (Text ohne HTML), derselbe wie in `/api/einstellungen`.
@@ -628,7 +628,7 @@ export function renderSettings({ stored, defaults, checks = {}, notice = null, e
 ${head('Einstellungen')}
 <body class="page-settings">
 ${appHeader({ current: 'einstellungen', user })}
-<div class="page-head"><h1>Einstellungen</h1><a href="/zustand" class="btn">Zustand der Dienste</a></div>
+<div class="page-head"><h1>Einstellungen</h1>${health ? '<a href="/zustand" class="btn">Zustand der Dienste</a>' : ''}</div>
 <main class="settings">
 <nav class="settings-nav" aria-label="Abschnitte">${nav
     .map(([id, label, state]) => `<a href="#${id}">${state ? `<span class="dot ${state[1]}" aria-hidden="true"></span>` : '<span class="dot" aria-hidden="true"></span>'}${label}</a>`)
