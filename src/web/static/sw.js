@@ -8,7 +8,8 @@
 // die Listen dazu), nie andere Notizen, Suche, Einstellungen oder `/api/…`.
 // Den Lesestoff nennt `/api/lesen/offline`; die Seite schickt dazu die
 // Nachricht `lesen-offline`. Abmelden und jeder neue Login löschen alles
-// außer der App-Hülle.
+// außer der App-Hülle. Eine neue Version holt die gespeicherten Leseansichten
+// sofort neu (VCP-98): Die alten trügen sonst Formulare und Skripte von vorher.
 'use strict';
 
 const { version, shell, mark, synthesis } = self.CONFIG;
@@ -21,6 +22,9 @@ const SHELL_PATHS = new Set(shell.map((p) => p.split('?')[0]));
 let generation = 0;
 // Leseseiten holt das Befüllen erst nach einem Tag wieder; Öffnen mit Netz frischt sie sofort auf.
 const FRESH_MS = 24 * 60 * 60 * 1000;
+// Mit welcher Version eine Seite gespeichert wurde; eine Leseansicht anderer Version gilt als veraltet.
+const VERSION_HEADER = 'x-cockpit-version';
+const outdated = (key, res) => key.startsWith('/lesen/doc?') && res.headers.get(VERSION_HEADER) !== version;
 
 /**
  * Schlüssel einer Leseseite, die offline liegen darf, sonst `null`: Leseansicht,
@@ -50,6 +54,8 @@ self.addEventListener('activate', (event) => {
     (async () => {
       for (const name of await caches.keys()) if (name.startsWith('cockpit-shell-') && name !== SHELL) await caches.delete(name);
       await self.clients.claim();
+      // Gespeicherte Leseansichten der alten Version jetzt auffrischen, solange Netz da ist; ohne bleiben sie.
+      await fill();
     })(),
   );
 });
@@ -119,7 +125,7 @@ async function fillReading() {
   }
   for (const key of wanted) {
     const hit = await cache.match(key);
-    if (hit && Date.now() - Date.parse(hit.headers.get('x-cockpit-stand') ?? '') < FRESH_MS) continue;
+    if (hit && !outdated(key, hit) && Date.now() - Date.parse(hit.headers.get('x-cockpit-stand') ?? '') < FRESH_MS) continue;
     let page;
     try {
       page = await fetch(key, { credentials: 'same-origin', redirect: 'manual', cache: 'no-store' });
@@ -146,6 +152,7 @@ async function remember(key, res, onlyKnown = false) {
   const gen = generation;
   const headers = new Headers(res.headers);
   headers.set('x-cockpit-stand', new Date().toISOString());
+  headers.set(VERSION_HEADER, version);
   const body = await res.blob();
   if (gen !== generation) return;
   const cache = await caches.open(PAGES);

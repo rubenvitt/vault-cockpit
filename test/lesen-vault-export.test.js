@@ -614,3 +614,67 @@ test('Notiz: Feed-Eintrag mit Diskussion verlinkt Original und Kommentare', () =
   );
   assert.match(text, /^\[Original\]\(<https:\/\/kuehn\.test\/a>\) · \[Kommentare\]\(<https:\/\/news\.ycombinator\.com\/item\?id=1>\) · Ann$/m);
 });
+
+// --- Nacharbeiten (VCP-98) ----------------------------------------------------------
+
+test('Kurzfassung nachtragen: alte Notiz bekommt sie als eigenen Bereich vor „## Markierungen“, einmal; eigener Text bleibt', async () => {
+  const { act } = decideRoutes();
+  // Wie vor VCP-96: archiviert mit Markierung, ohne Kurzfassung angelegt.
+  store.setStatus(doc.id, 'archiv');
+  store.addHighlight({ doc_id: doc.id, quote: 'Stelle' });
+  exporter.changed(doc.id);
+  exporter.flush();
+  const path = pathOf();
+  writeFileSync(join(root, path), read(path).replace('## Markierungen', 'Mein Satz oben.\n\n## Markierungen') + '\nMein Gedanke.\n');
+  idx.refresh(path);
+  const summary = () => findSection(read(path), 'kurzfassung');
+
+  // Die Kurzfassung steht auch im Volltext: Das zählt nicht als vorhanden.
+  store.updateDocument(doc.id, { excerpt: 'Der Stapel *wächst* & wächst.', content_html: ARTICLE });
+  await act('/aktion/lesen/doc/vault', { id: doc.id, volltext: '1' });
+  const text = read(path);
+  assert.equal(summary().inner, 'Der Stapel \\*wächst\\* & wächst.');
+  assert.match(text, /\nMein Satz oben\.\n\n<!-- cockpit:kurzfassung:start · [^\n]*-->\nDer Stapel \\\*wächst\\\* & wächst\.\n<!-- cockpit:kurzfassung:ende [0-9a-f]{8} -->\n\n## Markierungen\n/);
+  assert.ok(text.endsWith('## Eigene Gedanken\n\nMein Gedanke.\n'));
+
+  // Noch einmal: nichts doppelt; eine geänderte Kurzfassung frischt nur den Bereich auf.
+  await act('/aktion/lesen/doc/vault', { id: doc.id });
+  assert.equal(read(path), text);
+  store.updateDocument(doc.id, { excerpt: 'Neu gesagt.' });
+  await act('/aktion/lesen/doc/vault', { id: doc.id });
+  assert.equal(summary().inner, 'Neu gesagt.');
+  assert.equal(read(path).match(/cockpit:kurzfassung:start/g).length, 1);
+  assert.match(read(path), /Mein Satz oben\./);
+
+  // Eine neue Notiz hat die Kurzfassung im Kopf und bekommt keinen Bereich dazu.
+  const { doc: fresh } = store.addDocument({ url: 'https://blatt.test/neu', title: 'Neu', status: 'stapel', excerpt: 'Schon da.' });
+  await act('/aktion/lesen/doc/vault', { id: fresh.id });
+  await act('/aktion/lesen/doc/vault', { id: fresh.id });
+  const own = read(exporter.notePath(fresh.id));
+  assert.match(own, /\n\nSchon da\.\n\n## Markierungen/);
+  assert.equal(findSection(own, 'kurzfassung'), null);
+});
+
+test('Gesperrte Notiz: In den Vault und Ablegen melden es, schreiben nichts und lassen Status und Lesedatum', async () => {
+  const { act } = decideRoutes();
+  await act('/aktion/lesen/doc/vault', { id: doc.id });
+  await act('/aktion/lesen/doc/status', { id: doc.id, status: 'stapel' });
+  const path = pathOf();
+  const secret = '20-bereiche/Gesundheit/Stapel.md';
+  mkdirSync(join(root, '20-bereiche/Gesundheit'), { recursive: true });
+  renameSync(join(root, path), join(root, secret));
+  idx.refresh(path);
+  idx.refresh(secret);
+  const before = read(secret);
+  const readAt = store.get(doc.id).read_at;
+  assert.match(exporter.locked(doc.id), /„20-bereiche\/Gesundheit\/Stapel\.md“ liegt in einem vertraulichen/);
+
+  for (const [action, fields] of [['/aktion/lesen/doc/vault', { volltext: '1' }], ['/aktion/lesen/ablegen', {}]]) {
+    await assert.rejects(act(action, { id: doc.id, ...fields }), (err) => err.status === 409 && /^Nicht in den Vault geschrieben: Die Notiz „20-bereiche\/Gesundheit\/Stapel\.md“/.test(err.message));
+    assert.equal(store.get(doc.id).status, 'stapel', action);
+  }
+  assert.equal(store.get(doc.id).read_at, readAt);
+  assert.equal(read(secret), before);
+  assert.deepEqual(readdirSync(join(root, FOLDER)), []);
+  assert.equal(exporter.locked('gibt-es-nicht'), null);
+});
