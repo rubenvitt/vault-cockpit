@@ -125,6 +125,8 @@ test('Syntax: Satzzeichen am Zeilenende stören nicht (VCP-62)', () => {
   assert.equal(plan('Arzt anrufen morgen #gesundheit.').location.id, 'a-ges');
   // Der Punkt gehört zum Datum.
   assert.equal(plan('Abgabe 16.10.').due, '2026-10-16');
+  assert.equal(plan('Abgabe 16.10.!').due, '2026-10-16');
+  assert.equal(plan('Abgabe 16.10.,').title, 'Abgabe');
   // Kein Kürzel: der Satz bleibt, wie er ist.
   assert.equal(plan('Zahnarzt anrufen.').title, 'Zahnarzt anrufen.');
   assert.equal(plan('Termin für morgen.').title, 'Termin für morgen.');

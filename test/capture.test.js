@@ -54,6 +54,14 @@ test('capture.write legt dieselbe Capture-ID nur einmal an', () => {
   assert.equal(inbox().length, 1);
 });
 
+test('capture.write: dieselbe ID aus einer anderen Quelle ist eine eigene Notiz (VCP-56)', () => {
+  const a = capture.write({ title: 'Idee', text: 'eins', source: 'mail', captureId: 'x' });
+  const b = capture.write({ title: 'Idee', text: 'zwei', source: 'cockpit', captureId: 'x' });
+  assert.equal(b.duplicate, undefined);
+  assert.notEqual(b.path, a.path);
+  assert.equal(capture.write({ title: 'Idee', text: 'zwei', source: 'cockpit', captureId: 'x' }).path, b.path);
+});
+
 test('capture.write lehnt ungültige Quellen und IDs ab', () => {
   assert.throws(() => capture.write({ title: 'a', text: 'b', source: 'Böse\nQuelle' }), /Quelle/);
   assert.throws(() => capture.write({ title: 'a', text: 'b', captureId: 'a\nb' }), /Capture-ID/);

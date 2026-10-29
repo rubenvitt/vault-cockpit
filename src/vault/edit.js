@@ -108,9 +108,10 @@ export function createEditor({ vaultPath, index }) {
       mkdirSync(dirname(destination), { recursive: true });
       // Atomar ohne Überschreiben (VCP-59): Ein harter Link scheitert, wenn das Ziel
       // inzwischen existiert; erst danach verschwindet der alte Name.
+      let linked = false;
       try {
         linkSync(absolute, destination);
-        unlinkSync(absolute);
+        linked = true;
       } catch (err) {
         if (err.code === 'EEXIST' && !sameFile(absolute, destination)) throw taken();
         // Nur die Schreibweise geändert (Dateisystem ohne Groß/klein) oder keine harten
@@ -118,6 +119,15 @@ export function createEditor({ vaultPath, index }) {
         if (err.code !== 'EEXIST' && !['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'EMLINK', 'ENOSYS'].includes(err.code)) throw err;
         if (existsSync(destination) && !sameFile(absolute, destination)) throw taken();
         renameSync(absolute, destination);
+      }
+      if (linked) {
+        try {
+          unlinkSync(absolute);
+        } catch (err) {
+          // Alter Name bleibt: den neuen wieder entfernen, sonst gäbe es die Notiz zweimal.
+          try { unlinkSync(destination); } catch { /* bleibt als zweiter Name */ }
+          throw err;
+        }
       }
       reindex([relPath, to]);
       return { path: to, from: relPath, changed: true };
@@ -169,10 +179,11 @@ export function createEditor({ vaultPath, index }) {
         let fence = null;
         let count = 0;
         for (let i = 0; i < lines.length; i += 1) {
-          const f = lines[i].match(FENCE);
+          // Ein Zaun schließt nur mit derselben Sorte, mindestens gleich lang und ohne Info-Text.
+          const f = lines[i].match(/^\s*(`{3,}|~{3,})(.*)$/);
           if (f) {
             if (fence === null) fence = f[1];
-            else if (fence === f[1]) fence = null;
+            else if (f[1][0] === fence[0] && f[1].length >= fence.length && !f[2].trim()) fence = null;
             continue;
           }
           if (fence) continue;

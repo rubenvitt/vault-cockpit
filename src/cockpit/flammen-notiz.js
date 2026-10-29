@@ -134,6 +134,10 @@ export function planFlameUpdate(content, inner, { hasRows = true } = {}) {
   return planSection(content, NAME, inner, { label: LABEL, heading: 'Flammen', create: hasRows });
 }
 
+/** Verlaufsabrufe je Lauf: gleichzeitig und insgesamt (ms) (VCP-61). */
+const HISTORY_PARALLEL = 4;
+const HISTORY_BUDGET_MS = 20_000;
+
 /**
  * Hintergrunddienst: `update(weekId?)` trägt die Flammen einer Woche (Standard:
  * die laufende) ein, `afterFlame(task)` nach Start oder Stopp einer Flamme im Cockpit, `round()`
@@ -156,22 +160,31 @@ export function createFlameNote({ vaultPath, index, editor, policy, settings, zu
   async function blocksOf(z, tasks) {
     const out = new Map();
     if (!z.taskHistory) return out;
+    const pending = [];
     for (const t of tasks) {
       if (t.phoenix?.role !== 'flamme' || !t.flame_started_at) continue;
       const key = `${t.flame_started_at} ${t.flame_ended_at ?? ''}`;
       const hit = blockCache.get(t.id);
-      if (hit?.key === key) {
-        out.set(t.id, hit.blocks);
-        continue;
-      }
-      try {
-        const blocks = flameBlocks(await z.taskHistory(t.id));
-        blockCache.set(t.id, { key, blocks });
-        out.set(t.id, blocks);
-      } catch (err) {
-        logger.warn?.(`Feuer-Notiz: Verlauf von ${t.ref ?? t.id} nicht abrufbar, nur der letzte Block zählt — ${err.message}`);
-      }
+      if (hit?.key === key) out.set(t.id, hit.blocks);
+      else pending.push({ t, key });
     }
+    // Wenige Abrufe gleichzeitig und eine Frist für alle: Hängt Zunder, wartet die
+    // Notiz nicht Minuten. Was nicht drankommt, zählt diesmal nur den letzten Block.
+    const deadline = Date.now() + HISTORY_BUDGET_MS;
+    let next = 0;
+    const worker = async () => {
+      while (next < pending.length && Date.now() < deadline) {
+        const { t, key } = pending[next++];
+        try {
+          const blocks = flameBlocks(await z.taskHistory(t.id));
+          blockCache.set(t.id, { key, blocks });
+          out.set(t.id, blocks);
+        } catch (err) {
+          logger.warn?.(`Feuer-Notiz: Verlauf von ${t.ref ?? t.id} nicht abrufbar, nur der letzte Block zählt — ${err.message}`);
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(HISTORY_PARALLEL, pending.length) }, worker));
     return out;
   }
 

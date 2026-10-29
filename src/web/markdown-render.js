@@ -46,7 +46,7 @@ export function renderMarkdown(body, { checkbox = null, links = null, ids = new 
  * Inline-Teile siehe `parseInline`. `ids` sammelt die Anker über die ganze
  * Notiz (gleiche Überschriften bekommen `-2`, `-3` …).
  */
-export function parseMarkdown(body, { links = null, ids = new Map(), checkboxes = true } = {}) {
+export function parseMarkdown(body, { links = null, ids = new Map(), checkboxes = true, prefix = '' } = {}) {
   const lines = String(body ?? '').split(/\r?\n/);
   const out = [];
   let para = [];
@@ -56,7 +56,7 @@ export function parseMarkdown(body, { links = null, ids = new Map(), checkboxes 
   const inline = (s) => parseInline(s, links);
 
   const flushPara = () => {
-    if (para.length) out.push(media({ type: 'paragraph', content: joinLines(para.map(inline)) }, links, ids));
+    if (para.length) out.push(media({ type: 'paragraph', content: joinLines(para.map(inline)) }, links, ids, prefix));
     para = [];
   };
   const flushList = () => {
@@ -64,7 +64,7 @@ export function parseMarkdown(body, { links = null, ids = new Map(), checkboxes 
     list = null;
   };
   const flushQuote = () => {
-    if (quote.length) out.push(parseCallout(quote, { links, ids }) ?? { type: 'quote', content: joinLines(quote.map(inline)) });
+    if (quote.length) out.push(parseCallout(quote, { links, ids, prefix }) ?? { type: 'quote', content: joinLines(quote.map(inline)) });
     quote = [];
   };
   const flush = () => {
@@ -89,7 +89,7 @@ export function parseMarkdown(body, { links = null, ids = new Map(), checkboxes 
     const heading = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
     if (heading) {
       flush();
-      out.push({ type: 'heading', level: heading[1].length, id: uniqueId(heading[2], ids), content: inline(heading[2]) });
+      out.push({ type: 'heading', level: heading[1].length, id: prefix + uniqueId(heading[2], ids), content: inline(heading[2]) });
       continue;
     }
     if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) {
@@ -145,6 +145,9 @@ export function parseMarkdown(body, { links = null, ids = new Map(), checkboxes 
   return out;
 }
 
+/** Zähler der Einbettungen in `ids`; kein Anker beginnt so. */
+const EMBEDS = '\0embeds';
+
 /** Zeilen eines Absatzes oder Zitats: Inline-Teile mit `break` dazwischen. */
 const joinLines = (rows) => rows.flatMap((r, i) => (i ? [{ type: 'break' }, ...r] : r));
 
@@ -154,13 +157,17 @@ const joinLines = (rows) => rows.flatMap((r, i) => (i ? [{ type: 'break' }, ...r
  * `children` mit, wenn der Auflöser ihn hergibt (`links.embed`, VCP-63);
  * Checkboxen darin sind nur Anzeige, abgehakt wird in der Notiz selbst.
  */
-function media(block, links = null, ids = new Map()) {
+function media(block, links = null, ids = new Map(), prefix = '') {
   const [only, ...rest] = block.content;
   if (!only || rest.length) return block;
   if (only.type === 'image') return only;
   if (only.type === 'wikilink' && only.embed) {
     const inner = only.status === 'note' && !only.self ? links?.embed?.(only.path, only.heading) : null;
-    return inner ? { type: 'embed', link: only, children: parseMarkdown(inner.body, { links: inner.links, ids, checkboxes: false }) } : { type: 'embed', link: only };
+    if (!inner) return { type: 'embed', link: only };
+    // Eigene Anker je Einbettung (`e1-h-…`), damit `#Überschrift` der Notiz selbst ihr Ziel behält.
+    const n = (ids.get(EMBEDS) ?? 0) + 1;
+    ids.set(EMBEDS, n);
+    return { type: 'embed', link: only, children: parseMarkdown(inner.body, { links: inner.links, ids: new Map(), prefix: `${prefix}e${n}-`, checkboxes: false }) };
   }
   return block;
 }
@@ -299,13 +306,13 @@ const CALLOUT = {
  * plain), `label` der Standardtitel der Art; ohne eigenen Titel ist `title`
  * genau dieser. `foldable` mit `+`/`-`, `open` ist dann der Anfangszustand.
  */
-function parseCallout(quote, { links, ids }) {
+function parseCallout(quote, { links, ids, prefix = '' }) {
   const m = /^\[!([\w-]+)\]([+-]?)\s*(.*)$/.exec(quote[0].trim());
   if (!m) return null;
   const kind = m[1].toLowerCase();
   const [family, label] = CALLOUT[kind] ?? ['info', kind.charAt(0).toUpperCase() + kind.slice(1)];
   const title = m[3] ? parseInline(m[3], links) : [{ type: 'text', text: label }];
-  const children = parseMarkdown(quote.slice(1).join('\n'), { links, ids, checkboxes: false });
+  const children = parseMarkdown(quote.slice(1).join('\n'), { links, ids, prefix, checkboxes: false });
   return { type: 'callout', kind, family, label, title, foldable: Boolean(m[2]), open: m[2] !== '-', children };
 }
 
