@@ -136,6 +136,8 @@ export function createSyncJournal({
     while (!existsSync(probe)) probe = dirname(probe);
     const real = realpathSync(probe);
     if (real !== realRoot && !real.startsWith(realRoot + sep)) throw new SyncPathError('Pfad liegt außerhalb des Vaults');
+    // Auch nicht über einen Symlink in einen versteckten Ordner (.obsidian, .trash …).
+    if (real !== realRoot && isHidden(toPosix(real.slice(realRoot.length + 1)))) throw new SyncPathError('Versteckte Pfade werden nicht synchronisiert');
     return full;
   };
 
