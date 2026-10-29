@@ -1,7 +1,13 @@
-// Eingang sortieren (/lesen/eingang, src/lesen/inbox.js): Wischen und Tasten
-// sind nur Abkürzungen für die Knöpfe. Abschicken, Meldung mit Rückgängig und
-// das Nachladen von `main` übernimmt cockpit.js (Formular `.act`); deshalb
-// hängt alles am Dokument und sucht Karte und Formular jedes Mal neu.
+// Eingang sortieren (/lesen/eingang, src/lesen/inbox.js) und Wiedersehen
+// (/lesen/wiedersehen, src/lesen/review-page.js): Wischen und Tasten sind nur
+// Abkürzungen für die Knöpfe. Abschicken, Meldung mit Rückgängig und das
+// Nachladen von `main` übernimmt cockpit.js (Formular `.act`); deshalb hängt
+// alles am Dokument und sucht Karte und Formular jedes Mal neu.
+//
+// Das Formular `form.wisch` nennt die Ziele je Richtung (`data-links`,
+// `data-rechts`, `data-unten`); die Tasten stehen an den Knöpfen
+// (`aria-keyshortcuts`), auch an anderen Formularen wie „Rückgängig“ (Z) und
+// an einem `summary` (öffnet es und setzt den Fokus ins Textfeld).
 (() => {
   'use strict';
 
@@ -9,17 +15,23 @@
   const LOCK = 32; // Erst ab dieser Strecke steht die Richtung fest.
   const COMMIT = 0.3; // Anteil der Kartenbreite (seitlich) bzw. -höhe (nach unten) zum Auslösen.
 
-  const decideForm = () => document.querySelector('form.inbox-decide');
-  const toward = (card, dx, dy) =>
-    dx < -card.offsetWidth * COMMIT ? 'weg' : dx > card.offsetWidth * COMMIT ? 'lesen' : dy > card.offsetHeight * COMMIT ? 'stapel' : null;
+  const decideForm = () => document.querySelector('form.wisch');
+  /** Richtung (`links`, `rechts`, `unten`) oder null; nur Richtungen mit Ziel zählen. */
+  function toward(card, dx, dy) {
+    const form = decideForm();
+    const dir = dx < -card.offsetWidth * COMMIT ? 'links' : dx > card.offsetWidth * COMMIT ? 'rechts' : dy > card.offsetHeight * COMMIT ? 'unten' : null;
+    return dir && form?.dataset[dir] ? dir : null;
+  }
+  const directionOf = (form, ziel) => ['links', 'rechts', 'unten'].find((d) => form.dataset[d] === ziel) ?? null;
 
-  /** Schickt die Entscheidung über den passenden Knopf ab; die Karte fliegt in die Richtung. */
+  /** Schickt die Entscheidung über den passenden Knopf ab; die Karte fliegt in ihre Richtung. */
   function decide(ziel) {
     const form = decideForm();
     const button = form?.querySelector(`button[value="${ziel}"]`);
     if (!button || form.classList.contains('busy')) return;
     const card = document.querySelector('.inbox-card');
-    card?.classList.add(`fly-${ziel}`);
+    const fly = `fly-${directionOf(form, ziel) ?? 'rechts'}`;
+    card?.classList.add(fly);
     if (card) card.style.transform = '';
     const toasts = document.querySelector('.toasts');
     const before = toasts?.lastElementChild;
@@ -31,7 +43,7 @@
       if (form.classList.contains('busy')) return;
       watcher.disconnect();
       const last = toasts?.lastElementChild;
-      if (last && last !== before && last.classList.contains('error')) card.classList.remove(`fly-${ziel}`);
+      if (last && last !== before && last.classList.contains('error')) card.classList.remove(fly);
     }).observe(form, { attributes: true, attributeFilter: ['class'] });
   }
 
@@ -40,7 +52,7 @@
     if (e.persisted) location.reload();
   });
 
-  // --- Wischen: ← weg, ↓ Stapel, → lesen -----------------------------------
+  // --- Wischen: Ziele aus `form.wisch` (Eingang: ← weg, ↓ Stapel, → lesen) ---
 
   let drag = null;
   let swallowClick = false;
@@ -59,7 +71,8 @@
     if (!drag.axis) {
       if (Math.hypot(dx, dy) < LOCK) return;
       // Nur eine klar überwiegende Richtung zählt; schräg bleibt die Karte liegen.
-      drag.axis = Math.abs(dx) > 1.5 * Math.abs(dy) ? 'x' : dy > 1.5 * Math.abs(dx) ? 'y' : null;
+      // Nach unten nur, wo es ein Ziel gibt (im Wiedersehen scrollt die Seite).
+      drag.axis = Math.abs(dx) > 1.5 * Math.abs(dy) ? 'x' : dy > 1.5 * Math.abs(dx) && decideForm()?.dataset.unten ? 'y' : null;
       if (!drag.axis) {
         drag = null;
         return;
@@ -84,8 +97,8 @@
     // Ein Wischen, das auf dem Quellen-Link beginnt, soll ihn nicht öffnen.
     swallowClick = true;
     setTimeout(() => (swallowClick = false), 400);
-    const ziel = e.type === 'pointerup' ? toward(card, dx, dy) : null;
-    if (ziel) decide(ziel);
+    const dir = e.type === 'pointerup' ? toward(card, dx, dy) : null;
+    if (dir) decide(decideForm().dataset[dir]);
     else card.style.transform = '';
   };
   document.addEventListener('pointerup', end);
@@ -94,9 +107,16 @@
     if (swallowClick && e.target instanceof Element && e.target.closest('.inbox-card')) e.preventDefault();
   }, true);
 
-  // --- Tasten: ← / X weg, ↓ / S Stapel, → / Enter lesen, Z rückgängig, A im Vault ablegen ---
+  // --- Tasten: aus `aria-keyshortcuts` der Knöpfe (Eingang: ← / X weg, ↓ / S Stapel, → / Enter lesen, Z rückgängig, A ablegen) ---
 
-  const KEYS = { ArrowLeft: 'weg', x: 'weg', ArrowDown: 'stapel', s: 'stapel', ArrowRight: 'lesen', Enter: 'lesen' };
+  /** Element zur Taste: Knopf eines `.act`-Formulars oder ein `summary`. */
+  function target(key) {
+    for (const el of document.querySelectorAll('main form.act button[aria-keyshortcuts], main summary[aria-keyshortcuts]')) {
+      const keys = el.getAttribute('aria-keyshortcuts').split(/\s+/).map((k) => (k.length === 1 ? k.toLowerCase() : k));
+      if (keys.includes(key)) return el;
+    }
+    return null;
+  }
 
   document.addEventListener('keydown', (e) => {
     if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.isComposing || e.repeat) return;
@@ -104,16 +124,18 @@
     if (t?.closest('input, textarea, select, [contenteditable]')) return;
     // Enter auf einem Knopf oder Link bleibt dessen Sache.
     if (e.key === 'Enter' && t?.closest('a, button, summary')) return;
-    const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-    if (key === 'z' || key === 'a') {
-      const form = document.querySelector(key === 'z' ? 'form.inbox-undo' : 'form.inbox-ablegen');
-      if (!form || form.classList.contains('busy')) return;
-      e.preventDefault();
-      form.requestSubmit();
+    const el = target(e.key.length === 1 ? e.key.toLowerCase() : e.key);
+    if (!el) return;
+    e.preventDefault();
+    if (el instanceof HTMLElement && el.tagName === 'SUMMARY') {
+      const details = el.closest('details');
+      if (details) details.open = true;
+      details?.querySelector('textarea, input:not([type=hidden])')?.focus();
       return;
     }
-    if (!KEYS[key] || !decideForm()) return;
-    e.preventDefault();
-    decide(KEYS[key]);
+    const form = el.closest('form');
+    if (form.classList.contains('busy')) return;
+    if (form === decideForm()) decide(el.value);
+    else form.requestSubmit(el);
   });
 })();

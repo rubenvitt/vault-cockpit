@@ -131,6 +131,17 @@ export const MIGRATIONS = [
   CREATE INDEX ingests_status ON ingests(status, updated_at);`,
   // Zugangsdaten privater Feeds, verschlüsselt (src/cockpit/secret-box.js); nie in `url`.
   `ALTER TABLE feeds ADD COLUMN auth TEXT;`,
+  // Wiedersehen (VCP-85): wann zuletzt entschieden und der Stand davor (JSON) für ein dauerhaftes Rückgängig.
+  `ALTER TABLE highlights ADD COLUMN reviewed_at TEXT;
+  ALTER TABLE highlights ADD COLUMN review_prev TEXT;`,
+  // Lesestapel → Vault (VCP-85): Vorgemerktes übersteht einen Absturz, Fehlversuche zählen für den Backoff.
+  `CREATE TABLE export_pending (
+    doc_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_at TEXT,
+    last_error TEXT,
+    updated_at TEXT NOT NULL
+  );`,
 ];
 
 /** Zustände eines Ingest-Entwurfs (src/lesen/ingest.js). */
@@ -140,7 +151,7 @@ const INGEST_EDIT = ['status', 'origin', 'draft', 'error', 'applied', 'model', '
 export class ReadingError extends Error {}
 
 const DOC_FIELDS = ['url', 'canonical_url', 'comments_url', 'title', 'author', 'site', 'kind', 'origin', 'client_id', 'excerpt', 'content_html', 'content_text', 'word_count', 'reading_minutes', 'status', 'topics'];
-const HIGHLIGHT_EDIT = ['quote', 'prefix', 'suffix', 'start_hint', 'note', 'color', 'review_box', 'review_due', 'review_state'];
+const HIGHLIGHT_EDIT = ['quote', 'prefix', 'suffix', 'start_hint', 'note', 'color', 'review_box', 'review_due', 'review_state', 'reviewed_at', 'review_prev'];
 const FEED_EDIT = ['url', 'site_url', 'title', 'icon', 'paused', 'to_stack', 'keyword_filter', 'interval_minutes', 'etag', 'last_modified', 'last_fetch_at', 'last_error', 'error_count', 'next_fetch_at', 'group_id'];
 const GROUP_EDIT = ['name', 'paused', 'to_stack'];
 /** Filter `group` für `list`/`counts`: Gruppen-ID oder `ohne` (nicht aus einem Feed: Gespeichertes, Mail). */
@@ -435,6 +446,21 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
       return getHighlight(id);
     },
     deleteHighlight: (id) => db.prepare('DELETE FROM highlights WHERE id = ?').run(String(id ?? '')).changes > 0,
+
+    // --- Export in den Vault (src/lesen/vault-export.js) -------------------------
+
+    /** Dokument vormerken; eine neue Änderung setzt die Fehlversuche zurück. */
+    markExportPending(docId) {
+      if (!get(docId)) return;
+      db.prepare('INSERT INTO export_pending (doc_id, attempts, next_at, last_error, updated_at) VALUES (?, 0, NULL, NULL, ?) ON CONFLICT(doc_id) DO UPDATE SET attempts = 0, next_at = NULL, last_error = NULL, updated_at = excluded.updated_at').run(String(docId), iso());
+    },
+    /** Vorgemerkte Dokumente in der Reihenfolge des Vormerkens: `{ doc_id, attempts, next_at, last_error, updated_at }`. */
+    listExportPending: () => db.prepare('SELECT * FROM export_pending ORDER BY rowid').all(),
+    /** Fehlversuch festhalten: `next_at` ist der nächste Versuch (ISO). */
+    exportFailed(docId, { error, nextAt }) {
+      db.prepare('UPDATE export_pending SET attempts = attempts + 1, next_at = ?, last_error = ?, updated_at = ? WHERE doc_id = ?').run(nextAt, String(error ?? ''), iso(), String(docId));
+    },
+    exportDone: (docId) => db.prepare('DELETE FROM export_pending WHERE doc_id = ?').run(String(docId)).changes > 0,
 
     // --- Feeds ----------------------------------------------------------------
 
