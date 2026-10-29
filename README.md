@@ -67,7 +67,7 @@ Betrieb und Pfade im Container (die Compose-Datei setzt sie, sonst passen die St
 | `POLICY_FILE` | Pfad zur Policy (vertrauliche Ordner, Ausschlüsse) |
 | `VAULT_PATH`, `INDEX_DB`, `VECTOR_DB`, `CAPTURE_FOLDER` | Pfade, Standard `/vault`, `/data/index.db`, `/data/vectors.db`, `inbox` |
 | `REINDEX_INTERVAL_MIN` | Abstand der vollen Index-Neuaufbauten und der Brückenrunden, Standard 15 (Netz neben der Dateibeobachtung) |
-| `SYNC_ADAPTER` | `obsidian-headless` (Standard), `cockpit` ([eigener Sync](#eigener-sync-im-aufbau), im Aufbau) oder `none` (keine Dateibeobachtung, kein Sync-Status) |
+| `SYNC_ADAPTER` | nur noch Standard für **Einstellungen → Sync**: `obsidian-headless` (Standard), `cockpit` ([eigener Sync](#eigener-sync-im-aufbau)) oder `none` (keine Dateibeobachtung, kein Sync-Status) |
 | `SYNC_STATUS_FILE` | Statusdatei des Sync-Sidecars, z. B. `/sync-status/sync.json` |
 | `CAPTURE_STATE_FILE` | Merkzettel gegen doppelte Aufgaben, Standard `/data/capture-state.json` |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Abo-Token aus `claude setup-token` (ein Jahr gültig) für [Folgen](#lesen) „Podcast“ und „Report“, auch zu einem Thema mit Recherche im Vault und Internet; ohne gibt es nur „Vorlesen“. `ANTHROPIC_API_KEY` reicht das Cockpit bewusst nicht an die CLI weiter |
@@ -202,8 +202,9 @@ Obsidian-Plugin, der Merge bei Konflikten, Geräte im Web-Cockpit, Verlauf,
 Verschlüsselung und der Umstieg folgen (VCP-121 bis VCP-126). Bis dahin bleibt
 Obsidian Headless der Standard.
 
-- Einschalten mit `SYNC_ADAPTER=cockpit` und den Sidecar `vault-sync` vorher
-  stoppen (genau ein Sync pro Ordner).
+- Einschalten im Web-Cockpit unter **Einstellungen → Sync** („Eigener Sync“),
+  den Sidecar `vault-sync` vorher stoppen (genau ein Sync pro Ordner). Der Wechsel
+  wirkt ohne Neustart; solange der eigene Sync aus ist, antwortet `/sync/v1` mit 503.
 - Jedes Gerät bekommt unter Einstellungen → API-Tokens einen eigenen Token mit dem
   Recht **Sync**; der Tokenname ist der Gerätename. Ein Sync-Token liest und
   schreibt den ganzen Vault, auch vertrauliche Ordner. Widerrufen wirkt sofort.

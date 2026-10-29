@@ -7,7 +7,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createSyncJournal, checkSyncPath, SyncPathError } from '../src/sync/server/journal.js';
 import { createSyncHttp } from '../src/sync/server/http.js';
-import { createSyncAdapter } from '../src/sync/index.js';
+import { createSyncAdapter, createSyncSwitch } from '../src/sync/index.js';
+import { createSettingsStore, SettingsError } from '../src/cockpit/settings.js';
 import { createTokenStore } from '../src/cockpit/tokens.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
@@ -268,4 +269,49 @@ test('Journal: Datei über der Grenze wird übersprungen, nicht abgebrochen', ()
   j.close();
   rmSync(v, { recursive: true, force: true });
   rmSync(d, { recursive: true, force: true });
+});
+
+test('Sync umschaltbar: Wechsel stoppt den alten Adapter und startet den neuen mit denselben Empfängern', () => {
+  const d = mkdtempSync(join(tmpdir(), 'sync-switch-'));
+  const watch = () => ({ close() {}, on() {} });
+  const sw = createSyncSwitch({ kind: 'none', vaultPath: vault, dataDir: d, logger: quiet, watch });
+  const seen = [];
+  sw.start({ onChanges: (b) => seen.push(b) });
+  assert.equal(sw.name, 'none');
+  assert.equal(sw.journal, null);
+  assert.equal(sw.switchTo('none'), false);
+
+  assert.equal(sw.switchTo('cockpit'), true);
+  assert.equal(sw.name, 'cockpit');
+  assert.ok(sw.journal);
+  sw.notifyWrite('x.md');
+  assert.deepEqual(seen, [{ paths: ['x.md'] }], 'der neue Adapter meldet an dieselben Empfänger');
+
+  assert.throws(() => sw.switchTo('gibtsnicht'), /Unbekannter Sync-Adapter/);
+  assert.equal(sw.name, 'cockpit', 'ein fehlgeschlagener Wechsel lässt den alten laufen');
+  sw.switchTo('none');
+  assert.equal(sw.journal, null);
+  sw.stop();
+  rmSync(d, { recursive: true, force: true });
+});
+
+test('ohne eingeschalteten eigenen Sync antwortet /sync/v1 mit 503, ohne Token weiter mit 401', async () => {
+  const off = createSyncHttp({ tokens, journal: () => null, logger: quiet });
+  const srv = http.createServer((req, res) => off.handle(req, res, new URL(req.url, 'http://localhost')));
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const at = `http://127.0.0.1:${srv.address().port}/sync/v1/state`;
+  assert.equal((await fetch(at)).status, 401);
+  const res = await fetch(at, { headers: { authorization: `Bearer ${mac}` } });
+  assert.equal(res.status, 503);
+  assert.equal((await res.json()).error, 'sync_off');
+  srv.close();
+});
+
+test('Einstellungen: Sync-Wahl wird geprüft, Standard kommt aus der Umgebung', () => {
+  const store = createSettingsStore({ defaults: { syncAdapter: 'none' } });
+  assert.equal(store.get().sync.adapter, 'none');
+  store.save({ ...store.stored(), sync: { adapter: 'cockpit' } });
+  assert.equal(store.get().sync.adapter, 'cockpit');
+  assert.throws(() => store.save({ ...store.stored(), sync: { adapter: 'dropbox' } }), (err) => err instanceof SettingsError && err.field === 'sync.adapter');
+  assert.equal(createSettingsStore({}).get().sync.adapter, 'obsidian-headless');
 });
