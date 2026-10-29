@@ -117,6 +117,18 @@ function readBody(req) {
 
 const LOGIN = 'vc_login';
 const FLASH = 'vc_flash';
+// Adresse im Flash-Cookie: höchstens so viele UTF-8-Bytes, damit das Cookie samt Meldung und Signatur unter 4 KB bleibt.
+const DRAFT_BYTES = 1500;
+/** Text auf höchstens `max` UTF-8-Bytes gekürzt, ohne ein Zeichen zu zerteilen. */
+const cutBytes = (s, max) => {
+  if (Buffer.byteLength(s) <= max) return s;
+  let out = '';
+  for (const ch of s) {
+    if (Buffer.byteLength(out + ch) > max) break;
+    out += ch;
+  }
+  return out;
+};
 
 const HTML_HEADERS = {
   'content-type': 'text/html; charset=utf-8',
@@ -476,7 +488,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     const url = new URL(back, publicUrl);
     // Graph- und Lesen-Seiten rendern sich aus der Meldung im Cookie neu; die eingegebene Adresse geht mit (`draft`).
     if (url.pathname === '/graph' || READING_PAGES[url.pathname]) {
-      const draft = opts.draft && url.pathname !== '/graph' ? String(opts.draft).slice(0, 2000) : null;
+      const draft = opts.draft && url.pathname !== '/graph' ? cutBytes(String(opts.draft), DRAFT_BYTES) : null;
       return redirect(res, back, [flashCookie(draft ? { ...opts.flash, draft } : opts.flash)]);
     }
     if (url.pathname === '/planen' && plan) return planPage(req, res, url, session, opts);
