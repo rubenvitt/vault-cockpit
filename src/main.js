@@ -46,6 +46,7 @@ import { createCockpitActions } from './cockpit/actions.js';
 import { createWeekPlanner } from './cockpit/plan.js';
 import { createNoteDesk } from './cockpit/notes.js';
 import { createFlameNote } from './cockpit/flammen-notiz.js';
+import { createFlameBlocks } from './cockpit/flammen-bloecke.js';
 import { createOllamaEmbedder } from './semantic/embedder.js';
 import { createSemanticIndex } from './semantic/index.js';
 import { hybridSearch } from './semantic/search.js';
@@ -186,7 +187,10 @@ const calendars = createCalendarSources({ settings: cockpitSettings });
 // Ob Zunder den Zugang annimmt, merkt sich der Client bei jedem Aufruf (Seite
 // „Zustand“); ein neuer Zugang fängt von vorn an.
 const zunderAccess = createRunLog();
+// Verlauf der Flammen, geteilt von Wochenansicht, Rückblick und Feuer-Notiz (VCP-118).
+const flameBlocks = createFlameBlocks();
 const cockpit = createCockpit({
+  flameBlocks,
   index,
   settings: cockpitSettings,
   calendars,
@@ -313,7 +317,7 @@ sync.start({
 
 // Flammen der Woche mit gemessener Zeit in die Feuer-Notiz (VCP-52): nach
 // Start/Stopp im Cockpit und im Reindex-Intervall, abschaltbar in den Einstellungen.
-const flameNote = createFlameNote({ vaultPath: VAULT_PATH, index, editor, policy: POLICY, settings: cockpitSettings, zunder });
+const flameNote = createFlameNote({ vaultPath: VAULT_PATH, index, editor, policy: POLICY, settings: cockpitSettings, zunder, flameBlocks });
 setInterval(() => flameNote.round(), Number(process.env.REINDEX_INTERVAL_MIN ?? 15) * 60_000).unref();
 flameNote.round();
 // Eingeschaltet in den Einstellungen: gleich schreiben, nicht erst im nächsten Intervall (VCP-61).
