@@ -108,11 +108,20 @@ export function createMailCapture({
           .replace('{blobId}', encodeURIComponent(part.blobId))
           .replace('{type}', encodeURIComponent(part.type ?? 'application/octet-stream'))
           .replace('{name}', encodeURIComponent(part.name ?? 'teil'));
+        // Der Token geht nur über https mit.
+        if (new URL(url).protocol !== 'https:') throw new Error('Download-Adresse ohne https');
         const res = await fetch(url, { headers: { authorization: headers.authorization }, signal: AbortSignal.timeout(30_000) });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         if (Number(res.headers.get?.('content-length')) > MAX_BLOB) throw new Error('zu groß');
-        const buf = Buffer.from(await res.arrayBuffer());
-        if (buf.length > MAX_BLOB) throw new Error('zu groß');
+        // Mitzählen statt erst alles zu puffern: Ohne Content-Length gäbe es sonst keine Grenze.
+        const chunks = [];
+        let size = 0;
+        for await (const chunk of res.body ?? []) {
+          size += chunk.length;
+          if (size > MAX_BLOB) throw new Error('zu groß');
+          chunks.push(chunk);
+        }
+        const buf = Buffer.concat(chunks);
         bodyValues[part.partId] = { value: decodePart(buf, part.charset), isTruncated: false };
       } catch (err) {
         logger.warn?.(`Mail-Capture: Teil ${part.partId} von Mail ${email.id} nur gekürzt (${err.message})`);

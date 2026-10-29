@@ -269,6 +269,8 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
     if (!patch) return patch;
     if ('keyword_filter' in patch && (patch.keyword_filter || null) !== (feed.keyword_filter || null)) {
       db.prepare('DELETE FROM feed_entries WHERE feed_id = ? AND filtered = 1').run(feed.id);
+      // Ohne ETag und Last-Modified kommt der Feed beim nächsten Abruf ganz, auch wenn er sich nicht geändert hat.
+      patch = { etag: null, last_modified: null, ...patch };
     }
     if (patch.paused === false && feed.paused) return { last_error: null, error_count: 0, next_fetch_at: null, ...patch };
     return patch;
@@ -431,14 +433,14 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
 
     /**
      * Aufräumen (VCP-86): löscht Verworfenes, das seit vor `before` (ISO) auf
-     * `weg` steht und nie gelesen oder gehört wurde und keine Markierung hat.
+     * `weg` steht und nie (zu Ende) gelesen oder gehört wurde und keine Markierung hat.
      * „Fertig, weg“ nach dem Lesen (`read_at`) bleibt samt Markierungen.
      * Feed-Einträge bleiben bekannt (`feed_entries.doc_id` wird leer), kommen
      * also nicht wieder. Liefert die Zahl gelöschter Dokumente.
      */
     purgeDiscarded(before) {
       return db
-        .prepare(`DELETE FROM documents WHERE status = 'weg' AND status_changed_at < ? AND read_at IS NULL AND heard_at IS NULL
+        .prepare(`DELETE FROM documents WHERE status = 'weg' AND status_changed_at < ? AND read_at IS NULL AND heard_at IS NULL AND progress < 1
           AND NOT EXISTS (SELECT 1 FROM highlights h WHERE h.doc_id = documents.id)`)
         .run(String(before)).changes;
     },

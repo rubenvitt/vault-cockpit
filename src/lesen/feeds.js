@@ -346,7 +346,9 @@ export function createFeedPoller({ store, fetchFeed = fetchFeedDefault, fetchPag
 
   /** Ein Feed: abrufen, neue Einträge anlegen. Liefert Anzahl neuer Dokumente und Felder für den Feed. */
   async function refresh(feed) {
-    const headers = { ...(feed.etag ? { 'if-none-match': feed.etag } : {}), ...(feed.last_modified ? { 'if-modified-since': feed.last_modified } : {}) };
+    // Steht eine Icon-Suche an, ohne bedingte Anfrage: Ein 304 brächte die Icon-Adresse aus dem Feed nicht mit.
+    const conditional = !iconDue(feed);
+    const headers = conditional ? { ...(feed.etag ? { 'if-none-match': feed.etag } : {}), ...(feed.last_modified ? { 'if-modified-since': feed.last_modified } : {}) } : {};
     const auth = feed.has_auth ? store.feedAuth(feed.id) : null;
     const res = await fetchFeed(feed.url, { headers, ...(auth ? { auth } : {}) });
     if (res.status === 304) return { added: 0, patch: {} };
