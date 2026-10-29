@@ -14,6 +14,7 @@ import { renderPlan, planRoutes, PLAN_CSS } from './plan-page.js';
 import { renderHealth, healthAlert, HEALTH_CSS } from './health-render.js';
 import { offlineFiles, readingOfflineUrls, OFFLINE_CSS, OFFLINE_MARK, SYNTHESIS_FOLDER } from './offline.js';
 import { SettingsError, MAX_CALENDARS, TTS_PROVIDERS, SYNC_ADAPTERS } from '../cockpit/settings.js';
+import { shadowMarkdown, GRACE_MS } from '../sync/shadow-report.js';
 import { describeWeek, weekOf } from '../cockpit/week.js';
 import { ActionError, SETTABLE } from '../cockpit/actions.js';
 import { BackupError, MAX_BACKUP, checkPassphrase } from '../cockpit/backup.js';
@@ -225,7 +226,7 @@ for (const [path, file] of offlineFiles(PUBLIC, { html: HTML_HEADERS }).entries)
  * Die Sitzung ist ein signiertes Cookie und nur für diese Routen gültig; die
  * MCP-Schnittstelle prüft weiter ausschließlich Bearer-Tokens.
  */
-export function createWebHttp({ cockpit, settings, actions = null, notes = null, plan = null, reading = null, tokens = null, shortcuts = [], captureEnabled = false, calendars = null, graph = null, wholeGraph = null, search = null, evidence = null, health = null, backup = null, restart = () => {}, oidc, sessionSecret, publicUrl, appId = undefined, allowDevScheme = false, trustProxy = false, allowedSubjects = [], logger = console, now = () => Date.now() }) {
+export function createWebHttp({ cockpit, settings, actions = null, notes = null, plan = null, reading = null, tokens = null, shortcuts = [], captureEnabled = false, calendars = null, graph = null, wholeGraph = null, search = null, evidence = null, health = null, syncReport = null, backup = null, restart = () => {}, oidc, sessionSecret, publicUrl, appId = undefined, allowDevScheme = false, trustProxy = false, allowedSubjects = [], logger = console, now = () => Date.now() }) {
   const signer = createCookieSigner(sessionSecret);
   const secure = publicUrl.startsWith('https://');
   const sessions = createSessions({ signer, settings, allowedSubjects, secure, now });
@@ -395,6 +396,19 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       zunder: Boolean(actions && settings.get().zunder),
       evidence: evidence && note.frontmatter?.type === SYNTHESIS ? await evidence.suggest(note.path) : null,
     };
+  }
+
+  /** Abweichungsbericht des Schattenbetriebs (VCP-133) zum Herunterladen, als Markdown oder JSON. */
+  function syncReportExport(res, format) {
+    const { shadow, adapter } = syncReport();
+    const day = new Date(now()).toISOString().slice(0, 10);
+    const body = format === 'md' ? shadowMarkdown(shadow ?? [], { now: now(), adapter }) : `${JSON.stringify({ createdAt: new Date(now()).toISOString(), adapter, graceMinutes: GRACE_MS / 60_000, devices: shadow ?? [] }, null, 2)}\n`;
+    res.writeHead(200, {
+      'content-type': format === 'md' ? 'text/markdown; charset=utf-8' : 'application/json; charset=utf-8',
+      'content-disposition': `attachment; filename="sync-abweichungen-${day}.${format}"`,
+      'cache-control': 'no-store',
+    });
+    return res.end(body);
   }
 
   /** Notiz als JSON für die App (`/api/notiz?pfad=…`, siehe src/web/note-json.js). */
@@ -769,7 +783,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       bridge: { enabled: choice('bridge.enabled'), tag: field('bridge.tag') },
       flameNote: { enabled: choice('flameNote.enabled') },
       readingNotes: { folder: field('readingNotes.folder'), trashDays: field('readingNotes.trashDays') },
-      sync: { adapter: SYNC_ADAPTERS.includes(field('sync.adapter')) ? field('sync.adapter') : null },
+      sync: { adapter: SYNC_ADAPTERS.includes(field('sync.adapter')) ? field('sync.adapter') : null, shadow: choice('sync.shadow') },
       mail: {
         token: form.get('mail.clear') ? null : field('mail.token') || stored.mail.token,
         senders: list('mail.senders'),
@@ -1179,7 +1193,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   const BACKUP_ROUTES = backup ? { '/einstellungen/sicherung': downloadBackup, '/einstellungen/sicherung/wiederherstellen': restoreBackup } : {};
   const ACTION_ROUTES = new Set(Object.keys(ACTIONS));
   const SHORTCUT_ROUTES = new Map(shortcuts.map((s) => [`/kurzbefehle/${s.slug}.shortcut`, s]));
-  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...Object.keys(SETTINGS_API), ...PUBLIC.keys(), '/', '/api/woche', '/api/rueckblick', ...(plan ? ['/api/planen'] : []), '/api/sitzung', '/api/suche', ...(actions ? ['/api/erfassen/vorschau'] : []), '/rueckblick', ...(notes ? ['/notiz', '/notiz/bild'] : []), ...(plan ? ['/planen'] : []), '/graph', '/api/graph', ...(wholeGraph ? ['/graph/alles', '/api/graph/alles'] : []), ...Object.keys(READING_PAGES), '/einstellungen', ...(health ? ['/zustand'] : []), ...(tokens ? Object.keys(TOKEN_ROUTES) : []), ...Object.keys(BACKUP_ROUTES), '/einstellungen/abmelden', '/login', '/auth/callback', '/logout']);
+  const ROUTES = new Set([...ACTION_ROUTES, ...SHORTCUT_ROUTES.keys(), ...Object.keys(SETTINGS_API), ...PUBLIC.keys(), '/', '/api/woche', '/api/rueckblick', ...(plan ? ['/api/planen'] : []), '/api/sitzung', '/api/suche', ...(actions ? ['/api/erfassen/vorschau'] : []), '/rueckblick', ...(notes ? ['/notiz', '/notiz/bild'] : []), ...(plan ? ['/planen'] : []), '/graph', '/api/graph', ...(wholeGraph ? ['/graph/alles', '/api/graph/alles'] : []), ...Object.keys(READING_PAGES), '/einstellungen', ...(health ? ['/zustand'] : []), ...(syncReport ? ['/zustand/sync-bericht.md', '/zustand/sync-bericht.json'] : []), ...(tokens ? Object.keys(TOKEN_ROUTES) : []), ...Object.keys(BACKUP_ROUTES), '/einstellungen/abmelden', '/login', '/auth/callback', '/logout']);
   if (notes) for (const p of ['/wissen', '/api/wissen', '/api/notiz']) ROUTES.add(p);
   if (health) ROUTES.add('/api/zustand');
   if (notes || reading) ROUTES.add('/api/lesen/offline');
@@ -1338,6 +1352,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       if (path === '/rueckblick') return reviewPage(req, res, url, session);
       if (path === '/planen' && plan) return planPage(req, res, url, session);
       if (path === '/zustand' && health) return healthPage(req, res, session);
+      if (path.startsWith('/zustand/sync-bericht.') && syncReport) return syncReportExport(res, path.endsWith('.md') ? 'md' : 'json');
       return page(req, res, url, session);
     },
   };

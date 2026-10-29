@@ -1,5 +1,8 @@
 import { grantsOf } from '../../cockpit/tokens.js';
-import { SyncPathError, MAX_FILE_BYTES } from './journal.js';
+import { SyncPathError, MAX_FILE_BYTES, SHADOW_KINDS } from './journal.js';
+
+/** Höchstens so viele Abweichungen nimmt ein Vergleichsbericht an. */
+const MAX_REPORT_DIFFS = 2000;
 
 /**
  * Protokoll des eigenen Syncs (VCP-120), Version 1. Jedes Gerät hat einen
@@ -30,8 +33,15 @@ import { SyncPathError, MAX_FILE_BYTES } from './journal.js';
  * `entry.hash` von dem ab, was das Gerät hat, holt es die Datei neu. Ein
  * 409 `{error: "conflict", current}` kommt nur noch, wenn sich die Datei
  * gerade während des Abgleichs ändert: dann erneut versuchen. Bei
- * `error: "case"` gibt es den Pfad schon in anderer Groß-/Kleinschreibung. Die Kopfzeile `x-sync-client` (z. B.
- * `obsidian-plugin/0.1.0`) landet in der Geräteliste.
+ * `error: "case"` gibt es den Pfad schon in anderer Groß-/Kleinschreibung.
+ * Die Kopfzeile `x-sync-client` (z. B. `obsidian-plugin/0.1.0`) landet in der
+ * Geräteliste.
+ *
+ * Schattenbetrieb (VCP-133): Läuft daneben noch Obsidian Sync, ist das Journal
+ * nur lesend; `state` und `changes` tragen dann `readOnly: true`, Schreiben und
+ * Löschen antworten mit 403 `read_only`. Geräte vergleichen nur und melden das
+ * Ergebnis mit `POST /sync/v1/report` (JSON `{compared, diffs: [{path, kind,
+ * since}]}`, `kind` ist `only_local`, `only_server` oder `different`).
  */
 export function createSyncHttp({ tokens, journal: journalOf, onWrite = () => {}, maxFileBytes = MAX_FILE_BYTES, logger = console }) {
   // Das Journal gibt es nur, solange der eigene Sync eingestellt ist (Einstellungen → Sync).
@@ -50,15 +60,15 @@ export function createSyncHttp({ tokens, journal: journalOf, onWrite = () => {},
     return { id: t.id, name: t.name, client };
   }
 
-  function readBody(req) {
+  function readBody(req, limit = maxFileBytes) {
     return new Promise((resolve, reject) => {
       const declared = Number(req.headers['content-length']);
-      if (Number.isFinite(declared) && declared > maxFileBytes) return reject(Object.assign(new Error('zu groß'), { tooLarge: true }));
+      if (Number.isFinite(declared) && declared > limit) return reject(Object.assign(new Error('zu groß'), { tooLarge: true }));
       const chunks = [];
       let size = 0;
       req.on('data', (c) => {
         size += c.length;
-        if (size > maxFileBytes) {
+        if (size > limit) {
           reject(Object.assign(new Error('zu groß'), { tooLarge: true }));
           req.destroy();
           return;
@@ -87,6 +97,7 @@ export function createSyncHttp({ tokens, journal: journalOf, onWrite = () => {},
       return json(res, 200, body);
     }
     if (out.reason === 'too_large') return json(res, 413, { error: 'too_large' });
+    if (out.reason === 'read_only') return json(res, 403, { error: 'read_only', error_description: 'Schattenbetrieb: das Cockpit vergleicht nur, es schreibt nichts' });
     return json(res, 409, { error: out.reason, current: out.current ?? null });
   }
 
@@ -94,7 +105,7 @@ export function createSyncHttp({ tokens, journal: journalOf, onWrite = () => {},
     'GET /sync/v1/state': (req, res, url, dev, journal) => {
       const snap = journal.snapshot();
       journal.seen(dev, { pulled: true, cursor: snap.cursor });
-      return json(res, 200, snap);
+      return json(res, 200, journal.readOnly ? { ...snap, readOnly: true } : snap);
     },
 
     'GET /sync/v1/changes': (req, res, url, dev, journal) => {
@@ -103,7 +114,7 @@ export function createSyncHttp({ tokens, journal: journalOf, onWrite = () => {},
       if (since === null || limit === null || limit < 1) return json(res, 400, { error: '„since“ und „limit“ müssen ganze Zahlen ab 0 bzw. 1 sein' });
       const out = journal.changes(since, Math.min(limit, 1000));
       journal.seen(dev, { pulled: true, cursor: out.cursor });
-      return json(res, 200, out);
+      return json(res, 200, journal.readOnly ? { ...out, readOnly: true } : out);
     },
 
     'GET /sync/v1/file': (req, res, url, dev, journal) => {
@@ -143,6 +154,27 @@ export function createSyncHttp({ tokens, journal: journalOf, onWrite = () => {},
       const out = journal.put(path, data, { base, mtime, device: dev.id, deviceName: dev.name });
       journal.seen(dev, { pushed: true });
       return result(res, out, path);
+    },
+
+    'POST /sync/v1/report': async (req, res, url, dev, journal) => {
+      let body;
+      try {
+        body = JSON.parse((await readBody(req, 4 * 1024 * 1024)).toString('utf8'));
+      } catch (err) {
+        if (err.tooLarge) return json(res, 413, { error: 'too_large' });
+        return json(res, 400, { error: 'Bericht ist kein JSON' });
+      }
+      const diffs = Array.isArray(body?.diffs) ? body.diffs : null;
+      if (!diffs || diffs.length > MAX_REPORT_DIFFS) return json(res, 400, { error: `„diffs“ fehlt oder hat mehr als ${MAX_REPORT_DIFFS} Einträge` });
+      const clean = [];
+      for (const d of diffs) {
+        if (typeof d?.path !== 'string' || !d.path || d.path.length > 1024 || !SHADOW_KINDS.includes(d.kind)) return json(res, 400, { error: 'Abweichung braucht „path“ und „kind“' });
+        clean.push({ path: d.path, kind: d.kind, since: Number.isFinite(d.since) ? d.since : null });
+      }
+      const compared = Number.isInteger(body.compared) && body.compared >= 0 ? body.compared : 0;
+      journal.report(dev, { compared, diffs: clean });
+      journal.seen(dev, { pulled: true });
+      return json(res, 200, { ok: true, open: clean.length });
     },
 
     'POST /sync/v1/delete': (req, res, url, dev, journal) => {

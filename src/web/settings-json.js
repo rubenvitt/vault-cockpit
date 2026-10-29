@@ -20,6 +20,8 @@ export const KIND_LABELS = { ical: 'iCal-Abo', caldav: 'CalDAV' };
 export const SYNC_LABELS = { 'obsidian-headless': 'Obsidian Sync (Sidecar)', cockpit: 'Eigener Sync (im Aufbau)', none: 'aus' };
 /** Was auf der Seite unter „Sync“ steht. */
 export const SYNC_INTRO = 'Wer den Vault-Ordner auf dem Server abgleicht. Es darf nur ein Sync pro Ordner laufen: Vor dem Wechsel auf den eigenen Sync den Sidecar vault-sync stoppen. Der Wechsel wirkt sofort, ohne Neustart. Geräte des eigenen Syncs brauchen einen API-Token mit dem Recht „Sync“.';
+/** Hinweis zum Schattenbetrieb (VCP-133). */
+export const SHADOW_HINT = 'neben Obsidian Sync nur vergleichen, Abweichungen unter Zustand';
 export const syncOptions = (d) => [
   { value: '', label: `Standard (${SYNC_LABELS[d.syncAdapter ?? 'obsidian-headless'] ?? d.syncAdapter})` },
   ...Object.entries(SYNC_LABELS).map(([value, label]) => ({ value, label })),
@@ -75,7 +77,8 @@ export function sectionStates({ stored, defaults: d, checks = {} }) {
   const bridge = (stored.bridge.enabled ?? d.bridgeEnabled) ? ['an', 'ok'] : ['aus', 'off'];
   const flameNote = (stored.flameNote?.enabled ?? d.flameNoteEnabled ?? true) ? ['an', 'ok'] : ['aus', 'off'];
   const syncNow = stored.sync?.adapter ?? d.syncAdapter ?? 'obsidian-headless';
-  const sync = syncNow === 'none' ? ['aus', 'off'] : [SYNC_LABELS[syncNow] ?? syncNow, 'ok'];
+  const shadow = syncNow !== 'cockpit' && (stored.sync?.shadow ?? d.syncShadow ?? false);
+  const sync = syncNow === 'none' && !shadow ? ['aus', 'off'] : [`${SYNC_LABELS[syncNow] ?? syncNow}${shadow ? ', Schattenbetrieb' : ''}`, 'ok'];
   const problems = stored.calendars.filter((c) => checks[c.id] && !checks[c.id].ok).length;
   const kalender = !stored.calendars.length ? ['keine', 'off'] : problems ? [`${problems} von ${stored.calendars.length} nicht erreichbar`, 'warn'] : [`${stored.calendars.length} verbunden`, 'ok'];
   return { kalender, zunder, bruecke: bridge, 'feuer-notiz': flameNote, mail, lesestapel: null, embeddings: embed, vorlesen: voice, sync, anzeige: null, anmeldung: null };
@@ -163,7 +166,10 @@ function formSections(stored, d) {
     },
     sync: {
       intro: SYNC_INTRO,
-      fields: [field('sync.adapter', 'Sync', { kind: 'select', value: stored.sync?.adapter ?? '', options: syncOptions(d) })],
+      fields: [
+        field('sync.adapter', 'Sync', { kind: 'select', value: stored.sync?.adapter ?? '', options: syncOptions(d) }),
+        field('sync.shadow', 'Schattenbetrieb', { kind: 'select', hint: SHADOW_HINT, value: choice(stored.sync?.shadow ?? null), options: onOff(d.syncShadow ?? false) }),
+      ],
     },
     mail: {
       intro: 'Holt Mails aus einem Fastmail-Ordner ab und macht Notizen daraus, mit ! im Betreff Zunder-Aufgaben.',
@@ -327,7 +333,7 @@ export function settingsJson({ stored, defaults, checks = {}, tokens = null, cur
 const FIELDS = new Set([
   'tz', 'vaultName', 'inboxFolder',
   'zunder.url', 'zunder.token', 'zunder.clear',
-  'bridge.enabled', 'bridge.tag', 'flameNote.enabled', 'readingNotes.folder', 'readingNotes.trashDays', 'sync.adapter',
+  'bridge.enabled', 'bridge.tag', 'flameNote.enabled', 'readingNotes.folder', 'readingNotes.trashDays', 'sync.adapter', 'sync.shadow',
   'mail.token', 'mail.clear', 'mail.senders', 'mail.mailbox', 'mail.doneMailbox', 'mail.pollMinutes',
   'embed.url', 'embed.model',
   'tts.provider', 'tts.key', 'tts.clear', 'tts.voice', 'tts.model',
@@ -357,6 +363,7 @@ export function formOfSettings(stored) {
   put('flameNote.enabled', choice(stored.flameNote?.enabled ?? null));
   put('readingNotes.folder', stored.readingNotes?.folder);
   put('sync.adapter', stored.sync?.adapter);
+  put('sync.shadow', choice(stored.sync?.shadow ?? null));
   put('readingNotes.trashDays', stored.readingNotes?.trashDays);
   put('mail.senders', stored.mail.senders.join(', '));
   put('mail.mailbox', stored.mail.mailbox);

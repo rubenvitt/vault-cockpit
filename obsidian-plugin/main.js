@@ -20,6 +20,11 @@
  *
  * Gemerkt wird je Datei die Fassung des Servers (Hash) und Größe und mtime
  * der lokalen Datei dazu; so muss nur neu gehasht werden, was sich geändert hat.
+ *
+ * Modus „Nur vergleichen“ (Schattenbetrieb, VCP-133, Standard): Solange noch
+ * Obsidian Sync abgleicht, schreibt das Plugin nichts, weder lokal noch im
+ * Cockpit. Es vergleicht den lokalen Vault mit dem Stand im Cockpit und meldet
+ * die Abweichungen (createCompare), die das Cockpit unter Zustand zeigt.
  */
 
 let obsidian = null;
@@ -83,6 +88,11 @@ function createApi(request) {
       const r = await request('POST', '/sync/v1/file', params, data);
       if (r.status === 401 || r.status === 503) check(r);
       return { status: r.status, body: json(r) };
+    },
+    /** Vergleichsbericht im Schattenbetrieb. */
+    async report(body) {
+      const data = new TextEncoder().encode(JSON.stringify(body)).buffer;
+      return json(check(await request('POST', '/sync/v1/report', {}, data)));
     },
     async del(path, base) {
       const r = await request('POST', '/sync/v1/delete', { path, base: base || '' });
@@ -159,17 +169,24 @@ function createSyncEngine({ fs, api, state, save = async () => {}, log = () => {
     // Auf beiden Seiten geändert: das Schicken lässt den Server zusammenführen.
   }
 
+  // Im Schattenbetrieb schreibt das Cockpit nicht: dann auch hier nichts holen oder löschen.
+  const guard = (page) => {
+    if (page.readOnly) throw new SyncHttpError(403, 'Das Cockpit ist im Schattenbetrieb: im Plugin „Nur vergleichen“ wählen');
+  };
+
   async function pull() {
     if (state.cursor === null) {
       // Erster Abgleich (oder neuer Server): alles vergleichen, nichts vorausgesetzt.
-      state.files = {};
       const snap = await api.state();
+      guard(snap);
+      state.files = {};
       for (const entry of snap.files) await applyRemote(entry);
       state.cursor = snap.cursor;
       return;
     }
     for (;;) {
       const page = await api.changes(state.cursor);
+      guard(page);
       if (page.cursor < state.cursor) {
         // Der Server zählt neu (Journal neu aufgebaut): einmal komplett abgleichen.
         log('Sync: Server-Stand ist neu, gleiche komplett ab');
@@ -247,12 +264,62 @@ function createSyncEngine({ fs, api, state, save = async () => {}, log = () => {
   };
 }
 
-module.exports = { createSyncEngine, createApi, sha256, SyncHttpError, isHidden };
+/**
+ * Nur vergleichen (Schattenbetrieb): lokaler Vault gegen den Stand im
+ * Cockpit, ohne etwas zu schreiben. `state` merkt sich Hashes (`hashes`) und
+ * seit wann jede Abweichung besteht (`since`); der Bericht geht ans Cockpit.
+ */
+function createCompare({ fs, api, state, save = async () => {}, now = () => Date.now() }) {
+  if (!state.hashes) state.hashes = {};
+  if (!state.since) state.since = {};
+  return {
+    async compare() {
+      const snap = await api.state();
+      const remote = new Map(snap.files.filter((f) => !isHidden(f.path)).map((f) => [f.path, f.hash]));
+      const local = new Map();
+      for (const f of await fs.list()) {
+        if (isHidden(f.path)) continue;
+        const known = state.hashes[f.path];
+        if (known && known.size === f.size && known.mtime === f.mtime) {
+          local.set(f.path, known.hash);
+          continue;
+        }
+        const st = await fs.stat(f.path);
+        if (!st) continue;
+        const hash = await sha256(await fs.read(f.path));
+        state.hashes[f.path] = { hash, size: st.size, mtime: st.mtime };
+        local.set(f.path, hash);
+      }
+      for (const path of Object.keys(state.hashes)) if (!local.has(path)) delete state.hashes[path];
+
+      const t = now();
+      const diffs = [];
+      for (const path of new Set([...local.keys(), ...remote.keys()])) {
+        const l = local.get(path);
+        const r = remote.get(path);
+        if (l === r) continue;
+        const kind = r === undefined ? 'only_local' : l === undefined ? 'only_server' : 'different';
+        const key = `${kind}:${path}`;
+        diffs.push({ path, kind, since: state.since[key] ?? t });
+      }
+      state.since = Object.fromEntries(diffs.map((d) => [`${d.kind}:${d.path}`, d.since]));
+      diffs.sort((a, b) => a.path.localeCompare(b.path));
+      // Mehr nimmt das Cockpit nicht an; dann stimmt ohnehin Grundsätzliches nicht.
+      await api.report({ compared: local.size, diffs: diffs.slice(0, 2000) });
+      await save();
+      return { compared: local.size, diffs };
+    },
+  };
+}
+
+module.exports = { createSyncEngine, createCompare, createApi, sha256, SyncHttpError, isHidden };
 
 if (obsidian) {
   const { Plugin, PluginSettingTab, Setting, Notice, Platform, requestUrl, debounce, setIcon } = obsidian;
 
-  const DEFAULTS = { url: '', token: '', intervalMinutes: 5, state: { cursor: null, files: {} } };
+  // Erst vergleichen (neben Obsidian Sync), synchronisieren erst nach dem Umstieg.
+  const DEFAULTS = { url: '', token: '', mode: 'compare', intervalMinutes: 5, state: { cursor: null, files: {} }, compare: { hashes: {}, since: {} } };
+  const GRACE_MS = 10 * 60_000;
 
   /** Lokaler Vault über die Adapter-API (sieht auch Anhänge, schreibt Bytes). */
   const vaultFs = (app) => {
@@ -287,13 +354,15 @@ if (obsidian) {
       this.statusEl = this.addStatusBarItem();
       this.ribbon = this.addRibbonIcon('refresh-cw', 'Cockpit Sync: jetzt abgleichen', () => this.syncNow(true));
       this.addCommand({ id: 'sync-now', name: 'Jetzt abgleichen', callback: () => this.syncNow(true) });
+      this.addCommand({ id: 'show-diffs', name: 'Abweichungen anzeigen', callback: () => this.showDiffs() });
       this.addSettingTab(new CockpitSyncSettings(this.app, this));
       this.show('bereit');
 
       const soon = debounce(() => this.syncNow(), 5000, true);
       this.app.workspace.onLayoutReady(() => {
         this.syncNow();
-        for (const name of ['create', 'modify', 'delete', 'rename']) this.registerEvent(this.app.vault.on(name, soon));
+        // Nach Änderungen nur synchronisieren; beim Vergleichen läuft Obsidian Sync ohnehin noch hinterher.
+        for (const name of ['create', 'modify', 'delete', 'rename']) this.registerEvent(this.app.vault.on(name, () => this.settings.mode === 'sync' && soon()));
       });
       this.restartInterval();
       // Mobil: beim Zurückkommen in die App.
@@ -312,6 +381,33 @@ if (obsidian) {
       this.statusEl.setText(`Cockpit Sync: ${text}`);
       this.statusEl.toggleClass('mod-warning', error);
       this.ribbon.setAttribute('aria-label', `Cockpit Sync: ${text}`);
+    }
+
+    /** Schattenbetrieb: vergleichen und berichten, nichts schreiben. */
+    async compareNow(manual) {
+      const r = await createCompare({
+        fs: vaultFs(this.app),
+        api: createApi((...a) => this.request(...a)),
+        state: this.settings.compare,
+        save: () => this.saveSettings(),
+      }).compare();
+      this.last = new Date();
+      this.diffs = r.diffs;
+      const problems = r.diffs.filter((d) => Date.now() - d.since > GRACE_MS).length;
+      const time = this.last.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      this.show(
+        problems ? `Vergleich ${time}, ${problems} Abweichung(en)` : `Vergleich ✓ ${time}${r.diffs.length ? ` (${r.diffs.length} frisch)` : ''}`,
+        problems > 0,
+      );
+      if (manual) new Notice(`Cockpit Sync: ${r.compared} Dateien verglichen, ${r.diffs.length} Abweichung(en)`);
+    }
+
+    showDiffs() {
+      const list = this.diffs ?? [];
+      const label = { only_local: 'nur hier', only_server: 'nur im Cockpit', different: 'verschieden' };
+      if (!list.length) return new Notice('Cockpit Sync: keine Abweichungen beim letzten Vergleich');
+      const lines = list.slice(0, 20).map((d) => `${d.path} (${label[d.kind]}, seit ${Math.round((Date.now() - d.since) / 60_000)} min)`);
+      new Notice(`Cockpit Sync, Abweichungen:\n${lines.join('\n')}${list.length > 20 ? `\n… und ${list.length - 20} weitere (Cockpit → Zustand)` : ''}`, 20000);
     }
 
     async saveSettings() {
@@ -348,8 +444,12 @@ if (obsidian) {
       this.running = (async () => {
         do {
           this.again = false;
-          this.show('gleicht ab …');
+          this.show(this.settings.mode === 'sync' ? 'gleicht ab …' : 'vergleicht …');
           try {
+            if (this.settings.mode !== 'sync') {
+              await this.compareNow(manual);
+              continue;
+            }
             const engine = createSyncEngine({
               fs: vaultFs(this.app),
               api: createApi((...a) => this.request(...a)),
@@ -396,7 +496,10 @@ if (obsidian) {
           t.setPlaceholder('https://…').setValue(s.url).onChange(async (v) => {
             const url = v.trim();
             // Anderer Server: beim nächsten Mal komplett abgleichen.
-            if (url.replace(/\/+$/, '') !== s.url.replace(/\/+$/, '')) s.state = { cursor: null, files: {} };
+            if (url.replace(/\/+$/, '') !== s.url.replace(/\/+$/, '')) {
+              s.state = { cursor: null, files: {} };
+              s.compare = { hashes: {}, since: {} };
+            }
             s.url = url;
             await this.plugin.saveSettings();
           }),
@@ -411,6 +514,21 @@ if (obsidian) {
             await this.plugin.saveSettings();
           });
         });
+      new Setting(containerEl)
+        .setName('Modus')
+        .setDesc('„Nur vergleichen“, solange noch Obsidian Sync läuft: schreibt nichts und meldet Abweichungen ans Cockpit (Zustand → Sync). „Synchronisieren“ erst nach dem Umstieg.')
+        .addDropdown((d) =>
+          d
+            .addOption('compare', 'Nur vergleichen (neben Obsidian Sync)')
+            .addOption('sync', 'Synchronisieren')
+            .setValue(s.mode)
+            .onChange(async (v) => {
+              s.mode = v;
+              // Beim Wechsel aufs Synchronisieren einmal komplett abgleichen.
+              if (v === 'sync') s.state = { cursor: null, files: {} };
+              await this.plugin.saveSettings();
+            }),
+        );
       new Setting(containerEl)
         .setName('Abgleich alle … Minuten')
         .setDesc('Zusätzlich gleicht das Plugin beim Start, nach Änderungen und beim Zurückkommen in die App ab. 0 = nur dann.')

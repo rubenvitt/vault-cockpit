@@ -183,3 +183,67 @@ test('ohne gültigen Token bricht der Abgleich mit klarer Meldung ab', async () 
   const engine = createSyncEngine({ fs: { list: async () => [], stat: async () => null }, api, state: {} });
   await assert.rejects(engine.sync(), /Token ungültig/);
 });
+
+test('Schattenbetrieb: vergleichen schreibt nichts und meldet Abweichungen mit Dauer', async () => {
+  const { createCompare } = require('../obsidian-plugin/main.js');
+  const { shadowItems, shadowMarkdown } = await import('../src/sync/shadow-report.js');
+  const v = mkdtempSync(join(tmpdir(), 'shadow-vault-'));
+  const d = mkdtempSync(join(tmpdir(), 'shadow-data-'));
+  writeFileSync(join(v, 'Gleich.md'), 'gleich\n');
+  writeFileSync(join(v, 'Anders.md'), 'server\n');
+  writeFileSync(join(v, 'NurServer.md'), 'x\n');
+  let clock = Date.parse('2026-10-29T10:00:00Z');
+  const j = createSyncJournal({ vaultPath: v, dbPath: join(d, 'sync.db'), blobDir: join(d, 'blobs'), logger: quiet, readOnly: true, now: () => clock });
+  j.scan();
+  const t = tokens.create('iPhone-Schatten', 'sync');
+  const h = createSyncHttp({ tokens, journal: j, logger: quiet });
+  const srv = http.createServer((req, res) => h.handle(req, res, new URL(req.url, 'http://localhost')));
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const at = `http://127.0.0.1:${srv.address().port}`;
+  const request = async (method, path, params = {}, body) => {
+    const r = await fetch(`${at}${path}?${new URLSearchParams(params)}`, { method, headers: { authorization: `Bearer ${t.token}` }, body });
+    return { status: r.status, headers: Object.fromEntries(r.headers), body: await r.arrayBuffer() };
+  };
+  const api = createApi(request);
+
+  // Schreiben ist im Schattenbetrieb gesperrt, auch für ein Gerät im Modus „Synchronisieren“.
+  assert.equal((await api.put('Neu.md', Buffer.from('x'), null)).status, 403);
+  assert.ok(!existsSync(join(v, 'Neu.md')));
+  const mem = new Map([['Gleich.md', 'gleich\n'], ['Anders.md', 'gerät\n'], ['NurLokal.md', 'y\n']]);
+  const fs = {
+    list: async () => [...mem].map(([path, text]) => ({ path, size: text.length, mtime: 1 })),
+    stat: async (p) => (mem.has(p) ? { size: mem.get(p).length, mtime: 1 } : null),
+    read: async (p) => Buffer.from(mem.get(p)),
+    write: async () => assert.fail('Schattenbetrieb darf nicht schreiben'),
+    remove: async () => assert.fail('Schattenbetrieb darf nicht löschen'),
+  };
+  const engine = createSyncEngine({ fs, api, state: {} });
+  await assert.rejects(engine.sync(), /Schattenbetrieb/);
+
+  const state = {};
+  const cmp = createCompare({ fs, api, state, now: () => clock });
+  const first = await cmp.compare();
+  assert.equal(first.compared, 3);
+  assert.deepEqual(first.diffs.map((x) => [x.path, x.kind]), [['Anders.md', 'different'], ['NurLokal.md', 'only_local'], ['NurServer.md', 'only_server']]);
+
+  // 20 Minuten später: NurServer hat Obsidian Sync inzwischen gebracht, der Rest ist ein Problem.
+  clock += 20 * 60_000;
+  mem.set('NurServer.md', 'x\n');
+  const second = await cmp.compare();
+  assert.equal(second.diffs.length, 2);
+  const shadow = j.shadow();
+  assert.equal(shadow.length, 1);
+  assert.equal(shadow[0].name, 'iPhone-Schatten');
+  assert.equal(shadow[0].diffs.filter((x) => x.resolvedAt).length, 1);
+  const [item] = shadowItems(shadow, clock);
+  assert.equal(item.state, 'error');
+  assert.match(item.summary, /2 Abweichungen länger als 10 min: Anders\.md \(Inhalt verschieden, seit 20 min\)/);
+  const md = shadowMarkdown(shadow, { now: clock });
+  assert.match(md, /## iPhone-Schatten/);
+  assert.match(md, /\| `NurServer\.md` \| only_server \|/);
+
+  srv.close();
+  j.close();
+  rmSync(v, { recursive: true, force: true });
+  rmSync(d, { recursive: true, force: true });
+});

@@ -62,7 +62,27 @@ CREATE TABLE IF NOT EXISTS devices (
   push_at    INTEGER,
   cursor     INTEGER
 );
+-- Schattenbetrieb (VCP-133): Abweichungen, die Geräte beim Vergleichen melden.
+-- Eine Zeile je Gerät, Pfad und Art; \`resolved_at\` gesetzt, sobald sie weg ist.
+CREATE TABLE IF NOT EXISTS shadow_diffs (
+  device      TEXT NOT NULL,
+  path        TEXT NOT NULL,
+  kind        TEXT NOT NULL,
+  since       INTEGER NOT NULL,
+  last_seen   INTEGER NOT NULL,
+  resolved_at INTEGER,
+  PRIMARY KEY (device, path, kind, since)
+);
+CREATE TABLE IF NOT EXISTS shadow_reports (
+  device   TEXT PRIMARY KEY,
+  at       INTEGER NOT NULL,
+  compared INTEGER NOT NULL,
+  open     INTEGER NOT NULL
+);
 `;
+
+/** Arten einer Abweichung im Schattenbetrieb. */
+export const SHADOW_KINDS = ['only_local', 'only_server', 'different'];
 
 const sha256 = (data) => createHash('sha256').update(data).digest('hex');
 
@@ -95,6 +115,8 @@ export function createSyncJournal({
   maxBlobBytes = MAX_BLOB_BYTES,
   now = Date.now,
   logger = console,
+  // Schattenbetrieb (VCP-133): neben einem anderen Sync nur lesen, nie schreiben.
+  readOnly = false,
 }) {
   const root = resolve(vaultPath);
   mkdirSync(blobDir, { recursive: true });
@@ -119,6 +141,16 @@ export function createSyncJournal({
         pull_at = coalesce(excluded.pull_at, devices.pull_at), push_at = coalesce(excluded.push_at, devices.push_at),
         cursor = coalesce(excluded.cursor, devices.cursor)`),
     devices: db.prepare('SELECT id, name, client, seen_at, pull_at, push_at, cursor FROM devices ORDER BY seen_at DESC'),
+    openDiffs: db.prepare('SELECT path, kind, since FROM shadow_diffs WHERE device = ? AND resolved_at IS NULL'),
+    addDiff: db.prepare('INSERT OR IGNORE INTO shadow_diffs (device, path, kind, since, last_seen) VALUES (?, ?, ?, ?, ?)'),
+    seeDiff: db.prepare('UPDATE shadow_diffs SET last_seen = ? WHERE device = ? AND path = ? AND kind = ? AND resolved_at IS NULL'),
+    resolveDiff: db.prepare('UPDATE shadow_diffs SET resolved_at = ? WHERE device = ? AND path = ? AND kind = ? AND resolved_at IS NULL'),
+    setReport: db.prepare(`INSERT INTO shadow_reports (device, at, compared, open) VALUES (?, ?, ?, ?)
+      ON CONFLICT(device) DO UPDATE SET at = excluded.at, compared = excluded.compared, open = excluded.open`),
+    reports: db.prepare(`SELECT r.device, d.name, d.client, r.at, r.compared, r.open FROM shadow_reports r LEFT JOIN devices d ON d.id = r.device ORDER BY d.name`),
+    diffs: db.prepare(`SELECT s.device, d.name, s.path, s.kind, s.since, s.last_seen, s.resolved_at FROM shadow_diffs s LEFT JOIN devices d ON d.id = s.device
+      WHERE s.resolved_at IS NULL OR s.resolved_at >= ? ORDER BY d.name, s.resolved_at IS NOT NULL, s.since`),
+    pruneDiffs: db.prepare('DELETE FROM shadow_diffs WHERE resolved_at IS NOT NULL AND resolved_at < ?'),
   };
 
   // seq zählt nur hoch, auch über Grabsteine hinweg; `meta.seq` hält den
@@ -321,6 +353,7 @@ export function createSyncJournal({
      */
     put(rel, data, { base = null, mtime = null, device = null, deviceName = null } = {}) {
       checkSyncPath(rel);
+      if (readOnly) return { ok: false, reason: 'read_only' };
       if (data.length > maxFileBytes) return { ok: false, reason: 'too_large' };
       const hash = sha256(data);
       const seen = refresh(rel);
@@ -357,6 +390,7 @@ export function createSyncJournal({
     /** Löscht eine Datei, wenn `base` der aktuelle Hash ist. Schon weg gilt als Erfolg. */
     remove(rel, { base = null, device = null } = {}) {
       checkSyncPath(rel);
+      if (readOnly) return { ok: false, reason: 'read_only' };
       const seen = refresh(rel);
       if (seen.tooLarge) return { ok: false, reason: 'too_large' };
       const current = seen.entry;
@@ -392,6 +426,51 @@ export function createSyncJournal({
         pushAt: d.push_at ? new Date(Number(d.push_at)).toISOString() : null,
         cursor: d.cursor == null ? null : Number(d.cursor),
       })),
+
+    readOnly,
+
+    /**
+     * Vergleichsbericht eines Geräts im Schattenbetrieb: `diffs` sind alle
+     * Abweichungen, die es gerade sieht (`since` = zuerst gesehen, ms). Was
+     * vorher offen war und fehlt, gilt ab jetzt als aufgelöst.
+     */
+    report(dev, { compared = 0, diffs = [] }) {
+      const t = now();
+      const key = (d) => `${d.kind}\u0000${d.path}`;
+      const current = new Map(diffs.map((d) => [key(d), d]));
+      db.exec('BEGIN');
+      try {
+        for (const d of stmt.openDiffs.all(dev.id)) {
+          if (!current.has(key(d))) stmt.resolveDiff.run(t, dev.id, d.path, d.kind);
+        }
+        for (const d of current.values()) {
+          if (stmt.seeDiff.run(t, dev.id, d.path, d.kind).changes === 0) stmt.addDiff.run(dev.id, d.path, d.kind, Math.min(d.since ?? t, t), t);
+        }
+        stmt.setReport.run(dev.id, t, compared, current.size);
+        // Aufgelöstes nach 30 Tagen vergessen.
+        stmt.pruneDiffs.run(t - 30 * 86_400_000);
+        db.exec('COMMIT');
+      } catch (err) {
+        db.exec('ROLLBACK');
+        throw err;
+      }
+    },
+
+    /** Letzter Bericht je Gerät, mit den offenen und den aufgelösten Abweichungen (bis `since`, ms). */
+    shadow({ since = now() - 30 * 86_400_000 } = {}) {
+      const iso = (ms) => (ms == null ? null : new Date(Number(ms)).toISOString());
+      const all = stmt.diffs.all(since);
+      return stmt.reports.all().map((r) => ({
+        device: r.device,
+        name: r.name,
+        client: r.client,
+        at: iso(r.at),
+        compared: Number(r.compared),
+        diffs: all
+          .filter((d) => d.device === r.device)
+          .map((d) => ({ path: d.path, kind: d.kind, since: iso(d.since), lastSeen: iso(d.last_seen), resolvedAt: iso(d.resolved_at) })),
+      }));
+    },
 
     close: () => db.close(),
   };
