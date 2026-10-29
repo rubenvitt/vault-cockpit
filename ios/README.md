@@ -70,7 +70,7 @@ make test      # Unit-Tests auf dem ersten verfügbaren iPhone-Simulator
 - **Folgen gehört** (`FolgenScreen.swift`, `EpisodesStore`, `EpisodePlayer.swift`): Gruppen Zum Hören
   (angefangene zuerst) · Entsteht · Nur Transkript · Gehört (eingeklappt, kleinere Karten), je fertiger
   Folge „angefangen, bei 3:05“ bzw. „gehört am …“ und „Als gehört markieren“ / „Doch nicht gehört“
-  (mit Rückgängig). Der native Player meldet die Stelle (`APIClient.reportListening`, höchstens
+  (mit Rückgängig), je Transkript „Als erledigt markieren“ / „Doch nicht erledigt“. Der native Player meldet die Stelle (`APIClient.reportListening`, höchstens
   alle 30 s, beim Anhalten und am Ende); kurz vor Schluss vermerkt der Server die Folge als gehört.
 - **Ingest** (`Cockpit/Native/Lesen/IngestScreen.swift`, `IngestReviewScreen.swift`,
   `IngestReviewScreenParts.swift`; Stores `IngestStore`, `IngestReviewStore` in `CockpitShared`):

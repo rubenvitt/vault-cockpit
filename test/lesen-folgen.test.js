@@ -6,7 +6,7 @@ import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, existsSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createEpisodes, inputShares, chunkText, dialogueBatches, stripId3, audioFrames, EpisodeError, DEFAULT_NOTE_FOLDER } from '../src/lesen/folgen.js';
-import { parseRange, progressOf, clock, newSummary, episodeCard, portableMarkdown, spokenOfNote, createShareLinks, SHARED_PATH } from '../src/lesen/folgen-page.js';
+import { parseRange, progressOf, clock, newSummary, episodeCard, episodeGroups, listenOf, portableMarkdown, spokenOfNote, createShareLinks, SHARED_PATH } from '../src/lesen/folgen-page.js';
 import { createClaudeWriter, WriterError } from '../src/lesen/claude.js';
 import { createReadingStore } from '../src/lesen/store.js';
 import { readingRoutes } from '../src/lesen/http.js';
@@ -495,6 +495,27 @@ test('Folgen: erst nur Transkript mit Ton und Schwerpunkt, Audio später aus dem
     assert.match(card, /action="\/aktion\/lesen\/folge\/sprechen"/);
     assert.match(card, /Transkript lesen/);
     assert.match(card, /Kritisch · Schwerpunkt: KI/);
+    assert.match(card, /name="gehoert" value="1".*Als erledigt markieren/);
+    assert.equal(listenOf(done), 'neu');
+
+    // Erledigt wie eine gehörte Folge: unter „Gehört“, die Texte bekommen den Vermerk.
+    episodes.setHeard(ep.id, true);
+    await new Promise((r) => setImmediate(r));
+    done = episodes.get(ep.id);
+    assert.ok(done.heard_at);
+    assert.equal(listenOf(done), 'gehoert');
+    assert.deepEqual(calls.heard, [[a.id, b.id]]);
+    let groups = episodeGroups(episodes.list());
+    assert.deepEqual([groups.transkript.length, groups.gehoert.map((e) => e.id)], [0, [ep.id]]);
+    const doneCard = episodeCard(done, { ctx });
+    assert.match(doneCard, /^<li class="folge is-transcript is-gehoert"/);
+    assert.match(doneCard, /erledigt /);
+    assert.match(doneCard, /name="gehoert" value="0".*Doch nicht erledigt/);
+    episodes.setHeard(ep.id, false);
+    groups = episodeGroups(episodes.list());
+    assert.deepEqual([groups.transkript.map((e) => e.id), groups.gehoert.length], [[ep.id], 0]);
+    episodes.setHeard(ep.id, true);
+    await new Promise((r) => setImmediate(r));
 
     // Audio braucht die Stimme.
     assert.throws(() => episodes.speak(ep.id), (err) => err instanceof EpisodeError && err.status === 409);
@@ -506,7 +527,8 @@ test('Folgen: erst nur Transkript mit Ton und Schwerpunkt, Audio später aus dem
     assert.equal(calls.writes.length, 1, 'Claude schreibt nicht noch einmal');
     assert.equal(calls.notes.length, 1, 'keine zweite Notiz');
     assert.deepEqual(calls.dialogue, [[{ text: 'Willkommen.', voice: 'Host' }, { text: 'Danke.', voice: 'Gast' }]]);
-    assert.deepEqual(calls.heard, [[a.id, b.id]]);
+    assert.equal(done.heard_at, null, 'mit Audio wieder zum Hören');
+    assert.deepEqual(calls.heard.length, 3, 'zweimal erledigt, dann gesprochen');
     assert.throws(() => episodes.speak(ep.id), /nur zu einem fertigen Transkript/);
   }));
 

@@ -819,6 +819,10 @@ Texte bleiben gehört. Die Liste ordnet nach Gruppen: **Zum Hören** (angefangen
 zuerst, mit „angefangen, bei 3:05“), **Entsteht** (auch fehlgeschlagene), **Nur
 Transkript** und eingeklappt **Gehört** (kleinere, leisere Karten). Im JSON trägt
 jede Folge `listen` (`neu`, `angefangen`, `gehoert`), `heardAt` und `position`.
+Ein reines Transkript (ohne Audio) lässt sich ebenso „Als erledigt markieren“
+(gleiche Aktion, `listen` dann `neu` oder `gehoert`); es rückt unter **Gehört**, die
+Texte bekommen den Vermerk. Wird später doch Audio erzeugt, steht die Folge wieder
+unter **Zum Hören**.
 Folgen, die vor dieser Unterscheidung fertig wurden, gelten beim ersten Start als
 gehört. Die iOS-App meldet das Hören noch nicht; dort bis dahin „Als gehört markieren“.
 
