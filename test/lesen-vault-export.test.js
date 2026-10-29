@@ -755,6 +755,7 @@ test('Kurzfassung nachtragen: gleicht sie dem Titel, kommt sie trotzdem; ohne ei
     ['ohne', (t) => t.replace('## Markierungen', '## Zitate')],
     ['doppelt', (t) => `${t}\n## Markierungen\n`],
     ['nur im Code-Block', (t) => `${t.replace('## Markierungen', '## Zitate')}\n\`\`\`\n## Markierungen\n\`\`\`\n`],
+    ['schon in eigenem Abschnitt davor', (t) => t.replace('## Markierungen', '## Kurzfassung\n\nKurz.\n\n## Markierungen')],
   ]) {
     const { doc: d } = store.addDocument({ url: `https://blatt.test/${n}`, title: n, status: 'stapel' });
     const p = old(d);

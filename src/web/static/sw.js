@@ -18,6 +18,8 @@ const PAGES = 'cockpit-seiten';
 const WEEK = '/';
 const SHELL_PATHS = new Set(shell.map((p) => p.split('?')[0]));
 
+// Nach dem Aktivieren einer neuen Version einmal befüllen (veraltete Leseansichten), siehe `activate`.
+let refreshAfterActivate = false;
 // Zählt jedes Vergessen mit, damit eine noch laufende Speicherung danach nichts mehr ablegt.
 let generation = 0;
 // Leseseiten holt das Befüllen erst nach einem Tag wieder; Öffnen mit Netz frischt sie sofort auf.
@@ -54,9 +56,9 @@ self.addEventListener('activate', (event) => {
     (async () => {
       for (const name of await caches.keys()) if (name.startsWith('cockpit-shell-') && name !== SHELL) await caches.delete(name);
       await self.clients.claim();
-      // Gespeicherte Leseansichten der alten Version auffrischen, solange Netz da ist; ohne bleiben sie.
-      // Nicht abwarten: Bis `activate` fertig ist, warten alle Abrufe der Seiten, auch der Offline-Weg.
-      fill();
+      // Gespeicherte Leseansichten der alten Version auffrischt der nächste Seitenaufruf (`navigate`):
+      // Bis `activate` fertig ist, warten alle Abrufe, und danach hielte nichts den Worker für `fill` am Leben.
+      refreshAfterActivate = true;
     })(),
   );
 });
@@ -69,7 +71,13 @@ self.addEventListener('fetch', (event) => {
     if (url.pathname === '/logout') event.respondWith(logout(req));
     return;
   }
-  if (req.mode === 'navigate') event.respondWith(navigate(event, req, url));
+  if (req.mode === 'navigate') {
+    if (refreshAfterActivate) {
+      refreshAfterActivate = false;
+      event.waitUntil(fill());
+    }
+    event.respondWith(navigate(event, req, url));
+  }
   else if (SHELL_PATHS.has(url.pathname)) event.respondWith(shellFile(req));
 });
 

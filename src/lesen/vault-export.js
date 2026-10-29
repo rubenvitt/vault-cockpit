@@ -239,10 +239,9 @@ export function createReadingExport({ vaultPath, index, editor, policy, store, s
     const marks = headings.filter((h) => h.level === 2 && h.text === HEADING);
     if (!excerpt || marks.length !== 1) return;
     const lines = content.split(/\r?\n/);
-    // Nur im Kopf suchen (bis zum ersten Abschnitt, ohne Frontmatter und Titel): Im Volltext steht
+    // Nur bis „## Markierungen“ suchen (ohne Frontmatter und Titel): Im Volltext steht
     // die Kurzfassung oft wörtlich, und gleicht sie dem Titel, zählt der nicht.
-    const first = headings.find((h) => h.level === 2) ?? marks[0];
-    const top = lines.slice(0, first.line).filter((l) => !/^# /.test(l)).join('\n').replace(/^---\n[^]*?\n---[ \t]*(?:\n|$)/, '');
+    const top = lines.slice(0, marks[0].line).filter((l) => !/^# /.test(l)).join('\n').replace(/^---\n[^]*?\n---[ \t]*(?:\n|$)/, '');
     if (top.includes(excerpt)) return;
     // Der Editor ersetzt Text, keine Zeilen: ab der Überschrift so viele Zeilen, bis der Text eindeutig ist
     // (dieselbe Zeile kann etwa in einem Zitat stehen).
