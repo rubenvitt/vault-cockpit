@@ -8,7 +8,8 @@ import SwiftUI
 /// Graphen. Hinweis, wenn die Bedeutungssuche fehlt.
 ///
 /// `query`: Begriff aus einem Link (`/graph?q=…`, „Ganzen Vault durchsuchen“ in Wissen); dann
-/// gleich alle Treffer. Ohne Begriff bekommt das Feld den Fokus.
+/// gleich alle Treffer. Ohne Begriff bekommt das Feld den Fokus, darunter führt „Ganzer Vault als
+/// Graph“ zum ganzen Graphen.
 @MainActor
 struct SearchScreen: View {
     let query: String
@@ -45,6 +46,8 @@ struct SearchScreen: View {
                 NoteScreen(path: path)
             case .graph(let path):
                 GraphScreen(path: path)
+            case .whole(let notes):
+                WholeGraphScreen(canOpenNotes: notes)
             }
         }
         .task(id: query) { await load() }
@@ -107,6 +110,17 @@ struct SearchScreen: View {
                     Label("Vault durchsuchen", systemImage: "magnifyingglass")
                 } description: {
                     Text("Suchbegriff oder Frage eingeben. Ein Treffer öffnet \(store.opensNotes ? "die Notiz" : "seinen Graphen").")
+                } actions: {
+                    // Wie „Ganzen Vault als Graph zeigen“ auf der leeren Suchseite im Web.
+                    Button {
+                        session.toasts.signal(.selection)
+                        focused = false
+                        next = .whole(notes: store.opensNotes)
+                    } label: {
+                        Label("Ganzer Vault als Graph", systemImage: "circle.hexagongrid")
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(Theme.accent)
                 }
                 .padding(.top, 24)
             } else {
@@ -251,10 +265,12 @@ struct SearchScreen: View {
     }
 }
 
-/// Ziel auf dem Stapel aus der Suche: Notiz oder Graph eines Treffers.
+/// Ziel auf dem Stapel aus der Suche: Notiz oder Graph eines Treffers, oder der ganze Vault als
+/// Graph (`notes`: Treffer öffnen Notizen, also gibt es Notizseiten).
 enum SearchScreenDestination: Hashable {
     case note(String)
     case graph(String)
+    case whole(notes: Bool)
 }
 
 /// Suchfeld „Vault durchsuchen“: sucht live beim Tippen, Eingabe zeigt alle Treffer, ✕ leert.

@@ -1,11 +1,12 @@
 import CockpitShared
 import SwiftUI
 
-/// Graph einer Notiz nativ (`/graph?pfad=…` im Web): Kopf mit „Notiz ansehen“ und „In Obsidian
-/// öffnen“, darunter der Graph (Physik, Verschieben, Zoomen, Tippen wählt und klappt die
-/// Nachbarn auf, Doppeltippen macht den Knoten zur Mitte), Legende als Filter, Probleme und die
-/// Listen „Verlinkt von hier“, „Verweist hierher“, „Ähnlich, nicht verlinkt“ (mit Verlinken),
-/// „Aufgaben“ und „Termine“. Zeigt sofort den gespeicherten Stand und lädt dann neu.
+/// Graph einer Notiz nativ (`/graph?pfad=…` im Web): Kopf mit „Notiz ansehen“, „In Obsidian
+/// öffnen“ und „Im ganzen Vault zeigen“, darunter der Graph (Physik, Verschieben, Zoomen, Tippen
+/// wählt und klappt die Nachbarn auf, Doppeltippen macht den Knoten zur Mitte), Legende als
+/// Filter, Probleme und die Listen „Verlinkt von hier“, „Verweist hierher“, „Ähnlich, nicht
+/// verlinkt“ (mit Verlinken), „Aufgaben“ und „Termine“. Zeigt sofort den gespeicherten Stand
+/// und lädt dann neu.
 ///
 /// Eine neue Mitte (Doppeltippen, „Zur Mitte“, Tipp in einer Liste) bleibt auf diesem Bildschirm;
 /// „Zurück zu …“ im Kopf führt den Weg zurück.
@@ -70,6 +71,8 @@ struct GraphScreen: View {
                 NoteScreen(path: path)
             case .search:
                 SearchScreen()
+            case .whole(let path, let notes):
+                WholeGraphScreen(focus: path, canOpenNotes: notes)
             }
         }
         .task(id: path) { await load() }
@@ -183,6 +186,18 @@ struct GraphScreen: View {
                     if let obsidian = model.obsidianURL {
                         Button("In Obsidian öffnen") { session.context.openURL(obsidian) }
                     }
+                }
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Theme.accent)
+                .buttonStyle(.borderless)
+            }
+            if let model = store.model {
+                // Wie „Im ganzen Vault zeigen“ im Kopf der Graphseite im Web.
+                Button {
+                    session.toasts.signal(.selection)
+                    next = .whole(model.path, notes: model.can.notes)
+                } label: {
+                    Label("Im ganzen Vault zeigen", systemImage: "circle.hexagongrid")
                 }
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(Theme.accent)
@@ -323,10 +338,12 @@ struct GraphScreen: View {
     }
 }
 
-/// Ziel auf dem Stapel aus dem Graphen: eine Notiz oder die Suche.
+/// Ziel auf dem Stapel aus dem Graphen: eine Notiz, die Suche oder der ganze Vault mit dieser
+/// Notiz gewählt (`notes`: es gibt Notizseiten).
 enum GraphScreenDestination: Hashable {
     case note(String)
     case search
+    case whole(String, notes: Bool)
 }
 
 /// Frühere Mitte auf dem Weg zurück.

@@ -60,6 +60,7 @@ Die Bestandsaufnahme der Funktionen je Bereich (Felder, Aktionen, Meldungen) ist
 | `/lesen/feeds` | Reiter Lesen → Feeds (`FeedsScreen`) |
 | `/notiz?pfad=` | Blatt bzw. Stapel (`NoteScreen`) |
 | `/graph?pfad=`, `/graph?q=` | Blatt bzw. Stapel (`GraphScreen`, `SearchScreen`) |
+| `/graph/alles?pfad=` | Blatt bzw. Stapel (`WholeGraphScreen`); Einstieg „Ganzer Vault als Graph“ in der leeren Suche und „Im ganzen Vault zeigen“ im Graphen, „Nachbarschaft“ führt zurück in `GraphScreen` |
 | `/einstellungen#abschnitt` | Reiter Einstellungen (`SettingsScreen`, `SettingsSectionScreen`) |
 | `/zustand` | Einstellungen → Zustand der Dienste bzw. Blatt aus der Woche (`HealthScreen`) |
 | `POST /logout` | Einstellungen → Diese App → Abmelden (widerruft den Geräte-Token) |
