@@ -320,20 +320,28 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   const DRAFT_FLASH = { kind: 'error', message: 'Nicht gespeichert: Die Anmeldung war abgelaufen. Der Text steht wieder im Feld.' };
 
   /**
-   * Aktion ohne gültige Sitzung (ohne JavaScript): über den Login zurück auf
-   * die Seite. Den Text nimmt ein verschlüsseltes Cookie mit, aber nur bei
-   * einem Formular nachweislich von dieser Seite, damit niemand einen Entwurf
-   * unterschieben kann. Passt er nicht hinein, zeigt die Seite ihn zum Kopieren.
+   * Aktion ohne gültige Sitzung (ohne JavaScript, oder mit JavaScript als
+   * Rückfall bei einem Text, VCP-57): über den Login zurück auf die Seite.
+   * Den Text nimmt ein verschlüsseltes Cookie mit, aber nur bei einem Formular
+   * nachweislich von dieser Seite, damit niemand einen Entwurf unterschieben
+   * kann. Passt er nicht hinein, zeigt die Seite ihn zum Kopieren.
+   *
+   * Keine Weiterleitung zum Login: Der Login leitet weiter zu Pocket ID, und
+   * `form-action 'self'` gilt für die ganze Kette eines abgeschickten Formulars.
+   * Der Browser bräche dort ab. Deshalb eine Seite mit dem Schritt zum Login.
    */
   async function expiredAction(req, res, path) {
     const form = await readForm(req, res);
     if (!form) return;
     const back = safeNext(form.get('back'));
     const loginHref = `/login?next=${encodeURIComponent(back)}`;
+    const relogin = (text) => send(res, 401, renderMessage('Neu anmelden', text, { link: { href: loginHref, label: 'Anmelden' } }));
     const text = DRAFT_ACTIONS.has(path) ? (form.get('text') ?? '') : '';
-    if (!text.trim()) return redirect(res, loginHref);
+    if (!text.trim()) return relogin('Die Anmeldung ist abgelaufen. Nichts gespeichert.');
     const sameOrigin = req.headers.origin === new URL(publicUrl).origin || req.headers['sec-fetch-site'] === 'same-origin';
-    if (sameOrigin && sessions.keepDraft(res, { action: path, back, text })) return redirect(res, loginHref);
+    if (sameOrigin && sessions.keepDraft(res, { action: path, back, text })) {
+      return relogin('Die Anmeldung ist abgelaufen. Der Text ist nicht verloren: Nach dem Anmelden steht er wieder im Feld.');
+    }
     return send(res, 401, renderDraftRescue(text, loginHref));
   }
 
