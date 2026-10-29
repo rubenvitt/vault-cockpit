@@ -6,6 +6,8 @@ import { parseEvents } from '../src/cockpit/ics.js';
 import { createSettingsStore } from '../src/cockpit/settings.js';
 import { findFeuer, sectionParagraph } from '../src/cockpit/feuer.js';
 import { createCockpit, areaOf } from '../src/cockpit/data.js';
+import { createFlameBlocks } from '../src/cockpit/flammen-bloecke.js';
+import { flameRows } from '../src/cockpit/flammen-notiz.js';
 import { renderWeek, inline, dueTag } from '../src/web/render.js';
 import { noteOrigin } from '../src/web/note-render.js';
 import { buildIndex, openIndex } from '../src/vault/index.js';
@@ -499,4 +501,103 @@ test('Rückblick: je Bereich erledigt gegen geplant, außerdem Erledigtes und Fl
 
   const off = createCockpit({ index: fakeIndex([]), settings: settingsWith({ zunder: false }), zunderFor: () => assert.fail(), now: fixedNow, logger: quiet });
   assert.equal((await off.review()).unconfigured, true);
+});
+
+test('Zweimal gebrannte Flamme: Wochenansicht, Rückblick und Feuer-Notiz zeigen dieselbe Summe, Verlauf geteilt (VCP-118)', async () => {
+  const twice = {
+    id: 'f2', title: 'Flamme Steuer', status: 'done', due: '2026-10-13', location: loc('Finanzen'), phoenix: { fire: '2026-W42', role: 'flamme' },
+    flame_started_at: '2026-10-13T13:00:00Z', flame_ended_at: '2026-10-13T14:30:00Z',
+  };
+  const history = [
+    { seq: 1, field: 'flame_started_at', value: '2026-10-12T08:00:00Z' },
+    { seq: 2, field: 'flame_ended_at', value: '2026-10-12T08:30:00Z' },
+    { seq: 3, field: 'flame_started_at', value: '2026-10-13T13:00:00Z' },
+    { seq: 4, field: 'flame_ended_at', value: null },
+    { seq: 5, field: 'flame_ended_at', value: '2026-10-13T14:30:00Z' },
+  ];
+  const asked = [];
+  const zunder = { ...fakeZunder([...TASKS, twice]), async taskHistory(id) { asked.push(id); return id === 'f2' ? history : []; } };
+  const blocks = createFlameBlocks({ logger: quiet });
+  const cockpit = createCockpit({ index: fakeIndex([]), settings: settingsWith(), zunderFor: () => zunder, flameBlocks: blocks, now: fixedNow, logger: quiet });
+
+  const week = await cockpit.week('2026-W42');
+  assert.equal(week.flames.data.find((f) => f.id === 'f2').minutes, 120);
+  const review = await cockpit.review('2026-W42');
+  assert.equal(review.flames.find((f) => f.id === 'f2').minutes, 120);
+  assert.equal(review.areas.find((a) => a.area === 'Finanzen').minutes, 120);
+  const note = flameRows([twice], { tz: TZ, blocks: await blocks.of(zunder, [twice], { scope: '2026-W42' }) });
+  assert.equal(note[0].measured, '120');
+  // Der Verlauf je Flamme nur einmal, solange sich ihr letzter Block nicht ändert.
+  assert.deepEqual(asked.filter((id) => id === 'f2'), ['f2']);
+
+  // Rückblick: ein Block der Vorwoche zählt dort, nicht hier.
+  const spread = { ...twice, id: 'f3', flame_started_at: '2026-10-13T13:00:00Z', flame_ended_at: '2026-10-13T14:00:00Z' };
+  const spreadHistory = [
+    { seq: 1, field: 'flame_started_at', value: '2026-10-09T08:00:00Z' },
+    { seq: 2, field: 'flame_ended_at', value: '2026-10-09T08:40:00Z' },
+    { seq: 3, field: 'flame_started_at', value: '2026-10-13T13:00:00Z' },
+    { seq: 4, field: 'flame_ended_at', value: '2026-10-13T14:00:00Z' },
+  ];
+  const z2 = { ...fakeZunder([spread].map((t) => ({ ...t, phoenix: { fire: '2026-W41', role: 'flamme' }, closed: '2026-10-13' }))), async taskHistory() { return spreadHistory; } };
+  const c2 = createCockpit({ index: fakeIndex([]), settings: settingsWith(), zunderFor: () => z2, now: fixedNow, logger: quiet });
+  assert.deepEqual((await c2.review('2026-W42')).flames.map((f) => [f.id, f.minutes]), [['f3', 60]]);
+  assert.deepEqual((await c2.review('2026-W41')).flames.map((f) => [f.id, f.minutes]), [['f3', 40]]);
+
+  // Verlauf ausgefallen: weiter der letzte Block.
+  const broken = { ...fakeZunder([...TASKS, twice]), async taskHistory() { throw new Error('HTTP 500'); } };
+  const c3 = createCockpit({ index: fakeIndex([]), settings: settingsWith(), zunderFor: () => broken, now: fixedNow, logger: quiet });
+  assert.equal((await c3.week('2026-W42')).flames.data.find((f) => f.id === 'f2').minutes, 90);
+  assert.equal((await c3.review('2026-W42')).flames.find((f) => f.id === 'f2').minutes, 90);
+});
+
+test('Flammen-Verlauf: eine Seite wartet nur bis zur Frist, die späte Antwort landet im Cache (VCP-118)', async () => {
+  const t = { id: 'f2', flame_started_at: '2026-10-13T13:00:00Z', flame_ended_at: '2026-10-13T14:30:00Z' };
+  let answer;
+  const z = { taskHistory: () => new Promise((resolve) => (answer = resolve)) };
+  const blocks = createFlameBlocks({ logger: quiet });
+  const started = Date.now();
+  assert.equal((await blocks.of(z, [t], { budgetMs: 30 })).size, 0);
+  assert.ok(Date.now() - started < 1000);
+  answer([
+    { seq: 1, field: 'flame_started_at', value: '2026-10-13T13:00:00Z' },
+    { seq: 2, field: 'flame_ended_at', value: '2026-10-13T14:30:00Z' },
+  ]);
+  await new Promise((r) => setImmediate(r));
+  const asked = { taskHistory: () => assert.fail('aus dem Cache') };
+  assert.deepEqual((await blocks.of(asked, [t])).get('f2'), [{ start: '2026-10-13T13:00:00Z', end: '2026-10-13T14:30:00Z' }]);
+});
+
+test('Flammen-Verlauf: eine späte Antwort zu einem älteren Block ersetzt keinen neueren Cache-Eintrag (VCP-118)', async () => {
+  const old = { id: 'f2', flame_started_at: '2026-10-13T13:00:00Z', flame_ended_at: null };
+  const now = { ...old, flame_ended_at: '2026-10-13T14:30:00Z' };
+  const done = [
+    { seq: 1, field: 'flame_started_at', value: '2026-10-13T13:00:00Z' },
+    { seq: 2, field: 'flame_ended_at', value: '2026-10-13T14:30:00Z' },
+  ];
+  let slow;
+  const blocks = createFlameBlocks({ logger: quiet });
+  await blocks.of({ taskHistory: () => new Promise((resolve) => (slow = resolve)) }, [old], { budgetMs: 10 });
+  assert.equal((await blocks.of({ taskHistory: async () => done }, [now])).get('f2').length, 1);
+  slow([{ seq: 1, field: 'flame_started_at', value: '2026-10-13T13:00:00Z' }]);
+  await new Promise((r) => setImmediate(r));
+  assert.equal((await blocks.of({ taskHistory: () => assert.fail('aus dem Cache') }, [now])).get('f2').length, 1);
+});
+
+test('Flammen-Verlauf: ein älterer Lauf, dessen Abruf erst später startet, überschreibt keinen neueren Cache-Eintrag (VCP-118)', async () => {
+  const old = { id: 'f2', flame_started_at: '2026-10-13T13:00:00Z', flame_ended_at: null };
+  const other = { id: 'f1', flame_started_at: '2026-10-12T08:00:00Z', flame_ended_at: '2026-10-12T08:30:00Z' };
+  const now = { ...old, flame_ended_at: '2026-10-13T14:30:00Z' };
+  const done = [
+    { seq: 1, field: 'flame_started_at', value: '2026-10-13T13:00:00Z' },
+    { seq: 2, field: 'flame_ended_at', value: '2026-10-13T14:30:00Z' },
+  ];
+  let release;
+  const gate = new Promise((r) => (release = r));
+  const blocks = createFlameBlocks({ logger: quiet, parallel: 1 });
+  // Älterer Lauf: f1 hält den einzigen Platz, f2 wartet in der Schlange.
+  const older = blocks.of({ taskHistory: async (id) => (id === 'f1' ? (await gate, []) : [{ seq: 1, field: 'flame_started_at', value: '2026-10-13T13:00:00Z' }]) }, [other, old], { scope: 'a' });
+  assert.equal((await blocks.of({ taskHistory: async () => done }, [now], { scope: 'b' })).get('f2').length, 1);
+  release();
+  await older;
+  assert.equal((await blocks.of({ taskHistory: () => assert.fail('aus dem Cache') }, [now])).get('f2').length, 1);
 });
