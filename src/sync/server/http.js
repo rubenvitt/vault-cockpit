@@ -28,7 +28,10 @@ import { SyncPathError, MAX_FILE_BYTES } from './journal.js';
  * Groß-/Kleinschreibung. Die Kopfzeile `x-sync-client` (z. B.
  * `obsidian-plugin/0.1.0`) landet in der Geräteliste.
  */
-export function createSyncHttp({ tokens, journal, onWrite = () => {}, maxFileBytes = MAX_FILE_BYTES, logger = console }) {
+export function createSyncHttp({ tokens, journal: journalOf, onWrite = () => {}, maxFileBytes = MAX_FILE_BYTES, logger = console }) {
+  // Das Journal gibt es nur, solange der eigene Sync eingestellt ist (Einstellungen → Sync).
+  const current = typeof journalOf === 'function' ? journalOf : () => journalOf;
+
   const json = (res, status, body) => {
     res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify(body));
@@ -79,13 +82,13 @@ export function createSyncHttp({ tokens, journal, onWrite = () => {}, maxFileByt
   }
 
   const routes = {
-    'GET /sync/v1/state': (req, res, url, dev) => {
+    'GET /sync/v1/state': (req, res, url, dev, journal) => {
       const snap = journal.snapshot();
       journal.seen(dev, { pulled: true, cursor: snap.cursor });
       return json(res, 200, snap);
     },
 
-    'GET /sync/v1/changes': (req, res, url, dev) => {
+    'GET /sync/v1/changes': (req, res, url, dev, journal) => {
       const since = intParam(url.searchParams.get('since'), 0);
       const limit = intParam(url.searchParams.get('limit'), 1000);
       if (since === null || limit === null || limit < 1) return json(res, 400, { error: '„since“ und „limit“ müssen ganze Zahlen ab 0 bzw. 1 sein' });
@@ -94,7 +97,7 @@ export function createSyncHttp({ tokens, journal, onWrite = () => {}, maxFileByt
       return json(res, 200, out);
     },
 
-    'GET /sync/v1/file': (req, res, url) => {
+    'GET /sync/v1/file': (req, res, url, dev, journal) => {
       const path = url.searchParams.get('path');
       const hash = hashParam(url.searchParams.get('hash'));
       if (hash === undefined) return json(res, 400, { error: '„hash“ ist kein SHA-256' });
@@ -116,7 +119,7 @@ export function createSyncHttp({ tokens, journal, onWrite = () => {}, maxFileByt
       return res.end(found.data);
     },
 
-    'POST /sync/v1/file': async (req, res, url, dev) => {
+    'POST /sync/v1/file': async (req, res, url, dev, journal) => {
       const path = url.searchParams.get('path');
       const base = hashParam(url.searchParams.get('base'));
       if (base === undefined) return json(res, 400, { error: '„base“ ist kein SHA-256' });
@@ -133,7 +136,7 @@ export function createSyncHttp({ tokens, journal, onWrite = () => {}, maxFileByt
       return result(res, out, path);
     },
 
-    'POST /sync/v1/delete': (req, res, url, dev) => {
+    'POST /sync/v1/delete': (req, res, url, dev, journal) => {
       const path = url.searchParams.get('path');
       const base = hashParam(url.searchParams.get('base'));
       if (base === undefined) return json(res, 400, { error: '„base“ ist kein SHA-256' });
@@ -149,13 +152,15 @@ export function createSyncHttp({ tokens, journal, onWrite = () => {}, maxFileByt
     async handle(req, res, url) {
       const dev = device(req);
       if (!dev) return json(res, 401, { error: 'unauthorized' });
+      const journal = current();
+      if (!journal) return json(res, 503, { error: 'sync_off', error_description: 'Der eigene Sync ist nicht eingeschaltet (Einstellungen → Sync)' });
       const route = routes[`${req.method} ${url.pathname}`];
       if (!route) {
         const known = Object.keys(routes).some((k) => k.endsWith(` ${url.pathname}`));
         return json(res, known ? 405 : 404, { error: known ? 'method not allowed' : 'not_found' });
       }
       try {
-        return await route(req, res, url, dev);
+        return await route(req, res, url, dev, journal);
       } catch (err) {
         if (err instanceof SyncPathError) return json(res, 400, { error: err.message });
         logger.error?.(`Sync: ${req.method} ${url.pathname} fehlgeschlagen:`, err.message);

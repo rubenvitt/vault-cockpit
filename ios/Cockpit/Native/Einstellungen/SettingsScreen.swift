@@ -216,6 +216,7 @@ struct SettingsSectionRow: View {
         case "lesestapel": "books.vertical"
         case "embeddings": "brain"
         case "vorlesen": "speaker.wave.2"
+        case "sync": "arrow.triangle.2.circlepath.icloud"
         case "anzeige": "textformat.size"
         case "anmeldung": "person.badge.key"
         case SettingsSection.tokens: "key"

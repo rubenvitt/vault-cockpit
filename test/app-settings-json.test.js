@@ -193,11 +193,13 @@ test('Einstellungen als JSON: Felder, Stände, Kalender, Tokens, Kurzbefehle, Si
       const body = JSON.parse(text);
       keep('einstellungen', body);
 
-      assert.deepEqual(body.sections.map((s) => s.id), ['kalender', 'zunder', 'bruecke', 'feuer-notiz', 'mail', 'lesestapel', 'embeddings', 'vorlesen', 'anzeige', 'anmeldung', 'tokens', 'kurzbefehle', 'sicherung']);
+      assert.deepEqual(body.sections.map((s) => s.id), ['kalender', 'zunder', 'bruecke', 'feuer-notiz', 'mail', 'lesestapel', 'embeddings', 'vorlesen', 'sync', 'anzeige', 'anmeldung', 'tokens', 'kurzbefehle', 'sicherung']);
       const section = (id) => body.sections.find((s) => s.id === id);
       const fieldOf = (name) => body.sections.flatMap((s) => s.fields).find((f) => f.name === name);
       assert.deepEqual(section('kalender').state, { text: '1 von 2 nicht erreichbar', tone: 'warn' });
       assert.deepEqual(section('zunder').state, { text: 'eigener Zugang', tone: 'ok' });
+      assert.deepEqual(section('sync').state, { text: 'Obsidian Sync (Sidecar)', tone: 'ok' });
+      assert.deepEqual(fieldOf('sync.adapter').options.map((o) => o.value), ['', 'obsidian-headless', 'cockpit', 'none']);
       assert.deepEqual(section('bruecke').state, { text: 'aus', tone: 'off' });
       assert.deepEqual(section('mail').state, { text: 'eigener Token', tone: 'ok' });
       assert.deepEqual(section('embeddings').state, { text: 'aus, nur Volltextsuche', tone: 'off' });
