@@ -112,6 +112,10 @@ export function createCaptureRouter({ capture, zunder = null, state, tz = 'Europ
     return i === -1 ? { line: '', rest: '' } : { line: lines[i].trim(), rest: lines.slice(i + 1).join('\n').trim() };
   }
 
+  // Laufende Anlagen je Capture-ID: Ein Nachsenden, während die erste Anfrage
+  // noch auf Zunder wartet (Funke nach einem Timeout), legt nichts doppelt an.
+  const inFlight = new Map();
+
   async function toZunder({ text, title, source, captureId }) {
     const zunder = currentZunder();
     if (!zunder) {
@@ -120,7 +124,19 @@ export function createCaptureRouter({ capture, zunder = null, state, tz = 'Europ
     const key = captureId ? `capture:${source}:${captureId}` : null;
     const known = key ? state.get(key) : null;
     if (known) return { kind: 'task', duplicate: true, ...known };
+    if (key && inFlight.has(key)) return { kind: 'task', duplicate: true, ...(await inFlight.get(key)) };
 
+    const run = createInZunder({ zunder, text, title, source, key });
+    if (key) inFlight.set(key, run);
+    try {
+      return { kind: 'task', ...(await run) };
+    } finally {
+      if (key) inFlight.delete(key);
+    }
+  }
+
+  /** Legt die Aufgabe in Zunder an und merkt sie sich unter `key`. */
+  async function createInZunder({ zunder, text, title, source, key }) {
     const { line, rest } = split(text, title);
     if (!line) throw new CaptureError('Nach dem ! fehlt der Text der Aufgabe');
     const p = await plan(line, zunder);
@@ -136,7 +152,7 @@ export function createCaptureRouter({ capture, zunder = null, state, tz = 'Europ
     const task = { ...created, title: p.title, due: p.due, dueLabel: p.dueLabel, location: p.location ?? { kind: 'inbox' }, phoenix: p.phoenix, notes: p.notes };
     if (key) state.set(key, task);
     logger.info?.(`Capture (${source}) → Zunder ${task.ref ?? task.id}${p.location ? ` in ${p.location.name}` : ''}${p.due ? `, fällig ${p.due}` : ''}`);
-    return { kind: 'task', ...task };
+    return task;
   }
 
   function toVault({ text, title, source, captureId, created }) {

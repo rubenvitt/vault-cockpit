@@ -131,6 +131,9 @@ export function createCaptureHttp({ token = null, tokens = null, router, zunderE
     // Der Titel ist eine Zeile: Zeilenumbrüche aus der KI-Veredelung würden sonst
     // den Rest des Titels in die Beschreibung schieben.
     const title = typeof task.title === 'string' ? task.title.replace(/\s+/g, ' ').trim() : '';
+    if (task.description !== undefined && task.description !== null && typeof task.description !== 'string') {
+      throw new CaptureError('Feld "description" muss Text sein');
+    }
     const description = typeof task.description === 'string' ? task.description.trim() : '';
     if (!id) throw new CaptureError('empty id');
     if (!title) throw new CaptureError('empty title');
