@@ -693,7 +693,11 @@ test('Kurzfassung nachtragen: gleicht sie dem Titel, kommt sie trotzdem; ohne ei
   await act('/aktion/lesen/doc/vault', { id: doc.id });
   assert.equal(findSection(read(path), 'kurzfassung').inner, 'Vom Lesen: Über Stapel');
 
-  for (const [n, change] of [['ohne', (t) => t.replace('## Markierungen', '## Zitate')], ['doppelt', (t) => `${t}\n## Markierungen\n`]]) {
+  for (const [n, change] of [
+    ['ohne', (t) => t.replace('## Markierungen', '## Zitate')],
+    ['doppelt', (t) => `${t}\n## Markierungen\n`],
+    ['nur im Code-Block', (t) => `${t.replace('## Markierungen', '## Zitate')}\n\`\`\`\n## Markierungen\n\`\`\`\n`],
+  ]) {
     const { doc: d } = store.addDocument({ url: `https://blatt.test/${n}`, title: n, status: 'stapel' });
     const p = old(d);
     writeFileSync(join(root, p), change(read(p)));
@@ -702,4 +706,18 @@ test('Kurzfassung nachtragen: gleicht sie dem Titel, kommt sie trotzdem; ohne ei
     await act('/aktion/lesen/doc/vault', { id: d.id });
     assert.equal(findSection(read(p), 'kurzfassung'), null, n);
   }
+});
+
+test('Kurzfassung nachtragen: dieselbe Zeile in einem Zitat stört die eindeutige Überschrift nicht', async () => {
+  const { act } = decideRoutes();
+  store.setStatus(doc.id, 'archiv');
+  store.addHighlight({ doc_id: doc.id, quote: 'Stelle' });
+  exporter.changed(doc.id);
+  exporter.flush();
+  const path = pathOf();
+  writeFileSync(join(root, path), `${read(path)}\n> ## Markierungen\n`);
+  idx.refresh(path);
+  store.updateDocument(doc.id, { excerpt: 'Kurz.' });
+  await act('/aktion/lesen/doc/vault', { id: doc.id });
+  assert.match(read(path), /<!-- cockpit:kurzfassung:ende [0-9a-f]{8} -->\n\n## Markierungen\n/);
 });

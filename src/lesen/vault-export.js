@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { localDate } from '../cockpit/week.js';
 import { sectionBlock, findSection, writeSection } from '../vault/generated-section.js';
+import { headingsOf } from '../vault/edit.js';
 import { esc } from '../web/layout.js';
 import { htmlToMarkdown } from './extract.js';
 import { safeWikiMarkdown } from './wiki-markdown.js';
@@ -228,17 +229,29 @@ export function createReadingExport({ vaultPath, index, editor, policy, store, s
       if (excerpt) writeSection({ vaultPath, editor, path, name: SUMMARY_SECTION, inner: excerpt, label: SUMMARY_LABEL, create: false });
       return;
     }
-    // Nur im Kopf suchen (nach Frontmatter und Titel, bis zum ersten Abschnitt): Im Volltext steht
+    // Überschriften wie beim Editor: außerhalb von Code-Blöcken. Ohne genau ein „## Markierungen“
+    // bleibt die Notiz, wie sie ist: Ans Ende gehängt, landete die Kurzfassung unter „## Eigene Gedanken“.
+    const headings = headingsOf(content);
+    const marks = headings.filter((h) => h.level === 2 && h.text === HEADING);
+    if (!excerpt || marks.length !== 1) return;
+    const lines = content.split(/\r?\n/);
+    // Nur im Kopf suchen (bis zum ersten Abschnitt, ohne Frontmatter und Titel): Im Volltext steht
     // die Kurzfassung oft wörtlich, und gleicht sie dem Titel, zählt der nicht.
-    const top = content.replace(/^---\r?\n[^]*?\r?\n---[ \t]*(?:\r?\n|$)/, '').split(/^## /m)[0].replace(/^# .*$/gm, '');
-    if (!excerpt || top.includes(excerpt)) return;
-    const lines = content.match(new RegExp(`^##[ \\t]+${HEADING}[ \\t\\r]*$`, 'gm')) ?? [];
-    // Der Editor ersetzt Text, keine Zeilen. Ohne eindeutige Überschrift bleibt die Notiz, wie sie ist:
-    // Ans Ende gehängt, landete die Kurzfassung unter „## Eigene Gedanken“.
-    if (lines.length !== 1 || content.split(lines[0]).length !== 2) return;
+    const first = headings.find((h) => h.level === 2) ?? marks[0];
+    const top = lines.slice(0, first.line).filter((l) => !/^# /.test(l)).join('\n').replace(/^---\n[^]*?\n---[ \t]*(?:\n|$)/, '');
+    if (top.includes(excerpt)) return;
+    // Der Editor ersetzt Text, keine Zeilen: ab der Überschrift so viele Zeilen, bis der Text eindeutig ist
+    // (dieselbe Zeile kann etwa in einem Zitat stehen).
     const eol = content.includes('\r\n') ? '\r\n' : '\n';
+    const at = marks[0].line;
+    let oldText = null;
+    for (let end = at + 1; end <= lines.length && !oldText; end += 1) {
+      const span = lines.slice(at, end).join(eol);
+      if (content.split(span).length === 2 && content.indexOf(span) === lines.slice(0, at).join(eol).length + (at ? eol.length : 0)) oldText = span;
+    }
+    if (!oldText) return;
     const block = sectionBlock(SUMMARY_SECTION, excerpt, { label: SUMMARY_LABEL, eol });
-    editor.replace({ path, oldText: lines[0], newText: `${block}${eol}${eol}${lines[0]}` });
+    editor.replace({ path, oldText, newText: `${block}${eol}${eol}${oldText}` });
   }
 
   /**
