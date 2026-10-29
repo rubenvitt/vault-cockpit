@@ -16,13 +16,14 @@ import { EPISODE_LANGUAGES, DEFAULT_EPISODE_LANGUAGE } from '../lesen/languages.
  */
 
 export const KIND_LABELS = { ical: 'iCal-Abo', caldav: 'CalDAV' };
-export const SCOPE_LABELS = { search: 'Suche', capture: 'Capture', lesestapel: 'Lesestapel', app: 'App' };
+export const SCOPE_LABELS = { search: 'Suche', capture: 'Capture', lesestapel: 'Lesestapel', app: 'App', sync: 'Sync' };
 /** Was ein Token mit diesem Recht darf, wie auf der Einstellungsseite. */
 const SCOPE_TEXT = {
   search: 'GET /api/search (ohne vertrauliche Ordner)',
   capture: '/capture und /funke, nur neue Notizen und Zunder-Aufgaben',
   lesestapel: '/lesestapel/speichern, nur Artikel und PDFs in den Eingang',
   app: 'Geräte-Token der iOS-App: /api/…, Aktionen und alles, was Lesestapel darf',
+  sync: 'Ein Gerät des eigenen Syncs: /sync/v1/…, liest und schreibt den ganzen Vault, auch vertrauliche Ordner',
 };
 const SET = 'gesetzt (leer lassen = unverändert)';
 

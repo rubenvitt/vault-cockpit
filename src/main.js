@@ -7,6 +7,7 @@ import { loadPolicy } from './vault/policy.js';
 import { createCapture } from './vault/capture.js';
 import { createEditor } from './vault/edit.js';
 import { createSyncAdapter } from './sync/index.js';
+import { createSyncHttp } from './sync/server/http.js';
 import { createVaultMcpHandler } from './mcp/server.js';
 import { toWebRequest, writeWebResponse } from './http/bridge.js';
 import { createZunderClient } from './capture/zunder.js';
@@ -110,6 +111,8 @@ const sync = createSyncAdapter({
   kind: SYNC_ADAPTER,
   vaultPath: VAULT_PATH,
   statusFile: process.env.SYNC_STATUS_FILE || null,
+  // Nur für den eigenen Sync (`cockpit`): Journal und Blobs neben dem Index.
+  dataDir: dirname(INDEX_DB),
 });
 
 const CAPTURE_FOLDER = process.env.CAPTURE_FOLDER ?? 'inbox';
@@ -211,6 +214,12 @@ const captureRouter = createCaptureRouter({ capture, zunder, state: captureState
 // /capture und /funke. CAPTURE_TOKEN aus älteren Deployments gilt daneben weiter.
 const apiTokens = createTokenStore({ file: join(dirname(COCKPIT_SETTINGS_FILE), 'api-tokens.json') });
 const LEGACY_CAPTURE_TOKEN = process.env.CAPTURE_TOKEN || null;
+
+// Eigener Sync (VCP-13): Geräte gleichen sich über /sync/v1 ab, mit je einem
+// API-Token mit dem Recht „Sync“. Nur mit SYNC_ADAPTER=cockpit.
+const syncHttp = sync.journal
+  ? createSyncHttp({ tokens: apiTokens, journal: sync.journal, onWrite: (path) => sync.notifyWrite(path) })
+  : null;
 
 // Lesestapel (VCP-77): Artikel, Markierungen und Feeds, neben den Einstellungen
 // unter /data. Lässt sich nicht neu bauen, gehört deshalb in die Sicherung.
@@ -570,6 +579,7 @@ const app = createApp({
   captureHttp,
   readingApi,
   searchHttp,
+  syncHttp,
   webHttp,
   degraded: () => health.degraded(),
   mcpHandler: async (req, res, principal, body) => {
@@ -589,6 +599,7 @@ app.listen(PORT, '0.0.0.0', () => {
   const tokenCount = (scope) => apiTokens.list().filter((t) => t.scope === scope).length;
   console.log(`  Capture     : /capture, /funke (${tokenCount('capture')} Capture-Tokens${LEGACY_CAPTURE_TOKEN ? ' + CAPTURE_TOKEN' : ''})${mail ? `, Mail aus „${mail.status().mailbox}“` : ''}`);
   console.log(`  Suche       : /api/search (${tokenCount('search')} Such-Tokens)`);
+  if (syncHttp) console.log(`  Eigener Sync: /sync/v1 (${tokenCount('sync')} Geräte-Tokens)`);
   console.log(`  Lesestapel  : /lesestapel/speichern (${tokenCount('lesestapel')} Lesestapel-Tokens)`);
   const z = zunderSource();
   console.log(`  Zunder      : ${z ? `${z} (! → Inbox, Brücke ${bridgeState()})` : `aus (Einstellungen → Zunder), Brücke ${bridgeState()}`}`);

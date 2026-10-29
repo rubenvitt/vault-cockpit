@@ -67,7 +67,7 @@ Betrieb und Pfade im Container (die Compose-Datei setzt sie, sonst passen die St
 | `POLICY_FILE` | Pfad zur Policy (vertrauliche Ordner, Ausschlüsse) |
 | `VAULT_PATH`, `INDEX_DB`, `VECTOR_DB`, `CAPTURE_FOLDER` | Pfade, Standard `/vault`, `/data/index.db`, `/data/vectors.db`, `inbox` |
 | `REINDEX_INTERVAL_MIN` | Abstand der vollen Index-Neuaufbauten und der Brückenrunden, Standard 15 (Netz neben der Dateibeobachtung) |
-| `SYNC_ADAPTER` | `obsidian-headless` (Standard) oder `none` (keine Dateibeobachtung, kein Sync-Status) |
+| `SYNC_ADAPTER` | `obsidian-headless` (Standard), `cockpit` ([eigener Sync](#eigener-sync-im-aufbau), im Aufbau) oder `none` (keine Dateibeobachtung, kein Sync-Status) |
 | `SYNC_STATUS_FILE` | Statusdatei des Sync-Sidecars, z. B. `/sync-status/sync.json` |
 | `CAPTURE_STATE_FILE` | Merkzettel gegen doppelte Aufgaben, Standard `/data/capture-state.json` |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Abo-Token aus `claude setup-token` (ein Jahr gültig) für [Folgen](#lesen) „Podcast“ und „Report“, auch zu einem Thema mit Recherche im Vault und Internet; ohne gibt es nur „Vorlesen“. `ANTHROPIC_API_KEY` reicht das Cockpit bewusst nicht an die CLI weiter |
@@ -192,6 +192,45 @@ vergleicht deshalb den ganzen Ordner (Konflikte nach `CONFLICT_STRATEGY`, Standa
 **Client aktualisieren:** `OBSIDIAN_HEADLESS_VERSION` in `sync/Dockerfile` anheben.
 Nach dem Merge baut CI das Image mit der neuen Version als Tag; danach den Tag in
 der Compose-Datei des Servers nachziehen.
+
+#### Eigener Sync (im Aufbau)
+
+Der eigene Sync (VCP-13) soll Obsidian Sync ablösen: Das Cockpit ist selbst der
+Sync-Server, die Geräte gleichen sich über `/sync/v1` mit dem Vault-Ordner auf dem
+Server ab, ohne Sidecar. Fertig ist der Server (VCP-120); der Client als
+Obsidian-Plugin, der Merge bei Konflikten, Geräte im Web-Cockpit, Verlauf,
+Verschlüsselung und der Umstieg folgen (VCP-121 bis VCP-126). Bis dahin bleibt
+Obsidian Headless der Standard.
+
+- Einschalten mit `SYNC_ADAPTER=cockpit` und den Sidecar `vault-sync` vorher
+  stoppen (genau ein Sync pro Ordner).
+- Jedes Gerät bekommt unter Einstellungen → API-Tokens einen eigenen Token mit dem
+  Recht **Sync**; der Tokenname ist der Gerätename. Ein Sync-Token liest und
+  schreibt den ganzen Vault, auch vertrauliche Ordner. Widerrufen wirkt sofort.
+- Synchronisiert wird jede Datei außer versteckten Pfaden (`.obsidian`, `.trash`,
+  `.git` …), bis 100 MB je Datei. Die Ausschlüsse der Policy gelten hier nicht,
+  sie regeln nur den Index.
+- Das Journal (`sync.db`) und frühere Fassungen bis 5 MB (`sync-blobs/`) liegen
+  neben dem Index unter `/data`. Das Journal lässt sich aus dem Vault neu
+  aufbauen, Geräte gleichen dann einmal komplett ab.
+
+Protokoll (Bearer-Token, nur GET und POST):
+
+| Aufruf | Zweck |
+|---|---|
+| `GET /sync/v1/state` | alle vorhandenen Dateien mit Hash, Größe, mtime und `seq`, dazu `cursor` |
+| `GET /sync/v1/changes?since=<seq>` | Änderungen danach, älteste zuerst, `hash: null` = gelöscht; bei `more` ab `cursor` weiter |
+| `GET /sync/v1/file?path=…[&hash=…]` | Inhalt als Bytes (`x-sync-hash`, `x-sync-seq`, `x-sync-mtime`); mit `hash` eine frühere Fassung |
+| `POST /sync/v1/file?path=…&base=<hash>[&mtime=<ms>]` | Datei schreiben, Body = Bytes; `base` leer = neu |
+| `POST /sync/v1/delete?path=…&base=<hash>` | Datei löschen |
+
+Geschrieben und gelöscht wird nur, wenn `base` die aktuelle Fassung auf dem Server
+ist (SHA-256). Sonst kommt `409 {error: "conflict", current}` und nichts wird
+überschrieben; das Gerät holt dann die neue Fassung, führt zusammen und schickt
+mit der neuen Basis erneut. Auch was das Cockpit selbst schreibt (Bearbeiten,
+Capture, Brücke), zählt dabei: Der Server sieht vor jeder Prüfung auf die Platte.
+`409 {error: "case"}` heißt, der Pfad existiert schon in anderer Groß- und
+Kleinschreibung (auf macOS und iOS wäre das dieselbe Datei).
 
 ### Capture
 
@@ -1537,7 +1576,7 @@ npm ci && npm test
 - `src/vault/` — Markdown-Parser, SQLite-FTS5-Index, Link-Graph, Policy, Capture, Bearbeiten
 - `src/mcp/` — MCP-Werkzeuge auf Basis von `@modelcontextprotocol/server` v2
 - `src/http/` — HTTP-Schicht, Protected Resource Metadata, Host-Prüfung
-- `src/sync/` — Sync-Adapter: Dateibeobachtung, inkrementeller Reindex, Sync-Status
+- `src/sync/` — Sync-Adapter: Dateibeobachtung, inkrementeller Reindex, Sync-Status; `server/` ist der eigene Sync (Journal, Protokoll `/sync/v1`)
 - `src/capture/` — Capture von außen: Endpunkte, Mail-Abruf, Zunder-Weiterleitung und -Brücke
 - `src/cockpit/` — Wochenmodell: ISO-Wochen, Feuer-Notiz (mit Flammen aus Zunder), Kalender (iCal mit Serienauflösung, CalDAV), Einstellungen, Zusammenstellung aus Zunder
 - `src/semantic/` — Embeddings (Ollama), Abschnitte, Vektorspeicher, hybride Suche
