@@ -135,8 +135,8 @@ export function createApp({ config, verifyToken, mcpHandler, captureHttp = null,
     // eine zu strenge Prüfung ist eine dokumentierte Fehlerquelle.
     const origin = req.headers.origin;
     res.setHeader('access-control-allow-origin', origin ?? '*');
-    res.setHeader('access-control-expose-headers', 'WWW-Authenticate, MCP-Protocol-Version');
-    res.setHeader('access-control-allow-headers', 'Authorization, Content-Type, MCP-Protocol-Version, Mcp-Method, Mcp-Name');
+    res.setHeader('access-control-expose-headers', 'WWW-Authenticate, MCP-Protocol-Version, X-Sync-Hash, X-Sync-Seq, X-Sync-Mtime');
+    res.setHeader('access-control-allow-headers', 'Authorization, Content-Type, MCP-Protocol-Version, Mcp-Method, Mcp-Name, X-Sync-Client');
     res.setHeader('access-control-allow-methods', 'GET, POST, OPTIONS');
     if (req.method === 'OPTIONS') {
       res.writeHead(204);

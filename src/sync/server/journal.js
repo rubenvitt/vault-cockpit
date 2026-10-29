@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { createHash, randomBytes } from 'node:crypto';
 import {
   readFileSync, writeFileSync, renameSync, unlinkSync, rmdirSync, mkdirSync, readdirSync,
-  statSync, lstatSync, utimesSync, existsSync,
+  statSync, lstatSync, utimesSync, existsSync, realpathSync,
 } from 'node:fs';
 import { join, dirname, resolve, sep } from 'node:path';
 
@@ -127,9 +127,15 @@ export function createSyncJournal({
     return seq;
   };
 
+  const realRoot = realpathSync(root);
   const abs = (rel) => {
     const full = resolve(root, rel);
     if (!full.startsWith(root + sep)) throw new SyncPathError('Pfad liegt außerhalb des Vaults');
+    // Kein Symlink im Vault darf aus ihm hinausführen: den nächsten vorhandenen Vorfahren auflösen.
+    let probe = full;
+    while (!existsSync(probe)) probe = dirname(probe);
+    const real = realpathSync(probe);
+    if (real !== realRoot && !real.startsWith(realRoot + sep)) throw new SyncPathError('Pfad liegt außerhalb des Vaults');
     return full;
   };
 
@@ -185,18 +191,21 @@ export function createSyncJournal({
   }
 
   /** Alle sichtbaren Dateien unter dem Vault (rekursiv, ohne versteckte, ohne Symlinks). */
-  function* walk(dir) {
+  /** Unlesbare Unterordner landen in `unreadable` (mit „/“ am Ende); ist der Vault selbst unlesbar, bricht es ab. */
+  function* walk(dir, unreadable) {
     let entries;
     try {
       entries = readdirSync(dir, { withFileTypes: true });
     } catch (err) {
+      if (dir === root) throw err;
       logger.warn?.(`Sync: Ordner nicht lesbar: ${dir} (${err.message})`);
+      unreadable.push(`${toPosix(dir.slice(root.length + 1))}/`);
       return;
     }
     for (const e of entries) {
       if (e.name.startsWith('.')) continue;
       const full = join(dir, e.name);
-      if (e.isDirectory()) yield* walk(full);
+      if (e.isDirectory()) yield* walk(full, unreadable);
       else if (e.isFile()) yield toPosix(full.slice(root.length + 1));
     }
   }
@@ -206,9 +215,11 @@ export function createSyncJournal({
     scan() {
       const changed = [];
       const seen = new Set();
+      // Was in einem gerade unlesbaren Ordner liegt, gilt nicht als gelöscht.
+      const unreadable = [];
       db.exec('BEGIN');
       try {
-        for (const rel of walk(root)) {
+        for (const rel of walk(root, unreadable)) {
           seen.add(rel);
           try {
             if (refresh(rel).changed) changed.push(rel);
@@ -217,7 +228,7 @@ export function createSyncJournal({
           }
         }
         for (const r of stmt.live.all()) {
-          if (seen.has(r.path)) continue;
+          if (seen.has(r.path) || unreadable.some((p) => r.path.startsWith(p))) continue;
           if (record(r.path, { hash: null }).changed) changed.push(r.path);
         }
         db.exec('COMMIT');
@@ -273,7 +284,10 @@ export function createSyncJournal({
       checkSyncPath(rel);
       if (data.length > maxFileBytes) return { ok: false, reason: 'too_large' };
       const hash = sha256(data);
-      const current = refresh(rel).entry;
+      const seen = refresh(rel);
+      // Liegt dort eine Datei über der Grenze, kennt das Journal sie nicht: nicht überschreiben.
+      if (seen.tooLarge) return { ok: false, reason: 'too_large' };
+      const current = seen.entry;
       const currentHash = current?.hash ?? null;
       if (currentHash === hash) return { ok: true, entry: current, unchanged: true };
       if (currentHash !== (base || null)) return { ok: false, reason: 'conflict', current: currentHash ? current : null };
@@ -297,7 +311,9 @@ export function createSyncJournal({
     /** Löscht eine Datei, wenn `base` der aktuelle Hash ist. Schon weg gilt als Erfolg. */
     remove(rel, { base = null, device = null } = {}) {
       checkSyncPath(rel);
-      const current = refresh(rel).entry;
+      const seen = refresh(rel);
+      if (seen.tooLarge) return { ok: false, reason: 'too_large' };
+      const current = seen.entry;
       if (!current?.hash) return { ok: true, entry: current, unchanged: true };
       if (current.hash !== base) return { ok: false, reason: 'conflict', current };
       const full = abs(rel);
