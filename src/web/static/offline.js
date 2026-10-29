@@ -13,6 +13,10 @@
 // (Fortschritt, Status, Notiz: der letzte Stand gilt); neue Markierungen
 // tragen ihre ID als `cid`, damit der Server sie nur einmal anlegt.
 // Das CSRF-Token holt jeder Lauf frisch von `/api/sitzung`, nie ohne Netz.
+//
+// Abmelden leert den Puffer (VCP-87): Zitate und Notizen bleiben nicht auf
+// einem Gerät liegen, das jemand bewusst verlässt. Vorher geht raus, was mit
+// Netz noch rausgeht; wartet danach noch etwas, fragt die Seite nach.
 (() => {
   'use strict';
 
@@ -28,6 +32,8 @@
 
   // Muss zum Namen in sw.js passen.
   const PAGES = 'cockpit-seiten';
+  // So lange darf Nachsenden das Abmelden aufhalten.
+  const LEAVE_WAIT = 4000;
   // Wann zuletzt Lesestoff angefordert wurde; Abmelden setzt es zurück.
   const FILLED = 'cockpit-lesen-offline';
   const forgetWeek = () => {
@@ -82,17 +88,36 @@
     sw.postMessage({ type: 'lesen-offline' });
   }
 
-  // Abmelden: Die gespeicherte Woche verschwindet, bevor das Formular rausgeht.
-  // Der Puffer bleibt; er geht nach der nächsten Anmeldung raus.
+  // Abmelden: Gespeicherte Seiten und Puffer verschwinden, bevor das Formular rausgeht.
+  // Eine abgelaufene Sitzung (401 beim Nachsenden) ist kein Abmelden: Dann bleibt der Puffer.
   for (const form of document.querySelectorAll('form[action="/logout"]')) {
     form.addEventListener('submit', (e) => {
       if (form.dataset.cleared) return;
       e.preventDefault();
-      forgetWeek().finally(() => {
-        form.dataset.cleared = '1';
-        form.submit();
-      });
+      if (form.dataset.busy) return;
+      form.dataset.busy = '1';
+      leave()
+        .then((go) => {
+          if (!go) return;
+          form.dataset.cleared = '1';
+          form.submit();
+        })
+        .finally(() => delete form.dataset.busy);
     });
+  }
+
+  /** Vor dem Abmelden: senden, was geht (höchstens ein paar Sekunden), Rest nur nach Rückfrage verwerfen. `false` = bleiben. */
+  async function leave() {
+    if (entries.length) await Promise.race([flush(), new Promise((r) => setTimeout(r, LEAVE_WAIT))]);
+    await reload();
+    const shown = entries.filter((e) => !e.quiet || e.error).length;
+    if (shown && !window.confirm(`${shown === 1 ? 'Ein Eintrag wartet' : `${shown} Einträge warten`} noch auf Netz. Beim Abmelden ${shown === 1 ? 'wird er' : 'werden sie'} von diesem Gerät gelöscht und nicht gesendet. Trotzdem abmelden?`)) return false;
+    // Ein Lauf, der noch unterwegs ist, sendet danach nichts mehr; was schon raus ist, ist raus.
+    leaving = true;
+    await Promise.all([forgetWeek(), clear().catch(() => {})]);
+    entries = [];
+    render();
+    return true;
   }
 
   // --- Puffer (IndexedDB) ----------------------------------------------------
@@ -122,6 +147,8 @@
   const all = async () => ((await store('readonly', (s) => s.getAll())) ?? []).sort((a, b) => a.created - b.created);
   const save = (entry) => store('readwrite', (s) => s.put(entry));
   const drop = (id) => store('readwrite', (s) => s.delete(id));
+  const stored = (id) => store('readonly', (s) => s.get(id));
+  const clear = () => store('readwrite', (s) => s.clear());
   /**
    * Nach dem Senden: löschen bzw. ersetzen nur, wenn noch genau die gesendete
    * Fassung im Puffer liegt. Eine neuere (gleiche ID, anderer `rev`) bleibt stehen.
@@ -188,6 +215,8 @@
   }
 
   let flushing = null;
+  // Abmelden bestätigt: Der Puffer ist gelöscht, ein laufender Lauf hört auf.
+  let leaving = false;
   /** Sendet, was wartet; `retry` nimmt auch Einträge mit Fehler noch einmal. Nie zwei Läufe gleichzeitig, auch nicht über Tabs. */
   function flush({ retry = false } = {}) {
     // Ohne Netz nicht einmal nach dem Token fragen (VCP-55).
@@ -237,10 +266,14 @@
     const sent = [];
     let failed = 0;
     for (const entry of todo) {
+      if (leaving) break;
+      // Inzwischen verworfen, auch in einem anderen Tab (Abmelden dort, „Verwerfen“): nicht mehr senden.
+      if (!(await stored(entry.id).catch(() => null))) continue;
       let r = await sendOne(entry, csrf);
       // Token veraltet (Sitzung inzwischen erneuert): einmal frisch holen und noch einmal.
       if (r === 'csrf') {
         csrf = await sessionToken();
+        if (leaving) break;
         r = csrf ? await sendOne(entry, csrf) : 'stop';
       }
       if (r === 'stop' || r === 'csrf') break;
@@ -312,7 +345,7 @@
   function banner() {
     let text = null;
     let hint = document.querySelector('.lesen-reader')
-      ? ' Markieren, Notizen, Fortschritt und Archivieren warten auf dem Gerät und gehen raus, sobald wieder Netz da ist.'
+      ? ' Markieren, Notizen, Fortschritt, Entfernen, In Inbox und die Entscheidungen warten auf dem Gerät und gehen raus, sobald wieder Netz da ist.'
       : ' Nur die Schnelleingabe geht; sie sendet nach, sobald wieder Netz da ist.';
     if (stale && net) {
       text = 'Wieder online.';
@@ -462,8 +495,40 @@
     if (document.visibilityState === 'visible' && (!net || entries.some((e) => !e.error))) flush();
   }, 30_000);
 
+  // --- Gespeicherte Leseseite -------------------------------------------------
+
+  /**
+   * Seitenleiste und Stapel einer gespeicherten Seite: Artikel, die nicht im
+   * Cache liegen, öffnen ohne Netz nur die Hülle; sie verschwinden aus der
+   * Liste, ein Hinweis sagt, wie viele fehlen. Schlüssel wie `readingKey` in sw.js.
+   */
+  async function onlySaved() {
+    if (!savedAt || !('caches' in window)) return;
+    let cache;
+    try {
+      cache = await caches.open(PAGES);
+    } catch {
+      return;
+    }
+    const lists = new Map();
+    for (const a of document.querySelectorAll('.lesen-stack li a[href], .lesen-list li a[href]')) {
+      const url = new URL(a.getAttribute('href'), location.href);
+      const id = url.pathname === '/lesen/doc' ? url.searchParams.get('id') : null;
+      if (!id || (await cache.match(`/lesen/doc?id=${encodeURIComponent(id)}`))) continue;
+      const li = a.closest('li');
+      if (li.hidden) continue;
+      li.hidden = true;
+      const list = li.parentElement;
+      lists.set(list, (lists.get(list) ?? 0) + 1);
+    }
+    for (const [list, n] of lists) {
+      list.after(el('p', { className: 'meta offline-missing', textContent: `${n} ${n === 1 ? 'Artikel ist' : 'Artikel sind'} nicht offline gespeichert.` }));
+    }
+  }
+
   setNet(net);
   fillReading();
+  onlySaved();
   reload().then(() => {
     render();
     if (stale || entries.some((e) => !e.error)) flush();

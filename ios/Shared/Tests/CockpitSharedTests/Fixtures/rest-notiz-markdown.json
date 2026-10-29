@@ -510,7 +510,88 @@
         "anchor": null,
         "status": "note",
         "text": "Hund"
-      }
+      },
+      "children": [
+        {
+          "type": "heading",
+          "level": 2,
+          "id": "e1-h-über-den-hund",
+          "content": [
+            {
+              "type": "text",
+              "text": "Über den Hund"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "Bello ist "
+            },
+            {
+              "type": "bold",
+              "children": [
+                {
+                  "type": "text",
+                  "text": "lieb"
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "text": "."
+            }
+          ]
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            {
+              "depth": 0,
+              "task": {
+                "done": false,
+                "n": null,
+                "line": null
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Gassi"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "embed",
+          "link": {
+            "type": "wikilink",
+            "target": "Futter",
+            "heading": null,
+            "alias": null,
+            "embed": true,
+            "path": "wiki/Futter.md",
+            "self": false,
+            "anchor": null,
+            "status": "note",
+            "text": "Futter"
+          },
+          "children": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Zweimal täglich."
+                }
+              ]
+            }
+          ]
+        }
+      ]
     },
     {
       "type": "embed",

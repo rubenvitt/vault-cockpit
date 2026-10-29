@@ -86,7 +86,7 @@ export function renderInboxPage({ doc, left, today, filter }, ctx, { getFeed, va
     ? `<form method="post" action="${SORT}" class="act inbox-undo">${hidden({ ...write, id: today.last.id, ziel: 'eingang' })}<button type="submit" class="btn quiet" aria-keyshortcuts="z">${arrow('↶')} Rückgängig<span class="sr-only">: ${esc(name(today.last))}</span> <kbd aria-hidden="true">Z</kbd></button></form>`
     : '';
   const decide = doc
-    ? `<form method="post" action="${SORT}" class="act inbox-decide">${hidden({ ...write, id: doc.id })}
+    ? `<form method="post" action="${SORT}" class="act inbox-decide wisch" data-links="weg" data-unten="stapel" data-rechts="lesen">${hidden({ ...write, id: doc.id })}
       ${choice('weg', `${arrow('←')} Weg`, 'X', 'ArrowLeft x', ' inbox-weg')}
       ${choice('stapel', `${arrow('↓')} Stapel`, 'S', 'ArrowDown s')}
       ${choice('lesen', `Jetzt lesen ${arrow('→')}`, '↵', 'ArrowRight Enter', ' primary')}

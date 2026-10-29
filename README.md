@@ -246,7 +246,7 @@ nicht erreichbar, entsteht die Aufgabe trotzdem, in der Inbox.
 |---|---|
 | iOS-Kurzbefehl | Unter **Einstellungen → API-Tokens** einen Token mit dem Recht **Capture** anlegen, dann „Notiz ins Cockpit“ unter **Einstellungen → Kurzbefehle** laden und importieren und beim Import den Token eintragen. Läuft aus dem Share-Sheet oder fragt den Text ab. Von Hand: `POST <PUBLIC_URL>/capture?source=ios-kurzbefehl` mit dem Text als Body, Header `Authorization: Bearer vct_…` |
 | Sprachmemo | „Sprachmemo ins Cockpit“ ebenso aus den Einstellungen importieren: „Audio aufnehmen“, „Audio transkribieren“, dann wie oben mit `source=sprachmemo`. Transkribiert wird auf dem Gerät, das Cockpit bekommt nur Text. |
-| Funke | Als Relay-URL `<PUBLIC_URL>/funke` und als Relay-Token einen Capture-Token eintragen. Notizen landen im Capture-Ordner (der Ordner aus der App wird ignoriert), Aufgaben schickt Funke weiter direkt an Zunder. |
+| Funke | Als Relay-URL `<PUBLIC_URL>/funke` und als Relay-Token einen Capture-Token eintragen. Notizen landen im Capture-Ordner (der Ordner aus der App wird ignoriert). Aufgaben schickt Funke an `/funke/tasks`: Der Titel geht durch dieselbe Syntax wie oben (Fälligkeit, `#Ziel`, `+woche`), die Funke-Task-ID macht das Nachsenden idempotent. Ist im Cockpit kein Zunder eingerichtet (`503`), legt Funke die Aufgabe wie früher selbst in der Zunder-Inbox an. |
 | Mail | Unter **Einstellungen → Mail** Fastmail-API-Token und freigegebene Absender eintragen. Eine Adresse (Alias) anlegen und per Regel in den Ordner zum Abholen sortieren (Standard `Vault`). Betreff = Titel, `!` im Betreff = Aufgabe. Verarbeitete Mails wandern in die Ablage (Standard `Archive`). |
 
 `POST /capture` nimmt Klartext oder JSON `{"text", "title"?, "source"?, "id"?}`.
@@ -459,7 +459,9 @@ gibt.
 **Flammen in der Feuer-Notiz:** Das Cockpit trägt die Flammen der Woche aus
 Zunder in den Abschnitt „## Flammen“ der Feuer-Notiz ein (Tag, Flamme mit Link,
 geplanter Tag aus der Fälligkeit, gemessene Minuten, Status), damit Obsidian
-und Claude über MCP die Zahlen sehen. Das passiert nach Start oder Stopp einer
+und Claude über MCP die Zahlen sehen. Hat in der Woche eine Flamme an einer
+Aufgabe ohne Flammen-Markierung gebrannt, steht sie als „ungeplant“ mit in der
+Tabelle, mit den Minuten der Blöcke dieser Woche. Das passiert nach Start oder Stopp einer
 Flamme im Cockpit und im Reindex-Intervall (laufende und vorige Woche, also
 auch für Flammen, die in Zunder oder per MCP gestoppt wurden). Geschrieben wird
 nur zwischen den Markern `<!-- cockpit:flammen:start … -->` und
@@ -531,7 +533,12 @@ nächsten Login raus. Was der Server ablehnt (z. B. Zunder antwortet nicht),
 bleibt mit Fehler in der Liste, bis man es erneut sendet, ins Feld zurückholt
 oder verwirft. Notizvorschau, Suche, Einstellungen und die JSON-Schnittstellen
 speichert der Service Worker nie; Abmelden und jeder neue Login löschen die
-gespeicherte Woche (der Puffer bleibt und geht mit der nächsten Anmeldung raus).
+gespeicherte Woche. Abmelden leert auch den Puffer (VCP-87): Vorher geht mit Netz
+noch raus, was geht (höchstens vier Sekunden); wartet danach noch etwas, fragt
+die Seite, ob es wirklich vom Gerät gelöscht werden soll. Wer abbricht, bleibt
+angemeldet, Puffer und gespeicherte Seiten bleiben. Wer bestätigt, dessen noch
+laufendes Nachsenden schickt danach nichts mehr. Eine abgelaufene
+Sitzung ist kein Abmelden: Dann bleibt der Puffer und geht nach dem Login raus.
 
 **Offline lesen** (VCP-80): Neben der Woche darf genau dieser Lesestoff auf dem
 Gerät liegen, und nichts sonst: die nächsten 30 Artikel des Stapels (Reihenfolge
@@ -548,8 +555,13 @@ er holt nur, was fehlt oder älter als einen Tag ist, und löscht, was nicht meh
 auf der Liste steht. Wer einen gespeicherten Artikel mit Netz öffnet, frischt ihn
 auf. Eine Synthese zeigt auch Titel und Pfade verlinkter oder ähnlicher Notizen
 (wie online), deren Inhalt nicht. Ohne Netz gehen in der Leseansicht
-**Markieren, Notizen, Fortschritt und die Entscheidungen** (Fertig, weg · In den Vault) in denselben Puffer wie die
-Schnelleingabe; wartende Markierungen sind gestrichelt unterlegt. Jede neue
+**Markieren, Notizen, Entfernen, In Inbox, Fortschritt und die Entscheidungen** (Fertig, weg · In den Vault) in denselben Puffer wie die
+Schnelleingabe, auch im Funkloch, wenn das Gerät sich für online hält und erst
+das Senden scheitert; wartende Markierungen sind gestrichelt unterlegt, eine
+Markierung, deren Entfernen wartet, ist durchgestrichen. Ein zweites Entfernen
+derselben Markierung meldet der Server als erledigt, nicht als Fehler. Auf einer
+gespeicherten Seite zeigen Stapel und Seitenleiste nur Artikel, die selbst
+offline vorliegen, mit dem Hinweis, wie viele fehlen. Jede neue
 Markierung bekommt auf dem Gerät eine ID, die der Server als ihre ID übernimmt
 (`cid` bei `/aktion/lesen/markierung/neu`): Dieselbe ID legt nie eine zweite an.
 Fortschritt, Status und Notiz gelten mit dem letzten Stand. Das CSRF-Token holt
@@ -592,7 +604,7 @@ ist, mit letztem erfolgreichem Lauf und letztem Fehler samt Zeitpunkt und Text:
 Sync (Status, letzter Abgleich, Lebenszeichen des Sidecars), Index (Notizen,
 letzter Aufbau), Embeddings (Modell, Fortschritt), Mail-Abruf, Zunder-Brücke (neue
 Checkboxen und Abgleich getrennt), Zunder-Zugang (nimmt Zunder den Token an?) und
-Kalender (je Kalender) und Feeds (je Feed). `vault_stats` liefert dieselben Dienste
+Kalender (je Kalender), Feeds (je Feed) und Lesestapel → Vault. `vault_stats` liefert dieselben Dienste
 unter `services`. Letzten Erfolg und letzten Fehler je Dienst hält
 `/data/dienste-zustand.json` fest: Nach einem Neustart steht der Dienst bis zu
 seinem nächsten Lauf auf „unbekannt“, die Zeiten davor bleiben sichtbar. Beim Laden der Seite werden Zunder
@@ -678,7 +690,9 @@ Systemmenüs. Eine Markierung merkt sich Zitat, etwas Text davor und danach und 
 ungefähre Stelle (`src/lesen/anchor.js`). So sitzt sie auch nach erneutem Holen
 oder Umformatieren wieder richtig. Eingesetzt werden die Markierungen beim
 Ausliefern als `<mark>` nur um Textstücke. „In Inbox“ legt das Zitat mit Quelle
-über die Schnelleingabe als Notiz in der Vault-Inbox an. Unter **Markiert** stehen
+über die Schnelleingabe als Notiz „Zitat aus <Titel>“ in der Vault-Inbox an.
+Rückgängig nach „Entfernen“ legt die Markierung mit derselben ID und ihrem Stand
+im Wiedersehen neu an. Unter **Markiert** stehen
 alle Markierungen, filterbar nach Quelle und Thema.
 
 **Unterwegs hören** (`/lesen/hoeren?zeit=15`, VCP-79, Link auf dem Stapel): Die
@@ -986,8 +1000,12 @@ einfachen Leitner-Schema zurück: Box 1 bis 5 mit 1, 3, 7, 21 und 60 Tagen
 Abstand, eine neue Markierung ist nach einem Tag dran. Je Karte: **Behalten**
 rückt eine Box weiter, **In eigenen Worten** legt Zitat, eigene Worte und Quelle
 als Notiz in der Vault-Inbox an und rückt ebenfalls weiter, **Loslassen** nimmt
-die Markierung nur aus der Wiederholung (gelöscht wird nichts). Rückgängig steht
-in der Meldung, alles geht auch ohne JavaScript. Höchstens 20 Karten am Tag, der
+die Markierung nur aus der Wiederholung (gelöscht wird nichts). Wie im Eingang
+gehen Wischen (← Loslassen, → Behalten) und Tasten (L, B oder Enter, W für eigene
+Worte). Rückgängig steht in der Meldung und, für die letzte Entscheidung von
+heute, dauerhaft auf der Seite (Taste Z); nach „In eigenen Worten“ bleibt die
+Notiz in der Inbox liegen, und die Meldung sagt das. Alles geht auch ohne
+JavaScript. Höchstens 20 Karten am Tag, der
 Rest kommt morgen. Darunter die Woche (`?woche=2026-W43`, aus dem
 Wochenrückblick verlinkt): Zahlen, Balken je Thema (ohne Thema je Quelle) und
 Export als Markdown. Ist ein Embedding-Server eingestellt, bettet das Cockpit die
@@ -1128,7 +1146,10 @@ gebündelt nach 30 Sekunden Ruhe und beim Herunterfahren. Alles andere, vor
 allem „Eigene Gedanken“, bleibt unberührt. Gefunden wird die Notiz über
 `lesestapel_id` im Index, Umbenennen und Verschieben in Obsidian schaden also
 nicht. Ändert der Sync die Notiz gleichzeitig, bricht das Schreiben ab und
-wird später wiederholt. Wer im Bereich von Hand schreibt, hält das Cockpit davon
+wird später wiederholt. Vorgemerktes steht im Lesestapel (`export_pending`) und
+übersteht einen Absturz; ein bleibender Fehler wird mit wachsendem Abstand (30 s
+bis höchstens stündlich) wiederholt und steht ab dem zweiten Fehlversuch als
+„Lesestapel → Vault“ auf `/zustand`. Wer im Bereich von Hand schreibt, hält das Cockpit davon
 ab, ihn zu überschreiben. In vertraulichen, ausgeschlossenen oder
 Readwise-Ordnern legt es nichts an, und eine dorthin verschobene Notiz fasst es
 nicht mehr an. Wikilinks zu einer Markierung schreibt `addLink` aus
@@ -1139,7 +1160,9 @@ nicht mehr an. Wikilinks zu einer Markierung schreibt `addLink` aus
 einer noch nicht gespeicherten Auswahl zeigt in der Seitenleiste der
 Leseansicht, auf dem iPhone als Blatt von unten, passende Stellen aus anderen
 Quellen: Markierungen anderer Texte aus dem Lesestapel und Synthesen und
-Konzepte (`type: synthesis` oder `concept`) mit ihrem ähnlichsten Abschnitt.
+Konzepte (`type: synthesis` oder `concept`) mit ihrem ähnlichsten Abschnitt,
+je höchstens sechs und nur ab einem Kosinus von 0,55 (bge-m3, am echten Vault
+gemessen: Passendes liegt darüber, der beste Treffer zu Unpassendem um 0,5).
 Die Auswahl wird dafür sofort eingebettet, nicht erst beim nächsten Indexlauf;
 die Embeddings der Markierungen liegen nur im Speicher und teilen sich
 Wiedersehen und Querverbindungen (`src/lesen/embed-cache.js`). Die eigene
@@ -1150,6 +1173,8 @@ Lesestapel-Notiz, nie in die Zielnotiz; eine Auswahl wird vorher markiert. Ist
 das Ziel eine Markierung, verweist der Link auf deren Block
 (`[[anderer-text#^hl-…]]`) und das Cockpit legt die Notiz zum anderen Text an,
 falls es sie noch nicht gibt. Schon Verknüpftes steht als „Schon verknüpft“ da.
+Rückgängig in der Meldung nimmt den Link wieder heraus
+(`POST /aktion/lesen/verbinden/loesen`); eine dafür angelegte Notiz bleibt.
 Ohne Embedder oder wenn Ollama nicht antwortet, sucht es mit Hinweis nur im
 Volltext (dann auch in den Lesestapel-Notizen). Als JSON:
 `GET /api/lesen/verbindungen?markierung=<id>` oder `?doc=<id>&text=<Auswahl>`

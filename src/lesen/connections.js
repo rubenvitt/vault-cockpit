@@ -31,11 +31,23 @@ import { NOTE_TYPE, SECTION, blockId, parseLinks } from './vault-export.js';
  * - `POST /aktion/lesen/verbinden`: `markierung` und entweder `pfad` (Notiz,
  *   optional `abschnitt`) oder `zu` (andere Markierung). Eine Auswahl ohne
  *   Markierung markiert der Client vorher über `/aktion/lesen/markierung/neu`.
+ *   Ein neuer Link kommt mit Rückgängig.
+ * - `POST /aktion/lesen/verbinden/loesen`: `markierung`, `ziel` (der Wikilink
+ *   ohne Klammern, wie ihn `verbinden` geliefert hat); nimmt ihn wieder heraus
+ *   (VCP-85). Eine dafür angelegte Notiz bleibt.
  */
 
-/** shortcut: Typen nach der Vault-Konvention (`type: synthesis`, `type: concept`), nicht an einem echten Vault geprüft; bei Bedarf in die Einstellungen. */
+/** Typen nach der Vault-Konvention, am echten Vault geprüft (VCP-84): `wiki/concepts` hat `type: concept`, `wiki/synthesis` hat `type: synthesis`. */
 export const NOTE_TYPES = ['synthesis', 'concept'];
 const LIMIT = 6;
+/**
+ * Mindest-Kosinus für Markierungen und Notizen (bge-m3), am echten Vault
+ * gemessen (VCP-84): Passende Konzepte liegen bei 0,56 bis 0,68, der beste
+ * Treffer zu einer Auswahl ohne passendes Gegenstück (Spiele-Patchnotes, Lego
+ * mit dem Kind) bei 0,46 bis 0,51. Darunter zeigt die Seitenleiste lieber
+ * „Nichts Passendes gefunden“ als die besten sechs um jeden Preis.
+ */
+export const MIN_SCORE = 0.55;
 /** So lange wartet die Suche auf das Embedding der Auswahl, danach Volltext. */
 const QUERY_WAIT_MS = 4000;
 /** shortcut: verglichen werden höchstens die neuesten so vielen Markierungen; reicht für einige Jahre Lesen. */
@@ -52,7 +64,7 @@ const round = (x) => Math.round(x * 1000) / 1000;
  * `index`, `policy` wie für `/notiz`; `semantic` ist der semantische Index oder
  * ein Getter dafür, `exporter` die Lesestapel-Notizen (src/lesen/vault-export.js).
  */
-export function createConnections({ store, index, semantic = null, policy, exporter = null, embedCache = null, limit = LIMIT }) {
+export function createConnections({ store, index, semantic = null, policy, exporter = null, embedCache = null, limit = LIMIT, minScore = MIN_SCORE }) {
   const semanticOf = () => (typeof semantic === 'function' ? semantic() : semantic);
 
   /** Wie `listed` in src/cockpit/notes.js: eigene Notiz, nicht vertraulich, nicht ausgeschlossen. */
@@ -92,7 +104,8 @@ export function createConnections({ store, index, semantic = null, policy, expor
   /**
    * Ähnliche Stellen zu einer Markierung (`highlightId`) oder einer Auswahl
    * (`docId` + `text`):
-   * - `highlights`: `{ id, docId, title, text, note, href, score, linked }`, ähnlichste zuerst
+   * - `highlights`: `{ id, docId, title, text, note, href, score, linked }`, ähnlichste zuerst;
+   *   wie `notes` nur Treffer ab `minScore` (Volltext ohne Schwelle)
    * - `notes`: `{ path, title, type, heading, text, href, score, linked }`
    * - `linked`: schon verknüpfte Ziele `{ target, href }` (nur zu einer Markierung)
    * - `source`: `semantic` oder `text`, `problem`: Hinweis, warum nur Volltext
@@ -135,6 +148,7 @@ export function createConnections({ store, index, semantic = null, policy, expor
         .map((o, i) => ({ o, v: corpusVecs?.[i] }))
         .filter((x) => x.v)
         .map(({ o, v }) => ({ o, score: dot(vec, v) }))
+        .filter((x) => x.score >= minScore)
         .sort((a, b) => b.score - a.score)
         .slice(0, limit)
         .map(({ o, score }) => ({
@@ -150,7 +164,7 @@ export function createConnections({ store, index, semantic = null, policy, expor
       const allowed = new Set();
       for (const type of NOTE_TYPES) for (const p of index.filterPaths({ type })) if (p !== ownNote && listed(p)) allowed.add(p);
       const hits = semanticOf()?.searchVector(vec, { limit, allow: (p) => allowed.has(p) }) ?? [];
-      result.notes = hits.map((x) => noteHit(x.path, x, linkedPaths));
+      result.notes = hits.filter((x) => x.score >= minScore).map((x) => noteHit(x.path, x, linkedPaths));
       return result;
     }
 
@@ -204,7 +218,23 @@ export function createConnections({ store, index, semantic = null, policy, expor
     }
   }
 
-  return { find, link };
+  /** Rückgängig zu `link`: den Wikilink `target` unter der Markierung herausnehmen. */
+  function unlink({ highlightId, target }) {
+    if (!exporter) throw new ActionError('Die Lesestapel-Notizen sind hier nicht angebunden', 503);
+    const h = store.getHighlight(highlightId);
+    if (!h) throw new ActionError('Diese Markierung gibt es nicht', 404);
+    if (!String(target ?? '').trim()) throw new ActionError('Welche Verknüpfung?');
+    try {
+      const r = exporter.removeLink({ highlightId: h.id, target });
+      if (r.state === 'übersprungen') throw new ActionError(r.reason, 409);
+      return r;
+    } catch (err) {
+      if (err instanceof ActionError) throw err;
+      throw new ActionError(`Nicht gelöst: ${err.message}`, 409);
+    }
+  }
+
+  return { find, link, unlink };
 }
 
 /** Endpunkt und Aktion für src/lesen/http.js. */
@@ -227,8 +257,16 @@ export function connectionRoutes({ logger = console, ...options }) {
     actions: {
       async '/aktion/lesen/verbinden'(form, session) {
         const r = connections.link({ highlightId: form.get('markierung'), path: form.get('pfad'), heading: form.get('abschnitt'), toHighlight: form.get('zu') });
-        if (r.state !== 'aktuell') logger.info?.(`Lesestapel: [[${r.target}]] in ${r.path} (${session.sub})`);
-        return { message: `${r.state === 'aktuell' ? 'Schon verknüpft' : 'Verknüpft'} mit ${r.label}`, link: { target: r.target, path: r.path } };
+        if (r.added) logger.info?.(`Lesestapel: [[${r.target}]] in ${r.path} (${session.sub})`);
+        // Schon verknüpft: kein Rückgängig, sonst nähme es einen älteren Link weg. `added`, nicht `state`:
+        // Andere vorgemerkte Änderungen können den Bereich auch dann neu schreiben, wenn der Link schon dastand.
+        const undo = r.added ? { action: '/aktion/lesen/verbinden/loesen', fields: { markierung: form.get('markierung'), ziel: r.target } } : null;
+        return { message: `${r.added ? 'Verknüpft' : 'Schon verknüpft'} mit ${r.label}`, link: { target: r.target, path: r.path }, undo };
+      },
+      async '/aktion/lesen/verbinden/loesen'(form, session) {
+        const r = connections.unlink({ highlightId: form.get('markierung'), target: form.get('ziel') });
+        if (r.state !== 'aktuell') logger.info?.(`Lesestapel: [[${form.get('ziel')}]] aus ${r.path} genommen (${session.sub})`);
+        return { message: r.state === 'aktuell' ? 'War nicht (mehr) verknüpft' : 'Verknüpfung gelöst' };
       },
     },
   };

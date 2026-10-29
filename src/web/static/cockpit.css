@@ -683,12 +683,12 @@ details.rock[open] > summary { margin-bottom: var(--s-2); }
 /* Angedeutete Karten darunter, solange noch mehr im Eingang liegt */
 .inbox-card.more { box-shadow: var(--shadow-2), 0 7px 0 -3px var(--surface), 0 7px 0 -2px var(--line-strong); }
 .inbox-card.dragging { transition: border-color var(--fast); }
-.inbox-card[data-toward=weg] { border-color: var(--danger); }
-.inbox-card[data-toward=stapel] { border-color: var(--ok); }
-.inbox-card[data-toward=lesen] { border-color: var(--accent); }
-.inbox-card.fly-weg { transform: translateX(-120vw) rotate(-12deg); opacity: 0; }
-.inbox-card.fly-lesen { transform: translateX(120vw) rotate(12deg); opacity: 0; }
-.inbox-card.fly-stapel { transform: translateY(60vh); opacity: 0; }
+.inbox-card[data-toward=links] { border-color: var(--danger); }
+.inbox-card[data-toward=unten] { border-color: var(--ok); }
+.inbox-card[data-toward=rechts] { border-color: var(--accent); }
+.inbox-card.fly-links { transform: translateX(-120vw) rotate(-12deg); opacity: 0; }
+.inbox-card.fly-rechts { transform: translateX(120vw) rotate(12deg); opacity: 0; }
+.inbox-card.fly-unten { transform: translateY(60vh); opacity: 0; }
 .inbox-card > * { margin: 0; }
 .inbox-meta { color: var(--text-2); font-size: var(--t-sm); }
 .inbox-meta a { color: inherit; }
@@ -877,12 +877,16 @@ html[data-read-sans] .lesen-text :is(h1, h2, h3, h4, h5, h6) { font-family: var(
 
 /* --- Lesen: Wiedersehen --- */
 /* /lesen/wiedersehen (src/lesen/review-page.js): Karte wie im Eingang, darunter die Woche wie im Wochenrückblick */
-.wiedersehen-card { touch-action: auto; }
+.wiedersehen-card { touch-action: pan-y; }
 .wiedersehen-note { font-family: var(--font-read); color: var(--text-2); }
 .wiedersehen-actions { display: grid; gap: var(--s-2); }
 .wiedersehen-actions form { margin: 0; }
 .wiedersehen-decide { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-2); }
 .wiedersehen-decide .btn { min-height: 48px; }
+.wiedersehen-actions kbd { display: none; padding: 2px 5px; border: 1px solid currentColor; border-radius: var(--r-xs); opacity: .6; }
+@media (hover: hover) and (pointer: fine) {
+  .wiedersehen-actions kbd { display: inline; }
+}
 .wiedersehen-worte summary { cursor: pointer; color: var(--text-2); padding: var(--s-1) 0; }
 .wiedersehen-worte form { display: grid; gap: var(--s-2); margin-top: var(--s-2); }
 .wiedersehen-worte textarea { width: 100%; resize: vertical; font-family: var(--font-read); }
@@ -1306,6 +1310,9 @@ a.ingest-item-open:hover, a.ingest-item-open:focus-visible { color: var(--accent
 /* --- Lesen: Offline --- */
 /* Markierungen, die noch im Puffer auf Netz warten (lesen-doc.js, CSS Custom Highlight API) */
 ::highlight(lesen-wartet) { background-color: color-mix(in srgb, #facc15 22%, transparent); text-decoration: underline dashed var(--warn); }
+/* Entfernen wartet auf Netz (VCP-87): Text bleibt, die Farbe geht schon. */
+.lesen-text mark.hl[data-weg] { background: none; text-decoration: line-through dashed var(--warn); cursor: default; }
+.offline-missing { margin: 0.25rem 0 0; }
 
 /* --- Lesen: Querverbindungen --- */
 /* Seitenleiste der Leseansicht (src/web/static/lesen-verbinden.js); Treffer nutzen .lesen-notes, auf dem iPhone ein Blatt von unten */

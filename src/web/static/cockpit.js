@@ -285,7 +285,9 @@
       await refresh();
       tick();
     } catch (err) {
-      if (!fallBack(form, err)) toast(err.message, { kind: 'error' });
+      if (fallBack(form, err)) return;
+      // Funkloch in der Leseansicht: Die Entscheidung geht in den Offline-Puffer (lesen-doc.js), statt verloren.
+      if (!(err.offline && (await window.cockpitLesen?.decision(form)))) toast(err.message, { kind: 'error' });
     } finally {
       form.classList.remove('busy');
     }

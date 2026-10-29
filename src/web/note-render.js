@@ -270,7 +270,11 @@ header .meta a { color: inherit; }
 .box svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; opacity: 0; }
 .box.on { background: var(--ok); border-color: var(--ok); }
 .box.on svg { opacity: 1; }
-.box:hover { border-color: var(--ok); }
+button.box:hover { border-color: var(--ok); }
+/* Nur Anzeige (Callouts, Embeds, ohne Schreibrecht): Glyphe ausblenden, Häkchen wie beim Knopf zeichnen. */
+span.box { cursor: default; font-size: 0; color: transparent; }
+span.box::before { content: none; }
+span.box.on::after { content: ''; width: 4px; height: 9px; margin-top: -3px; border: solid #fff; border-width: 0 2.4px 2.4px 0; transform: rotate(45deg); }
 @media (max-width: 900px) {
   .note-page { grid-template-columns: 1fr; }
   .note-actions { position: static; }

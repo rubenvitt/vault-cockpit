@@ -140,13 +140,26 @@
       }
       const fields = kind === 'note' ? { pfad: hit.path, abschnitt: hit.heading ?? '' } : { zu: hit.id };
       const data = await send('/aktion/lesen/verbinden', new URLSearchParams({ markierung: id, ...fields, csrf: csrf() }));
-      toast(data.message);
+      toast(data.message, data.undo ? { action: { label: 'Rückgängig', run: () => unlink(data.undo) } } : {});
       // Neu laden, damit „Schon verknüpft“ oben und an den Treffern stimmt.
       if (state === s) return load({ ...s.req, highlightId: id, anchor: null });
     } catch (err) {
       toast(err.message, { kind: 'error' });
     }
     if (state === s) render();
+  }
+
+  /** Rückgängig nach „Verknüpfen“: Link wieder heraus, offene Liste neu laden (VCP-85). */
+  async function unlink(undo) {
+    try {
+      const data = await send(undo.action, new URLSearchParams({ ...undo.fields, csrf: csrf() }));
+      toast(data.message);
+      // Nach dem Verknüpfen hat `load` einen neuen Stand angelegt; maßgeblich ist, ob noch dieselbe Markierung offen ist.
+      const current = state?.req?.highlightId ?? state?.data?.highlightId;
+      if (state?.open && current === undo.fields.markierung) await load({ ...state.req, highlightId: current, anchor: null });
+    } catch (err) {
+      toast(err.message, { kind: 'error' });
+    }
   }
 
   /** Lesetext und Seitenleiste neu vom Server, damit die neue Markierung im Text steht (wie in lesen-doc.js). */

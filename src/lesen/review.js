@@ -36,14 +36,10 @@ export function keep(h, now) {
 export const letGo = () => ({ review_state: 'losgelassen' });
 
 /**
- * Heute schon gesehen: seit `dayStart` geändert und entweder weitergerückt
- * (Box ≥ 2, nicht mehr fällig) oder losgelassen. Ein Rückgängig macht die
- * Karte wieder fällig und zählt sie damit nicht mehr.
- * shortcut: Eine heute geänderte Notiz an einer nicht fälligen Markierung ab
- * Box 2 zählt mit; genauer wäre ein Feld `reviewed_at` per Migration.
+ * Heute schon gesehen: seit `dayStart` entschieden (`reviewed_at`, VCP-85).
+ * Ein Rückgängig löscht den Zeitpunkt und zählt die Karte damit nicht mehr.
  */
-export const seenToday = (h, dayStart, now) =>
-  h.updated_at >= dayStart && (h.review_state === 'losgelassen' || (boxOf(h) >= 2 && !isDue(h, now)));
+export const seenToday = (h, dayStart) => Boolean(h.reviewed_at) && h.reviewed_at >= dayStart;
 
 /**
  * Häufungen ähnlicher Markierungen aus verschiedenen Dokumenten: Jede noch
