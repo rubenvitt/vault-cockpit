@@ -42,6 +42,8 @@ final class LoginTests: XCTestCase {
         let date = DateComponents(calendar: .current, year: 2026, month: 10, day: 23, hour: 12).date!
         XCTAssertEqual(LoginRequest.deviceName(name: "iPhone", model: "iPhone17,1", date: date), "iPhone · iPhone17,1 · 23.10.2026")
         XCTAssertEqual(LoginRequest.deviceName(name: String(repeating: "x", count: 100), model: "m", date: date).count, 80)
+        // Emoji zählen wie beim Server doppelt (UTF-16).
+        XCTAssertEqual(LoginRequest.deviceName(name: String(repeating: "📱", count: 50), model: "m", date: date).utf16.count, 80)
     }
 
     func testLoginSheetThatNeverOpenedShowsAMessage() {

@@ -96,7 +96,13 @@ struct LoginRequest {
     /// Einstellungen → API-Tokens unterscheidbar, z. B. „iPhone · iPhone17,1 · 23.10.2026“.
     static func deviceName(name: String, model: String, date: Date) -> String {
         let day = date.formatted(.dateTime.day(.twoDigits).month(.twoDigits).year().locale(Locale(identifier: "de_DE")))
-        return String("\(name) · \(model) · \(day)".prefix(80))
+        // Der Server zählt UTF-16-Einheiten wie JS (höchstens 80); ein Emoji sind meist zwei.
+        var result = ""
+        for character in "\(name) · \(model) · \(day)" {
+            guard result.utf16.count + String(character).utf16.count <= 80 else { break }
+            result.append(character)
+        }
+        return result
     }
 
     @MainActor
