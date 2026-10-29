@@ -25,6 +25,11 @@ const sha256 = (s) => createHash('sha256').update(s).digest();
  *   Funke-Relay. Funke braucht damit keinen eigenen Relay mehr, als Relay-URL
  *   genügt `<PUBLIC_URL>/funke`. Der Ordner aus der App wird ignoriert, die Notiz
  *   landet immer im Capture-Ordner.
+ * - `POST /funke/tasks` — JSON `{id, title, description?}`: eine Aufgabe aus
+ *   Funke. Der Titel geht durch dieselbe Schnelleingabe-Syntax wie `!` beim
+ *   Kurzbefehl (Fälligkeit, `#Ziel`, `+woche`), die Funke-Task-ID macht das
+ *   Nachsenden aus der Offline-Queue idempotent. Ohne Zunder im Cockpit kommt
+ *   `503`; Funke schickt die Aufgabe dann wie bisher selbst an Zunder.
  */
 function successMessage(result) {
   // Nennt Ziel und Fälligkeit und, was nicht erkannt wurde, damit der Kurzbefehl es anzeigt.
@@ -114,8 +119,35 @@ export function createCaptureHttp({ token = null, tokens = null, router, zunderE
     };
   }
 
+  function parseFunkeTask(body) {
+    let task;
+    try {
+      task = JSON.parse(body || '{}');
+    } catch {
+      throw new CaptureError('bad json');
+    }
+    if (typeof task !== 'object' || task === null || Array.isArray(task)) throw new CaptureError('JSON-Objekt erwartet');
+    const id = typeof task.id === 'string' ? task.id.trim() : '';
+    // Der Titel ist eine Zeile: Zeilenumbrüche aus der KI-Veredelung würden sonst
+    // den Rest des Titels in die Beschreibung schieben.
+    const title = typeof task.title === 'string' ? task.title.replace(/\s+/g, ' ').trim() : '';
+    const description = typeof task.description === 'string' ? task.description.trim() : '';
+    if (!id) throw new CaptureError('empty id');
+    if (!title) throw new CaptureError('empty title');
+    return {
+      text: description ? `!${title}\n${description}` : `!${title}`,
+      source: 'funke',
+      captureId: `funke-task-${id}`,
+    };
+  }
+
+  const ROUTES = {
+    '/funke/notes': parseFunke,
+    '/funke/tasks': parseFunkeTask,
+  };
+
   return {
-    matches: (path) => path === '/capture' || path === '/funke/notes' || path === '/funke/health',
+    matches: (path) => path === '/capture' || path === '/funke/health' || Object.hasOwn(ROUTES, path),
 
     async handle(req, res, url, body) {
       if (!authorized(req)) return fail(res, 401, 'unauthorized');
@@ -127,7 +159,7 @@ export function createCaptureHttp({ token = null, tokens = null, router, zunderE
       if (req.method !== 'POST' || path === '/funke/health') return fail(res, 405, 'method not allowed');
 
       try {
-        const input = path === '/funke/notes' ? parseFunke(body) : parseCapture(req, url, body);
+        const input = Object.hasOwn(ROUTES, path) ? ROUTES[path](body) : parseCapture(req, url, body);
         const result = await router.route(input);
         return json(res, result.duplicate ? 200 : 201, { ok: true, ...result, message: successMessage(result) });
       } catch (err) {

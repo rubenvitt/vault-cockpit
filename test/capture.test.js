@@ -351,3 +351,37 @@ test('/funke spricht das Protokoll des Funke-Relays, idempotent', async () => {
     assert.match(readInbox(inbox()[0]), /source: funke/);
   });
 });
+
+test('/funke/tasks wendet die Schnelleingabe-Syntax an, idempotent über die Funke-ID', async () => {
+  await withServer(async (call) => {
+    const task = JSON.stringify({ id: '01a1f805-eba0-77ee-a761-5ef35f30e49b', title: 'Zahnarzt anrufen\nmorgen.', description: 'Wegen Termin' });
+    const first = await call('/funke/tasks', { body: task });
+    assert.equal(first.status, 201);
+    const body = await first.json();
+    assert.equal(body.kind, 'task');
+    assert.equal(body.title, 'Zahnarzt anrufen');
+    assert.ok(body.due, 'morgen. am Ende wird zur Fälligkeit');
+    assert.equal(zunderCalls[0].title, 'Zahnarzt anrufen');
+    assert.equal(zunderCalls[0].due, body.due);
+    assert.match(zunderCalls[0].description, /^Wegen Termin\n\n_Erfasst über Funke/);
+    assert.equal((await call('/funke/tasks', { body: task })).status, 200, 'Nachsenden aus der Offline-Queue');
+    assert.equal(zunderCalls.length, 1);
+  });
+});
+
+test('/funke/tasks prüft die Eingabe und meldet fehlendes Zunder mit 503', async () => {
+  await withServer(async (call) => {
+    assert.equal((await call('/funke/tasks', { body: '{kaputt' })).status, 400);
+    assert.equal((await call('/funke/tasks', { body: JSON.stringify({ title: 'x' }) })).status, 400);
+    assert.equal((await call('/funke/tasks', { body: JSON.stringify({ id: 'a', title: '  ' }) })).status, 400);
+    assert.equal((await call('/funke/tasks', { body: JSON.stringify({ id: 'a/b', title: 'x' }) })).status, 400);
+    assert.equal((await call('/funke/tasks', { method: 'GET' })).status, 405);
+    assert.equal((await call('/funke/tasks', { body: JSON.stringify({ id: 'a', title: 'x' }), auth: null })).status, 401);
+  });
+  await withServer(
+    async (call) => {
+      assert.equal((await call('/funke/tasks', { body: JSON.stringify({ id: 'a', title: 'x' }) })).status, 503);
+    },
+    { zunder: null, zunderEnabled: false },
+  );
+});
