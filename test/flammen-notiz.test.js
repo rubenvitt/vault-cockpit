@@ -9,13 +9,14 @@ import { createEditor } from '../src/vault/edit.js';
 import { createSettingsStore } from '../src/cockpit/settings.js';
 import { createCockpitActions } from '../src/cockpit/actions.js';
 import { createStateStore } from '../src/capture/state.js';
-import { createFlameNote, flameRows, renderFlameTable, planFlameUpdate, flameBlock, flameBlocks, flameMinutes } from '../src/cockpit/flammen-notiz.js';
+import { createFlameNote, flameRows, renderFlameTable, planFlameUpdate, flameBlock, flameBlocks, flameMinutes, burnedSince } from '../src/cockpit/flammen-notiz.js';
+import { describeWeek } from '../src/cockpit/week.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
 const tz = 'Europe/Berlin';
 const FEUER = '20-bereiche/Phönix/feuer/Feuer W3 - 2026-Q4.md';
 const flamme = { fire: '2026-W42', role: 'flamme' };
-let root, idx, editor, settings, tasks, calls, svc, policy;
+let root, idx, editor, settings, tasks, recent, calls, svc, policy;
 
 const put = (p, text) => {
   mkdirSync(join(root, p, '..'), { recursive: true });
@@ -31,6 +32,7 @@ const zunder = {
   taskUrl: (id) => `https://zunder.test/#/aufgabe/${id}`,
   async filterTasks(f) {
     calls.push(f);
+    if (f.order_by === 'updated') return recent.slice(f.offset ?? 0, (f.offset ?? 0) + f.limit);
     return tasks.filter((t) => t.phoenix?.fire === f.phoenix_fire);
   },
 };
@@ -47,6 +49,7 @@ beforeEach(() => {
   editor = createEditor({ vaultPath: root, index: idx });
   settings = createSettingsStore({ defaults: { tz }, logger: quiet });
   calls = [];
+  recent = [];
   tasks = [
     { id: 'f1', title: 'Folien | Teil [1]', status: 'done', due: '2026-10-12T15:00:00+02:00', phoenix: flamme, flame_started_at: '2026-10-13T13:00:00Z', flame_ended_at: '2026-10-13T14:30:00Z' },
     { id: 'f2', title: 'Steuer', status: 'open', due: '2026-10-15', phoenix: flamme },
@@ -212,6 +215,63 @@ test('Lauf: zweimal gebrannte Flamme zeigt die Summe, der Verlauf wird nur bei �
   assert.match(read(FEUER), /\| 90 \| erledigt \|/);
 });
 
+test('Lauf: Blöcke an Aufgaben ohne Flammen-Markierung stehen als „ungeplant“ in der Tabelle, nur die der Woche (VCP-117)', async () => {
+  const asked = [];
+  recent = [
+    // Zweimal gebrannt: der Block der Vorwoche zählt hier nicht.
+    { id: 'u1', title: 'Steuererklärung', status: 'in_progress', phoenix: null, flame_started_at: '2026-10-13T08:00:00Z', flame_ended_at: '2026-10-13T08:45:00Z', updated_at: '2026-10-13T08:45:00Z' },
+    { id: 'u2', title: 'Brennt gerade', status: 'open', phoenix: { fire: '2026-W42', role: 'feuer_schritt' }, flame_running: true, flame_started_at: '2026-10-14T09:30:00Z', updated_at: '2026-10-14T09:30:00Z' },
+    // Die Flamme der Woche kommt nicht doppelt, die einer anderen Woche gar nicht, verworfene auch nicht.
+    { ...tasks[0], updated_at: '2026-10-13T14:30:00Z' },
+    { id: 'o1', title: 'Andere Woche', status: 'done', phoenix: { fire: '2026-W41', role: 'flamme' }, flame_started_at: '2026-10-12T09:00:00Z', flame_ended_at: '2026-10-12T10:00:00Z', updated_at: '2026-10-12T10:00:00Z' },
+    { id: 'd1', title: 'Verworfen', status: 'dropped', phoenix: null, flame_started_at: '2026-10-12T11:00:00Z', flame_ended_at: '2026-10-12T12:00:00Z', updated_at: '2026-10-12T12:00:00Z' },
+    // Zuletzt vor der Woche gebrannt.
+    { id: 'a1', title: 'Alt', status: 'open', phoenix: null, flame_started_at: '2026-10-09T08:00:00Z', flame_ended_at: '2026-10-09T09:00:00Z', updated_at: '2026-10-11T08:00:00Z' },
+  ];
+  const history = {
+    u1: [
+      { seq: 1, field: 'flame_started_at', value: '2026-10-08T08:00:00Z' },
+      { seq: 2, field: 'flame_ended_at', value: '2026-10-08T10:00:00Z' },
+      { seq: 3, field: 'flame_started_at', value: '2026-10-13T08:00:00Z' },
+      { seq: 4, field: 'flame_ended_at', value: '2026-10-13T08:45:00Z' },
+    ],
+  };
+  const withHistory = { ...zunder, async taskHistory(id) { asked.push(id); return history[id] ?? []; } };
+  const note = make({ zunder: () => withHistory });
+  assert.equal((await note.update('2026-W42')).state, 'geschrieben');
+  const text = read(FEUER);
+  assert.match(text, /\| Di 13\.10\. \| \[Steuererklärung\][^\n]*\| ungeplant \| 45 \| in Arbeit \|/);
+  assert.match(text, /\| Mi 14\.10\. \| \[Brennt gerade\][^\n]*\| ungeplant \| läuft \| brennt \|/);
+  assert.equal(text.match(/Folien/g).length, 1);
+  assert.doesNotMatch(text, /Andere Woche|Verworfen|\[Alt\]/);
+  assert.deepEqual(asked.sort(), ['f1', 'u1', 'u2']);
+
+  // Zweiter Lauf: nichts geändert, der Verlauf wird nicht noch einmal gefragt.
+  assert.equal((await note.update('2026-W42')).state, 'aktuell');
+  assert.equal(asked.length, 3);
+
+  // Ohne Verlauf zählt der letzte Block, wenn er in der Woche liegt.
+  writeFileSync(join(root, FEUER), feuerNote());
+  await make().update('2026-W42');
+  assert.match(read(FEUER), /\[Steuererklärung\][^\n]*\| ungeplant \| 45 \|/);
+});
+
+test('Suche nach ungeplant gebrannten Aufgaben: seitenweise, bis zum Wochenbeginn, mit Obergrenze (VCP-117)', async () => {
+  const week = describeWeek({ year: 2026, week: 42 }, tz);
+  const at = (i) => new Date(Date.parse('2026-10-15T00:00:00Z') - i * 3_600_000).toISOString();
+  // 450 Aufgaben, stündlich zurück: bis Nummer 74 ab Wochenbeginn (Mo 0 Uhr in Berlin).
+  recent = Array.from({ length: 450 }, (_, i) => ({ id: `t${i}`, title: `T${i}`, status: 'open', phoenix: null, flame_started_at: at(i), flame_ended_at: at(i), updated_at: at(i) }));
+  const found = await burnedSince(zunder, week);
+  assert.equal(found.length, 75);
+  assert.equal(calls.length, 1);
+
+  // Alles in der Woche geändert: höchstens fünf Seiten.
+  calls = [];
+  recent = Array.from({ length: 2000 }, (_, i) => ({ id: `n${i}`, title: 'N', status: 'open', updated_at: '2026-10-14T00:00:00Z' }));
+  await burnedSince(zunder, week);
+  assert.equal(calls.length, 5);
+});
+
 test('Lauf: dieselbe Warnung nur einmal ins Log, nach einem guten Lauf wieder (VCP-61)', async () => {
   const warnings = [];
   const note = make({ logger: { ...quiet, warn: (m) => warnings.push(m) } });
@@ -253,7 +313,7 @@ test('Lauf: aus in den Einstellungen, ohne Feuer-Notiz, ohne Zunder oder vertrau
 test('Intervall: laufende und vorige Woche; nach Stopp die Woche der Flamme', async () => {
   const results = await svc.round();
   // W41 hat keine Feuer-Notiz: übersprungen, ohne Zunder zu fragen.
-  assert.deepEqual(calls.map((c) => c.phoenix_fire), ['2026-W42']);
+  assert.deepEqual(calls.filter((c) => c.phoenix_fire).map((c) => c.phoenix_fire), ['2026-W42']);
   assert.deepEqual(results.map((r) => [r.state, r.week]), [['übersprungen', '2026-W41'], ['geschrieben', '2026-W42']]);
 
   // Flamme einer anderen Woche → deren Notiz; ohne Phönix-Woche → die laufende.
