@@ -147,6 +147,7 @@
   const all = async () => ((await store('readonly', (s) => s.getAll())) ?? []).sort((a, b) => a.created - b.created);
   const save = (entry) => store('readwrite', (s) => s.put(entry));
   const drop = (id) => store('readwrite', (s) => s.delete(id));
+  const stored = (id) => store('readonly', (s) => s.get(id));
   const clear = () => store('readwrite', (s) => s.clear());
   /**
    * Nach dem Senden: löschen bzw. ersetzen nur, wenn noch genau die gesendete
@@ -266,10 +267,13 @@
     let failed = 0;
     for (const entry of todo) {
       if (leaving) break;
+      // Inzwischen verworfen, auch in einem anderen Tab (Abmelden dort, „Verwerfen“): nicht mehr senden.
+      if (!(await stored(entry.id).catch(() => null))) continue;
       let r = await sendOne(entry, csrf);
       // Token veraltet (Sitzung inzwischen erneuert): einmal frisch holen und noch einmal.
       if (r === 'csrf') {
         csrf = await sessionToken();
+        if (leaving) break;
         r = csrf ? await sendOne(entry, csrf) : 'stop';
       }
       if (r === 'stop' || r === 'csrf') break;

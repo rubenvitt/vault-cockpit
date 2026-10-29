@@ -335,6 +335,30 @@ test('Abmelden während eines hängenden Nachsendens: Nach dem Bestätigen geht 
   );
 });
 
+test('Nachsenden: Was ein anderer Tab inzwischen gelöscht hat (Abmelden, Verwerfen), geht nicht mehr raus', async () => {
+  let release;
+  const gate = new Promise((r) => (release = r));
+  const page = await loadPage({
+    onLine: false,
+    server: async (path) => {
+      if (path === '/api/sitzung') return { body: { csrf: 't1' } };
+      await gate;
+      return { body: { ok: true, message: 'ok' } };
+    },
+  });
+  for (const id of ['a', 'b']) await page.puffer.queue({ id, action: '/aktion/lesen/markierung/notiz', fields: { id, notiz: id }, label: `Notiz: ${id}` });
+  page.ctx.navigator.onLine = true;
+  const running = page.puffer.flush();
+  await until(() => page.requests.some((r) => r.path !== '/api/sitzung'), 'erste Notiz unterwegs');
+  page.idb.data.clear();
+  release();
+  await running;
+  assert.deepEqual(
+    page.requests.filter((r) => r.path !== '/api/sitzung').map((r) => r.fields.id),
+    ['a'],
+  );
+});
+
 test('Gespeicherte Leseseite: Stapel und Seitenleiste zeigen nur Artikel, die offline vorliegen', async () => {
   const html = `<main class="lesen-doc">
     <nav class="lesen-stack"><ol>
