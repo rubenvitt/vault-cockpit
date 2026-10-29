@@ -38,6 +38,37 @@ public enum CockpitFormat {
         return "\(weekdays[(c.weekday ?? 1) - 1]) \(two(c.day ?? 0)).\(two(c.month ?? 0)). \(two(c.hour ?? 0)):\(two(c.minute ?? 0))"
     }
 
+    /// Kalendertag einer Fälligkeit (`JJJJ-MM-TT` oder RFC 3339) in `timeZone`, wie `dueDay` in render.js.
+    public static func localDay(_ due: String, timeZone: TimeZone) -> String? {
+        if due.count == 10, parts(of: due) != nil { return due }
+        return date(from: due).map { dayString($0, in: timeZone) }
+    }
+
+    /// Fälligkeit als Schild wie `dueTag` in render.js (VCP-54): „Heute“ und „Morgen“ als
+    /// Wort, sonst wie `dueLabel`; überfällig nur, solange die Aufgabe offen ist. nil ohne Fälligkeit.
+    public static func dueTag(_ task: ZunderTask, today: String?, timeZone: TimeZone) -> DueTag? {
+        let label = dueLabel(task.due, timeZone: timeZone)
+        guard !label.isEmpty, let due = task.due else { return nil }
+        let closed = task.status == .done || task.status == .dropped
+        let time = label.contains(":") ? String(label.suffix(5)) : nil
+        guard let today, let day = localDay(due, timeZone: timeZone) else {
+            return DueTag(text: label, label: label, tone: task.overdue && !closed ? .overdue : .plain)
+        }
+        let tomorrow = Self.day(from: today, in: timeZone)
+            .flatMap { calendar(timeZone).date(byAdding: .day, value: 1, to: $0) }
+            .map { dayString($0, in: timeZone) }
+        var text = label
+        var tone = DueTag.Tone.plain
+        if day == today {
+            text = time.map { "Heute \($0)" } ?? "Heute"
+            tone = .today
+        } else if day == tomorrow {
+            text = time.map { "Morgen \($0)" } ?? "Morgen"
+        }
+        if day < today && !closed { tone = .overdue }
+        return DueTag(text: text, label: label, tone: tone)
+    }
+
     /// Uhrzeit `HH:MM` in `timeZone` (Termine, „seit 09:40“).
     public static func time(_ date: Date, timeZone: TimeZone) -> String {
         let c = calendar(timeZone).dateComponents([.hour, .minute], from: date)
@@ -149,4 +180,30 @@ public enum CockpitFormat {
     }
 
     private static func two(_ n: Int) -> String { n < 10 ? "0\(n)" : "\(n)" }
+}
+
+/// Schild für die Fälligkeit einer Aufgabe (`CockpitFormat.dueTag`).
+public struct DueTag: Equatable, Sendable {
+    public enum Tone: Equatable, Sendable {
+        case plain
+        /// Heute fällig.
+        case today
+        /// Überfällig und noch offen.
+        case overdue
+    }
+
+    /// Kurz: „Heute“, „Morgen 09:30“, „Fr 16.10.“
+    public let text: String
+    /// Immer mit Datum, für VoiceOver: „Fr 16.10.“
+    public let label: String
+    public let tone: Tone
+
+    public init(text: String, label: String, tone: Tone) {
+        self.text = text
+        self.label = label
+        self.tone = tone
+    }
+
+    /// „Überfällig seit Mo 12.10.“ bzw. „Fällig Fr 16.10.“
+    public var accessibilityText: String { tone == .overdue ? "Überfällig seit \(label)" : "Fällig \(label)" }
 }

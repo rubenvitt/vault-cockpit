@@ -7,7 +7,7 @@ import { renderDraftRescue } from './session-render.js';
 import { renderWeek, renderMessage, renderSettings, dueLabel } from './render.js';
 import { versionAssets, THEME } from './layout.js';
 import { renderGraph, renderSearch, renderWholeGraph, graphJson, GRAPH_CSS } from './graph-render.js';
-import { renderNote, NOTE_CSS } from './note-render.js';
+import { renderNote, noteOrigin, NOTE_CSS } from './note-render.js';
 import { noteJson } from './note-json.js';
 import { renderReview, REVIEW_CSS } from './review-render.js';
 import { renderPlan, planRoutes, PLAN_CSS } from './plan-page.js';
@@ -397,9 +397,13 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     if (!note) {
       return send(res, 404, renderMessage('Notiz nicht verfügbar', `„${path}“ gibt es nicht, oder sie liegt in einem vertraulichen oder ausgeschlossenen Ordner.`, { link: { href: '/', label: 'Zur Woche' } }));
     }
+    // Herkunft (Inbox, Graph …) wandert in die Adresse, damit sie Aktionen ohne JavaScript übersteht.
+    const origin = noteOrigin(url.searchParams.get('zurueck'), req.headers.referer, new URL(publicUrl).origin);
+    if (origin && !url.searchParams.has('zurueck')) url.searchParams.set('zurueck', origin.path);
     const back = url.pathname + url.search;
     const kept = draft === null && actions ? sessions.takeDraft(req, res, (d) => d.action === '/aktion/notiz/anhaengen' && d.back === back) : null;
     const html = renderNote(note, {
+      origin,
       user: session.name ?? session.sub,
       write: actions ? writeContext(req) : null,
       back,
@@ -465,7 +469,11 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     return url.pathname === '/notiz' && notes ? notePage(req, res, url, session, opts) : page(req, res, url, session, opts);
   };
   /** Nach dem Verschieben gibt es die alte Notizseite nicht mehr. */
-  const notePageOf = (path) => `/notiz?pfad=${encodeURIComponent(path)}`;
+  /** Notizseite; `from` ist die bisherige Notizadresse, deren Herkunft (`zurueck`) mitgeht. */
+  const notePageOf = (path, from = null) => {
+    const zurueck = from ? new URL(from, publicUrl).searchParams.get('zurueck') : null;
+    return `/notiz?pfad=${encodeURIComponent(path)}${zurueck ? `&zurueck=${encodeURIComponent(zurueck)}` : ''}`;
+  };
 
   const taskName = (t) => (t.ref ? `${t.ref} ${t.title}` : t.title);
   const statusMessage = (t) => {
@@ -547,8 +555,8 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
                 const from = r.from.includes('/') ? r.from.slice(0, r.from.lastIndexOf('/')) : '';
                 logger.info?.(`Cockpit: ${r.from} → ${r.path} (${session.sub})`);
                 // Von der Notizseite aus geht es zur neuen Adresse der Notiz.
-                const redirect = back.startsWith('/notiz') ? notePageOf(r.path) : null;
-                const undo = r.changed && from ? { action: '/aktion/notiz/ablegen', fields: { pfad: r.path, ordner: from, back: redirect ? notePageOf(r.from) : back } } : null;
+                const redirect = back.startsWith('/notiz') ? notePageOf(r.path, back) : null;
+                const undo = r.changed && from ? { action: '/aktion/notiz/ablegen', fields: { pfad: r.path, ordner: from, back: redirect ? notePageOf(r.from, back) : back } } : null;
                 return { message: r.changed ? `Abgelegt in ${folder}/` : `Liegt schon in ${folder}/`, path: r.path, from: r.from, folder, redirect, undo };
               },
               async '/aktion/notiz/tags'(form) {

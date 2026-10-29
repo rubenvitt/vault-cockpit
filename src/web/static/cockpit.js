@@ -106,7 +106,15 @@
     rock.classList.toggle('all-done', items.length > 0 && done === items.length);
   }
 
+  // Dieselbe Aufgabe kann zweimal auf der Seite stehen (Heute und Big Rocks): beide folgen.
   function show(li, status) {
+    const id = li.dataset.id;
+    const copies = id ? document.querySelectorAll(`li.task[data-id="${CSS.escape(id)}"]`) : [];
+    for (const copy of copies) if (copy !== li && copy.querySelector('form.tick')) showOne(copy, status);
+    showOne(li, status);
+  }
+
+  function showOne(li, status) {
     li.className = li.className.replace(/\bstatus-\S+/, `status-${status}`);
     li.dataset.status = status;
     const form = li.querySelector('form.tick');
