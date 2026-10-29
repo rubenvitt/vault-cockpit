@@ -110,6 +110,8 @@ public enum ReadingAction {
     public static let episodeSpeak = "/aktion/lesen/folge/sprechen"
     public static let episodeIngest = "/aktion/lesen/folge/ingest"
     public static let episodeDelete = "/aktion/lesen/folge/loeschen"
+    /// `id`: Einmal-Link aufs gesprochene Transkript (`url`, `expiresAt`, `minutes`).
+    public static let episodeShare = "/aktion/lesen/folge/teilen"
     /// `id`, `gehoert` (`1` gehört, `0` doch nicht), mit Rückgängig.
     public static let episodeHeard = "/aktion/lesen/folge/gehoert"
     /// `id`, `stelle` und `dauer` in Sekunden (der Player, still); kurz vor Schluss gehört.

@@ -896,6 +896,29 @@ public enum EpisodeStatus {
     public static let failed = "fehler"
 }
 
+/// Antwort auf „Einmal-Link“ (`/aktion/lesen/folge/teilen`): `url` liefert einmal das
+/// Gesprochene als Markdown, bis `expiresAt` (`minutes` Minuten).
+public struct EpisodeShareLink: ActionReply, Equatable, Identifiable, Sendable {
+    public let ok: Bool
+    public let message: String
+    public let url: URL
+    public let expiresAt: String?
+    public let minutes: Int?
+
+    public var id: URL { url }
+
+    enum CodingKeys: String, CodingKey { case ok, message, url, expiresAt, minutes }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        ok = try c.decodeIfPresent(Bool.self, forKey: .ok) ?? false
+        message = try c.decodeIfPresent(String.self, forKey: .message) ?? ""
+        url = try c.decode(URL.self, forKey: .url)
+        expiresAt = try c.decodeIfPresent(String.self, forKey: .expiresAt)
+        minutes = try c.decodeIfPresent(Int.self, forKey: .minutes)
+    }
+}
+
 /// Folge (`episodeJson`). Die MP3 liegt unter `/api/app/folge?id=`.
 public struct Episode: Decodable, Equatable, Identifiable, Sendable {
     public let id: String

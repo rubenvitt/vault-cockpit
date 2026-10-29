@@ -71,7 +71,9 @@ make test      # Unit-Tests auf dem ersten verfügbaren iPhone-Simulator
   (angefangene zuerst) · Entsteht · Nur Transkript · Gehört (eingeklappt, kleinere Karten), je fertiger
   Folge „angefangen, bei 3:05“ bzw. „gehört am …“ und „Als gehört markieren“ / „Doch nicht gehört“
   (mit Rückgängig). Der native Player meldet die Stelle (`APIClient.reportListening`, höchstens
-  alle 30 s, beim Anhalten und am Ende); kurz vor Schluss vermerkt der Server die Folge als gehört.
+  alle 30 s, beim Anhalten und am Ende); kurz vor Schluss vermerkt der Server die Folge als gehört. Ein
+  Transkript (Podcast, Report) hat „Einmal-Link“: `/aktion/lesen/folge/teilen` liefert eine Adresse,
+  die 15 Minuten lang einmal das Gesprochene als Markdown zurückgibt; sie geht gleich ins Teilen-Blatt.
 - **Ingest** (`Cockpit/Native/Lesen/IngestScreen.swift`, `IngestReviewScreen.swift`,
   `IngestReviewScreenParts.swift`; Stores `IngestStore`, `IngestReviewStore` in `CockpitShared`):
   Bereich „Ingest“ im Lesen mit der Zahl bereiter Entwürfe (nur, wenn der Server ihn kennt),

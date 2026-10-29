@@ -193,6 +193,22 @@ public final class EpisodesStore {
         return true
     }
 
+    /// „Einmal-Link“ zu einem Transkript: kurz gültige Adresse, die einmal das Gesprochene als
+    /// Markdown liefert (`/geteilt.md`). nil bei Fehler (mit Meldung).
+    public func shareLink(_ episode: Episode) async -> EpisodeShareLink? {
+        guard episode.isTranscript, episode.kind != "vorlesen", !busy.contains(episode.id) else { return nil }
+        busy.insert(episode.id)
+        defer { busy.remove(episode.id) }
+        do {
+            let link = try await context.api.action(ReadingAction.episodeShare, fields: ["id": episode.id], as: EpisodeShareLink.self)
+            context.toasts.signal(.success)
+            return link
+        } catch {
+            context.report(error)
+            return nil
+        }
+    }
+
     /// „Audio erzeugen“ zu einem fertigen Transkript: aus demselben Skript, Claude schreibt nicht
     /// noch einmal.
     @discardableResult
