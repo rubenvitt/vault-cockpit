@@ -145,6 +145,7 @@ final class AppModel {
             return
         }
         let player = players.listening(request.minutes)
+        player.onUnauthorized = { [weak self] in self?.apiUnauthorized() }
         replacePlayer(with: .listening(player))
         Task { await player.start() }
     }
@@ -190,7 +191,9 @@ final class AppModel {
             let request = LoginRequest(serverURL: config.serverURL)
             let callback = try await authenticator.authenticate(url: request.url, callback: request.callback)
             let code = try request.code(from: callback)
-            let result = try await APIClient.redeem(baseURL: config.serverURL, code: code, verifier: request.pkce.verifier, device: LoginRequest.currentDeviceName)
+            // Ein Token je Gerät: Der bisherige (abgelaufen, widerrufen oder noch gültig) geht mit, der Server widerruft ihn.
+            let previous = (try? keychain.token()) ?? nil
+            let result = try await APIClient.redeem(baseURL: config.serverURL, code: code, verifier: request.pkce.verifier, device: LoginRequest.currentDeviceName, replaces: previous)
             // Das Cookie braucht die App nicht mehr (kein WKWebView); sie arbeitet mit dem Geräte-Token.
             do {
                 try keychain.save(token: result.token.token)
@@ -402,9 +405,25 @@ final class AppModel {
         guard let token = (try? keychain.token()) ?? nil,
               let pending = PendingShares(appGroup: config.appGroup)
         else { return }
-        for (share, error) in await pending.flush(using: APIClient(baseURL: config.serverURL, token: token)) {
+        let rejected = await pending.flush(using: APIClient(baseURL: config.serverURL, token: token)) { [weak self] in
+            await self?.apiUnauthorized()
+        }
+        for (share, error) in rejected {
             log.error("Geteiltes verworfen (\(share.id, privacy: .public)): \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    /// Fortschritt und Markierungen aus „Unterwegs hören“, die ohne Netz liegen blieben, auch ohne
+    /// offenen Player nachsenden (Start, Vordergrund). Läuft einer, sendet er seinen Puffer selbst.
+    func sendPendingListening() async {
+        if case .listening(let player) = nowPlaying {
+            await player.flush()
+            return
+        }
+        // Ein Player nur zum Senden: Er startet nicht, spielt also nichts und meldet sich nirgends an.
+        let sender = players.listening(15)
+        sender.onUnauthorized = { [weak self] in self?.apiUnauthorized() }
+        await sender.flush()
     }
 
     /// Geräte-Token auf dem Server widerrufen, dann Website-Daten (Cookies, Service Worker und

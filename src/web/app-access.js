@@ -8,9 +8,9 @@ import { readLimited, FormError } from './multipart.js';
 import { audioResponse } from '../lesen/folgen-page.js';
 
 /**
- * Login und JSON-API der iOS-App (VCP-91). Die App ist eine Hülle um das
- * Web-Cockpit (WKWebView); Passkeys gehen dort nicht, deshalb meldet sie sich
- * über das Login-Blatt des Systems an (`ASWebAuthenticationSession`):
+ * Login und JSON-API der iOS-App (VCP-91). Die App ist nativ und meldet sich
+ * über das Login-Blatt des Systems an (`ASWebAuthenticationSession`), dort
+ * gehen auch Passkeys:
  *
  * 1. `GET /login?app=1&state=…&challenge=…` läuft wie der Web-Login über
  *    Pocket ID (src/web/http.js), endet aber mit einem Redirect auf den
@@ -18,9 +18,12 @@ import { audioResponse } from '../lesen/folgen-page.js';
  *    einer Sitzung. `challenge` = base64url(sha256(verifier)), wie PKCE.
  *    Den Link fängt das Login-Blatt ab; iOS gibt ihn nur an die App, die in
  *    `/.well-known/apple-app-site-association` steht (Team und Bundle-ID).
- * 2. `POST /api/app/einloesen` `{ code, verifier, device }` tauscht den Code
- *    gegen ein Sitzungs-Cookie (für den `WKHTTPCookieStore`) und einen
- *    Geräte-Token mit dem Recht `app` (src/cockpit/tokens.js).
+ * 2. `POST /api/app/einloesen` `{ code, verifier, device, replaces? }` tauscht
+ *    den Code gegen einen Geräte-Token mit dem Recht `app`
+ *    (src/cockpit/tokens.js). `replaces` ist der bisherige Token des Geräts:
+ *    Er wird widerrufen, damit jedes Gerät nur einen Token hat (VCP-99). Ein
+ *    Sitzungs-Cookie gibt es nicht mehr, die native App braucht keins; so
+ *    liegt auf dem Gerät keine Kopie einer Web-Sitzung.
  *
  * Der Code lebt nur im Speicher, 60 Sekunden, und gilt für genau einen
  * Versuch: Wer ihn abfängt, hat den Verifier nicht. Der Redirect geht nur auf
@@ -31,6 +34,9 @@ import { audioResponse } from '../lesen/folgen-page.js';
  * könnte sich sonst selbst einen Login holen.
  *
  * Mit dem Geräte-Token (`Authorization: Bearer vct_…`) statt Sitzung und CSRF:
+ * Der Login bei Pocket ID läuft mit `prompt=login` (src/web/http.js).
+ * Einlösen ist je Absender begrenzt (hinter dem Proxy aus `X-Forwarded-For`).
+ *
  * `GET /api/app/stapel?zeit=15`, `GET /api/app/text?id=…`,
  * `GET /api/app/audio?id=…&von=…&bis=…` (MP3 eines Satzes, nur mit Stimme vom
  * Server; welche, sagt `stimme` in `/api/app/stapel`), `POST /api/app/fortschritt`, `POST /api/app/markierung`, `GET /api/app/ich`,
@@ -47,7 +53,7 @@ export const APP_CALLBACK_PATH = '/app/angemeldet';
 export const SITE_ASSOCIATION_PATH = '/.well-known/apple-app-site-association';
 const DEV_REDIRECT = 'cockpit://login';
 const CODE_SECONDS = 60;
-// shortcut: ein globales Fenster für alle Absender (ein Nutzer, wenige Geräte); bei mehr Nutzern je Adresse zählen.
+// Je Absender; die Tabelle räumt jeder Versuch auf, sie wächst also höchstens um die Absender einer Minute.
 const REDEEM_LIMIT = 10;
 const REDEEM_WINDOW = 60_000;
 const MAX_BODY = 16 * 1024;
@@ -67,14 +73,31 @@ class AppError extends Error {
   }
 }
 
-/**
- * `sessions` aus src/web/sessions.js, `tokens` aus src/cockpit/tokens.js,
- * `reading` aus src/lesen/http.js (Aktionen und `listen`).
- */
-export function createAppAccess({ sessions, tokens, reading, publicUrl, appId = `${APP_TEAM_ID}.${APP_BUNDLE_ID}`, allowDevScheme = false, logger = console, now = () => Date.now() }) {
+/** `tokens` aus src/cockpit/tokens.js, `reading` aus src/lesen/http.js (Aktionen und `listen`). */
+export function createAppAccess({ tokens, reading, publicUrl, appId = `${APP_TEAM_ID}.${APP_BUNDLE_ID}`, allowDevScheme = false, trustProxy = false, logger = console, now = () => Date.now() }) {
   const codes = new Map();
   const redirectTo = !publicUrl.startsWith('https://') && allowDevScheme ? DEV_REDIRECT : new URL(APP_CALLBACK_PATH, publicUrl).href;
-  let attempts = [];
+  /** Absender → Zeitpunkte der Versuche im laufenden Fenster. */
+  const attempts = new Map();
+
+  /** Absender des Requests: hinter dem Proxy der erste Eintrag aus `X-Forwarded-For`, sonst die Gegenstelle. */
+  const senderOf = (req) => {
+    const forwarded = trustProxy ? String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim() : '';
+    return forwarded || req.socket?.remoteAddress || '?';
+  };
+
+  /** Zählt den Versuch; false, wenn der Absender im Fenster schon `REDEEM_LIMIT` hatte. */
+  const allowAttempt = (sender, t) => {
+    for (const [k, list] of attempts) {
+      const recent = list.filter((a) => a > t - REDEEM_WINDOW);
+      if (recent.length) attempts.set(k, recent);
+      else attempts.delete(k);
+    }
+    const list = attempts.get(sender) ?? [];
+    if (list.length >= REDEEM_LIMIT) return false;
+    attempts.set(sender, [...list, t]);
+    return true;
+  };
 
   const json = (res, status, body) => {
     res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
@@ -107,10 +130,8 @@ export function createAppAccess({ sessions, tokens, reading, publicUrl, appId = 
 
   async function redeem(req, res) {
     const t = now();
-    attempts = attempts.filter((a) => a > t - REDEEM_WINDOW);
-    if (attempts.length >= REDEEM_LIMIT) return fail(res, 429, 'Zu viele Versuche. In einer Minute noch einmal.');
-    attempts.push(t);
-    const { code, verifier, device } = await readJson(req);
+    if (!allowAttempt(senderOf(req), t)) return fail(res, 429, 'Zu viele Versuche. In einer Minute noch einmal.');
+    const { code, verifier, device, replaces } = await readJson(req);
     // Jeder Versuch verbraucht den Code, auch ein falscher.
     const entry = typeof code === 'string' ? codes.get(code) : undefined;
     if (entry) codes.delete(code);
@@ -119,8 +140,14 @@ export function createAppAccess({ sessions, tokens, reading, publicUrl, appId = 
     if (!entry || entry.exp <= t || given.length !== expected.length || !timingSafeEqual(given, expected)) {
       return fail(res, 400, 'Code ungültig, abgelaufen oder schon eingelöst. Bitte neu anmelden.', 'invalid_code');
     }
+    // Ein Token je Gerät: Den bisherigen widerrufen, bevor der neue entsteht (zählt sonst gegen MAX_TOKENS).
+    // Nur einen gültigen `app`-Token; ein unbekannter oder schon widerrufener ändert nichts.
+    const previous = typeof replaces === 'string' ? tokens.find(replaces) : null;
+    if (previous && previous.scope === 'app') {
+      tokens.revoke(previous.id);
+      logger.info?.(`App-Login: bisherigen Geräte-Token „${previous.name}“ widerrufen`);
+    }
     let created;
-    // shortcut: jeder App-Login legt einen neuen Geräte-Token an, der alte bleibt bis zum Widerruf (alle zählen gegen MAX_TOKENS); bei Bedarf schickt die App den alten mit und das Einlösen widerruft ihn.
     try {
       created = tokens.create(device, 'app');
     } catch (err) {
@@ -130,7 +157,6 @@ export function createAppAccess({ sessions, tokens, reading, publicUrl, appId = 
     logger.info?.(`App-Login: Geräte-Token „${created.name}“ für ${entry.user.subject}`);
     return json(res, 200, {
       ok: true,
-      cookie: sessions.issueValues(entry.user, new URL(publicUrl).hostname),
       token: { token: created.token, id: created.id, name: created.name, scopes: grantsOf('app') },
     });
   }

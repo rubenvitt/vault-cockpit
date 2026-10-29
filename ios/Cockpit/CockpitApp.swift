@@ -22,10 +22,11 @@ struct CockpitApp: App {
                 }
             }
             // Geteiltes, das die Share Extension ohne Netz gepuffert hat, beim Start, im Vordergrund und nach dem Login nachsenden;
-            // ebenso den Puffer der Schnelleingabe.
+            // ebenso die Puffer von „Unterwegs hören“ und der Schnelleingabe.
             .task(id: scenePhase == .active && model.phase == .loggedIn) {
                 if scenePhase == .active, model.phase == .loggedIn {
                     await model.sendPendingShares()
+                    await model.sendPendingListening()
                     await model.cockpit?.foreground()
                 }
             }

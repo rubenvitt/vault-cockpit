@@ -38,6 +38,11 @@ struct PlayerMachine: Equatable {
     private var resumesAfterInterruption = false
 
     var currentItem: QueueItem? { index.map { items[$0] } }
+    /// Der Text nach dem laufenden, zum Vorladen.
+    var nextItem: QueueItem? {
+        guard let index, index + 1 < items.count else { return nil }
+        return items[index + 1]
+    }
     var currentSentence: String? { text?.text(of: sentence) }
     var currentUtterance: Utterance? { text?.utterance(of: sentence) }
     /// Der Satz danach im selben Text, zum Vorladen.

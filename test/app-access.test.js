@@ -82,6 +82,7 @@ async function withServer(run, { sub = 'ruben', publicUrl = 'https://vault.test'
     publicUrl,
     appId: 'TEAM123.dev.example.cockpit',
     allowDevScheme,
+    trustProxy: true,
     allowedSubjects: ['ruben'],
     logger,
     now: () => clock.t,
@@ -101,9 +102,9 @@ async function withServer(run, { sub = 'ruben', publicUrl = 'https://vault.test'
   const base = `http://127.0.0.1:${app.address().port}`;
   // Ein Keksglas für das Login-Blatt (ASWebAuthenticationSession), eins für den WKWebView.
   const sheet = {};
-  const call = async (path, { method = 'GET', jar = sheet, body = undefined, bearer = null } = {}) => {
+  const call = async (path, { method = 'GET', jar = sheet, body = undefined, bearer = null, headers: extra = {} } = {}) => {
     const cookie = Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ');
-    const headers = { 'x-forwarded-host': 'vault.test', ...(cookie ? { cookie } : {}), ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) };
+    const headers = { 'x-forwarded-host': 'vault.test', ...(cookie ? { cookie } : {}), ...(bearer ? { authorization: `Bearer ${bearer}` } : {}), ...extra };
     if (body !== undefined) headers['content-type'] = 'application/json';
     const res = await fetch(base + path, { method, redirect: 'manual', headers, body: body === undefined ? undefined : JSON.stringify(body) });
     for (const c of res.headers.getSetCookie()) {
@@ -123,16 +124,24 @@ async function withServer(run, { sub = 'ruben', publicUrl = 'https://vault.test'
     assert.equal(back.status, 303);
     return new URL(back.headers.get('location'));
   };
-  const redeem = (body) => call('/api/app/einloesen', { method: 'POST', body });
+  /** Web-Login im Browser; liefert das Keksglas mit Sitzung. Dazu die Adresse, zu der Pocket ID geschickt wurde. */
+  const webLogin = async () => {
+    const jar = {};
+    const start = await call('/login', { jar });
+    const { code, state: s } = idp.authorize(start.headers.get('location'));
+    assert.equal((await call(`/auth/callback?code=${code}&state=${s}`, { jar })).status, 303);
+    return { jar, authorize: new URL(start.headers.get('location')) };
+  };
+  const redeem = (body, headers = {}) => call('/api/app/einloesen', { method: 'POST', body, headers });
   try {
-    await run({ base, call, appLogin, redeem, clock, tokens, store, changed, logs, sheet });
+    await run({ base, call, appLogin, webLogin, redeem, clock, tokens, store, changed, logs, sheet });
   } finally {
     app.close();
   }
 }
 
-test('App-Login: Universal Link, Einlösen, Cookie öffnet /lesen/eingang, Token die App-API', async () => {
-  await withServer(async ({ base, call, appLogin, redeem, clock, tokens, store, changed, logs, sheet }) => {
+test('App-Login: Universal Link, Einlösen ohne Sitzungs-Cookie, Token die App-API', async () => {
+  await withServer(async ({ base, call, appLogin, redeem, tokens, store, changed, logs, sheet }) => {
     const { verifier, challenge } = pkce();
     const back = await appLogin({ challenge });
     assert.equal(`${back.origin}${back.pathname}`, 'https://vault.test/app/angemeldet');
@@ -145,28 +154,13 @@ test('App-Login: Universal Link, Einlösen, Cookie öffnet /lesen/eingang, Token
     const res = await redeem({ code, verifier, device: 'Rubens iPhone' });
     assert.equal(res.status, 200);
     const out = await res.json();
-    assert.deepEqual(Object.keys(out.cookie).sort(), ['domain', 'expires', 'httpOnly', 'name', 'path', 'sameSite', 'secure', 'value']);
-    assert.equal(out.cookie.name, 'vc_session');
-    assert.equal(out.cookie.domain, 'vault.test');
-    assert.equal(out.cookie.path, '/');
-    assert.equal(out.cookie.secure, true);
-    assert.equal(out.cookie.httpOnly, true);
-    // Standard der Einstellungen: 30 Tage ohne Nutzung, verlängert bei Nutzung.
-    assert.ok(Math.abs(Date.parse(out.cookie.expires) - (Date.now() + 30 * 86_400_000)) < 5000);
+    // Die native App braucht keine Web-Sitzung: kein Cookie, weder im Body noch als Set-Cookie.
+    assert.equal(out.cookie, undefined);
+    assert.equal(res.headers.get('set-cookie'), null);
     assert.match(out.token.token, /^vct_/);
     assert.deepEqual(out.token.scopes, ['app', 'lesestapel']);
     assert.deepEqual(tokens.list().map((t) => [t.name, t.scope]), [['Rubens iPhone', 'app']]);
-    assert.ok(!logs.some((l) => l.includes(out.token.token) || l.includes(code) || l.includes(out.cookie.value)), 'keine Geheimnisse im Log');
-
-    // Mit dem Cookie (WKWebView) ist das Cockpit offen.
-    const web = { [out.cookie.name]: out.cookie.value };
-    assert.equal((await call('/lesen/eingang', { jar: web })).status, 200);
-    assert.equal((await call('/lesen/eingang', { jar: {} })).status, 303);
-    // Bei Nutzung verlängert wie im Web: nach über einer Stunde ein frisches Cookie, das der WKWebView übernimmt.
-    clock.t += 2 * 3600_000;
-    const before = web.vc_session;
-    assert.equal((await call('/lesen/eingang', { jar: web })).status, 200);
-    assert.notEqual(web.vc_session, before);
+    assert.ok(!logs.some((l) => l.includes(out.token.token) || l.includes(code)), 'keine Geheimnisse im Log');
 
     // Mit dem Token die App-API.
     const bearer = out.token.token;
@@ -259,7 +253,7 @@ test('App-Login: cockpit://login nur bei PUBLIC_URL ohne https und außerhalb de
       assert.equal(back.searchParams.get('state'), 'zustand-123');
       const res = await redeem({ code: back.searchParams.get('code'), verifier, device: 'Simulator' });
       assert.equal(res.status, 200);
-      assert.equal((await res.json()).cookie.secure, false);
+      assert.match((await res.json()).token.token, /^vct_/);
     },
     { publicUrl: 'http://vault.test', allowDevScheme: true },
   );
@@ -301,12 +295,51 @@ test('App-Login: nur ALLOWED_SUBJECTS', async () => {
   );
 });
 
-test('App-Login: Einlösen ist begrenzt', async () => {
+test('App-Login: Einlösen ist je Absender begrenzt', async () => {
   await withServer(async ({ redeem, clock }) => {
-    for (let i = 0; i < 10; i++) assert.equal((await redeem({ code: `x${i}`, verifier: 'y' })).status, 400);
-    assert.equal((await redeem({ code: 'x', verifier: 'y' })).status, 429);
+    const from = (ip) => ({ 'x-forwarded-for': `${ip}, 10.0.0.1` });
+    for (let i = 0; i < 10; i++) assert.equal((await redeem({ code: `x${i}`, verifier: 'y' }, from('203.0.113.7'))).status, 400);
+    assert.equal((await redeem({ code: 'x', verifier: 'y' }, from('203.0.113.7'))).status, 429);
+    // Ein anderer Absender ist davon nicht betroffen.
+    assert.equal((await redeem({ code: 'x', verifier: 'y' }, from('198.51.100.2'))).status, 400);
     clock.t += 61_000;
-    assert.equal((await redeem({ code: 'x', verifier: 'y' })).status, 400);
+    assert.equal((await redeem({ code: 'x', verifier: 'y' }, from('203.0.113.7'))).status, 400);
+  });
+});
+
+test('App-Login: mit prompt=login bei Pocket ID, der Web-Login ohne', async () => {
+  await withServer(async ({ call, webLogin }) => {
+    const start = await call(`/login?app=1&state=zustand-123&challenge=${pkce().challenge}`);
+    assert.equal(new URL(start.headers.get('location')).searchParams.get('prompt'), 'login');
+    const { authorize } = await webLogin();
+    assert.equal(authorize.searchParams.get('prompt'), null);
+  });
+});
+
+test('App-Login: ein Token je Gerät, der mitgeschickte bisherige wird widerrufen', async () => {
+  await withServer(async ({ call, appLogin, redeem, tokens }) => {
+    const login = async (body = {}) => {
+      const { verifier, challenge } = pkce();
+      const code = (await appLogin({ challenge })).searchParams.get('code');
+      const res = await redeem({ code, verifier, device: 'Rubens iPhone', ...body });
+      assert.equal(res.status, 200);
+      return (await res.json()).token;
+    };
+    const first = await login();
+    const second = await login({ replaces: first.token });
+    assert.deepEqual(tokens.list().map((t) => t.id), [second.id]);
+    assert.equal((await call('/api/app/ich', { bearer: first.token })).status, 401);
+    assert.equal((await call('/api/app/ich', { bearer: second.token })).status, 200);
+
+    // Unbekannt, schon widerrufen oder kein App-Token: nichts wird widerrufen, der Login klappt trotzdem.
+    const search = tokens.create('Suche', 'search');
+    const third = await login({ replaces: search.token });
+    await login({ replaces: first.token });
+    await login({ replaces: 'vct_ausgedacht' });
+    await login({ replaces: 42 });
+    assert.equal(tokens.list().length, 6);
+    assert.ok(tokens.find(search.token));
+    assert.ok(tokens.find(third.token));
   });
 });
 
@@ -439,15 +472,16 @@ test('Geräte-Token: JSON und Aktionen des Cockpits ohne Cookie und CSRF, Seiten
 });
 
 test('Geräte-Token hat Vorrang vor einem mitgeschickten Sitzungs-Cookie (kein CSRF für die App)', async () => {
-  await withServer(async ({ base, appLogin, redeem, store }) => {
+  await withServer(async ({ base, appLogin, webLogin, redeem, store }) => {
     const { verifier, challenge } = pkce();
     const back = await appLogin({ challenge });
     const out = await (await redeem({ code: back.searchParams.get('code'), verifier, device: 'Rubens iPhone' })).json();
+    const { jar } = await webLogin();
     const { doc } = store.addDocument({ url: 'https://blatt.test/k', title: 'Mit Keks', status: 'eingang', reading_minutes: 3 });
     const post = (headers) =>
       fetch(`${base}/aktion/lesen/sortieren`, {
         method: 'POST',
-        headers: { 'x-forwarded-host': 'vault.test', accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded', cookie: `${out.cookie.name}=${out.cookie.value}`, ...headers },
+        headers: { 'x-forwarded-host': 'vault.test', accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded', cookie: `vc_session=${jar.vc_session}`, ...headers },
         body: new URLSearchParams({ id: doc.id, ziel: 'stapel' }),
       });
     // Nur mit Cookie und ohne CSRF: abgelehnt wie bisher.

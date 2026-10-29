@@ -211,13 +211,13 @@ for (const [path, file] of offlineFiles(PUBLIC, { html: HTML_HEADERS }).entries)
  * Die Sitzung ist ein signiertes Cookie und nur für diese Routen gültig; die
  * MCP-Schnittstelle prüft weiter ausschließlich Bearer-Tokens.
  */
-export function createWebHttp({ cockpit, settings, actions = null, notes = null, plan = null, reading = null, tokens = null, shortcuts = [], captureEnabled = false, calendars = null, graph = null, wholeGraph = null, search = null, evidence = null, health = null, backup = null, restart = () => {}, oidc, sessionSecret, publicUrl, appId = undefined, allowDevScheme = false, allowedSubjects = [], logger = console, now = () => Date.now() }) {
+export function createWebHttp({ cockpit, settings, actions = null, notes = null, plan = null, reading = null, tokens = null, shortcuts = [], captureEnabled = false, calendars = null, graph = null, wholeGraph = null, search = null, evidence = null, health = null, backup = null, restart = () => {}, oidc, sessionSecret, publicUrl, appId = undefined, allowDevScheme = false, trustProxy = false, allowedSubjects = [], logger = console, now = () => Date.now() }) {
   const signer = createCookieSigner(sessionSecret);
   const secure = publicUrl.startsWith('https://');
   const sessions = createSessions({ signer, settings, allowedSubjects, secure, now });
   const READING_PAGES = reading?.pages ?? {};
   // iOS-App: Login über das System-Blatt, Geräte-Token, JSON-API (VCP-91).
-  const appAccess = tokens && reading ? createAppAccess({ sessions, tokens, reading, publicUrl, appId, allowDevScheme, logger, now }) : null;
+  const appAccess = tokens && reading ? createAppAccess({ tokens, reading, publicUrl, appId, allowDevScheme, trustProxy, logger, now }) : null;
 
   const send = (res, status, body, headers = {}) => {
     res.writeHead(status, { ...HTML_HEADERS, ...headers });
@@ -285,7 +285,9 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       const next = safeNext(url.searchParams.get('next'));
       return send(res, 200, renderMessage('Neu anmelden', 'Die Anmeldung ist abgelaufen.', { link: { href: `/login?next=${encodeURIComponent(next)}`, label: 'Anmelden', top: true } }));
     }
-    const { url: target, pending } = await oidc.start();
+    // App-Login immer mit erneuter Anmeldung bei Pocket ID (`prompt=login`): Sonst könnte eine fremde
+    // App, solange Pocket ID im gemeinsamen Safari-Speicher angemeldet ist, ohne Rückfrage einen Login starten.
+    const { url: target, pending } = await oidc.start(app ? { prompt: 'login' } : {});
     const value = signer.seal({ ...pending, ...(app ? { app } : { next: safeNext(url.searchParams.get('next')) }), exp: Math.floor(now() / 1000) + 600 });
     redirect(res, target, [cookie(LOGIN, value, { secure, maxAge: 600 })]);
   }

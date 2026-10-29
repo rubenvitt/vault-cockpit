@@ -29,7 +29,8 @@ make test      # Unit-Tests auf dem ersten verfügbaren iPhone-Simulator
   iOS 17.4). Dafür stehen `applinks:` und `webcredentials:` des Hosts in den Entitlements, und der
   Server liefert `/.well-known/apple-app-site-association` (siehe README im Repo, „iOS-App: Login
   und App-API“). Danach `POST /api/app/einloesen`: der Geräte-Token kommt in die geteilte
-  Keychain-Gruppe (das Sitzungs-Cookie der Antwort braucht die App nicht mehr). Gerätename: „iPhone · iPhone17,1 · 23.10.2026“ (`UIDevice.name` ist nur „iPhone“).
+  Keychain-Gruppe; ein noch vorhandener alter Token geht als `replaces` mit und wird dabei
+  widerrufen (ein Token je Gerät). Gerätename: „iPhone · iPhone17,1 · 23.10.2026“ (`UIDevice.name` ist nur „iPhone“).
 - **Rahmen** (`Cockpit/Native/MainView.swift`, `AppModel.swift`, docs/ios-nativ.md): nach dem Login
   Reiter Woche, Lesen, Rückblick und Einstellungen, alle nativ; es gibt keinen WKWebView mehr. Die
   Bildschirme nehmen die Stores aus `CockpitShared` (`CockpitSession`: API mit dem Geräte-Token,
@@ -159,13 +160,15 @@ zeigt nur den großen Player, statt neu anzufangen. Tests: `NowPlayingTests`, mi
   Kopien: Wiedergabeliste aus den nicht fertigen Kopien, Text samt mitgeführter Lesestelle, Audio
   gespeicherter Sätze immer von der Platte. Ein abgelehnter Token (401) bleibt ein Fehler.
 - **Sperrbildschirm:** `MPNowPlayingInfoCenter` mit Titel, Quelle, Dauer und Stelle als Schätzung
-  (15 Zeichen pro Sekunde bei Tempo 1) und Tempo. `MPRemoteCommandCenter`: Play, Pause, Umschalten,
+  und Tempo. Die Schätzung beginnt bei 15 Zeichen pro Sekunde (Tempo 1) und lernt aus jedem zu Ende
+  gesprochenen Satz ab 20 Zeichen nach (`SpeechRate`, `UserDefaults` `player.zeichenProSekunde`). `MPRemoteCommandCenter`: Play, Pause, Umschalten,
   nächster Titel = nächster Text, vorheriger Titel = Satz zurück (einen vorigen Text gibt es nicht),
   `skipBackward`/`skipForward` = Satz zurück/vor, `changePlaybackRate`, `like` und `bookmark` =
   merken. Mit Skip-Befehlen zeigt der Sperrbildschirm Skip-Knöpfe statt Titel-Knöpfen.
   AirPods schicken Play/Pause, Doppeltipp (nächster Titel) und Dreifachtipp (vorheriger Titel);
   `like`/`bookmark` kommen von AirPods nicht, ob Sperrbildschirm oder CarPlay sie anbieten, ist
-  auf dem Gerät noch zu prüfen.
+  auf dem Gerät noch zu prüfen: Jeder empfangene Befehl steht im Log (Subsystem
+  `dev.rubeen.cockpit`, Kategorie `player`, „Fernbedienung: …“), am Mac in der Konsole.
 - **Fortschritt:** nach jedem Satz `POST /api/app/fortschritt`, Anker = Anfang des nächsten
   Satzes, Fortschritt nie sinkend (der Server nimmt jeden Wert), nach dem letzten Satz 1.
 - **Merken:** markiert den laufenden Satz, Anker wie `anchorAt` in `src/lesen/anchor.js`
@@ -175,9 +178,11 @@ zeigt nur den großen Player, statt neu anzufangen. Tests: `NowPlayingTests`, mi
 - **Ohne Netz:** Fortschritt (nur der letzte Stand je Text) und Markierungen (höchstens 100) kommen
   in einen Puffer in den `UserDefaults` der App Group (`player.pending`) und gehen raus, sobald
   `NWPathMonitor` wieder Netz meldet, beim nächsten Öffnen des Players (vor dem Laden von Liste und Text, damit
-  sie den nachgesendeten Stand zeigen) oder nach dem nächsten Satz.
-  Andere 4xx-Antworten als 401/429 verwirft der Puffer. Texte lädt der Player erst, wenn er sie
-  braucht: Ohne Netz geht es nach dem laufenden Text nicht weiter.
+  sie den nachgesendeten Stand zeigen), nach dem nächsten Satz und, auch ohne offenen Player, wenn
+  die App in den Vordergrund kommt (`AppModel.sendPendingListening`).
+  Andere 4xx-Antworten als 401/429 verwirft der Puffer; 401 bleibt liegen und startet den Login.
+  Den nächsten Text der Liste lädt der Player vor, während der laufende spielt: Der Wechsel klappt
+  so auch gesperrt und ohne Netz (mit Stimme vom Server liest dann die Gerätestimme).
 - **Zeichen:** Server und Leseansicht zählen in UTF-16 (JS-Strings). `SpeechText` rechnet deshalb
   über `String.UTF16View`; fällt eine Kontextgrenze mitten in ein Emoji, rückt sie nach innen.
 
@@ -225,13 +230,13 @@ let saved = try await api.saveToReadingList(url: link, title: title)  // saved.m
   (Body als Stream aus der Datei), statisch `redeem(…)`. Fehler kommen als
   `APIError` (`status`, `code`, `message`); `isUnauthorized` heißt neu anmelden.
 - Modelle: `Me`, `Queue`/`QueueItem`, `ListenText`, `NewHighlight`, `HighlightResult`,
-  `SavedDocument`, `Redemption` (`SessionCookie` mit `httpCookie`, `DeviceToken`).
+  `SavedDocument`, `Redemption` (`DeviceToken`).
 - `SharedContent.detect(urls:texts:hasPDF:)`: Inhaltserkennung der Share Extension (rein, getestet).
 - `PendingShares`: Puffer im App-Group-Container (`init(appGroup:)`), `add`, `all`, `remove`,
   `send`, `flush(using:)`.
 
 Tests (`CockpitTests`): API-Client und Einlösen über einen `URLProtocol`-Mock, Keychain über
-`KeychainBackend` gemockt, dazu PKCE (Testvektor aus RFC 7636), Callback-Prüfung, Cookie-Umwandlung,
+`KeychainBackend` gemockt, dazu PKCE (Testvektor aus RFC 7636), Callback-Prüfung,
 Navigationsregeln (`RoutingTests`: Links, Reiter, Blatt mit Seiten), Player über den Reitern (`NowPlayingTests`). `ShareTests`: Inhaltserkennung, PDF-Upload (Body, Query, Header)
 und Offline-Puffer in einem temporären Verzeichnis.
 

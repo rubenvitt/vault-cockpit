@@ -517,6 +517,8 @@ const webHttp = process.env.WEB_CLIENT_ID
       appId: `${process.env.APP_TEAM_ID || APP_TEAM_ID}.${process.env.APP_BUNDLE_ID || APP_BUNDLE_ID}`,
       // `cockpit://` nur für einen lokalen Server ohne https, nie im Container (NODE_ENV=production).
       allowDevScheme: process.env.NODE_ENV !== 'production',
+      // Begrenzung beim Einlösen des App-Logins je Absender: hinter dem Proxy aus X-Forwarded-For.
+      trustProxy: config.trustProxy,
       allowedSubjects: ALLOWED_SUBJECTS,
     })
   : null;

@@ -14,8 +14,6 @@ final class Player {
     static let windows = [5, 15, 30, 60]
     static let tempos = [0.8, 1.0, 1.2, 1.5, 1.8]
     static let tempoKey = "player.tempo"
-    /// Grobe Sprechgeschwindigkeit bei Tempo 1 für die Zeitangaben auf dem Sperrbildschirm.
-    static let charactersPerSecond = 15.0
 
     private(set) var machine = PlayerMachine()
     var minutes: Int
@@ -23,7 +21,10 @@ final class Player {
         didSet {
             defaults.set(tempo, forKey: Self.tempoKey)
             // Neues Tempo gleich hören: den laufenden Satz neu beginnen.
-            if machine.isPlaying, let utterance = machine.currentUtterance { speech.speak(utterance, tempo: tempo) }
+            if machine.isPlaying, let utterance = machine.currentUtterance {
+                speaking = (Date(), utterance.end - utterance.start)
+                speech.speak(utterance, tempo: tempo)
+            }
             updateNowPlaying()
         }
     }
@@ -35,6 +36,8 @@ final class Player {
     private(set) var downloads: [String: Double] = [:]
     /// Stimme vom Server laut letzter Wiedergabeliste; offline geladen werden dann auch die Sätze.
     private(set) var serverVoice: String?
+    /// Der Server hat den Geräte-Token abgelehnt (401): Die App meldet neu an (`AppModel.apiUnauthorized`).
+    @ObservationIgnored var onUnauthorized: (() -> Void)?
 
     private let service: (any ListenService)?
     private let offline: OfflineStore?
@@ -49,6 +52,13 @@ final class Player {
     @ObservationIgnored private var commandTargets: [(MPRemoteCommand, Any)] = []
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
     @ObservationIgnored private var pathMonitor: NWPathMonitor?
+    /// Der nächste Text der Liste, schon geladen, solange der laufende spielt: Der Wechsel klappt
+    /// dann auch bei gesperrtem Bildschirm und ohne Netz. Nur einer, der Schlüssel ist seine ID.
+    @ObservationIgnored private var prefetched: (id: String, text: SpeechText)?
+    /// Gelernte Sprechgeschwindigkeit für Dauer und Stelle auf dem Sperrbildschirm.
+    @ObservationIgnored private var rate: SpeechRate
+    /// Beginn und Länge des Satzes, der gerade gesprochen wird, zum Nachmessen.
+    @ObservationIgnored private var speaking: (start: Date, units: Int)?
     private let log = Logger(subsystem: "dev.rubeen.cockpit", category: "player")
 
     /// `service` nil: nicht angemeldet (kein Geräte-Token). `offline`: Offline-Kopien, nil = ohne.
@@ -61,7 +71,11 @@ final class Player {
         let saved = defaults.double(forKey: Self.tempoKey)
         tempo = Self.tempos.contains(saved) ? saved : 1
         pending = PendingListening(defaults: defaults)
-        speech.onFinish = { [weak self] in self?.send(.sentenceFinished) }
+        rate = SpeechRate(defaults: defaults)
+        speech.onFinish = { [weak self] in
+            self?.measureSentence()
+            self?.send(.sentenceFinished)
+        }
         speech.onNotice = { [weak self] in self?.message = $0 }
     }
 
@@ -109,8 +123,10 @@ final class Player {
             message = nil
             serverVoice = queue.voice
             speech.use(serverVoice: queue.voice)
+            prefetched = nil
             send(.queue(queue.items))
         } catch {
+            if (error as? APIError)?.isUnauthorized == true { onUnauthorized?() }
             message = "Wiedergabeliste ließ sich nicht laden: \(error.localizedDescription)"
         }
     }
@@ -123,9 +139,11 @@ final class Player {
             case .speak:
                 guard let utterance = machine.currentUtterance else { break }
                 activateSession()
+                speaking = (Date(), utterance.end - utterance.start)
                 speech.speak(utterance, tempo: tempo)
                 if let next = machine.nextUtterance { speech.prepare(next) }
             case .stop:
+                speaking = nil
                 speech.stop()
             case .load(let id):
                 Task { await load(id) }
@@ -213,6 +231,12 @@ final class Player {
 
     private func load(_ id: String) async {
         guard let service else { return }
+        if let ready = prefetched, ready.id == id {
+            prefetched = nil
+            send(.loaded(id: id, text: ready.text))
+            await prefetchNext()
+            return
+        }
         // Beim Textwechsel spielt kein Ton: ohne Hintergrund-Task könnte iOS die gesperrte App hier anhalten.
         let task = UIApplication.shared.beginBackgroundTask(withName: "Text laden")
         defer { UIApplication.shared.endBackgroundTask(task) }
@@ -220,9 +244,33 @@ final class Player {
             send(.loaded(id: id, text: SpeechText(try await service.text(id: id))))
         } catch let error as APIError where error.status == 404 {
             send(.loaded(id: id, text: nil))
+            return
         } catch {
+            if (error as? APIError)?.isUnauthorized == true { onUnauthorized?() }
             message = "Text ließ sich nicht laden: \(error.localizedDescription)"
             send(.loadFailed(id: id))
+            return
+        }
+        await prefetchNext()
+    }
+
+    /// Lädt den Text nach dem laufenden vor, während dieser spielt (Audio-Sitzung aktiv, die App
+    /// läuft also auch gesperrt). Fehler sind still: Beim Wechsel lädt `load` dann wie bisher.
+    // shortcut: nur der Text; mit Stimme vom Server holt `ServerSpeech` den ersten Satz erst beim Wechsel und liest ohne Netz mit der Gerätestimme.
+    private func prefetchNext() async {
+        guard let service, let next = machine.nextItem, prefetched?.id != next.id else { return }
+        guard let listen = try? await service.text(id: next.id) else { return }
+        // Inzwischen weitergesprungen: nur behalten, wenn er noch der nächste ist.
+        if machine.nextItem?.id == next.id { prefetched = (next.id, SpeechText(listen)) }
+    }
+
+    /// Satz zu Ende gesprochen: echte Sprechzeit in die gelernte Geschwindigkeit. Abgebrochene
+    /// Sätze (Pause, Sprung, neues Tempo) kommen nicht hier an, `speaking` ist dann neu oder nil.
+    private func measureSentence() {
+        guard let speaking, machine.isPlaying else { return }
+        self.speaking = nil
+        if rate.record(units: speaking.units, seconds: Date().timeIntervalSince(speaking.start), tempo: tempo) {
+            rate.save(to: defaults)
         }
     }
 
@@ -252,6 +300,7 @@ final class Player {
                 case .highlight(let highlight): _ = try await service.addHighlight(highlight)
                 }
             } catch where PendingListening.shouldRetry(error) {
+                if (error as? APIError)?.isUnauthorized == true { onUnauthorized?() }
                 return rejected
             } catch {
                 log.error("Verworfen: \(error.localizedDescription, privacy: .public)")
@@ -280,20 +329,20 @@ final class Player {
 
     private func setUpSystem() {
         let center = MPRemoteCommandCenter.shared()
-        on(center.playCommand) { $0.send(.play) }
-        on(center.pauseCommand) { $0.send(.pause) }
-        on(center.togglePlayPauseCommand) { $0.send(.toggle) }
-        on(center.nextTrackCommand) { $0.send(.nextText) }
+        on(center.playCommand, "play") { $0.send(.play) }
+        on(center.pauseCommand, "pause") { $0.send(.pause) }
+        on(center.togglePlayPauseCommand, "togglePlayPause") { $0.send(.toggle) }
+        on(center.nextTrackCommand, "nextTrack") { $0.send(.nextText) }
         // Einen vorigen Text gibt es nicht; AirPods-Dreifachtipp heißt hier „Satz zurück“.
-        on(center.previousTrackCommand) { $0.send(.previousSentence) }
-        on(center.skipBackwardCommand) { $0.send(.previousSentence) }
-        on(center.skipForwardCommand) { $0.send(.nextSentence) }
-        on(center.likeCommand) { $0.remember() }
-        on(center.bookmarkCommand) { $0.remember() }
+        on(center.previousTrackCommand, "previousTrack") { $0.send(.previousSentence) }
+        on(center.skipBackwardCommand, "skipBackward") { $0.send(.previousSentence) }
+        on(center.skipForwardCommand, "skipForward") { $0.send(.nextSentence) }
+        on(center.likeCommand, "like") { $0.remember() }
+        on(center.bookmarkCommand, "bookmark") { $0.remember() }
         center.likeCommand.localizedTitle = "Das hier merken"
         center.bookmarkCommand.localizedTitle = "Das hier merken"
         center.changePlaybackRateCommand.supportedPlaybackRates = Self.tempos.map { NSNumber(value: $0) }
-        on(center.changePlaybackRateCommand) { player, event in
+        on(center.changePlaybackRateCommand, "changePlaybackRate") { player, event in
             guard let rate = (event as? MPChangePlaybackRateCommandEvent)?.playbackRate else { return }
             player.tempo = Self.tempos.min { abs($0 - Double(rate)) < abs($1 - Double(rate)) } ?? 1
         }
@@ -317,15 +366,18 @@ final class Player {
         pathMonitor = monitor
     }
 
-    private func on(_ command: MPRemoteCommand, _ action: @escaping (Player) -> Void) {
-        on(command) { player, _ in action(player) }
+    private func on(_ command: MPRemoteCommand, _ name: String, _ action: @escaping (Player) -> Void) {
+        on(command, name) { player, _ in action(player) }
     }
 
-    private func on(_ command: MPRemoteCommand, _ action: @escaping (Player, MPRemoteCommandEvent) -> Void) {
+    /// `name` steht im Log (Kategorie `player`, Konsole am Mac): So lässt sich am Gerät ablesen,
+    /// welche Befehle AirPods, Sperrbildschirm und CarPlay wirklich schicken.
+    private func on(_ command: MPRemoteCommand, _ name: String, _ action: @escaping (Player, MPRemoteCommandEvent) -> Void) {
         command.isEnabled = true
         let target = command.addTarget { [weak self] event in
             MainActor.assumeIsolated {
                 guard let self else { return .commandFailed }
+                self.log.info("Fernbedienung: \(name, privacy: .public)")
                 action(self, event)
                 return .success
             }
@@ -333,7 +385,7 @@ final class Player {
         commandTargets.append((command, target))
     }
 
-    /// Titel, Quelle und geschätzte Dauer/Stelle (Zeichen durch Sprechgeschwindigkeit) für Sperrbildschirm und CarPlay.
+    /// Titel, Quelle und geschätzte Dauer/Stelle (Zeichen durch gelernte Sprechgeschwindigkeit) für Sperrbildschirm und CarPlay.
     private func updateNowPlaying() {
         guard let item = machine.currentItem else {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
@@ -348,8 +400,8 @@ final class Player {
             MPNowPlayingInfoPropertyDefaultPlaybackRate: 1.0,
         ]
         if let text = machine.text {
-            info[MPMediaItemPropertyPlaybackDuration] = Double(text.length) / Self.charactersPerSecond
-            info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = Double(text.sentences[machine.sentence].start) / Self.charactersPerSecond
+            info[MPMediaItemPropertyPlaybackDuration] = Double(text.length) / rate.charactersPerSecond
+            info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = Double(text.sentences[machine.sentence].start) / rate.charactersPerSecond
         }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }

@@ -195,18 +195,21 @@ final class APIClientTests: XCTestCase {
         }
     }
 
-    func testRedeemDecodesCookieAndToken() async throws {
-        respond(#"""
-        {"ok":true,"cookie":{"name":"vc_session","value":"abc.def","domain":"vault.test","path":"/","expires":"2026-11-22T10:00:00.000Z","secure":true,"httpOnly":true,"sameSite":"Lax"},
-         "token":{"token":"vct_neu","id":"t1","name":"iPhone","scopes":["app","lesestapel"]}}
-        """#)
+    func testRedeemDecodesToken() async throws {
+        respond(#"{"ok":true,"token":{"token":"vct_neu","id":"t1","name":"iPhone","scopes":["app","lesestapel"]}}"#)
         let result = try await APIClient.redeem(baseURL: base, code: "c0de", verifier: "v", device: "iPhone · 23.10.2026", session: session)
         XCTAssertEqual(seen[0].request.url?.absoluteString, "https://vault.test/api/app/einloesen")
         XCTAssertEqual(seen[0].request.httpMethod, "POST")
         XCTAssertNil(seen[0].request.value(forHTTPHeaderField: "Authorization"))
+        // Ohne bisherigen Token fehlt `replaces` ganz.
         XCTAssertEqual(seen[0].body as? [String: String], ["code": "c0de", "verifier": "v", "device": "iPhone · 23.10.2026"])
         XCTAssertEqual(result.token.token, "vct_neu")
-        XCTAssertEqual(result.cookie.expires, Date(timeIntervalSince1970: 1_795_341_600))
+    }
+
+    func testRedeemSendsPreviousToken() async throws {
+        respond(#"{"ok":true,"token":{"token":"vct_neu","id":"t2","name":"iPhone","scopes":["app","lesestapel"]}}"#)
+        _ = try await APIClient.redeem(baseURL: base, code: "c0de", verifier: "v", device: "iPhone", replaces: "vct_alt", session: session)
+        XCTAssertEqual(seen[0].body as? [String: String], ["code": "c0de", "verifier": "v", "device": "iPhone", "replaces": "vct_alt"])
     }
 
     func testRedeemFailureIsInvalidCode() async {
@@ -217,27 +220,5 @@ final class APIClientTests: XCTestCase {
         } catch {
             XCTAssertEqual((error as? APIError)?.code, "invalid_code")
         }
-    }
-
-    func testSessionCookieBecomesHTTPCookie() throws {
-        let expires = Date(timeIntervalSince1970: 1_795_341_600)
-        let json = #"{"name":"vc_session","value":"abc","domain":"vault.test","path":"/","expires":"2026-11-22T10:00:00Z","secure":true,"httpOnly":true,"sameSite":"Lax"}"#
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let session = try decoder.decode(SessionCookie.self, from: Data(json.utf8))
-        let cookie = try XCTUnwrap(session.httpCookie)
-        XCTAssertEqual(cookie.name, "vc_session")
-        XCTAssertEqual(cookie.value, "abc")
-        XCTAssertEqual(cookie.domain, "vault.test")
-        XCTAssertEqual(cookie.path, "/")
-        XCTAssertEqual(cookie.expiresDate, expires)
-        XCTAssertTrue(cookie.isSecure)
-        XCTAssertTrue(cookie.isHTTPOnly)
-        XCTAssertFalse(cookie.isSessionOnly)
-        XCTAssertEqual(cookie.sameSitePolicy, .sameSiteLax)
-
-        let local = try decoder.decode(SessionCookie.self, from: Data(json.replacingOccurrences(of: #""secure":true,"httpOnly":true"#, with: #""secure":false,"httpOnly":false"#).utf8))
-        XCTAssertFalse(try XCTUnwrap(local.httpCookie).isSecure)
-        XCTAssertFalse(try XCTUnwrap(local.httpCookie).isHTTPOnly)
     }
 }

@@ -110,9 +110,8 @@ public struct SavedDocument: Codable, Equatable, Sendable {
     public let message: String
 }
 
-/// `POST /api/app/einloesen`
+/// `POST /api/app/einloesen`: nur der Geräte-Token, ein Sitzungs-Cookie gibt es nicht mehr.
 public struct Redemption: Decodable, Sendable {
-    public let cookie: SessionCookie
     public let token: DeviceToken
 }
 
@@ -121,37 +120,4 @@ public struct DeviceToken: Decodable, Equatable, Sendable {
     public let id: String
     public let name: String
     public let scopes: [String]
-}
-
-/// Sitzungs-Cookie aus dem Login (dieselbe Sitzung wie im Browser). Die native App braucht es
-/// nicht mehr; sie arbeitet mit dem Geräte-Token.
-public struct SessionCookie: Decodable, Equatable, Sendable {
-    public let name: String
-    public let value: String
-    /// Ohne Punkt davor: gilt nur für genau diesen Host.
-    public let domain: String
-    public let path: String
-    public let expires: Date
-    public let secure: Bool
-    public let httpOnly: Bool
-    /// `Lax` oder `Strict`.
-    public let sameSite: String
-
-    /// Mit allen Attributen; `nil`, wenn Foundation das Cookie ablehnt.
-    public var httpCookie: HTTPCookie? {
-        var properties: [HTTPCookiePropertyKey: Any] = [
-            .name: name, .value: value, .domain: domain, .path: path, .expires: expires,
-        ]
-        if secure { properties[.secure] = "TRUE" }
-        // Für HttpOnly gibt es keinen öffentlichen Schlüssel, Foundation liest diesen.
-        if httpOnly { properties[HTTPCookiePropertyKey("HttpOnly")] = "TRUE" }
-        #if !os(Linux)
-        switch sameSite.lowercased() {
-        case "lax": properties[.sameSitePolicy] = HTTPCookieStringPolicy.sameSiteLax
-        case "strict": properties[.sameSitePolicy] = HTTPCookieStringPolicy.sameSiteStrict
-        default: break
-        }
-        #endif
-        return HTTPCookie(properties: properties)
-    }
 }
