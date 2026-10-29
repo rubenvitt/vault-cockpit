@@ -1,6 +1,6 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, unlinkSync, renameSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, unlinkSync, renameSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createIndexManager } from '../src/vault/manager.js';
@@ -107,6 +107,12 @@ test('applyChanges führt Bilder in der Tabelle images, ohne Beobachter zu wecke
     assert.ok(mgr.hasImage('projects/Foto.PNG'));
     unlinkSync(join(root, 'projects/Foto.PNG'));
     mgr.applyChanges(['projects/Foto.PNG', 'projects/Erste.md']);
+    assert.deepEqual(mgr.imagesNamed('foto.png'), []);
+    // Einzeln gemeldet gilt dasselbe wie beim Gang: kein versteckter Ordner, kein Symlink auf dem Weg.
+    mkdirSync(join(root, '.trash'), { recursive: true });
+    writeFileSync(join(root, '.trash/foto.png'), 'x');
+    symlinkSync(join(root, '.trash'), join(root, 'projects/link'));
+    mgr.applyChanges(['.trash/foto.png', 'projects/link/foto.png']);
     assert.deepEqual(mgr.imagesNamed('foto.png'), []);
     assert.deepEqual(heard.map((c) => c.paths), [['projects/Erste.md']]);
   } finally {

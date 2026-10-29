@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { readFileSync, readdirSync, statSync, lstatSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, lstatSync, realpathSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { parseNote } from './markdown.js';
 import { DEFAULT_POLICY } from './policy.js';
@@ -247,11 +247,24 @@ export function openIndex(dbOrPath, { vaultPath = process.env.VAULT_PATH ?? '/va
   // Nachschlagetabellen für resolveLink, neu gebaut nach jeder Änderung am Index.
   let maps = null;
 
+  /**
+   * Gilt für ein einzeln gemeldetes Bild dasselbe wie beim Gang über den
+   * Vault? Nicht ausgeschlossen, kein versteckter Ordner, kein Symlink auf dem Weg.
+   */
+  function eligibleImage(relPath) {
+    if (policy.isExcluded(relPath) || relPath.split('/').some((part) => !part || part.startsWith('.') || part === '..')) return false;
+    try {
+      return realpathSync(join(vaultPath, relPath)) === join(realpathSync(vaultPath), relPath);
+    } catch {
+      return false;
+    }
+  }
+
   /** Ein Bild neu eintragen oder entfernen; Notizen und Links bleiben unberührt. */
   function refreshImage(relPath) {
     const existed = Boolean(db.prepare('SELECT 1 FROM images WHERE path = ?').get(relPath));
     db.prepare('DELETE FROM images WHERE path = ?').run(relPath);
-    const exists = !policy.isExcluded(relPath) && insertImageFile(prepareStatements(db), { vaultPath }, relPath);
+    const exists = eligibleImage(relPath) && insertImageFile(prepareStatements(db), { vaultPath }, relPath);
     return { existed, exists, image: true };
   }
 
