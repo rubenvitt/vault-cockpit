@@ -702,9 +702,10 @@ ${backupHint(backup)}
 </section>
 <section id="lesestapel">
   ${head2('Lesestapel')}
-  <p class="meta">Gelesene Texte mit Markierungen kommen als Notiz in diesen Ordner, jede Markierung mit Block-ID zum Verlinken. Das Cockpit schreibt danach nur den Bereich „Markierungen“ neu; in vertraulichen und Readwise-Ordnern legt es nichts an.</p>
+  <p class="meta">Gelesene Texte mit Markierungen kommen als Notiz in diesen Ordner, jede Markierung mit Block-ID zum Verlinken. Das Cockpit schreibt danach nur den Bereich „Markierungen“ neu; in vertraulichen und Readwise-Ordnern legt es nichts an. Verworfenes, das ungelesen auf „Weg“ steht, löscht es nach so vielen Tagen (0 = nie); Gelesenes und Markiertes bleibt.</p>
   <div class="grid">
     <label>Ordner im Vault<input name="readingNotes.folder" value="${esc(stored.readingNotes?.folder ?? '')}" placeholder="${esc(d.readingNotesFolder ?? 'raw')}"></label>
+    <label>Verworfenes löschen nach Tagen<input name="readingNotes.trashDays" inputmode="numeric" value="${esc(stored.readingNotes?.trashDays ?? '')}" placeholder="${esc(d.readingTrashDays ?? 30)}"></label>
   </div>
   <h3>Ingest ins Wiki</h3>
   <p class="meta">Claude entwirft für Texte im Stapel, was ins Mycel-Wiki kommt (Source-Page, Verknüpfungen, Vorschläge); ins Wiki kommt erst, was du unter Lesen → Ingest abhakst. Nachts entstehen Entwürfe für Stapel-Texte ohne Entwurf, über dasselbe Abo wie die Folgen (<code>CLAUDE_CODE_OAUTH_TOKEN</code>). Nach dem Übernehmen pflanzt ein Agent die Quelle ein: Er arbeitet sie in die Seiten ein, an die sie andockt, und hält Widersprüche als Spannung fest; er ergänzt nur und schreibt nur unter <code>wiki/</code>.</p>

@@ -162,9 +162,10 @@ function formSections(stored, d) {
       ],
     },
     lesestapel: {
-      intro: 'Gelesene Texte mit Markierungen kommen als Notiz in diesen Ordner, jede Markierung mit Block-ID zum Verlinken. Das Cockpit schreibt danach nur den Bereich „Markierungen“ neu; in vertraulichen und Readwise-Ordnern legt es nichts an.',
+      intro: 'Gelesene Texte mit Markierungen kommen als Notiz in diesen Ordner, jede Markierung mit Block-ID zum Verlinken. Das Cockpit schreibt danach nur den Bereich „Markierungen“ neu; in vertraulichen und Readwise-Ordnern legt es nichts an. Verworfenes, das ungelesen auf „Weg“ steht, löscht es nach so vielen Tagen (0 = nie); Gelesenes und Markiertes bleibt.',
       fields: [
         field('readingNotes.folder', 'Ordner im Vault', { value: stored.readingNotes?.folder, placeholder: d.readingNotesFolder ?? '30-ressourcen/lesestapel' }),
+        field('readingNotes.trashDays', 'Verworfenes löschen nach Tagen', { kind: 'number', hint: '0 = nie, Gelesenes bleibt', value: stored.readingNotes?.trashDays, placeholder: d.readingTrashDays ?? 30 }),
         ...[
           field('ingest.nightly', 'Nachts entwerfen', { kind: 'select', value: choice(stored.ingest?.nightly ?? null), options: onOff(d.ingestNightly ?? true) }),
           field('ingest.hour', 'Uhrzeit', { kind: 'number', hint: 'volle Stunde, 0–23', value: stored.ingest?.hour, placeholder: d.ingestHour ?? 3 }),
@@ -310,7 +311,7 @@ export function settingsJson({ stored, defaults, checks = {}, tokens = null, cur
 const FIELDS = new Set([
   'tz', 'vaultName', 'inboxFolder',
   'zunder.url', 'zunder.token', 'zunder.clear',
-  'bridge.enabled', 'bridge.tag', 'flameNote.enabled', 'readingNotes.folder',
+  'bridge.enabled', 'bridge.tag', 'flameNote.enabled', 'readingNotes.folder', 'readingNotes.trashDays',
   'mail.token', 'mail.clear', 'mail.senders', 'mail.mailbox', 'mail.doneMailbox', 'mail.pollMinutes',
   'embed.url', 'embed.model',
   'tts.provider', 'tts.key', 'tts.clear', 'tts.voice', 'tts.model',
@@ -339,6 +340,7 @@ export function formOfSettings(stored) {
   put('bridge.tag', stored.bridge.tag);
   put('flameNote.enabled', choice(stored.flameNote?.enabled ?? null));
   put('readingNotes.folder', stored.readingNotes?.folder);
+  put('readingNotes.trashDays', stored.readingNotes?.trashDays);
   put('mail.senders', stored.mail.senders.join(', '));
   put('mail.mailbox', stored.mail.mailbox);
   put('mail.doneMailbox', stored.mail.doneMailbox);

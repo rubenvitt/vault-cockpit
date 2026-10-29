@@ -276,3 +276,32 @@ test('Lesestapel: website-weite Canonical legt verschiedene Artikel nicht zusamm
   // Die Adresse selbst ist die Canonical eines vorhandenen: derselbe.
   assert.equal(store.addDocument({ url: 'https://blog.test/artikel', title: 'Was anderes' }).doc.id, a.id);
 });
+
+test('Lesestapel: Aufräumen löscht nur ungelesen Verworfenes vor dem Stichtag, ohne Markierungen', () => {
+  const c = clock();
+  const store = createReadingStore({ path: ':memory:', now: c.now });
+  const add = (url, extra = {}) => store.addDocument({ url, title: url, ...extra }).doc;
+  const weg = add('https://a.test/weg');
+  const gelesen = add('https://a.test/gelesen');
+  const markiert = add('https://a.test/markiert');
+  const gehoert = add('https://a.test/gehoert');
+  const stapel = add('https://a.test/stapel');
+  store.setStatus(weg.id, 'weg');
+  store.setStatus(gelesen.id, 'weg', { read: true });
+  store.addHighlight({ doc_id: markiert.id, quote: 'x' });
+  store.setStatus(markiert.id, 'weg');
+  store.markHeard([gehoert.id]);
+  store.setStatus(gehoert.id, 'weg');
+  store.addFeed({ url: 'https://a.test/feed' });
+  const feed = store.listFeeds()[0];
+  store.rememberEntry(feed.id, 'guid-1', weg.id);
+  c.tick(10 * 24 * 60 * 60_000);
+  const spaet = add('https://a.test/spaet');
+  store.setStatus(spaet.id, 'weg');
+
+  assert.equal(store.purgeDiscarded(new Date(c.now() - 24 * 60 * 60_000).toISOString()), 1);
+  assert.equal(store.get(weg.id), null);
+  for (const d of [gelesen, markiert, gehoert, stapel, spaet]) assert.ok(store.get(d.id), d.url);
+  assert.ok(store.knownEntries(feed.id).has('guid-1'), 'der Feed-Eintrag bleibt bekannt und kommt nicht wieder');
+  assert.equal(store.purgeDiscarded(new Date(c.now() - 24 * 60 * 60_000).toISOString()), 0);
+});
