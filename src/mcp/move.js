@@ -66,6 +66,7 @@ export function moveNote({ index, editor, policy = DEFAULT_POLICY }, { path, fol
       try {
         const r = editor.relink({ path: l.path, from: l.old_target, to: l.new_target });
         if (r.count) updated.push({ ...l, count: r.count });
+        else left.push({ ...l, error: 'Der Link steht nicht in der erwarteten Schreibweise in der Notiz' });
       } catch (err) {
         left.push({ ...l, error: err.message });
       }

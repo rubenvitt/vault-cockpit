@@ -30,14 +30,15 @@ export function createCapture({ vaultPath, folder = 'inbox', now = () => new Dat
     return t;
   }
 
-  function findByCaptureId(captureId) {
+  function findByCaptureId(captureId, source) {
     let names;
     try {
       names = readdirSync(baseDir);
     } catch {
       return null;
     }
-    const marker = `\ncapture_id: ${captureId}\n`;
+    // Quelle und ID zusammen: Zwei Quellen dürfen dieselbe ID vergeben (VCP-56).
+    const marker = `\nsource: ${source}\ncapture_id: ${captureId}\n`;
     for (const name of names) {
       if (!name.endsWith('.md')) continue;
       let head;
@@ -63,7 +64,7 @@ export function createCapture({ vaultPath, folder = 'inbox', now = () => new Dat
       }
 
       if (captureId !== null) {
-        const existing = findByCaptureId(captureId);
+        const existing = findByCaptureId(captureId, source);
         if (existing) return { path: `${folder}/${existing}`, absolute: join(baseDir, existing), title: name, duplicate: true };
       }
 

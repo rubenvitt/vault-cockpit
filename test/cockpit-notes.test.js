@@ -160,6 +160,19 @@ test('get: eingebettete Notizen zeigen ihren Inhalt, mit Tiefengrenze, ohne Krei
   assert.equal(section.children.length, 3);
 });
 
+test('get: Abschnitt mit formatierter Überschrift, Anker der Einbettung stören die Notiz nicht (VCP-63)', () => {
+  put('10-projekte/F.md', '## **Werte**\n\nfett\n\n## Thema\n\nim Embed\n');
+  put('10-projekte/G.md', '![[F]]\n\n![[F#Werte]]\n\n## Thema\n\neigenes\n');
+  for (const p of ['10-projekte/F.md', '10-projekte/G.md']) idx.refresh(p);
+  idx.relinkAll();
+  const note = desk.get('10-projekte/G.md');
+  const blocks = parseMarkdown(note.body, { links: note.links });
+  const [whole, werte] = blocks.filter((b) => b.type === 'embed');
+  assert.equal(werte.children[0].content[0].text, 'fett');
+  assert.deepEqual(whole.children.filter((b) => b.type === 'heading').map((h) => h.id), ['e1-h-werte', 'e1-h-thema']);
+  assert.equal(blocks.find((b) => b.type === 'heading').id, 'h-thema');
+});
+
 test('embedNow: eine Notiz ohne Embeddings gleich einbetten, mit Zeitgrenze (VCP-63)', async () => {
   const embedded = new Set();
   const scheduled = [];

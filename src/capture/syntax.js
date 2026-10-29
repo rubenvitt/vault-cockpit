@@ -114,7 +114,11 @@ export function parseTaskLine(line, { today }) {
     // nicht, außer sie gehören zur Angabe selbst (`14.10.`) (VCP-62).
     if (i === words.length - 1 && !recognized(w, today)) {
       const bare = w.replace(TRAILING, '');
-      if (bare && bare !== w && recognized(bare, today)) w = bare;
+      // `16.10.!`: Der Punkt gehört zum Datum, nur das Satzzeichen danach fällt weg.
+      if (bare && bare !== w) {
+        if (recognized(bare, today)) w = bare;
+        else if (recognized(`${bare}.`, today)) w = `${bare}.`;
+      }
     }
     if (TAG.test(w)) {
       tags.unshift({ index: i, token: w });

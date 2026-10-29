@@ -170,7 +170,7 @@ const MAX_EMBED_CHARS = 50_000;
  * wenn es sie nicht gibt. Codeblöcke zählen nicht.
  */
 export function sectionOf(body, heading) {
-  const want = String(heading ?? '').trim().toLowerCase();
+  const want = headingKey(heading);
   const lines = String(body ?? '').split(/\r?\n/);
   let fence = null;
   let start = -1;
@@ -185,12 +185,24 @@ export function sectionOf(body, heading) {
     const h = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(lines[i]);
     if (!h) continue;
     if (start >= 0 && h[1].length <= level) return lines.slice(start, i).join('\n');
-    if (start < 0 && h[2].trim().toLowerCase() === want) {
+    if (start < 0 && headingKey(h[2]) === want) {
       start = i + 1;
       level = h[1].length;
     }
   }
   return start >= 0 ? lines.slice(start).join('\n') : null;
+}
+
+/** Überschrift ohne Formatierung, wie die Anker in `headingId` (web/markdown-render.js): `**Werte**` = `Werte`. */
+function headingKey(text) {
+  return String(text ?? '')
+    .replace(/!?\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2')
+    .replace(/!?\[\[([^\]]+)\]\]/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s-]/gu, '')
+    .trim()
+    .replace(/\s+/g, '-');
 }
 
 /**
