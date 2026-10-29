@@ -80,7 +80,7 @@ export function createNoteDesk({ index, editor, policy, settings, vaultPath = nu
     return row && !row.sensitivity && row.class === 'core' ? row : null;
   }
 
-  const attachments = vaultPath ? createAttachments({ vaultPath, policy }) : null;
+  const attachments = vaultPath ? createAttachments({ vaultPath, policy, index }) : null;
   const related = createRelated({ index, semantic, visible: listed });
 
   return {

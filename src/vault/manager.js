@@ -1,5 +1,6 @@
 import { buildIndex, openIndex } from './index.js';
 import { DEFAULT_POLICY } from './policy.js';
+import { isImagePath } from './images.js';
 
 /**
  * Hält den Index aktuell.
@@ -63,19 +64,19 @@ export function createIndexManager({ vaultPath, dbPath, policy = DEFAULT_POLICY,
   });
 
   /**
-   * Geänderte Notizen (Vault-relative Pfade) einzeln neu einlesen. Ist dabei
-   * eine Datei entstanden oder verschwunden, werden alle Linkziele neu
-   * aufgelöst, damit Backlinks stimmen.
+   * Geänderte Notizen und Bilder (Vault-relative Pfade) einzeln neu einlesen.
+   * Ist dabei eine Notiz entstanden oder verschwunden, werden alle Linkziele
+   * neu aufgelöst, damit Backlinks stimmen. Beobachter hören nur von Notizen.
    */
   const applyChanges = tracked(function applyChanges(paths) {
     let presenceChanged = false;
     for (const path of new Set(paths)) {
-      const { existed, exists } = current.refresh(path);
-      if (existed !== exists) presenceChanged = true;
+      const { existed, exists, image } = current.refresh(path);
+      if (existed !== exists && !image) presenceChanged = true;
     }
     if (presenceChanged) current.relinkAll();
     changedAt = Date.now();
-    notify({ full: false, paths: [...new Set(paths)] });
+    notify({ full: false, paths: [...new Set(paths)].filter((p) => !isImagePath(p)) });
   });
 
   rebuild();
@@ -127,5 +128,7 @@ export function createIndexManager({ vaultPath, dbPath, policy = DEFAULT_POLICY,
     resolveLink: (...a) => current.resolveLink(...a),
     tagsOf: (...a) => current.tagsOf(...a),
     wholeGraph: (...a) => current.wholeGraph(...a),
+    imagesNamed: (...a) => current.imagesNamed(...a),
+    hasImage: (...a) => current.hasImage(...a),
   };
 }

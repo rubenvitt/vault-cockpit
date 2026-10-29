@@ -460,6 +460,8 @@ Embeddings, ohne sie per Volltext). Bilder (`![[bild.png]]`, `![](anhang/bild.pn
 PNG, JPEG, GIF, WebP, AVIF, kein SVG) liefert `/notiz/bild?pfad=…` nur angemeldet
 und nie aus vertraulichen, ausgeschlossenen oder versteckten Ordnern oder über
 Symlinks aus; Bilder von außen lädt die Vorschau nicht, sie werden ein Link.
+Welche Bilder es gibt, steht im Index (Tabelle `images`, gepflegt vom Dateiwächter
+und vom Komplettaufbau), auch große Vaults werden dafür nicht durchsucht.
 Tabellen und Callouts (`> [!note]`, aufklappbar mit `+`/`-`) werden dargestellt,
 das Frontmatter steht eingeklappt in einer Zeile. Bei Inbox-Notizen schlägt
 das Cockpit oben im Verarbeiten-Bereich **Tags** (häufig bei den ähnlichsten

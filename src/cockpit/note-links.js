@@ -1,5 +1,6 @@
-import { readdirSync, realpathSync, lstatSync, openSync, fstatSync, closeSync, constants } from 'node:fs';
+import { realpathSync, lstatSync, openSync, fstatSync, closeSync, constants } from 'node:fs';
 import { join, posix } from 'node:path';
+import { IMAGE_TYPES, extOf } from '../vault/images.js';
 
 /**
  * Verweise einer Notiz für die Vorschau im Cockpit: Wikilinks auf Notizen
@@ -11,23 +12,12 @@ import { join, posix } from 'node:path';
  * über einen Symlink oder `..` aus dem Vault führt, gelten als „fehlt“.
  */
 
-/** Bildformate, die die Vorschau zeigt. SVG fehlt bewusst: es kann Script enthalten. */
-export const IMAGE_TYPES = {
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  webp: 'image/webp',
-  avif: 'image/avif',
-};
-
 /** Anhänge, die Obsidian einbettet, die Vorschau aber nur nennt. */
 const OTHER_FILES = /\.(svg|pdf|mp3|m4a|wav|ogg|webm|mp4|mov|canvas|excalidraw)$/i;
 
 /** Größtes Bild, das das Cockpit ausliefert. */
 export const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 
-const extOf = (p) => (/\.([a-z0-9]+)$/i.exec(p)?.[1] ?? '').toLowerCase();
 const folderOf = (p) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
 
 /**
@@ -43,13 +33,11 @@ export function cleanPath(path) {
 }
 
 /**
- * Bilder im Vault, nach Dateiname. Die Liste entsteht beim ersten Bedarf und
- * gilt eine Minute; findet ein Bild keinen Treffer, wird sie (höchstens alle
- * zehn Sekunden) neu eingelesen, damit gerade synchronisierte Bilder auftauchen.
+ * Bilder im Vault, nach Dateiname. Sie stehen in der Tabelle `images` des
+ * Index (VCP-114), die der Komplettaufbau und der Dateiwächter pflegen; ein
+ * Gang über den Vault ist dafür nicht mehr nötig.
  */
-export function createAttachments({ vaultPath, policy, ttlMs = 60_000, retryMs = 10_000, now = () => Date.now() }) {
-  let cache = null;
-  let builtAt = 0;
+export function createAttachments({ vaultPath, policy, index }) {
   const vaultReal = (() => {
     try {
       return realpathSync(vaultPath);
@@ -60,46 +48,6 @@ export function createAttachments({ vaultPath, policy, ttlMs = 60_000, retryMs =
 
   /** Darf das Cockpit diesen Pfad zeigen? Gleiche Regeln wie für Notizen. */
   const allowed = (p) => !policy.isExcluded(p) && !policy.sensitivityOf(p) && policy.classify(p) === 'core';
-
-  function scan() {
-    const byName = new Map();
-    const paths = new Set();
-    const walk = (dir, rel) => {
-      let entries;
-      try {
-        entries = readdirSync(dir, { withFileTypes: true });
-      } catch {
-        return;
-      }
-      for (const e of entries) {
-        if (e.name.startsWith('.')) continue;
-        const p = rel ? `${rel}/${e.name}` : e.name;
-        // Symlinks sind weder Datei noch Ordner und bleiben damit draußen.
-        if (e.isDirectory()) {
-          if (allowed(`${p}/_`)) walk(join(dir, e.name), p);
-        } else if (e.isFile() && IMAGE_TYPES[extOf(e.name)] && allowed(p)) {
-          paths.add(p);
-          const key = e.name.toLowerCase();
-          if (!byName.has(key)) byName.set(key, []);
-          byName.get(key).push(p);
-        }
-      }
-    };
-    walk(vaultReal, '');
-    cache = { byName, paths };
-    builtAt = now();
-  }
-
-  const fresh = () => {
-    if (!cache || now() - builtAt > ttlMs) scan();
-    return cache;
-  };
-  const lookup = (fn) => {
-    const hit = fn(fresh());
-    if (hit || now() - builtAt < retryMs) return hit;
-    scan();
-    return fn(cache);
-  };
 
   /** Bester Kandidat unter gleichnamigen Bildern: möglichst nah am Ordner der Notiz, dann kürzester Pfad. */
   function nearest(candidates, from) {
@@ -122,10 +70,8 @@ export function createAttachments({ vaultPath, policy, ttlMs = 60_000, retryMs =
       const raw = String(name ?? '').trim().replace(/^\/+/, '');
       if (!IMAGE_TYPES[extOf(raw)]) return null;
       const direct = [cleanPath(raw), cleanPath(posix.normalize(posix.join(from, raw)))].filter(Boolean);
-      return lookup(({ byName, paths }) => {
-        for (const p of direct) if (paths.has(p)) return p;
-        return nearest(byName.get(raw.split('/').pop().toLowerCase()) ?? [], from);
-      });
+      for (const p of direct) if (allowed(p) && index.hasImage(p)) return p;
+      return nearest(index.imagesNamed(raw.split('/').pop()).filter(allowed), from);
     },
 
     /**

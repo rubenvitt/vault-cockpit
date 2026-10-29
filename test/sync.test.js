@@ -97,7 +97,24 @@ test('applyChanges übernimmt geänderten Inhalt', () => {
   assert.equal(mgr.search('Leuchtturm').total, 1);
 });
 
-test('Watcher bündelt Notizänderungen und ignoriert versteckte Pfade und Anhänge', async () => {
+test('applyChanges führt Bilder in der Tabelle images, ohne Beobachter zu wecken', () => {
+  const heard = [];
+  const off = mgr.onChange((c) => heard.push(c));
+  try {
+    writeFileSync(join(root, 'projects/Foto.PNG'), 'x');
+    mgr.applyChanges(['projects/Foto.PNG']);
+    assert.deepEqual(mgr.imagesNamed('foto.png'), ['projects/Foto.PNG']);
+    assert.ok(mgr.hasImage('projects/Foto.PNG'));
+    unlinkSync(join(root, 'projects/Foto.PNG'));
+    mgr.applyChanges(['projects/Foto.PNG', 'projects/Erste.md']);
+    assert.deepEqual(mgr.imagesNamed('foto.png'), []);
+    assert.deepEqual(heard.map((c) => c.paths), [['projects/Erste.md']]);
+  } finally {
+    off();
+  }
+});
+
+test('Watcher bündelt Notiz- und Bildänderungen und ignoriert versteckte Pfade und andere Anhänge', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'vault-watch-'));
   mkdirSync(join(dir, 'notes'));
   mkdirSync(join(dir, '.obsidian'));
@@ -109,12 +126,14 @@ test('Watcher bündelt Notizänderungen und ignoriert versteckte Pfade und Anhä
     // Paket als die Notizen.
     writeFileSync(join(dir, '.obsidian/workspace.json'), '{}');
     writeFileSync(join(dir, '.obsidian/versteckt.md'), 'v');
-    writeFileSync(join(dir, 'notes/bild.png'), 'x');
+    writeFileSync(join(dir, '.obsidian/x.png'), 'x');
+    writeFileSync(join(dir, 'notes/doku.pdf'), 'x');
     writeFileSync(join(dir, 'notes/a.md'), 'a');
     writeFileSync(join(dir, 'notes/b.md'), 'b');
+    writeFileSync(join(dir, 'notes/bild.png'), 'x');
     const batch = await nextBatch(batches);
-    assert.equal(batch.full, undefined, 'versteckte Dateien und Anhänge lösen keinen Komplettaufbau aus');
-    assert.deepEqual(batch.paths.sort(), ['notes/a.md', 'notes/b.md']);
+    assert.equal(batch.full, undefined, 'versteckte Dateien und andere Anhänge lösen keinen Komplettaufbau aus');
+    assert.deepEqual(batch.paths.sort(), ['notes/a.md', 'notes/b.md', 'notes/bild.png']);
   } finally {
     w.stop();
     rmSync(dir, { recursive: true, force: true });
@@ -137,10 +156,10 @@ test('Watcher verlangt einen Komplettaufbau, wenn ein Ordner umbenannt wird', as
   }
 });
 
-test('Watcher plant für versteckte Pfade und Anhänge kein Paket ein', (t) => {
+test('Watcher plant für versteckte Pfade und andere Anhänge kein Paket ein', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'vault-watch-'));
   mkdirSync(join(dir, 'notes'));
-  writeFileSync(join(dir, 'notes/bild.png'), 'x');
+  writeFileSync(join(dir, 'notes/doku.pdf'), 'x');
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const handlers = [];
   const fakeWatch = (_p, _o, cb) => {
@@ -152,13 +171,15 @@ test('Watcher plant für versteckte Pfade und Anhänge kein Paket ein', (t) => {
   try {
     handlers[0]('change', '.obsidian/workspace.json');
     handlers[0]('rename', '.trash/alt.md');
-    handlers[0]('change', 'notes/bild.png');
+    handlers[0]('change', '.obsidian/x.png');
+    handlers[0]('change', 'notes/doku.pdf');
     t.mock.timers.tick(10_000);
     assert.deepEqual(batches, []);
 
     handlers[0]('change', 'notes/a.md');
+    handlers[0]('rename', 'notes/bild.png');
     t.mock.timers.tick(100);
-    assert.deepEqual(batches, [{ paths: ['notes/a.md'] }]);
+    assert.deepEqual(batches, [{ paths: ['notes/a.md', 'notes/bild.png'] }]);
   } finally {
     w.stop();
     rmSync(dir, { recursive: true, force: true });

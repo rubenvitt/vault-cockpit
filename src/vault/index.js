@@ -1,8 +1,9 @@
 import { DatabaseSync } from 'node:sqlite';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, lstatSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { parseNote } from './markdown.js';
 import { DEFAULT_POLICY } from './policy.js';
+import { isImagePath } from './images.js';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS notes (
@@ -37,6 +38,17 @@ CREATE TABLE IF NOT EXISTS links (
 CREATE INDEX IF NOT EXISTS links_source ON links(source);
 CREATE INDEX IF NOT EXISTS links_target ON links(target_path);
 
+-- Bilder im Vault (VCP-114), damit eingebettete Bilder ohne Gang über den Vault
+-- gefunden werden. name ist der Dateiname klein geschrieben, wie Obsidian ihn sucht.
+CREATE TABLE IF NOT EXISTS images (
+  path TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  folder TEXT,
+  size INTEGER NOT NULL,
+  mtime INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS images_name ON images(name);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
   path UNINDEXED,
   title,
@@ -53,7 +65,7 @@ function* walk(dir, root) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
       yield* walk(full, root);
-    } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.md')) {
+    } else if (entry.isFile() && (entry.name.toLowerCase().endsWith('.md') || isImagePath(entry.name))) {
       yield toPosix(relative(root, full));
     }
   }
@@ -69,7 +81,23 @@ function prepareStatements(db) {
     insertTag: db.prepare('INSERT INTO note_tags (path, tag) VALUES (?, ?)'),
     insertLink: db.prepare('INSERT INTO links (source, target_raw, target_path, alias) VALUES (?,?,?,?)'),
     insertFts: db.prepare('INSERT INTO notes_fts (path, title, body) VALUES (?,?,?)'),
+    insertImage: db.prepare('INSERT INTO images (path, name, folder, size, mtime) VALUES (?,?,?,?,?)'),
   };
+}
+
+/** Ein Bild in die Tabelle `images` eintragen; false, wenn es nicht (mehr) lesbar ist. */
+function insertImageFile(stmts, { vaultPath }, relPath) {
+  let st;
+  try {
+    // lstat: ein Symlink ist kein Bild im Vault (wie beim Gang über den Vault).
+    st = lstatSync(join(vaultPath, relPath));
+  } catch {
+    return false;
+  }
+  if (!st.isFile()) return false;
+  const slash = relPath.lastIndexOf('/');
+  stmts.insertImage.run(relPath, relPath.slice(slash + 1).toLowerCase(), slash >= 0 ? relPath.slice(0, slash) : '', st.size, Math.floor(st.mtimeMs));
+  return true;
 }
 
 /** Eine Notiz von der Platte lesen und in alle Tabellen eintragen. */
@@ -110,14 +138,19 @@ export function buildIndex({ vaultPath, dbPath, persist, policy = DEFAULT_POLICY
   const db = new DatabaseSync(dbPath);
   db.exec('PRAGMA journal_mode = WAL');
   db.exec(SCHEMA);
-  db.exec('DELETE FROM notes; DELETE FROM note_tags; DELETE FROM links; DELETE FROM notes_fts;');
+  db.exec('DELETE FROM notes; DELETE FROM note_tags; DELETE FROM links; DELETE FROM notes_fts; DELETE FROM images;');
 
   const stmts = prepareStatements(db);
 
   let count = 0;
+  let images = 0;
   db.exec('BEGIN');
   for (const relPath of walk(vaultPath, vaultPath)) {
     if (policy.isExcluded(relPath)) continue;
+    if (isImagePath(relPath)) {
+      if (insertImageFile(stmts, { vaultPath }, relPath)) images += 1;
+      continue;
+    }
 
     let raw;
     try {
@@ -136,7 +169,7 @@ export function buildIndex({ vaultPath, dbPath, persist, policy = DEFAULT_POLICY
   resolveLinks(db);
   db.exec('ANALYZE');
 
-  logger.info?.(`Index aufgebaut: ${count} Notizen`);
+  logger.info?.(`Index aufgebaut: ${count} Notizen, ${images} Bilder`);
   if (persist) persist(db, vaultPath);
   return { db, count };
 }
@@ -213,6 +246,14 @@ export function openIndex(dbOrPath, { vaultPath = process.env.VAULT_PATH ?? '/va
   const db = typeof dbOrPath === 'string' ? new DatabaseSync(dbOrPath, { readOnly: false }) : dbOrPath;
   // Nachschlagetabellen für resolveLink, neu gebaut nach jeder Änderung am Index.
   let maps = null;
+
+  /** Ein Bild neu eintragen oder entfernen; Notizen und Links bleiben unberührt. */
+  function refreshImage(relPath) {
+    const existed = Boolean(db.prepare('SELECT 1 FROM images WHERE path = ?').get(relPath));
+    db.prepare('DELETE FROM images WHERE path = ?').run(relPath);
+    const exists = !policy.isExcluded(relPath) && insertImageFile(prepareStatements(db), { vaultPath }, relPath);
+    return { existed, exists, image: true };
+  }
 
   return {
     db,
@@ -454,6 +495,19 @@ export function openIndex(dbOrPath, { vaultPath = process.env.VAULT_PATH ?? '/va
       return out;
     },
 
+    /** Pfade der Bilder mit diesem Dateinamen (Groß-/Kleinschreibung egal), sortiert. */
+    imagesNamed(name) {
+      return db
+        .prepare('SELECT path FROM images WHERE name = ? ORDER BY path')
+        .all(String(name ?? '').toLowerCase())
+        .map((r) => r.path);
+    },
+
+    /** Steht genau dieser Pfad als Bild im Index? */
+    hasImage(path) {
+      return Boolean(db.prepare('SELECT 1 FROM images WHERE path = ?').get(String(path ?? '')));
+    },
+
     stats() {
       const byClass = {};
       for (const r of db.prepare('SELECT class, COUNT(*) c FROM notes GROUP BY class').all()) {
@@ -478,6 +532,7 @@ export function openIndex(dbOrPath, { vaultPath = process.env.VAULT_PATH ?? '/va
      */
     refresh(path) {
       const relPath = String(path ?? '');
+      if (isImagePath(relPath)) return refreshImage(relPath);
       const existed = Boolean(db.prepare('SELECT 1 FROM notes WHERE path = ?').get(relPath));
       let raw = null;
       try {

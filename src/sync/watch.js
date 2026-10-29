@@ -1,5 +1,6 @@
 import { watch as fsWatch, statSync } from 'node:fs';
 import { join, sep } from 'node:path';
+import { isImagePath } from '../vault/images.js';
 
 const toPosix = (p) => p.split(sep).join('/');
 
@@ -8,7 +9,8 @@ const toPosix = (p) => p.split(sep).join('/');
  *
  * Ein Sync schreibt oft viele Dateien kurz hintereinander. Ereignisse werden
  * deshalb gesammelt, bis debounceMs lang Ruhe ist (spätestens nach maxWaitMs),
- * und dann als ein Paket gemeldet: { paths } mit Vault-relativen .md-Pfaden,
+ * und dann als ein Paket gemeldet: { paths } mit Vault-relativen Pfaden von
+ * Notizen und Bildern (die der Index in `images` führt),
  * oder { full: true }, wenn sich einzelne Pfade nicht sicher ableiten lassen
  * (Ordner angelegt, umbenannt oder gelöscht, Ereignis ohne Dateinamen, sehr
  * viele Änderungen auf einmal). Dann ist ein Komplettaufbau billiger und sicher.
@@ -59,11 +61,11 @@ export function createVaultWatcher({
     }
     const rel = toPosix(String(filename));
     if (rel.split('/').some((part) => part.startsWith('.'))) return;
-    if (rel.toLowerCase().endsWith('.md')) {
+    if (rel.toLowerCase().endsWith('.md') || isImagePath(rel)) {
       paths.add(rel);
       return schedule();
     }
-    // Kein Markdown: Anhänge sind egal, Ordner nicht. Ein angelegter,
+    // Weder Notiz noch Bild: andere Anhänge sind egal, Ordner nicht. Ein angelegter,
     // umbenannter oder gelöschter Ordner verschiebt Notizen, ohne dass für
     // jede einzelne ein Ereignis kommt.
     let isFile = false;
