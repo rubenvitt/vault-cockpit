@@ -132,7 +132,8 @@ struct PageView: View {
         case .search(let query):
             SearchScreen(query: query)
         case .wholeGraph(let focus):
-            WholeGraphScreen(focus: focus)
+            // Ob es Notizseiten gibt, sagt erst eine Antwort; bis dahin wie `SearchStore.opensNotes`: ja.
+            WholeGraphScreen(focus: focus, canOpenNotes: true)
         case .wissen(let query):
             WissenScreen(query: query)
                 .navigationTitle("Wissen")
