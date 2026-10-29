@@ -22,6 +22,7 @@ const STATUS_MARK = { done: '✓', in_progress: '◐', blocked: '⏸', review: '
 const short = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 const graphHref = (path) => `/graph?pfad=${encodeURIComponent(path)}`;
 const noteHref = (path) => `/notiz?pfad=${encodeURIComponent(path)}`;
+const wholeHref = (path) => `/graph/alles?pfad=${encodeURIComponent(path)}`;
 
 function obsidianLink(path, vaultName) {
   if (!vaultName) return null;
@@ -171,15 +172,15 @@ function linkForm(ctx, center, target) {
 }
 
 /** `notes`: Treffer der Live-Suche öffnen die Notizseite statt des Graphen. */
-function page({ title, query = '', body, user, write = null, graph = false, flash = null, back = '/graph', notes = false }) {
+function page({ title, query = '', body, user, write = null, graph = false, flash = null, back = '/graph', notes = false, scripts = null, whole = false }) {
   return `<!doctype html>
 <html lang="de">
-${head(title, { script: Boolean(write), scripts: [...(graph ? [assets.graphLib] : []), assets.graph] })}
-<body class="page-graph">
+${head(title, { script: Boolean(write), scripts: scripts ?? [...(graph ? [assets.graphLib] : []), assets.graph] })}
+<body class="page-graph${whole ? ' page-graph-whole' : ''}">
 ${appHeader({ current: 'graph', user })}
 <div class="page-head">
   <h1>${esc(title)}</h1>
-  <form method="get" action="/graph" class="search" role="search"${notes ? ' data-notes="1"' : ''}><input type="search" name="q" value="${esc(query)}" placeholder="Vault durchsuchen" aria-label="Vault durchsuchen" enterkeyhint="search" autocomplete="off" spellcheck="false"><button type="submit" class="btn">Suchen</button></form>
+  <form method="get" action="/graph" class="search${whole ? ' whole-search' : ''}" role="search"${notes ? ' data-notes="1"' : ''}><input type="search" name="q" value="${esc(query)}" placeholder="${whole ? 'Notiz im Graphen finden' : 'Vault durchsuchen'}" aria-label="${whole ? 'Notiz im Graphen finden' : 'Vault durchsuchen'}" enterkeyhint="search" autocomplete="off" spellcheck="false"><button type="submit" class="btn">Suchen</button></form>
 </div>
 <main>
 ${body}
@@ -193,8 +194,9 @@ ${body}
  * @param {object} [opts.write]  `{ csrf, notes }`, wenn die Seite schreiben darf (Verlinken)
  * @param {string} [opts.back]   Rücksprung nach einer Aktion ohne JavaScript
  * @param {object} [opts.flash]  Meldung aus der letzten Aktion
+ * @param {boolean} [opts.whole] Link „Im ganzen Vault zeigen“ (`/graph/alles`)
  */
-export function renderGraph(graph, { vaultName = null, user = null, tz = 'Europe/Berlin', write = null, back = '/graph', flash = null, notes = false } = {}) {
+export function renderGraph(graph, { vaultName = null, user = null, tz = 'Europe/Berlin', write = null, back = '/graph', flash = null, notes = false, whole = false } = {}) {
   const center = graph.nodes.find((n) => n.id === graph.center);
   const link = obsidianLink(center.path, vaultName);
   const problems = graph.problems.length ? graph.problems.map((p) => `<p class="problem">${esc(p)}</p>`).join('') : '';
@@ -209,7 +211,7 @@ export function renderGraph(graph, { vaultName = null, user = null, tz = 'Europe
     back,
     notes,
     body: `<section class="graph-panel">
-      <p class="meta">${esc(center.path)}${write?.notes ? ` · <a href="/notiz?pfad=${esc(encodeURIComponent(center.path))}">Notiz ansehen</a>` : ''}${link ? ` · <a href="${esc(link)}">In Obsidian öffnen</a>` : ''}</p>
+      <p class="meta">${esc(center.path)}${write?.notes ? ` · <a href="/notiz?pfad=${esc(encodeURIComponent(center.path))}">Notiz ansehen</a>` : ''}${link ? ` · <a href="${esc(link)}">In Obsidian öffnen</a>` : ''}${whole ? ` · <a href="${esc(wholeHref(center.path))}">Im ganzen Vault zeigen</a>` : ''}</p>
       <div class="graph-stage" ${attrs}>${svg(graph)}</div>
       <div class="legend" data-filters>
         <label class="key k-link"><input type="checkbox" name="link" checked hidden>Link</label>
@@ -223,12 +225,36 @@ export function renderGraph(graph, { vaultName = null, user = null, tz = 'Europe
   });
 }
 
+/**
+ * „Ganzer Vault“ (`/graph/alles`, VCP-40): Rahmen für `/static/graph-alles.js`,
+ * das Knoten und vorberechnete Positionen von `/api/graph/alles` holt und mit
+ * sigma zeichnet. Ohne JavaScript (oder WebGL) bleibt ein Hinweis mit dem Weg
+ * zur Suche. `focus` ist eine Notiz, auf die der Graph beim Öffnen springt.
+ */
+export function renderWholeGraph({ user = null, notes = false, focus = null } = {}) {
+  const attrs = ['data-whole="/api/graph/alles"', notes ? 'data-notes="1"' : '', focus ? `data-focus="${esc(focus)}"` : ''].filter(Boolean).join(' ');
+  return page({
+    title: 'Ganzer Vault',
+    user,
+    notes,
+    whole: true,
+    scripts: [assets.graphLib, assets.wholeGraph],
+    body: `<section class="graph-panel">
+      <p class="meta"><span data-whole-stats>Alle eigenen Notizen und ihre Links, ohne vertrauliche Ordner.</span> · <a href="/graph">Zur Suche</a></p>
+      <div class="graph-stage whole" ${attrs}>
+        <p class="whole-fallback empty">Der Graph über den ganzen Vault braucht JavaScript und WebGL. Einzelne Notizen zeigt die <a href="/graph">Suche</a> mit ihrem Graphen.</p>
+      </div>
+      <div class="legend whole-legend" data-whole-legend hidden></div>
+    </section>`,
+  });
+}
+
 const STREAM_LABEL = { text: 'Volltext', semantic: 'Bedeutung', graph: 'Graph' };
 
 /** Mit `notes` öffnet ein Treffer die Notiz, der Graph steht als Link daneben. */
-export function renderSearch(query, result, { user = null, notes = false } = {}) {
+export function renderSearch(query, result, { user = null, notes = false, whole = false } = {}) {
   let body;
-  if (!query) body = `<section><p class="empty">Suchbegriff oder Frage eingeben. Ein Treffer öffnet ${notes ? 'die Notiz' : 'seinen Graphen'}.</p></section>`;
+  if (!query) body = `<section><p class="empty">Suchbegriff oder Frage eingeben. Ein Treffer öffnet ${notes ? 'die Notiz' : 'seinen Graphen'}.</p>${whole ? '<p><a href="/graph/alles" class="chip">Ganzen Vault als Graph zeigen</a></p>' : ''}</section>`;
   else if (!result.results.length) body = `<section><p class="empty">Nichts gefunden für „${esc(query)}“.</p></section>`;
   else {
     body = `<section><h2>${result.total} Treffer</h2><ul class="results">${result.results
@@ -322,7 +348,20 @@ export const GRAPH_CSS = `
 .live-results .hit > a[role=option] { padding-right: 64px; }
 .live-results .hit > .graph-link { position: absolute; top: 8px; right: 8px; padding: 2px 8px; font-size: 12px; color: var(--muted); border-radius: var(--r-sm); }
 .live-results .hit > .graph-link:hover { color: var(--accent); background: none; }
+/* Ganzer Vault (/static/graph-alles.js) */
+.graph-stage.whole:not(.interactive) { padding: var(--s-6) 0; }
+.graph-stage.whole.interactive { height: min(78vh, 900px); }
+.graph-stage.interactive > .whole-fallback { display: none; }
+.whole-legend .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+.whole-legend .key::before { content: none; }
+.whole-legend button.key { font: inherit; color: inherit; background: none; cursor: pointer; padding: 2px 8px 2px 6px; border-radius: 999px; border: 1px solid transparent; }
+.whole-legend button.key:hover { border-color: var(--line); }
+.whole-legend button.key[aria-pressed=true] { border-color: var(--accent-line); background: var(--accent-soft); color: var(--text); }
+.whole-legend .count { display: inline; margin-left: 4px; font-size: 12px; }
+.whole-legend .mode { display: inline-flex; gap: 4px; align-items: center; margin-right: 8px; }
+.whole-legend .mode .chip[aria-pressed=true] { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent); }
 @media (max-width: 700px) {
+  .graph-stage.whole.interactive { height: 68vh; }
   .graph-stage.interactive { height: 60vh; min-height: 340px; margin: 0 calc(-1 * var(--s-4)); }
   .live-results { left: 0; right: auto; }
   .graph-card { left: 8px; right: 8px; bottom: 8px; width: auto; }
