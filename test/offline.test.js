@@ -471,10 +471,10 @@ test('Service Worker: neue Version holt gespeicherte Leseansichten sofort neu, o
     const text = async (key) => (await cache.match(key))?.text();
 
     // Ohne Netz: Aktivieren scheitert still, die alten Fassungen bleiben lesbar.
-    // `activate` wartet nicht aufs Befüllen; das Befüllen danach ist dasselbe (`filling`).
+    // `activate` wartet nicht aufs Befüllen; das übernimmt der nächste Seitenaufruf (einmal).
     const activate = async () => {
       await sw.dispatch('activate');
-      await sw.dispatch('message', { data: { type: 'lesen-offline' } });
+      await sw.dispatch('fetch', { request: sw.request('/graph') });
     };
     online = false;
     await sw.dispatch('install');
@@ -483,11 +483,16 @@ test('Service Worker: neue Version holt gespeicherte Leseansichten sofort neu, o
 
     online = true;
     await activate();
-    assert.deepEqual(fetched, ['/api/lesen/offline', '/lesen/doc?id=a', '/lesen/doc?id=b']);
+    assert.deepEqual(fetched, ['/api/lesen/offline', '/graph', '/lesen/doc?id=a', '/lesen/doc?id=b']);
     assert.match(await text('/lesen/doc?id=a'), /Neu \/lesen\/doc\?id=a/);
     assert.match(await text('/lesen/doc?id=b'), /Neu \/lesen\/doc\?id=b/);
     assert.match(await text('/wissen'), /Alt Wissen/);
     assert.equal((await cache.match('/lesen/doc?id=a')).headers.get('x-cockpit-version'), version);
+
+    // Nur der erste Seitenaufruf nach dem Aktivieren befüllt.
+    fetched.length = 0;
+    await sw.dispatch('fetch', { request: sw.request('/graph') });
+    assert.deepEqual(fetched, ['/graph']);
 
     // Mit der aktuellen Version und frisch: nichts mehr zu holen.
     fetched.length = 0;
