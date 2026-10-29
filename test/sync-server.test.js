@@ -1,7 +1,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, statSync, unlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, statSync, unlinkSync, symlinkSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -314,4 +314,37 @@ test('Einstellungen: Sync-Wahl wird geprüft, Standard kommt aus der Umgebung', 
   assert.equal(store.get().sync.adapter, 'cockpit');
   assert.throws(() => store.save({ ...store.stored(), sync: { adapter: 'dropbox' } }), (err) => err instanceof SettingsError && err.field === 'sync.adapter');
   assert.equal(createSettingsStore({}).get().sync.adapter, 'obsidian-headless');
+});
+
+test('ein Symlink im Vault führt nicht hinaus, weder lesend noch schreibend', async () => {
+  const outside = mkdtempSync(join(tmpdir(), 'sync-aussen-'));
+  writeFileSync(join(outside, 'geheim.md'), 'geheim\n');
+  symlinkSync(outside, join(vault, 'link'));
+  const a = client(mac);
+  assert.equal((await a.get('link/geheim.md')).status, 400);
+  assert.equal((await a.put('link/neu.md', 'x', null)).status, 400);
+  assert.equal((await a.put('link/tief/neu.md', 'x', null)).status, 400);
+  assert.ok(!existsSync(join(outside, 'neu.md')));
+  assert.ok(!existsSync(join(outside, 'tief')));
+  unlinkSync(join(vault, 'link'));
+  rmSync(outside, { recursive: true, force: true });
+});
+
+test('eine Datei über der Grenze auf der Platte wird weder überschrieben noch gelöscht', () => {
+  const v = mkdtempSync(join(tmpdir(), 'sync-gross-'));
+  const d = mkdtempSync(join(tmpdir(), 'sync-gross-data-'));
+  writeFileSync(join(v, 'video.bin'), Buffer.alloc(2048, 1));
+  const j = createSyncJournal({ vaultPath: v, dbPath: join(d, 'sync.db'), blobDir: join(d, 'blobs'), maxFileBytes: 1024, logger: quiet });
+  j.scan();
+  assert.deepEqual(j.put('video.bin', Buffer.from('klein'), { base: null }), { ok: false, reason: 'too_large' });
+  assert.equal(readFileSync(join(v, 'video.bin')).length, 2048);
+  writeFileSync(join(v, 'wächst.bin'), 'a');
+  j.scan();
+  const old = sha('a');
+  writeFileSync(join(v, 'wächst.bin'), Buffer.alloc(2048, 2));
+  assert.deepEqual(j.remove('wächst.bin', { base: old }), { ok: false, reason: 'too_large' });
+  assert.ok(existsSync(join(v, 'wächst.bin')));
+  j.close();
+  rmSync(v, { recursive: true, force: true });
+  rmSync(d, { recursive: true, force: true });
 });
