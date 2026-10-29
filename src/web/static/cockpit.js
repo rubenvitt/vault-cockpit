@@ -45,8 +45,26 @@
     } catch {
       /* leer */
     }
-    if (!res.ok || !data?.ok) throw new Error(data?.message || `Fehler ${res.status}. Nichts gespeichert.`);
+    if (!res.ok || !data?.ok) {
+      // `expired`: Sitzung abgelaufen; Textformulare gehen dann den Weg ohne JavaScript (fallBack).
+      throw Object.assign(new Error(data?.message || `Fehler ${res.status}. Nichts gespeichert.`), { expired: res.status === 401 });
+    }
     return data;
+  }
+
+  /**
+   * Abgelaufene Sitzung bei einem Formular mit Text: noch einmal als normales
+   * Formular absenden. Der Server legt den Text verschlüsselt ab, schickt über
+   * den Login und stellt ihn danach wieder ins Feld (VCP-57). `false`, wenn
+   * das Formular keinen Text trägt und die Meldung reicht.
+   */
+  function fallBack(form, err) {
+    const text = form.elements.text;
+    if (!err.expired || !(text instanceof HTMLTextAreaElement) || !text.value.trim()) return false;
+    toast('Die Anmeldung ist abgelaufen. Der Text kommt mit über den Login.');
+    // Die Methode des Formulars selbst: löst kein `submit` aus, also auch nicht diesen Weg noch einmal.
+    HTMLFormElement.prototype.submit.call(form);
+    return true;
   }
 
   // --- Meldungen ------------------------------------------------------------
@@ -263,7 +281,7 @@
       await refresh();
       tick();
     } catch (err) {
-      toast(err.message, { kind: 'error' });
+      if (!fallBack(form, err)) toast(err.message, { kind: 'error' });
     } finally {
       form.classList.remove('busy');
     }
@@ -345,6 +363,8 @@
       } catch (err) {
         // Ohne Verbindung nimmt der Offline-Puffer den Text mit derselben Erfassungs-ID und sendet ihn später.
         // Sonst bleibt der Text im Feld; dieselbe Erfassungs-ID verhindert Doppelte beim erneuten Senden.
+        // Abgelaufene Sitzung: der Text geht als Formular über den Login und steht danach wieder im Feld.
+        if (fallBack(capture, err)) return;
         if (!(err.offline && (await window.cockpitPuffer?.take(capture)))) toast(err.message, { kind: 'error' });
       } finally {
         capture.classList.remove('busy');

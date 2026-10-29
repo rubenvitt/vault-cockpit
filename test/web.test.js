@@ -123,6 +123,13 @@ const graph = {
 };
 const search = async (q) => ({ results: [{ path: 'wiki/a.md', title: 'A', snippet: `zu ${q}`, streams: ['text', 'semantic'] }], total: 1, degraded: null });
 
+/** Ziel des Schritts „Anmelden“ auf der Seite nach einer Aktion ohne Sitzung (keine Weiterleitung, VCP-57). */
+async function reloginHref(res) {
+  assert.equal(res.status, 401);
+  assert.equal(res.headers.get('location'), null);
+  return (await res.text()).match(/href="(\/login\?next=[^"]*)" class="btn primary"/)[1].replace(/&amp;/g, '&');
+}
+
 async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSubjects = ['ruben'], calendars = null, actions = null, notes = null, shortcuts = [], clock = null, search: searchFn = search, zunder = true, wholeGraph = null } = {}) {
   const idp = fakeIdp(idpOptions);
   const settings = createSettingsStore({ defaults: { tz: 'Europe/Berlin', inboxFolder: 'inbox', ...(zunder ? { zunderUrl: 'https://zunder.env', zunderToken: 'zt_env' } : {}) }, logger: quiet });
@@ -804,8 +811,7 @@ test('Aktionen: nur angemeldet, mit CSRF-Token und von dieser Seite', async () =
   await withServer(
     async ({ call, login }) => {
       const anon = await call('/aktion/status', { method: 'POST', form: { id: 't1', status: 'done' } });
-      assert.equal(anon.status, 303);
-      assert.equal(anon.headers.get('location'), '/login?next=%2F');
+      assert.equal(await reloginHref(anon), '/login?next=%2F');
       const anonJson = await call('/aktion/erfassen', { method: 'POST', form: { text: 'x' }, accept: 'application/json' });
       assert.equal(anonJson.status, 401);
       assert.equal((await call('/aktion/status')).status, 405);
@@ -1578,13 +1584,18 @@ test('Abgelaufene Sitzung: Schnelleingabe geht über den Login zurück, der Text
       clock.t += 31 * DAY_MS;
 
       const res = await call('/aktion/erfassen', { method: 'POST', form: { text: '! Wichtig <b>', cid, csrf, back: '/?woche=2026-W42' }, origin: 'https://vault.test' });
-      assert.equal(res.status, 303);
-      assert.equal(res.headers.get('location'), '/login?next=%2F%3Fwoche%3D2026-W42');
+      // Eine Seite statt einer Weiterleitung: `form-action 'self'` gälte sonst bis zu Pocket ID.
+      assert.equal(res.status, 401);
+      assert.equal(res.headers.get('location'), null);
+      const relogin = await res.text();
+      assert.match(relogin, /href="\/login\?next=%2F%3Fwoche%3D2026-W42"/);
+      assert.match(relogin, /Nach dem Anmelden steht er wieder im Feld/);
+      assert.ok(!relogin.includes('Wichtig'));
       assert.match(res.headers.getSetCookie().find((c) => c.startsWith('vc_draft=')), /HttpOnly; SameSite=Lax; Secure; Max-Age=900$/);
       // Verschlüsselt: Der Text steht weder im Cookie noch in der Adresse zu Pocket ID.
       assert.ok(!Buffer.from(jar.vc_draft, 'base64url').toString('latin1').includes('Wichtig'));
       assert.equal(actions.calls.length, 0);
-      const start = await call(res.headers.get('location'));
+      const start = await call('/login?next=%2F%3Fwoche%3D2026-W42');
       assert.ok(!start.headers.get('location').includes('Wichtig'));
       const { code, state } = idp.authorize(start.headers.get('location'));
       const back = await call(`/auth/callback?code=${code}&state=${state}`);
@@ -1613,7 +1624,7 @@ test('Abgelaufene Sitzung: Text zum Anhängen wartet auf seine Notiz', async () 
       clock.t += 31 * DAY_MS;
       const back = '/notiz?pfad=00-inbox%2FIdee.md';
       const res = await call('/aktion/notiz/anhaengen', { method: 'POST', form: { pfad: '00-inbox/Idee.md', text: 'Nachtrag', csrf, back }, origin: 'https://vault.test' });
-      assert.equal(res.headers.get('location'), `/login?next=${encodeURIComponent(back)}`);
+      assert.ok((await res.text()).includes(`href="/login?next=${encodeURIComponent(back).replace(/&/g, '&amp;')}"`));
       await login('/');
       // Die Wochenansicht nimmt den Entwurf nicht, er bleibt für die Notiz liegen.
       assert.ok(!(await (await call('/')).text()).includes('Nachtrag'));
@@ -1653,11 +1664,10 @@ test('Abgelaufene Sitzung: zu langer Text oder unklare Herkunft kommt zum Kopier
 
       assert.equal((await call('/aktion/erfassen', { method: 'POST', form: { text: 'x', csrf }, origin: 'https://evil.test' })).status, 403);
       const empty = await call('/aktion/erfassen', { method: 'POST', form: { text: '  ', csrf, back: '/' }, origin: vault });
-      assert.equal(empty.headers.get('location'), '/login?next=%2F');
+      assert.equal(await reloginHref(empty), '/login?next=%2F');
       const status = await call('/aktion/status', { method: 'POST', form: { id: 't1', status: 'done', csrf, back: '/?woche=2026-W42' }, origin: vault });
-      assert.equal(status.status, 303);
-      assert.equal(status.headers.get('location'), '/login?next=%2F%3Fwoche%3D2026-W42');
-      assert.equal((await call('/aktion/status', { method: 'POST', form: { id: 't1', status: 'done', back: '//evil.test' }, origin: vault })).headers.get('location'), '/login?next=%2F');
+      assert.equal(await reloginHref(status), '/login?next=%2F%3Fwoche%3D2026-W42');
+      assert.equal(await reloginHref(await call('/aktion/status', { method: 'POST', form: { id: 't1', status: 'done', back: '//evil.test' }, origin: vault })), '/login?next=%2F');
       assert.equal(jar.vc_draft, undefined);
       assert.equal(actions.calls.length, 0);
     },
@@ -1692,7 +1702,7 @@ test('Offline-Cache: eine Wochenansicht mit wiederhergestelltem Entwurf wird nic
       const html = await fresh.text();
       clock.t += 31 * DAY_MS;
       const res = await call('/aktion/erfassen', { method: 'POST', form: { text: 'Entwurf, der nicht in den Cache darf', cid: html.match(/name="cid" value="([^"]+)"/)[1], csrf: csrfFrom(html), back: '/' }, origin: 'https://vault.test' });
-      const start = await call(res.headers.get('location'));
+      const start = await call(await reloginHref(res));
       const { code, state } = idp.authorize(start.headers.get('location'));
       await call(`/auth/callback?code=${code}&state=${state}`);
       const page = await call('/');

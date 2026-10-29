@@ -559,11 +559,14 @@ spätestens 90 Tage nach dem Login; wer das Cockpit mindestens einmal im Monat
 Dauern lassen sich unter **Einstellungen → Anmeldung** ändern (leer = Standard,
 eine kürzere wirkt sofort). Dort beendet **Überall abmelden** alle Sitzungen auf
 allen Geräten, auch die eigene: Die Einstellungen zählen eine Generation hoch,
-die in jedem Sitzungs-Cookie steht. Läuft die Sitzung ab, während man ohne
-JavaScript etwas abschickt, geht es über den Login zurück auf dieselbe Seite;
+die in jedem Sitzungs-Cookie steht. Läuft die Sitzung ab, während man etwas
+abschickt, geht es über **Anmelden** und den Login zurück auf dieselbe Seite;
 der Text aus Schnelleingabe oder „Anhängen“ steht dann wieder im Feld (15
 Minuten lang, verschlüsselt in einem Cookie, nie in einer URL). Ist er dafür zu
-lang, zeigt die Seite ihn zum Kopieren.
+lang, zeigt die Seite ihn zum Kopieren. Mit JavaScript gilt dasselbe: Bei einer
+abgelaufenen Sitzung geht ein Formular mit Text noch einmal als normales
+Formular raus. Den Schritt zum Login klickt man selbst, weil `form-action 'self'`
+eine Weiterleitung zu Pocket ID aus einem abgeschickten Formular abbräche.
 
 **Zustand der Dienste:** Die Seite `/zustand` (aus **Einstellungen → Zustand der
 Dienste**) zeigt je Hintergrunddienst, ob er läuft, einen Fehler meldet oder aus
