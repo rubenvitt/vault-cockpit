@@ -210,3 +210,19 @@ test('Querverbindungen über das Cockpit: JSON nur angemeldet (sonst 401), Lesea
     app.close();
   }
 });
+
+test('Querverbindungen (VCP-85): Verknüpfen kommt mit Rückgängig, das den Link wieder herausnimmt', async () => {
+  const routes = routesWith(fruitEmbedder());
+  const r = await connect(routes, { markierung: hl.a.id, pfad: 'wiki/obst.md' });
+  assert.deepEqual(r.undo, { action: '/aktion/lesen/verbinden/loesen', fields: { markierung: hl.a.id, ziel: 'obst' } });
+  assert.equal((await connect(routes, { markierung: hl.a.id, pfad: 'wiki/obst.md' })).undo, null, 'schon verknüpft: kein Rückgängig');
+
+  const undo = (fields) => routes.actions[r.undo.action](new URLSearchParams(fields), { sub: 'ruben' });
+  assert.equal((await undo(r.undo.fields)).message, 'Verknüpfung gelöst');
+  const own = exporter.notePath(docs.a.id);
+  assert.doesNotMatch(readFileSync(join(root, own), 'utf8'), /Verknüpft:/);
+  assert.deepEqual((await find(routes, { markierung: hl.a.id })).linked, []);
+  assert.equal((await undo(r.undo.fields)).message, 'War nicht (mehr) verknüpft');
+  await assert.rejects(undo({ markierung: 'nein', ziel: 'obst' }), { status: 404 });
+  await assert.rejects(undo({ markierung: hl.a.id, ziel: ' ' }), /Welche Verknüpfung/);
+});

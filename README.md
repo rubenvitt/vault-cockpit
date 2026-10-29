@@ -588,7 +588,7 @@ ist, mit letztem erfolgreichem Lauf und letztem Fehler samt Zeitpunkt und Text:
 Sync (Status, letzter Abgleich, Lebenszeichen des Sidecars), Index (Notizen,
 letzter Aufbau), Embeddings (Modell, Fortschritt), Mail-Abruf, Zunder-Brücke (neue
 Checkboxen und Abgleich getrennt), Zunder-Zugang (nimmt Zunder den Token an?) und
-Kalender (je Kalender) und Feeds (je Feed). `vault_stats` liefert dieselben Dienste
+Kalender (je Kalender), Feeds (je Feed) und Lesestapel → Vault. `vault_stats` liefert dieselben Dienste
 unter `services`. Letzten Erfolg und letzten Fehler je Dienst hält
 `/data/dienste-zustand.json` fest: Nach einem Neustart steht der Dienst bis zu
 seinem nächsten Lauf auf „unbekannt“, die Zeiten davor bleiben sichtbar. Beim Laden der Seite werden Zunder
@@ -674,7 +674,9 @@ Systemmenüs. Eine Markierung merkt sich Zitat, etwas Text davor und danach und 
 ungefähre Stelle (`src/lesen/anchor.js`). So sitzt sie auch nach erneutem Holen
 oder Umformatieren wieder richtig. Eingesetzt werden die Markierungen beim
 Ausliefern als `<mark>` nur um Textstücke. „In Inbox“ legt das Zitat mit Quelle
-über die Schnelleingabe als Notiz in der Vault-Inbox an. Unter **Markiert** stehen
+über die Schnelleingabe als Notiz „Zitat aus <Titel>“ in der Vault-Inbox an.
+Rückgängig nach „Entfernen“ legt die Markierung mit derselben ID und ihrem Stand
+im Wiedersehen neu an. Unter **Markiert** stehen
 alle Markierungen, filterbar nach Quelle und Thema.
 
 **Unterwegs hören** (`/lesen/hoeren?zeit=15`, VCP-79, Link auf dem Stapel): Die
@@ -982,8 +984,12 @@ einfachen Leitner-Schema zurück: Box 1 bis 5 mit 1, 3, 7, 21 und 60 Tagen
 Abstand, eine neue Markierung ist nach einem Tag dran. Je Karte: **Behalten**
 rückt eine Box weiter, **In eigenen Worten** legt Zitat, eigene Worte und Quelle
 als Notiz in der Vault-Inbox an und rückt ebenfalls weiter, **Loslassen** nimmt
-die Markierung nur aus der Wiederholung (gelöscht wird nichts). Rückgängig steht
-in der Meldung, alles geht auch ohne JavaScript. Höchstens 20 Karten am Tag, der
+die Markierung nur aus der Wiederholung (gelöscht wird nichts). Wie im Eingang
+gehen Wischen (← Loslassen, → Behalten) und Tasten (L, B oder Enter, W für eigene
+Worte). Rückgängig steht in der Meldung und, für die letzte Entscheidung von
+heute, dauerhaft auf der Seite (Taste Z); nach „In eigenen Worten“ bleibt die
+Notiz in der Inbox liegen, und die Meldung sagt das. Alles geht auch ohne
+JavaScript. Höchstens 20 Karten am Tag, der
 Rest kommt morgen. Darunter die Woche (`?woche=2026-W43`, aus dem
 Wochenrückblick verlinkt): Zahlen, Balken je Thema (ohne Thema je Quelle) und
 Export als Markdown. Ist ein Embedding-Server eingestellt, bettet das Cockpit die
@@ -1118,7 +1124,10 @@ gebündelt nach 30 Sekunden Ruhe und beim Herunterfahren. Alles andere, vor
 allem „Eigene Gedanken“, bleibt unberührt. Gefunden wird die Notiz über
 `lesestapel_id` im Index, Umbenennen und Verschieben in Obsidian schaden also
 nicht. Ändert der Sync die Notiz gleichzeitig, bricht das Schreiben ab und
-wird später wiederholt. Wer im Bereich von Hand schreibt, hält das Cockpit davon
+wird später wiederholt. Vorgemerktes steht im Lesestapel (`export_pending`) und
+übersteht einen Absturz; ein bleibender Fehler wird mit wachsendem Abstand (30 s
+bis höchstens stündlich) wiederholt und steht ab dem zweiten Fehlversuch als
+„Lesestapel → Vault“ auf `/zustand`. Wer im Bereich von Hand schreibt, hält das Cockpit davon
 ab, ihn zu überschreiben. In vertraulichen, ausgeschlossenen oder
 Readwise-Ordnern legt es nichts an, und eine dorthin verschobene Notiz fasst es
 nicht mehr an. Wikilinks zu einer Markierung schreibt `addLink` aus
@@ -1140,6 +1149,8 @@ Lesestapel-Notiz, nie in die Zielnotiz; eine Auswahl wird vorher markiert. Ist
 das Ziel eine Markierung, verweist der Link auf deren Block
 (`[[anderer-text#^hl-…]]`) und das Cockpit legt die Notiz zum anderen Text an,
 falls es sie noch nicht gibt. Schon Verknüpftes steht als „Schon verknüpft“ da.
+Rückgängig in der Meldung nimmt den Link wieder heraus
+(`POST /aktion/lesen/verbinden/loesen`); eine dafür angelegte Notiz bleibt.
 Ohne Embedder oder wenn Ollama nicht antwortet, sucht es mit Hinweis nur im
 Volltext (dann auch in den Lesestapel-Notizen). Als JSON:
 `GET /api/lesen/verbindungen?markierung=<id>` oder `?doc=<id>&text=<Auswahl>`

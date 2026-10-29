@@ -614,3 +614,61 @@ test('Notiz: Feed-Eintrag mit Diskussion verlinkt Original und Kommentare', () =
   );
   assert.match(text, /^\[Original\]\(<https:\/\/kuehn\.test\/a>\) · \[Kommentare\]\(<https:\/\/news\.ycombinator\.com\/item\?id=1>\) · Ann$/m);
 });
+
+test('Verknüpfen rückgängig (VCP-85): removeLink nimmt nur diesen Wikilink heraus, legt nie eine Notiz an', () => {
+  const h = store.addHighlight({ doc_id: doc.id, quote: 'Stelle', start_hint: 1 });
+  assert.deepEqual(exporter.removeLink({ highlightId: h.id, target: 'Start' }).state, 'aktuell');
+  assert.equal(pathOf(), null, 'ohne Notiz legt das Lösen keine an');
+
+  const { path } = exporter.addLink({ highlightId: h.id, target: 'Start' });
+  exporter.addLink({ highlightId: h.id, target: 'Andere' });
+  assert.equal(exporter.removeLink({ highlightId: h.id, target: 'Start' }).state, 'geschrieben');
+  assert.deepEqual(parseLinks(read(path)).get(blockId(h.id)), ['Andere']);
+  assert.equal(exporter.removeLink({ highlightId: h.id, target: 'Start' }).state, 'aktuell');
+  assert.throws(() => exporter.removeLink({ highlightId: 'gibt-es-nicht', target: 'Start' }), /gibt es nicht/);
+});
+
+test('Vorgemerktes übersteht einen Absturz (VCP-85): ein neuer Export holt es aus der Datenbank nach', async () => {
+  const wait = (ms) => new Promise((res) => setTimeout(res, ms));
+  store.setStatus(doc.id, 'archiv');
+  store.addHighlight({ doc_id: doc.id, quote: 'Stelle' });
+  exporter.changed(doc.id);
+  exporter.stop(); // „Absturz“: der Zeitgeber läuft nie
+  assert.deepEqual(store.listExportPending().map((r) => r.doc_id), [doc.id]);
+
+  const restarted = make({ delayMs: 5 });
+  await wait(40);
+  assert.deepEqual(restarted.pending(), []);
+  assert.match(read(restarted.notePath(doc.id)), /> Stelle/);
+  restarted.stop();
+});
+
+test('Bleibende Fehler (VCP-85): wachsende Abstände, ab dem zweiten Fehlversuch auf /zustand, eine Änderung setzt zurück', () => {
+  store.setStatus(doc.id, 'archiv');
+  store.addHighlight({ doc_id: doc.id, quote: 'Stelle' });
+  const broken = { ...editor, create() { throw new Error('beide Dateinamen schon vergeben'); } };
+  const svc = make({ editor: broken, delayMs: 30_000 });
+  assert.equal(svc.health().state, 'unknown');
+  svc.changed(doc.id);
+  const gaps = [];
+  for (let i = 0; i < 4; i += 1) {
+    const before = Date.now();
+    assert.equal(svc.flush()[0].state, 'fehler');
+    const [row] = store.listExportPending();
+    gaps.push(Math.round((Date.parse(row.next_at) - before) / 30_000));
+    if (i === 0) assert.equal(svc.health().state, 'unknown', 'ein Fehlversuch allein ist meist der Sync');
+  }
+  assert.deepEqual(gaps, [1, 2, 4, 8]);
+  const h = svc.health();
+  assert.equal(h.id, 'reading-export');
+  assert.equal(h.state, 'error');
+  assert.match(h.summary, /„Vom Lesen: Über Stapel“ kommt nicht in den Vault/);
+  assert.match(h.lastError, /beide Dateinamen schon vergeben/);
+  assert.ok(h.facts.some((f) => f.label === 'Nächster Versuch'));
+
+  // Eine neue Änderung setzt die Fehlversuche zurück und versucht es entprellt wieder.
+  svc.changed(doc.id);
+  assert.equal(store.listExportPending()[0].attempts, 0);
+  assert.equal(svc.health().state, 'unknown');
+  svc.stop();
+});

@@ -231,3 +231,60 @@ test('Wiedersehen über das Cockpit: ohne JavaScript Behalten → Rückgängig a
     app.close();
   }
 });
+
+test('Wiedersehen (VCP-85): dauerhaftes Rückgängig der letzten Entscheidung, auch nach „In eigenen Worten“ mit Hinweis auf die Notiz', async () => {
+  const { store, page, act, advance, routes, ctx, captured } = setup();
+  advance(DAY);
+  let html = await page();
+  assert.doesNotMatch(html, /inbox-undo/, 'heute noch nichts entschieden');
+  assert.match(html, /<script src="\/static\/lesen-eingang\.js\?v=[\w-]+" defer><\/script>/);
+  assert.match(html, /class="act wiedersehen-decide wisch" data-links="loslassen" data-rechts="behalten"/);
+  assert.match(html, /aria-keyshortcuts="ArrowLeft l"/);
+  assert.match(html, /<summary aria-keyshortcuts="w">In eigenen Worten/);
+
+  const first = cardId(html);
+  const r = await act('/aktion/lesen/wiedersehen', { id: first, ziel: 'worte', worte: 'Meine Sicht.', cid: 'w-1' });
+  assert.deepEqual(r.undo, { action: '/aktion/lesen/wiedersehen/zurueck', fields: { id: first } });
+  assert.equal(captured[0].title, 'Gedanke zu Erster Text');
+  advance(60_000);
+  const second = cardId(await page());
+  await act('/aktion/lesen/wiedersehen', { id: second, ziel: 'loslassen' });
+
+  // Die Seite bietet die letzte Entscheidung an, auch nach einem Neuladen.
+  html = await page();
+  assert.match(html, new RegExp(`action="/aktion/lesen/wiedersehen/zurueck" class="act inbox-undo">.*name="id" value="${second}"`));
+  const json = JSON.parse((await routes.pages['/api/lesen/wiedersehen'](ctx())).body);
+  assert.deepEqual(json.undo, { action: '/aktion/lesen/wiedersehen/zurueck', fields: { id: second } });
+  assert.equal(json.last.decision, 'loslassen');
+
+  assert.equal((await act('/aktion/lesen/wiedersehen/zurueck', { id: second })).message, 'Wieder dran');
+  assert.equal(store.getHighlight(second).review_state, 'aktiv');
+  await assert.rejects(act('/aktion/lesen/wiedersehen/zurueck', { id: second }), /nicht zurücksetzen/, 'zweimal geht nicht');
+
+  // Danach ist die Entscheidung davor dran; die Inbox-Notiz bleibt und die Meldung sagt es.
+  assert.match(await page(), new RegExp(`class="act inbox-undo">.*name="id" value="${first}"`));
+  assert.equal((await act('/aktion/lesen/wiedersehen/zurueck', { id: first })).message, 'Wieder dran. Die Notiz in der Inbox bleibt: Inbox/x.md');
+  const back = store.getHighlight(first);
+  assert.deepEqual([back.review_box, back.reviewed_at, back.review_prev], [0, null, null]);
+  html = await page();
+  assert.match(html, /Heute 0 von 3 gesehen/);
+  assert.doesNotMatch(html, /inbox-undo/);
+
+  // Ältere Clients schicken den Stand mit; ohne gemerkten Stand gilt der.
+  store.updateHighlight(first, { review_box: 3 });
+  await act('/aktion/lesen/wiedersehen/zurueck', { id: first, box: '1', faellig: '', zustand: 'aktiv' });
+  assert.equal(store.getHighlight(first).review_box, 1);
+
+  // Gestern entschieden zählt heute nicht und lässt sich auf der Seite nicht mehr zurücknehmen.
+  await act('/aktion/lesen/wiedersehen', { id: cardId(await page()), ziel: 'behalten' });
+  advance(DAY);
+  assert.doesNotMatch(await page(), /inbox-undo/);
+});
+
+test('Wiedersehen (VCP-85): Querverbindung als Notiz mit den Titeln der Texte', async () => {
+  const embedder = () => ({ model: 'm', embed: async (texts) => texts.map(() => Float32Array.from([1, 0])) });
+  const s = setup({ embedder });
+  const ids = (await s.page()).match(/name="ids" value="([^"]+)"/)[1];
+  await s.act('/aktion/lesen/wiedersehen/verbindung', { ids });
+  assert.match(s.captured[0].title, /^Querverbindung (Erster Text und Zweiter Text|Zweiter Text und Erster Text)$/);
+});

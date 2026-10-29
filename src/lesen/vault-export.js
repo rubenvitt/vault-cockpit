@@ -40,13 +40,14 @@ import { safeWikiMarkdown } from './wiki-markdown.js';
  * (`addLink`) und bleiben beim Neuschreiben erhalten.
  *
  * Änderungen sind entprellt (`changed(docId)`, Standard 30 s, `flush()` sofort).
- * Wirft der Editor, weil der Sync die Notiz gleichzeitig geändert hat, bleibt
- * das Dokument vorgemerkt und der nächste Lauf versucht es wieder.
- * shortcut: Vorgemerktes lebt nur im Speicher (beim Herunterfahren wird es
- * geschrieben, ein Absturz verliert es bis zur nächsten Änderung); bei Bedarf
- * eine Tabelle per Migration.
- * shortcut: Jeder Fehler wird alle 30 s wiederholt, auch ein bleibender (etwa
- * beide Dateinamen schon vergeben); bei Bedarf Fehler zählen und aufgeben.
+ * Vorgemerktes steht in der Tabelle `export_pending` des Lesestapels und
+ * übersteht so einen Absturz; beim Start holt der Export es nach. Wirft der
+ * Editor (etwa weil der Sync die Notiz gleichzeitig geändert hat), bleibt das
+ * Dokument vorgemerkt und der nächste Versuch kommt mit wachsendem Abstand
+ * (30 s, 1, 2, 4 … min, höchstens stündlich), damit ein bleibender Fehler
+ * (etwa beide Dateinamen schon vergeben) nicht alle 30 s ins Log läuft. Eine
+ * neue Änderung am Dokument versucht es wieder sofort entprellt. Ab dem
+ * zweiten Fehlversuch zeigt `/zustand` den Fehler (`health()`).
  */
 
 export const NOTE_TYPE = 'lesestapel';
@@ -60,6 +61,10 @@ const TEXT_LABEL = 'Volltext aus dem Lesestapel, das Cockpit schreibt bis zum En
 const LINKS = 'Verknüpft:';
 const BLOCK_LINE = /^\^(hl-[0-9a-z]+)[ \t]*$/;
 const WIKILINK = /\[\[([^[\]\n]+)\]\]/g;
+/** Längster Abstand zwischen zwei Versuchen nach Fehlern. */
+const MAX_BACKOFF_MS = 60 * 60 * 1000;
+/** Ab so vielen Fehlversuchen in Folge meldet `/zustand` einen Fehler; einer allein ist meist der Sync. */
+const FAILING_AFTER = 2;
 
 /** Block-ID einer Markierung: `hl-` und die ersten 8 Zeichen ihrer ID. */
 // Aus einem Hash: Markierungs-IDs kommen auch vom Client (`cid`) und müssen vorn nicht zufällig sein.
@@ -172,8 +177,7 @@ export function noteContent(doc, inner, { tz, read = false, readAt = null, fullT
  * `now` liefert die Zeit (für „gelesen“ ohne `read_at`), `delayMs` die Entprellung.
  */
 export function createReadingExport({ vaultPath, index, editor, policy, store, settings, now = () => new Date(), delayMs = 30_000, logger = console }) {
-  const pending = new Set();
-  const status = { lastRun: null, lastError: null, lastWrite: null };
+  const status = { lastRun: null, lastError: null, lastWrite: null, lastOkAt: null };
   let timer = null;
 
   /**
@@ -208,12 +212,12 @@ export function createReadingExport({ vaultPath, index, editor, policy, store, s
 
   /**
    * Eine Notiz anlegen oder ihren Bereich neu schreiben; `force` legt auch ohne
-   * Markierungen an, `link` ergänzt einen Wikilink. `read` (Standard: archiviert)
+   * Markierungen an, `link` ergänzt einen Wikilink, `unlink` nimmt einen heraus. `read` (Standard: archiviert)
    * trägt `lesestatus: gelesen` und `gelesen:` nach, `fullText` schreibt den
    * Bereich „text“ (fehlt er, kommt er vor „## Eigene Gedanken“) und
    * `ingest: offen`, wenn `ingest` fehlt und `markIngest` gilt; `gehoert:` folgt `heard_at`.
    */
-  function exportDoc(docId, { force = false, link = null, read = undefined, fullText = false, markIngest = true } = {}) {
+  function exportDoc(docId, { force = false, link = null, unlink = null, read = undefined, fullText = false, markIngest = true } = {}) {
     const doc = store.get(docId);
     if (!doc) return { state: 'weg' };
     const found = locate(doc.id);
@@ -230,6 +234,7 @@ export function createReadingExport({ vaultPath, index, editor, policy, store, s
       if (current && !current.broken && !current.edited) links = parseLinks(current.inner);
     }
     if (link) links.set(link.id, [...(links.get(link.id) ?? []), link.target]);
+    if (unlink) links.set(unlink.id, (links.get(unlink.id) ?? []).filter((t) => t !== unlink.target));
     const inner = renderHighlights(highlights, links);
     if (!found) return { ...create(doc, inner, { read: isRead, fullText, markIngest }), doc: doc.id };
 
@@ -255,44 +260,65 @@ export function createReadingExport({ vaultPath, index, editor, policy, store, s
     return { ...r, path: found.path, doc: doc.id };
   }
 
+  /** Abstand nach `attempts` Fehlversuchen: `delayMs`, dann jeweils doppelt, höchstens stündlich. */
+  const backoff = (attempts) => Math.min(MAX_BACKOFF_MS, delayMs * 2 ** Math.max(0, attempts - 1));
+
+  /** Zeitgeber auf den nächsten fälligen Versuch: frisch Vorgemerktes entprellt, Fehlgeschlagenes nach Backoff. */
   function schedule() {
     clearTimeout(timer);
-    timer = setTimeout(flush, delayMs);
+    timer = null;
+    const rows = store.listExportPending();
+    if (!rows.length) return;
+    // Abstände nach der Uhr des Rechners, nicht nach `now` (das ist nur das Datum für „gelesen“).
+    const t = Date.now();
+    const wait = Math.min(...rows.map((r) => (r.next_at ? Math.max(0, Date.parse(r.next_at) - t) : delayMs)));
+    timer = setTimeout(() => flush({ due: true }), Math.max(wait, Math.min(delayMs, 1000)));
     timer.unref?.();
   }
 
-  /** Alles Vorgemerkte jetzt schreiben; Fehlgeschlagenes bleibt vorgemerkt. */
-  function flush() {
+  /**
+   * Vorgemerktes jetzt schreiben; Fehlgeschlagenes bleibt vorgemerkt.
+   * `due: true` (Zeitgeber) lässt Dokumente aus, deren Backoff noch läuft.
+   */
+  function flush({ due = false } = {}) {
     clearTimeout(timer);
     timer = null;
     const results = [];
-    for (const id of [...pending]) {
-      pending.delete(id);
+    const t = Date.now();
+    for (const row of store.listExportPending()) {
+      if (due && row.next_at && Date.parse(row.next_at) > t) continue;
+      const id = row.doc_id;
       status.lastRun = now().toISOString();
       try {
         const r = exportDoc(id);
+        store.exportDone(id);
+        status.lastOkAt = status.lastRun;
         if (r.state === 'angelegt' || r.state === 'geschrieben') status.lastWrite = { at: status.lastRun, path: r.path };
         if (r.state === 'übersprungen') logger.warn?.(`Lesestapel → Vault: ${r.reason}`);
         results.push(r);
       } catch (err) {
-        pending.add(id);
+        const attempts = row.attempts + 1;
+        store.exportFailed(id, { error: err.message, nextAt: new Date(t + backoff(attempts)).toISOString() });
         status.lastError = { at: status.lastRun, message: err.message };
-        logger.warn?.(`Lesestapel → Vault: später noch einmal — ${err.message}`);
+        logger.warn?.(`Lesestapel → Vault: ${attempts === 1 ? 'später noch einmal' : `${attempts}. Fehlversuch, nächster in ${Math.round(backoff(attempts) / 60_000) || 1} min`} — ${err.message}`);
         results.push({ state: 'fehler', doc: id, error: err.message });
       }
     }
-    if (pending.size) schedule();
+    schedule();
     return results;
   }
+
+  // Nach einem Neustart: was vor dem Absturz vorgemerkt war, kommt jetzt dran.
+  schedule();
 
   return {
     /** Dokument hat sich geändert (Status, Fortschritt, Markierungen): entprellt exportieren. */
     changed(docId) {
       if (!docId) return;
-      pending.add(String(docId));
+      store.markExportPending(String(docId));
       schedule();
     },
-    flush,
+    flush: () => flush(),
 
     /**
      * Wikilink `[[target]]` zur Markierung in den Bereich „Markierungen“ ihrer
@@ -308,6 +334,19 @@ export function createReadingExport({ vaultPath, index, editor, policy, store, s
       const h = store.getHighlight(highlightId);
       if (!h) throw new Error('Diese Markierung gibt es nicht');
       return exportDoc(h.doc_id, { force: true, link: { id: blockId(h.id), target: t } });
+    },
+
+    /**
+     * Rückgängig zu `addLink` (VCP-85): den Wikilink `[[target]]` unter der
+     * Markierung wieder herausnehmen. Legt nie eine Notiz an; ohne Notiz oder
+     * ohne den Link ist der Zustand `aktuell`. Fehler des Editors wirft er.
+     */
+    removeLink({ highlightId, target }) {
+      const t = String(target ?? '').trim();
+      const h = store.getHighlight(highlightId);
+      if (!h) throw new Error('Diese Markierung gibt es nicht');
+      const r = exportDoc(h.doc_id, { unlink: { id: blockId(h.id), target: t } });
+      return r.state === 'wartet' ? { state: 'aktuell', doc: h.doc_id } : r;
     },
 
     /**
@@ -351,15 +390,42 @@ export function createReadingExport({ vaultPath, index, editor, policy, store, s
           editor.setFrontmatter({ path: found.path, set: { gehoert } });
           return { state: 'geschrieben', path: found.path, doc: id };
         } catch (err) {
-          pending.add(id);
+          store.markExportPending(id);
           schedule();
           logger.warn?.(`Lesestapel → Vault: „gehört“ später noch einmal — ${err.message}`);
           return { state: 'fehler', path: found.path, doc: id, error: err.message };
         }
       });
     },
-    pending: () => [...pending],
+    pending: () => store.listExportPending().map((r) => r.doc_id),
     status: () => ({ ...status }),
+
+    /** Dienst für `/zustand` (src/health/collect.js): Fehler erst ab dem zweiten Fehlversuch in Folge. */
+    health() {
+      const rows = store.listExportPending();
+      const failing = rows.filter((r) => r.attempts >= FAILING_AFTER);
+      const last = [...failing].sort((a, b) => a.updated_at.localeCompare(b.updated_at)).at(-1);
+      const name = (id) => store.get(id)?.title || id;
+      const state = failing.length ? 'error' : status.lastOkAt ? 'ok' : 'unknown';
+      return {
+        id: 'reading-export',
+        name: 'Lesestapel → Vault',
+        state,
+        summary: failing.length
+          ? `${failing.length === 1 ? `„${name(failing[0].doc_id)}“ kommt` : `${failing.length} Texte kommen`} nicht in den Vault`
+          : status.lastOkAt
+            ? 'schreibt Lesestapel-Notizen'
+            : 'wartet auf die erste Änderung',
+        lastOkAt: status.lastOkAt,
+        lastErrorAt: last?.updated_at ?? null,
+        lastError: last ? `${name(last.doc_id)}: ${last.last_error}` : null,
+        facts: [
+          ...(rows.length ? [{ label: 'Vorgemerkt', value: String(rows.length) }] : []),
+          ...(last?.next_at ? [{ label: 'Nächster Versuch', at: last.next_at }] : []),
+          ...(status.lastWrite ? [{ label: 'Zuletzt geschrieben', value: status.lastWrite.path }] : []),
+        ],
+      };
+    },
     stop() {
       clearTimeout(timer);
       timer = null;

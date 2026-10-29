@@ -337,6 +337,7 @@ const health = createHealth({
   calendars,
   flameNote,
   feeds: () => feedPoller.health(),
+  readingExport: () => readingExport.health(),
   // Letzter Erfolg und Fehler je Dienst überstehen einen Neustart (VCP-60).
   file: join(dirname(COCKPIT_SETTINGS_FILE), 'dienste-zustand.json'),
 });

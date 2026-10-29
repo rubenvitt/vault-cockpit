@@ -4,6 +4,8 @@ import { esc } from '../web/layout.js';
 import { readingPage } from './pages.js';
 import { docLink } from './doc.js';
 import { highlightJson, jsonReply } from './json.js';
+import { REVIEW_STATES } from './store.js';
+import { MAX_BOX } from './review.js';
 
 /**
  * Markierungen (VCP-71): die Liste „Markiert“ und die Aktionen, mit denen die
@@ -13,9 +15,10 @@ import { highlightJson, jsonReply } from './json.js';
  *
  * Formularfelder:
  * - `/aktion/lesen/markierung/neu`: `id` (Dokument), `quote`, `prefix`, `suffix`, `start`, `notiz`?,
- *   `cid`? (ID der Markierung vom Gerät; dieselbe `cid` legt nie eine zweite an, VCP-80)
+ *   `cid`? (ID der Markierung vom Gerät; dieselbe `cid` legt nie eine zweite an, VCP-80),
+ *   `box`?, `faellig`?, `zustand`? (Stand im Wiedersehen, für das Rückgängig nach dem Entfernen, VCP-85)
  * - `/aktion/lesen/markierung/notiz`: `id` (Markierung), `notiz` (leer löscht sie)
- * - `/aktion/lesen/markierung/loeschen`: `id` (Markierung); Rückgängig legt sie neu an
+ * - `/aktion/lesen/markierung/loeschen`: `id` (Markierung); Rückgängig legt sie mit ID, Anker und Wiedersehen-Stand neu an
  * - `/aktion/lesen/markierung/inbox`: `markierung` (vorhandene) oder `id` (Dokument) mit `quote`, dazu `notiz`?, `cid`
  *
  * `/api/lesen/markiert?quelle=&thema=` liefert die Liste mit den Filtern als JSON.
@@ -33,6 +36,34 @@ function field(form, name, max, label) {
 }
 const noteOf = (form) => field(form, 'notiz', MAX_NOTE, 'Die Notiz').trim() || null;
 const href = (u) => (/^https?:\/\//i.test(u ?? '') ? u : null);
+
+/**
+ * Wiedersehen-Stand aus dem Formular (`box`, `faellig`, `zustand`) als Patch
+ * oder null, wenn keiner mitkam. Halbe oder ungültige Angaben lehnt es ab.
+ */
+export function reviewFields(form) {
+  const raw = ['box', 'faellig', 'zustand'].map((k) => form.get(k));
+  if (raw.every((v) => v == null)) return null;
+  const [box, due, state] = [Number(raw[0]), raw[1] || null, raw[2]];
+  if (raw[0] == null || raw[0] === '' || !Number.isInteger(box) || box < 0 || box > MAX_BOX || (due && Number.isNaN(Date.parse(due))) || !REVIEW_STATES.includes(state)) {
+    throw new ActionError('Ungültiger Stand im Wiedersehen');
+  }
+  return { review_box: box, review_due: due, review_state: state };
+}
+
+/**
+ * Titel der Inbox-Notiz (VCP-85): `prefix` und der Titel des Textes, sonst
+ * Quelle oder Host. Ohne Zeichen, die in Dateinamen, Wikilinks oder dem
+ * Frontmatter stören (`:` `#` `[` `]` `|` `^` …); kürzt der Capture-Router.
+ */
+export function noteTitle(prefix, doc) {
+  const host = URL.canParse(doc?.url ?? '') ? new URL(doc.url).hostname : '';
+  const source = String(doc?.title || doc?.site || host || 'einem Text')
+    .replace(/[[\]#^|:*?"<>\\/]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return `${prefix} ${source || 'einem Text'}`;
+}
 
 /** Notiz für die Vault-Inbox: Zitat als Blockzitat (beginnt also nie mit `!`), Notiz, Quelle. */
 export function inboxText({ quote, note, doc }) {
@@ -116,7 +147,8 @@ export function highlightRoutes({ store, asAction, capture = null, onChange = ()
           return { message: 'Schon markiert', highlight: { id: known.id }, duplicate: true };
         }
         const start = Number.parseInt(form.get('start') ?? '', 10);
-        const h = await asAction(() =>
+        const review = reviewFields(form);
+        const added = await asAction(() =>
           store.addHighlight({
             id: cid ?? undefined,
             doc_id: doc.id,
@@ -127,6 +159,7 @@ export function highlightRoutes({ store, asAction, capture = null, onChange = ()
             note: noteOf(form),
           }),
         );
+        const h = review ? store.updateHighlight(added.id, review) : added;
         onChange(doc.id);
         return { message: h.note ? 'Markiert, mit Notiz' : 'Markiert', highlight: { id: h.id }, undo: { action: '/aktion/lesen/markierung/loeschen', fields: { id: h.id } } };
       },
@@ -144,7 +177,8 @@ export function highlightRoutes({ store, asAction, capture = null, onChange = ()
         store.deleteHighlight(h.id);
         onChange(h.doc_id);
         // `cid` = alte ID: Block-ID `^hl-…` und Links darauf bleiben nach dem Rückgängig gültig.
-        const fields = { id: h.doc_id, cid: h.id, quote: h.quote, prefix: h.prefix, suffix: h.suffix, start: h.start_hint ?? '', notiz: h.note ?? '' };
+        // Dazu der Stand im Wiedersehen, sonst begänne die Markierung dort wieder bei Box 1.
+        const fields = { id: h.doc_id, cid: h.id, quote: h.quote, prefix: h.prefix, suffix: h.suffix, start: h.start_hint ?? '', notiz: h.note ?? '', box: h.review_box, faellig: h.review_due ?? '', zustand: h.review_state };
         return { message: 'Markierung entfernt', undo: { action: '/aktion/lesen/markierung/neu', fields } };
       },
 
@@ -155,7 +189,7 @@ export function highlightRoutes({ store, asAction, capture = null, onChange = ()
         const quote = h?.quote ?? field(form, 'quote', MAX_QUOTE, 'Die Auswahl');
         if (!quote.trim()) throw new ActionError('Nichts ausgewählt');
         const captureId = form.get('cid') || (h ? `lesen-${h.id}` : null);
-        const result = await capture({ text: inboxText({ quote, note: h?.note ?? noteOf(form), doc }), captureId });
+        const result = await capture({ text: inboxText({ quote, note: h?.note ?? noteOf(form), doc }), title: noteTitle('Zitat aus', doc), captureId });
         if (!result.duplicate) logger.info?.(`Lesestapel: Zitat aus ${doc.url} in die Inbox (${session.sub})`);
         return { message: `${result.duplicate ? 'Schon in der Inbox' : 'In der Inbox'}: ${result.path}`, result };
       },
