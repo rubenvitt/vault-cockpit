@@ -1,6 +1,6 @@
 import { realpathSync, lstatSync, openSync, fstatSync, closeSync, constants } from 'node:fs';
 import { join, posix } from 'node:path';
-import { IMAGE_TYPES, extOf } from '../vault/images.js';
+import { isImagePath, imageTypeOf } from '../vault/images.js';
 
 /**
  * Verweise einer Notiz für die Vorschau im Cockpit: Wikilinks auf Notizen
@@ -68,7 +68,7 @@ export function createAttachments({ vaultPath, policy, index }) {
      */
     find(name, from = '') {
       const raw = String(name ?? '').trim().replace(/^\/+/, '');
-      if (!IMAGE_TYPES[extOf(raw)]) return null;
+      if (!isImagePath(raw)) return null;
       const direct = [cleanPath(raw), cleanPath(posix.normalize(posix.join(from, raw)))].filter(Boolean);
       for (const p of direct) if (allowed(p) && index.hasImage(p)) return p;
       return nearest(index.imagesNamed(raw.split('/').pop()).filter(allowed), from);
@@ -82,7 +82,7 @@ export function createAttachments({ vaultPath, policy, index }) {
      */
     open(path) {
       const rel = cleanPath(path);
-      const type = rel && IMAGE_TYPES[extOf(rel)];
+      const type = rel && imageTypeOf(rel);
       if (!type || !allowed(rel)) return null;
       const absolute = join(vaultReal, rel);
       let fd = null;
@@ -180,7 +180,7 @@ export function createLinkResolver({ index, visible, attachments = null, read = 
     wikilink(target) {
       const t = String(target ?? '').trim();
       if (!t) return { kind: 'note', path: notePath, title: null, self: own(notePath) };
-      if (IMAGE_TYPES[extOf(t)]) return asImage(t);
+      if (isImagePath(t)) return asImage(t);
       if (OTHER_FILES.test(t)) return { kind: 'file' };
       const path = index.resolveLink(t);
       const row = path ? visible(path) : null;
