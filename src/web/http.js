@@ -94,7 +94,8 @@ const PUBLIC = new Map([
   ...['apple-touch-icon', 'icon-192', 'icon-512', 'icon-maskable-512'].map((n) => [`/static/icons/${n}.png`, { type: 'image/png', body: staticFile(`icons/${n}.png`) }]),
 ]);
 
-const MAX_FORM = 64 * 1024;
+// Entwürfe dürfen 20.000 Zeichen haben; URL-kodiert sind das bis zu 9 Byte je Zeichen (VCP-57).
+const MAX_FORM = 256 * 1024;
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
