@@ -54,6 +54,14 @@ export function createVaultWatcher({
     quietTimer.unref?.();
   }
 
+  const isDirectory = (rel) => {
+    try {
+      return statSync(join(vaultPath, rel)).isDirectory();
+    } catch {
+      return false;
+    }
+  };
+
   function onEvent(_type, filename) {
     if (filename == null) {
       full = true;
@@ -61,7 +69,8 @@ export function createVaultWatcher({
     }
     const rel = toPosix(String(filename));
     if (rel.split('/').some((part) => part.startsWith('.'))) return;
-    if (rel.toLowerCase().endsWith('.md') || isImagePath(rel)) {
+    // Ein Ordner, der wie eine Notiz oder ein Bild heißt (`skizzen.png/`), gilt als Ordner.
+    if ((rel.toLowerCase().endsWith('.md') || isImagePath(rel)) && !isDirectory(rel)) {
       paths.add(rel);
       return schedule();
     }
