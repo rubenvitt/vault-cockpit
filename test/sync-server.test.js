@@ -348,3 +348,17 @@ test('eine Datei über der Grenze auf der Platte wird weder überschrieben noch 
   rmSync(v, { recursive: true, force: true });
   rmSync(d, { recursive: true, force: true });
 });
+
+test('ein Symlink auf einen versteckten Ordner im Vault liefert nichts aus', async () => {
+  mkdirSync(join(vault, '.privat'), { recursive: true });
+  writeFileSync(join(vault, '.privat/geheim.txt'), 'geheim\n');
+  symlinkSync(join(vault, '.privat'), join(vault, 'alias'));
+  const a = client(mac);
+  const got = await a.get('alias/geheim.txt');
+  assert.equal(got.status, 400);
+  assert.equal(got.text, null);
+  assert.equal((await a.put('alias/neu.txt', 'x', null)).status, 400);
+  assert.ok(!existsSync(join(vault, '.privat/neu.txt')));
+  unlinkSync(join(vault, 'alias'));
+  rmSync(join(vault, '.privat'), { recursive: true, force: true });
+});
