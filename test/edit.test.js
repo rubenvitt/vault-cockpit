@@ -205,6 +205,27 @@ test('move: mit name wird umbenannt, .md ergänzt und ungültige Namen abgelehnt
   assert.match(read('projects/Alpha.md'), /Erster Absatz/);
 });
 
+test('move ohne harte Links: kopiert exklusiv und überschreibt kein neues Ziel', (t) => {
+  t.mock.method(fs, 'linkSync', () => { throw Object.assign(new Error('nicht unterstützt'), { code: 'EPERM' }); });
+  syncBuiltinESMExports();
+  try {
+    assert.equal(editor.move({ path: 'projects/Alpha.md', folder: 'archiv' }).path, 'archiv/Alpha.md');
+    assert.match(read('archiv/Alpha.md'), /Erster Absatz/);
+    assert.equal(fs.existsSync(join(root, 'projects/Alpha.md')), false);
+    // Ein Ziel, das erst nach der Prüfung entsteht (die Prüfung sieht es nicht), bleibt unangetastet.
+    writeFileSync(join(root, 'projects/Alpha.md'), 'gleichzeitig angelegt\n');
+    const original = fs.existsSync;
+    t.mock.method(fs, 'existsSync', (p) => (String(p).endsWith('projects/Alpha.md') ? false : original(p)));
+    syncBuiltinESMExports();
+    assert.throws(() => editor.move({ path: 'archiv/Alpha.md', folder: 'projects' }), /schon eine Notiz/);
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  }
+  assert.equal(read('projects/Alpha.md'), 'gleichzeitig angelegt\n');
+  assert.match(read('archiv/Alpha.md'), /Erster Absatz/);
+});
+
 test('move: bricht ab, wenn der Sync die Notiz zwischendurch ändert', (t) => {
   // existsSync läuft zwischen dem ersten Lesen und dem Verschieben; dort schreibt hier „der Sync“.
   const original = fs.existsSync;

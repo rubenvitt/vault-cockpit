@@ -53,7 +53,8 @@ export function moveNote({ index, editor, policy = DEFAULT_POLICY }, { path, fol
   const unique = index.basenameCount?.(stem) === 1;
   if (visible.length) {
     result.links_to_update = visible.map((l) => ({
-      path: l.source,
+      // Ein Selbstlink der verschobenen Notiz steht jetzt am neuen Ort.
+      path: l.source === r.from ? r.path : l.source,
       title: l.title,
       old_target: l.raw,
       new_target: !l.byPath && unique ? stem : l.target.endsWith('.md') ? r.path : stripMd(r.path),
@@ -64,9 +65,7 @@ export function moveNote({ index, editor, policy = DEFAULT_POLICY }, { path, fol
     const updated = [];
     for (const l of result.links_to_update) {
       try {
-        // Ein Selbstlink der verschobenen Notiz steht jetzt am neuen Ort.
-        const source = l.path === result.old_path ? result.new_path : l.path;
-        const r = editor.relink({ path: source, from: l.old_target, to: l.new_target });
+        const r = editor.relink({ path: l.path, from: l.old_target, to: l.new_target });
         if (r.count) updated.push({ ...l, count: r.count });
         else left.push({ ...l, error: 'Der Link steht nicht in der erwarteten Schreibweise in der Notiz' });
       } catch (err) {

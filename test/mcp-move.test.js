@@ -182,6 +182,8 @@ test('update_links: ein Selbstlink per Pfad wird am neuen Ort umgeschrieben', ()
   index.applyChanges(['inbox/Idee.md']);
   const r = move({ path: 'inbox/Idee.md', folder: 'projects', update_links: true });
   assert.equal(r.links_to_update, undefined);
+  assert.ok(r.links_updated.some((l) => l.path === 'projects/Idee.md'));
+  assert.ok(!r.links_updated.some((l) => l.path === 'inbox/Idee.md'));
   assert.equal(readFileSync(join(root, 'projects/Idee.md'), 'utf8'), '# Idee\n\n[[projects/Idee#Oben]]\n');
 });
 
