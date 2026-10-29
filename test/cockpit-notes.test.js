@@ -111,6 +111,26 @@ test('move: ablegen, aber nie in vertrauliche oder ausgeschlossene Ordner', () =
   assert.equal(desk.get('40-archiv/Idee.md').inInbox, false);
 });
 
+test('move: nennt vorher betroffene Links, passt sie beim Ablegen an und kann umbenennen (VCP-58)', () => {
+  put('10-projekte/Hund/Plan.md', '# Plan\n\n[[00-inbox/Idee]] und [[Idee]]\n');
+  put('20-bereiche/Gesundheit/Werte.md', '# Werte\n\n[[00-inbox/Idee]]\n');
+  idx.refresh('10-projekte/Hund/Plan.md');
+  idx.refresh('20-bereiche/Gesundheit/Werte.md');
+  idx.relinkAll();
+  const impact = desk.get('00-inbox/Idee.md').impact;
+  assert.deepEqual(impact.byPath, [{ path: '10-projekte/Hund/Plan.md', title: 'Plan', target: '00-inbox/Idee' }]);
+  assert.deepEqual(impact.byName, [{ path: '10-projekte/Hund/Plan.md', title: 'Plan', target: 'Idee' }]);
+  assert.equal(impact.hiddenByPath, 1);
+
+  const r = desk.move('00-inbox/Idee.md', '40-archiv', 'Preise');
+  assert.equal(r.path, '40-archiv/Preise.md');
+  assert.deepEqual(r.updated.map((u) => [u.path, u.old_target, u.new_target]), [['10-projekte/Hund/Plan.md', '00-inbox/Idee', '40-archiv/Preise'], ['10-projekte/Hund/Plan.md', 'Idee', 'Preise']]);
+  assert.equal(r.hidden, 1);
+  assert.equal(read('10-projekte/Hund/Plan.md'), '# Plan\n\n[[40-archiv/Preise]] und [[Preise]]\n');
+  assert.equal(read('20-bereiche/Gesundheit/Werte.md'), '# Werte\n\n[[00-inbox/Idee]]\n');
+  assert.throws(() => desk.move('40-archiv/Preise.md', '40-archiv', 'A#B'), (e) => e.status === 400);
+});
+
 test('setTags, append, toggle schreiben in die Notiz', () => {
   assert.deepEqual(desk.setTags('00-inbox/Idee.md', '#hund, training  hund').tags, ['hund', 'training']);
   assert.match(read('00-inbox/Idee.md'), /tags:\n {2}- hund\n {2}- training/);

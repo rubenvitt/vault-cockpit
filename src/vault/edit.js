@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, realpathSync, renameSync, mkdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, realpathSync, renameSync, mkdirSync, existsSync, linkSync, unlinkSync, statSync } from 'node:fs';
 import { join, sep, dirname } from 'node:path';
 import { KEY_ALIASES } from './markdown.js';
 
@@ -93,7 +93,8 @@ export function createEditor({ vaultPath, index }) {
       const to = `${target}/${name}`;
       if (to === relPath) return { path: relPath, from: relPath, changed: false };
       const destination = join(vaultPath, to);
-      if (existsSync(destination)) throw new Error(`In „${target}“ gibt es schon eine Notiz „${name}“`);
+      const taken = () => new Error(`In „${target}“ gibt es schon eine Notiz „${name}“`);
+      if (existsSync(destination) && !sameFile(absolute, destination)) throw taken();
       // Auch der Zielordner darf nicht per Symlink aus dem Vault herausführen:
       // den tiefsten vorhandenen Ordner prüfen, bevor etwas angelegt wird.
       let existing = dirname(destination);
@@ -105,7 +106,19 @@ export function createEditor({ vaultPath, index }) {
         throw new Error(`"${relPath}" wurde gerade anderweitig geändert. Bitte neu lesen und erneut versuchen.`);
       }
       mkdirSync(dirname(destination), { recursive: true });
-      renameSync(absolute, destination);
+      // Atomar ohne Überschreiben (VCP-59): Ein harter Link scheitert, wenn das Ziel
+      // inzwischen existiert; erst danach verschwindet der alte Name.
+      try {
+        linkSync(absolute, destination);
+        unlinkSync(absolute);
+      } catch (err) {
+        if (err.code === 'EEXIST' && !sameFile(absolute, destination)) throw taken();
+        // Nur die Schreibweise geändert (Dateisystem ohne Groß/klein) oder keine harten
+        // Links (manche Freigaben): umbenennen, die Prüfung oben hat das Ziel gesehen.
+        if (err.code !== 'EEXIST' && !['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'EMLINK', 'ENOSYS'].includes(err.code)) throw err;
+        if (existsSync(destination) && !sameFile(absolute, destination)) throw taken();
+        renameSync(absolute, destination);
+      }
       reindex([relPath, to]);
       return { path: to, from: relPath, changed: true };
     },
@@ -119,8 +132,8 @@ export function createEditor({ vaultPath, index }) {
       if (!target || target.split('/').some((p) => !p.trim() || p === '.' || p === '..' || p.startsWith('.')) || CTRL_OR_NEWLINE.test(target) || target.includes('\\')) {
         throw new Error(`„${folder}“ ist kein gültiger Ordner`);
       }
-      const file = String(name ?? '');
-      if (!/\.md$/i.test(file) || /[\\/]/.test(file) || file.startsWith('.') || CTRL_OR_NEWLINE.test(file)) throw new Error(`„${name}“ ist kein gültiger Dateiname`);
+      // Dieselbe Prüfung wie beim Umbenennen (VCP-59); `.md` wird ergänzt.
+      const file = noteFileName(name);
       const to = `${target}/${file}`;
       const destination = join(vaultPath, to);
       let existing = dirname(destination);
@@ -136,6 +149,40 @@ export function createEditor({ vaultPath, index }) {
       }
       reindex([to]);
       return { path: to, changed: true };
+    },
+
+    /**
+     * Schreibt Wikilinks und Einbettungen auf `from` (der Linktext vor `|` oder
+     * `#`, genau so geschrieben) auf `to` um, außerhalb von Codeblöcken.
+     * Für das Verschieben mit `update_links` (VCP-58); wie alle Änderungen nur
+     * in eigenen, nicht vertraulichen Notizen und mit Abbruch, wenn der Sync
+     * gleichzeitig schreibt. Liefert zusätzlich `count`.
+     */
+    relink({ path, from, to }) {
+      const old = String(from ?? '');
+      const next = String(to ?? '');
+      if (!old || !next || /[\]|#^\n]/.test(next)) throw new Error(`„${to}“ ist kein gültiges Linkziel`);
+      const pattern = new RegExp(`(!?\\[\\[)${old.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=[|#\\]])`, 'g');
+      return modify(path, (content) => {
+        const eol = content.includes('\r\n') ? '\r\n' : '\n';
+        const lines = content.split(/\r?\n/);
+        let fence = null;
+        let count = 0;
+        for (let i = 0; i < lines.length; i += 1) {
+          const f = lines[i].match(FENCE);
+          if (f) {
+            if (fence === null) fence = f[1];
+            else if (fence === f[1]) fence = null;
+            continue;
+          }
+          if (fence) continue;
+          lines[i] = lines[i].replace(pattern, (_, open) => {
+            count += 1;
+            return `${open}${next}`;
+          });
+        }
+        return { content: lines.join(eol), count };
+      });
     },
 
     /**
@@ -299,6 +346,16 @@ export function createEditor({ vaultPath, index }) {
       });
     },
   };
+}
+
+/** Zeigen beide Pfade auf dieselbe Datei (nur andere Schreibweise auf einem Dateisystem ohne Groß/klein)? */
+function sameFile(a, b) {
+  try {
+    const [x, y] = [statSync(a), statSync(b)];
+    return x.ino === y.ino && x.dev === y.dev;
+  } catch {
+    return false;
+  }
 }
 
 // Was Obsidian im Dateinamen nicht zulässt oder was Wikilinks bricht.

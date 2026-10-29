@@ -240,7 +240,7 @@ test('create: legt eine neue Notiz an, überschreibt nie und bleibt im Vault', (
   for (const bad of ['', '../raus', '.obsidian']) {
     assert.throws(() => editor.create({ folder: bad, name: 'x.md', content: '' }), /kein gültiger Ordner/);
   }
-  for (const bad of ['x.txt', 'a/b.md', '.x.md', '']) {
+  for (const bad of ['a/b.md', '.x.md', '', 'A#B.md', 'Leer .md']) {
     assert.throws(() => editor.create({ folder: 'projects', name: bad, content: '' }), /kein gültiger Dateiname/);
   }
   symlinkSync(outside, join(root, 'raus'));

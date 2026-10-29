@@ -25,7 +25,7 @@ Alle Lesewerkzeuge verlangen den Scope `vault:read`.
 | `vault_edit` | Exakte Textstelle in einer Notiz ersetzen oder löschen (Scope `vault:edit`) |
 | `vault_append` | Text am Notizende oder unter einer Überschrift anhängen (Scope `vault:edit`) |
 | `vault_set_frontmatter` | Einzelne Frontmatter-Felder setzen oder entfernen (Scope `vault:edit`) |
-| `vault_move` | Notiz in einen Ordner verschieben, optional umbenennen, etwa zum Leeren der Inbox; nie in oder aus vertraulichen Ordnern, nennt Links, die danach ins Leere zeigen (Scope `vault:edit`) |
+| `vault_move` | Notiz in einen Ordner verschieben, optional umbenennen, etwa zum Leeren der Inbox; nie in oder aus vertraulichen Ordnern; Links, die danach ins Leere zeigen, nennt es oder schreibt sie mit `update_links` gleich um (Scope `vault:edit`) |
 
 ## Betrieb
 
@@ -390,7 +390,11 @@ oben eine Leiste mit Timer und „Stopp“. Notizen der Vault-Inbox öffnen sich
 **Vorschau** im Cockpit (`/notiz?pfad=…`, Obsidian-Link daneben): Checkboxen
 abhaken, Tags setzen, Text anhängen und in einen Ordner **ablegen** (Vorschläge
 aus dem Index, Eingabe frei) oder mit einem Klick ins Archiv (der oberste Ordner
-namens `archiv`, auch `40-archiv`). Vertrauliche und ausgeschlossene Ordner der
+namens `archiv`, auch `40-archiv`), auf Wunsch unter neuem Namen. Vorher nennt
+die Seite, welche Notizen per Pfad (und, nur beim Umbenennen betroffen, per
+Name) hierher verlinken; das Ablegen schreibt diese Links gleich um.
+Vertrauliche Notizen fasst es nie an, sie stehen nur als Anzahl da.
+Vertrauliche und ausgeschlossene Ordner der
 Policy zeigt das Cockpit weder an noch nimmt es sie als Ziel. Die Vorschau
 taugt auch zum Lesen im ganzen Vault: Wikilinks (über Pfad, Dateiname oder
 Alias aus `aliases`, auch `[[Notiz#Überschrift]]`) führen zur nächsten
