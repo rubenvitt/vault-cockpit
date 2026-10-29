@@ -188,10 +188,14 @@ export function burnedInWeek(tasks, blocks, week) {
   const burned = [];
   const weekBlocks = new Map();
   for (const t of tasks) {
-    const all = blocks.get(t.id) ?? (t.flame_started_at && t.flame_ended_at ? [{ start: t.flame_started_at, end: t.flame_ended_at }] : []);
+    // Ein leerer Verlauf (etwa abgeschnitten) zählt wie keiner: dann der letzte Block.
+    const history = blocks.get(t.id);
+    const all = history?.length ? history : t.flame_started_at && t.flame_ended_at ? [{ start: t.flame_started_at, end: t.flame_ended_at }] : [];
     const mine = all.filter((b) => inWeek(b.start));
-    if (!mine.length && !(t.flame_running && inWeek(t.flame_started_at))) continue;
-    burned.push(t);
+    const running = Boolean(t.flame_running) && inWeek(t.flame_started_at);
+    if (!mine.length && !running) continue;
+    // Brennt sie erst in einer späteren Woche, zählt hier nur, was in dieser lag.
+    burned.push(t.flame_running && !running ? { ...t, flame_running: false } : t);
     weekBlocks.set(t.id, mine);
   }
   return { burned, blocks: weekBlocks };

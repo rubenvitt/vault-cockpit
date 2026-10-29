@@ -9,7 +9,7 @@ import { createEditor } from '../src/vault/edit.js';
 import { createSettingsStore } from '../src/cockpit/settings.js';
 import { createCockpitActions } from '../src/cockpit/actions.js';
 import { createStateStore } from '../src/capture/state.js';
-import { createFlameNote, flameRows, renderFlameTable, planFlameUpdate, flameBlock, flameBlocks, flameMinutes, burnedSince } from '../src/cockpit/flammen-notiz.js';
+import { createFlameNote, flameRows, renderFlameTable, planFlameUpdate, flameBlock, flameBlocks, flameMinutes, burnedSince, burnedInWeek } from '../src/cockpit/flammen-notiz.js';
 import { describeWeek } from '../src/cockpit/week.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
@@ -254,6 +254,17 @@ test('Lauf: Blöcke an Aufgaben ohne Flammen-Markierung stehen als „ungeplant�
   writeFileSync(join(root, FEUER), feuerNote());
   await make().update('2026-W42');
   assert.match(read(FEUER), /\[Steuererklärung\][^\n]*\| ungeplant \| 45 \|/);
+});
+
+test('Ungeplant: leerer Verlauf zählt wie keiner, eine Flamme einer späteren Woche brennt hier nicht (VCP-117)', () => {
+  const week = describeWeek({ year: 2026, week: 42 }, tz);
+  const done = { id: 'e1', title: 'Leer', status: 'open', flame_started_at: '2026-10-13T08:00:00Z', flame_ended_at: '2026-10-13T08:20:00Z' };
+  const later = { id: 'l1', title: 'Später', status: 'in_progress', flame_running: true, flame_started_at: '2026-10-20T08:00:00Z' };
+  const blocks = new Map([['e1', []], ['l1', [{ start: '2026-10-14T08:00:00Z', end: '2026-10-14T09:00:00Z' }]]]);
+  const out = burnedInWeek([done, later], blocks, week);
+  assert.deepEqual(out.burned.map((t) => [t.id, Boolean(t.flame_running)]), [['e1', false], ['l1', false]]);
+  const rows = flameRows([], { tz, blocks: out.blocks, burned: out.burned });
+  assert.deepEqual(rows.map((r) => [r.day, r.measured, r.status]), [['Di 13.10.', '20', 'offen'], ['Mi 14.10.', '60', 'in Arbeit']]);
 });
 
 test('Suche nach ungeplant gebrannten Aufgaben: seitenweise, bis zum Wochenbeginn, mit Obergrenze (VCP-117)', async () => {
