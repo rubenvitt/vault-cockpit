@@ -132,7 +132,10 @@ function incomingLinks(index, path) {
       // Je Schreibweise einmal: `[[ inbox/Idee ]]` braucht ein eigenes Umschreiben.
       const raw = link.raw ?? target;
       const byPath = (target.endsWith('.md') ? target : `${target}.md`) === path;
-      const byName = !byPath && stripMd(target).toLowerCase() === stripMd(path.split('/').pop()).toLowerCase();
+      // Per Name nur, wenn der Link wirklich hierher auflöst: Gibt es `Idee.md` zweimal,
+      // gehört `[[Idee]]` womöglich der anderen und darf nicht umgeschrieben werden.
+      const byName = !byPath && stripMd(target).toLowerCase() === stripMd(path.split('/').pop()).toLowerCase()
+        && (!index.resolveLink || index.resolveLink(target) === path);
       if ((!byPath && !byName) || seen.has(raw)) continue;
       seen.add(raw);
       found.push({ source, title, raw, target, byPath, sensitive: Boolean(row.sensitivity) });

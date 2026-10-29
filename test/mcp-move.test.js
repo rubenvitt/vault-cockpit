@@ -134,6 +134,14 @@ test('update_links: jede Schreibweise und Blockverweise werden umgeschrieben', (
   assert.equal(readFileSync(join(root, 'projects/Delta.md'), 'utf8'), '# Delta\n\n[[projects/Alpha/Idee]] und [[projects/Alpha/Idee]] und [[projects/Alpha/Idee^b1]]\n');
 });
 
+test('update_links: ein gleichnamiger Link, der auf eine andere Notiz zeigt, bleibt', () => {
+  put('Idee.md', '# Andere Idee\n');
+  put('projects/Zeta.md', '# Zeta\n\n[[Idee]] und [[inbox/Idee]]\n');
+  index.applyChanges(['Idee.md', 'projects/Zeta.md']);
+  move({ path: 'inbox/Idee.md', folder: 'projects', name: 'Neu', update_links: true });
+  assert.equal(readFileSync(join(root, 'projects/Zeta.md'), 'utf8'), '# Zeta\n\n[[Idee]] und [[projects/Neu]]\n');
+});
+
 test('update_links: Codeblöcke enden nur am passenden Zaun', () => {
   put('projects/Epsilon.md', '# E\n\n````\n```\n[[inbox/Idee]]\n```\n````\n~~~\n```js\n[[inbox/Idee]]\n~~~\n[[inbox/Idee]]\n');
   index.applyChanges(['projects/Epsilon.md']);
