@@ -140,7 +140,9 @@ export function highlightRoutes({ store, asAction, capture = null, onChange = ()
       },
 
       async '/aktion/lesen/markierung/loeschen'(form) {
-        const h = highlightOf(form.get('id'));
+        // Schon weg: kein Fehler, damit ein nachgesendetes Entfernen (VCP-87) nicht im Puffer hängen bleibt.
+        const h = store.getHighlight(form.get('id') ?? '');
+        if (!h) return { message: 'Markierung war schon entfernt' };
         store.deleteHighlight(h.id);
         onChange(h.doc_id);
         // `cid` = alte ID: Block-ID `^hl-…` und Links darauf bleiben nach dem Rückgängig gültig.
