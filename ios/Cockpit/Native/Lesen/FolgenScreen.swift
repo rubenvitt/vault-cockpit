@@ -32,6 +32,8 @@ struct FolgenList: View {
     @State private var showsHeard = false
     /// Folge, deren Texte gerade für den Ingest gewählt werden.
     @State private var choosingIngest: Episode?
+    /// Frischer Einmal-Link, das Teilen-Blatt zeigt ihn.
+    @State private var sharedLink: EpisodeShareLink?
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -80,6 +82,10 @@ struct FolgenList: View {
         }
         .sheet(item: $downloads.shared) { file in
             FolgenShareSheet(url: file.url)
+                .presentationDetents([.medium, .large])
+        }
+        .sheet(item: $sharedLink) { link in
+            FolgenShareSheet(url: link.url)
                 .presentationDetents([.medium, .large])
         }
         .onAppear {
@@ -238,6 +244,7 @@ struct FolgenList: View {
                     model.open(path: CockpitFormat.notePath(path))
                 },
                 speak: { speak(episode) },
+                share: episode.kind == "vorlesen" ? nil : { shareLink(episode) },
                 ingest: { ingest(episode) },
                 openIngest: openIngest,
                 delete: { confirmDelete(episode) }
@@ -291,6 +298,16 @@ struct FolgenList: View {
     private func speak(_ episode: Episode) {
         toasts.signal(.selection)
         Task { await store.speak(episode) }
+    }
+
+    /// Einmal-Link erzeugen und gleich ins Teilen-Blatt (dort auch „Kopieren“).
+    private func shareLink(_ episode: Episode) {
+        toasts.signal(.selection)
+        Task {
+            guard let link = await store.shareLink(episode) else { return }
+            toasts.show("Einmal-Link, \(link.minutes ?? 15) Minuten gültig und nur einmal abrufbar.")
+            sharedLink = link
+        }
     }
 
     private func ingest(_ episode: Episode) {

@@ -93,12 +93,15 @@ struct FolgenDoneCard: View {
 }
 
 /// Erst nur das Transkript (`.folge.is-transcript`): „Transkript lesen“ (die Notiz im Vault),
-/// „Audio erzeugen“ mit dem, was es bei ElevenLabs kostet, und „Löschen“.
+/// „Audio erzeugen“ mit dem, was es bei ElevenLabs kostet, „Einmal-Link“ (das Gesprochene als
+/// Markdown, kurz gültig) und „Löschen“.
 struct FolgenTranscriptCard: View {
     let episode: Episode
     let isBusy: Bool
     let openNote: (String) -> Void
     let speak: () -> Void
+    /// „Einmal-Link“; nil bei Vorlesen (dort gibt es kein Skript zum Teilen).
+    var share: (() -> Void)?
     let ingest: () -> Void
     let openIngest: () -> Void
     let delete: () -> Void
@@ -141,6 +144,13 @@ struct FolgenTranscriptCard: View {
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accent)
                 .accessibilityHint(episode.speak?.hint ?? "")
+                if let share {
+                    Button(action: share) {
+                        Label("Einmal-Link", systemImage: "link")
+                    }
+                    .buttonStyle(LesenQuietButtonStyle())
+                    .accessibilityHint("Link aufs Gesprochene als Markdown, kurz gültig und nur einmal abrufbar")
+                }
                 FolgenIngestButton(episode: episode, ingest: ingest)
                 Button(role: .destructive, action: delete) {
                     Label("Löschen", systemImage: "trash")
@@ -669,7 +679,7 @@ enum FolgenDownloadError: LocalizedError {
     }
 }
 
-/// Teilen-Blatt des Systems für die geladene MP3.
+/// Teilen-Blatt des Systems für die geladene MP3 oder den Einmal-Link.
 struct FolgenShareSheet: UIViewControllerRepresentable {
     let url: URL
 

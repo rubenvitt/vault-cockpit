@@ -559,6 +559,26 @@ final class ReadingStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testEpisodeShareLink() async throws {
+        let transport = server()
+        let store = EpisodesStore(context: try context(transport), pollInterval: 0)
+        await store.load()
+        let transcript = try JSONDecoder().decode(Episode.self, from: json(#"{"id":"ep-transkript","kind":"podcast","title":"Podcast: Stapel","status":"transkript","createdAt":"2026-10-25T09:00:00.000Z","audio":false}"#))
+        transport.respond { request in
+            path(of: request) == "/api/lesen/folgen" ? (200, try fixture("lesen-folgen")) : (200, json(#"{"ok":true,"message":"Einmal-Link, 15 Minuten gültig und nur einmal abrufbar: https://vault.example/geteilt.md?t=abc","url":"https://vault.example/geteilt.md?t=abc","expiresAt":"2026-10-25T09:15:00.000Z","minutes":15}"#))
+        }
+        let link = await store.shareLink(transcript)
+        XCTAssertEqual(link?.url.absoluteString, "https://vault.example/geteilt.md?t=abc")
+        XCTAssertEqual(link?.minutes, 15)
+        let request = try XCTUnwrap(transport.requests.first { path(of: $0) == "/aktion/lesen/folge/teilen" })
+        XCTAssertEqual(formFields(request), ["id": "ep-transkript"])
+
+        let vorlesen = try JSONDecoder().decode(Episode.self, from: json(#"{"id":"v","kind":"vorlesen","status":"transkript","createdAt":"2026-10-25T09:00:00.000Z"}"#))
+        let none = await store.shareLink(vorlesen)
+        XCTAssertNil(none, "Vorlesen hat kein Skript zum Teilen")
+    }
+
+    @MainActor
     func testEpisodeIngestTexts() async throws {
         let transport = server()
         let store = EpisodesStore(context: try context(transport), pollInterval: 0)
