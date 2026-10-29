@@ -384,7 +384,7 @@ function heuteSection(model, tz, ctx) {
   const tasks = model.rocks.ok
     ? model.rocks.data.flatMap((g) => g.tasks).filter((t) => {
         const day = t.due && t.status !== 'dropped' ? dueDay(t.due, tz) : null;
-        return day === model.today || (day && day < model.today && t.status !== 'done');
+        return day === model.today || (day && day >= model.week.monday && day < model.today && t.status !== 'done');
       })
     : [];
   const list = [
