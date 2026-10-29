@@ -133,11 +133,14 @@ test('openImage: nur Bilder im Vault, ohne Symlinks, Traversal, vertrauliche und
     'privat/foto.png',
     '.obsidian/x.png',
     '00-inbox/Idee.md',
+    'anhang/x.constructor',
     'anhang/fehlt.png',
     '',
   ]) {
     assert.equal(desk.openImage(bad), null, bad);
   }
+  put('anhang/x.constructor', PNG);
+  assert.equal(desk.openImage('anhang/x.constructor'), null);
   assert.equal(cleanPath('a/./b.png'), null);
   assert.equal(cleanPath('a/b c.png'), 'a/b c.png');
 });

@@ -11,4 +11,7 @@ export const IMAGE_TYPES = {
 export const extOf = (p) => (/\.([a-z0-9]+)$/i.exec(p)?.[1] ?? '').toLowerCase();
 
 /** Ein Bild, das der Index in der Tabelle `images` führt? */
-export const isImagePath = (p) => Boolean(IMAGE_TYPES[extOf(String(p ?? ''))]);
+export const isImagePath = (p) => Object.hasOwn(IMAGE_TYPES, extOf(String(p ?? '')));
+
+/** MIME-Typ eines Bildpfads oder null (nur eigene Einträge, kein `x.constructor`). */
+export const imageTypeOf = (p) => (isImagePath(p) ? IMAGE_TYPES[extOf(String(p))] : null);
