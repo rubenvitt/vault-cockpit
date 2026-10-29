@@ -5,6 +5,7 @@ import {
   statSync, lstatSync, utimesSync, existsSync, realpathSync,
 } from 'node:fs';
 import { join, dirname, resolve, sep } from 'node:path';
+import { mergeFile, conflictName } from './merge.js';
 
 /**
  * Journal des eigenen Syncs (VCP-120): Der Vault-Ordner auf dem Server bleibt
@@ -20,9 +21,11 @@ import { join, dirname, resolve, sep } from 'node:path';
  *   die gemeinsame Basis für den späteren 3-Wege-Merge (VCP-122) und den
  *   Versionsverlauf (VCP-124).
  *
- * Schreiben geht nur mit Basis-Hash (optimistische Sperre): Das Gerät sagt,
- * welche Fassung es zuletzt kannte (`null` = gab es nicht). Weicht der Stand
- * auf dem Server ab, kommt ein Konflikt zurück und nichts wird überschrieben.
+ * Schreiben geht mit Basis-Hash: Das Gerät sagt, welche Fassung es zuletzt
+ * kannte (`null` = gab es nicht). Weicht der Stand auf dem Server ab, wird
+ * nichts überschrieben (VCP-122): Der Server führt beide Fassungen per
+ * 3-Wege-Merge zusammen (siehe merge.js) oder behält seine und legt die des
+ * Geräts als Konfliktkopie daneben. Löschen gegen Ändern: Ändern gewinnt.
  * Vor jeder Prüfung wird die Datei auf der Platte neu angesehen, denn das
  * Cockpit selbst (Bearbeiten, Capture, Brücke) schreibt am Journal vorbei.
  *
@@ -192,6 +195,43 @@ export function createSyncJournal({
     return record(rel, { hash: sha256(data), size: st.size, mtime, data, device });
   }
 
+  function readBlob(hash) {
+    if (!/^[0-9a-f]{64}$/.test(String(hash))) return null;
+    try {
+      return readFileSync(blobPath(hash));
+    } catch {
+      return null;
+    }
+  }
+
+  /** Schreibt atomar (Temp-Datei, dann umbenennen) und hält die neue Fassung fest. */
+  function write(rel, data, { mtime = null, device = null } = {}) {
+    const full = abs(rel);
+    mkdirSync(dirname(full), { recursive: true });
+    const tmp = join(dirname(full), `.sync-${randomBytes(6).toString('hex')}.tmp`);
+    writeFileSync(tmp, data);
+    if (Number.isFinite(mtime) && mtime > 0) utimesSync(tmp, new Date(), new Date(mtime));
+    renameSync(tmp, full);
+    const st = statSync(full);
+    return record(rel, { hash: sha256(data), size: st.size, mtime: Math.floor(st.mtimeMs), data, device }).entry;
+  }
+
+  /** Freier Name für eine Konfliktkopie neben `rel`, oder null. */
+  function freeConflictName(rel, deviceName) {
+    const date = new Date(now()).toISOString().slice(0, 10);
+    for (let n = 1; n <= 50; n += 1) {
+      const candidate = conflictName(rel, deviceName, date, n);
+      try {
+        checkSyncPath(candidate);
+        if (existsSync(abs(candidate)) || stmt.sameCase.get(candidate, candidate)) continue;
+      } catch {
+        return null;
+      }
+      return candidate;
+    }
+    return null;
+  }
+
   /** Alle sichtbaren Dateien unter dem Vault (rekursiv, ohne versteckte, ohne Symlinks). */
   /** Unlesbare Unterordner landen in `unreadable` (mit „/“ am Ende); ist der Vault selbst unlesbar, bricht es ab. */
   function* walk(dir, unreadable) {
@@ -268,21 +308,18 @@ export function createSyncJournal({
     },
 
     /** Eine frühere Fassung über ihren Hash, oder null. */
-    blob(hash) {
-      if (!/^[0-9a-f]{64}$/.test(String(hash))) return null;
-      try {
-        return readFileSync(blobPath(hash));
-      } catch {
-        return null;
-      }
-    },
+    blob: readBlob,
 
     /**
-     * Schreibt eine Datei, wenn `base` der aktuelle Hash ist (`null` = Datei
-     * darf noch nicht existieren). Ist der Stand schon der neue, gilt das als
-     * Erfolg (wiederholter Upload).
+     * Schreibt eine Datei. Ist `base` der aktuelle Hash (`null` = Datei gibt
+     * es noch nicht), einfach so; ist der Stand schon der neue, gilt das als
+     * Erfolg (wiederholter Upload). Sonst entscheidet `resolution`:
+     * - `restored`: auf dem Server inzwischen gelöscht, die Änderung gewinnt;
+     * - `merged`: beide Fassungen zusammengeführt, das Ergebnis liegt auf dem Server;
+     * - `copy`: nicht zusammenführbar, der Server behält seine Fassung, die des
+     *   Geräts liegt als Konfliktkopie (`copy`) daneben.
      */
-    put(rel, data, { base = null, mtime = null, device = null } = {}) {
+    put(rel, data, { base = null, mtime = null, device = null, deviceName = null } = {}) {
       checkSyncPath(rel);
       if (data.length > maxFileBytes) return { ok: false, reason: 'too_large' };
       const hash = sha256(data);
@@ -292,22 +329,29 @@ export function createSyncJournal({
       const current = seen.entry;
       const currentHash = current?.hash ?? null;
       if (currentHash === hash) return { ok: true, entry: current, unchanged: true };
-      if (currentHash !== (base || null)) return { ok: false, reason: 'conflict', current: currentHash ? current : null };
       if (!currentHash) {
         // Auf Geräten mit Dateisystem ohne Groß-/Kleinschreibung wären das zwei Dateien am selben Ort.
         const other = stmt.sameCase.get(rel, rel);
         if (other) return { ok: false, reason: 'case', current: row(stmt.get.get(other.path)) };
+        const entry = write(rel, data, { mtime, device });
+        return base ? { ok: true, entry, resolution: 'restored' } : { ok: true, entry };
       }
+      if (currentHash === (base || null)) return { ok: true, entry: write(rel, data, { mtime, device }) };
 
-      const full = abs(rel);
-      mkdirSync(dirname(full), { recursive: true });
-      const tmp = join(dirname(full), `.sync-${randomBytes(6).toString('hex')}.tmp`);
-      writeFileSync(tmp, data);
-      if (Number.isFinite(mtime) && mtime > 0) utimesSync(tmp, new Date(), new Date(mtime));
-      renameSync(tmp, full);
-      const st = statSync(full);
-      const { entry } = record(rel, { hash, size: st.size, mtime: Math.floor(st.mtimeMs), data, device });
-      return { ok: true, entry };
+      // Veraltete Basis: zusammenführen oder Konfliktkopie, nie überschreiben.
+      const ours = readFileSync(abs(rel));
+      // Gerade eben auf der Platte geändert: das Gerät soll es noch einmal versuchen.
+      if (sha256(ours) !== currentHash) return { ok: false, reason: 'conflict', current: refresh(rel).entry };
+      const baseData = base ? readBlob(base) : null;
+      const merged = baseData && mergeFile(rel, baseData, ours, data);
+      if (merged) {
+        if (sha256(merged) === currentHash) return { ok: true, entry: current, unchanged: true, resolution: 'merged' };
+        return { ok: true, entry: write(rel, merged, { device }), resolution: 'merged' };
+      }
+      const copyRel = freeConflictName(rel, deviceName ?? device);
+      if (!copyRel) return { ok: false, reason: 'conflict', current };
+      const copy = write(copyRel, data, { mtime, device });
+      return { ok: true, entry: current, unchanged: true, resolution: 'copy', copy };
     },
 
     /** Löscht eine Datei, wenn `base` der aktuelle Hash ist. Schon weg gilt als Erfolg. */
@@ -317,7 +361,8 @@ export function createSyncJournal({
       if (seen.tooLarge) return { ok: false, reason: 'too_large' };
       const current = seen.entry;
       if (!current?.hash) return { ok: true, entry: current, unchanged: true };
-      if (current.hash !== base) return { ok: false, reason: 'conflict', current };
+      // Inzwischen geändert: Ändern gewinnt, die Datei bleibt.
+      if (current.hash !== base) return { ok: true, entry: current, unchanged: true, resolution: 'kept' };
       const full = abs(rel);
       unlinkSync(full);
       // Leer gewordene Ordner aufräumen, bis zum Vault hinauf.
