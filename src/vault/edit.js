@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, realpathSync, renameSync, mkdirSync, existsSync, linkSync, unlinkSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, realpathSync, renameSync, mkdirSync, existsSync, linkSync, unlinkSync, statSync, copyFileSync, utimesSync, constants } from 'node:fs';
 import { join, sep, dirname } from 'node:path';
 import { KEY_ALIASES } from './markdown.js';
 
@@ -118,11 +118,24 @@ export function createEditor({ vaultPath, index }) {
         linked = true;
       } catch (err) {
         if (err.code === 'EEXIST' && occupied()) throw taken();
-        // Nur die Schreibweise geändert (Dateisystem ohne Groß/klein) oder keine harten
-        // Links (manche Freigaben): umbenennen, die Prüfung oben hat das Ziel gesehen.
-        if (err.code !== 'EEXIST' && !['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'EMLINK', 'ENOSYS'].includes(err.code)) throw err;
-        if (occupied()) throw taken();
-        renameSync(absolute, destination);
+        if (err.code === 'EEXIST') {
+          // Nur die Schreibweise geändert (Dateisystem ohne Groß/klein): Das Ziel ist
+          // dieselbe Datei, umbenennen kann nichts anderes überschreiben.
+          renameSync(absolute, destination);
+        } else {
+          // Keine harten Links (manche Freigaben): exklusiv kopieren, das scheitert
+          // ebenso an einem inzwischen angelegten Ziel; danach gilt der neue Name.
+          if (!['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'EMLINK', 'ENOSYS'].includes(err.code)) throw err;
+          try {
+            copyFileSync(absolute, destination, constants.COPYFILE_EXCL);
+          } catch (copyErr) {
+            if (copyErr.code === 'EEXIST') throw taken();
+            throw copyErr;
+          }
+          const { atime, mtime } = statSync(absolute);
+          try { utimesSync(destination, atime, mtime); } catch { /* nur Zeitstempel */ }
+          linked = true;
+        }
       }
       if (linked) {
         try {
