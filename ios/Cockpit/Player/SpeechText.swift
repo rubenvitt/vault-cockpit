@@ -99,3 +99,41 @@ struct SpeechText: Equatable {
         i > 0 && i < units.count && UTF16.isLeadSurrogate(units[i - 1]) && UTF16.isTrailSurrogate(units[i])
     }
 }
+
+/// Sprechgeschwindigkeit bei Tempo 1 in UTF-16-Einheiten pro Sekunde, für Dauer und Stelle auf dem
+/// Sperrbildschirm. Startwert 15, danach aus den echten Sprechzeiten gelernt: Jeder zu Ende
+/// gesprochene Satz verschiebt den Wert um ein Zehntel Richtung seiner eigenen Geschwindigkeit.
+/// Gilt für Gerätestimme und Stimme vom Server gemeinsam (`UserDefaults`, Schlüssel `key`).
+struct SpeechRate: Equatable {
+    static let key = "player.zeichenProSekunde"
+    static let initial = 15.0
+    /// Kurze Sätze messen vor allem die Pausen; sie zählen nicht.
+    static let minimumUnits = 20
+    static let minimumSeconds = 0.5
+    static let range = 5.0...40.0
+    static let weight = 0.1
+
+    private(set) var charactersPerSecond: Double
+
+    init(charactersPerSecond: Double = initial) {
+        self.charactersPerSecond = charactersPerSecond
+    }
+
+    init(defaults: UserDefaults) {
+        let saved = defaults.double(forKey: Self.key)
+        self.init(charactersPerSecond: Self.range.contains(saved) ? saved : Self.initial)
+    }
+
+    /// Ein Satz mit `units` Einheiten dauerte `seconds` bei `tempo`. Liefert, ob er zählte.
+    /// Ausreißer (Netz hängt, Satz abgeschnitten) begrenzt `range`.
+    mutating func record(units: Int, seconds: Double, tempo: Double) -> Bool {
+        guard units >= Self.minimumUnits, seconds >= Self.minimumSeconds, tempo > 0 else { return false }
+        let measured = min(max(Double(units) / seconds / tempo, Self.range.lowerBound), Self.range.upperBound)
+        charactersPerSecond += (measured - charactersPerSecond) * Self.weight
+        return true
+    }
+
+    func save(to defaults: UserDefaults) {
+        defaults.set(charactersPerSecond, forKey: Self.key)
+    }
+}

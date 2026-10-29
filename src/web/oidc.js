@@ -36,8 +36,11 @@ export function createOidcLogin({ issuer, clientId, clientSecret = null, redirec
   });
 
   return {
-    /** Ziel der Weiterleitung zum Login und der Zustand, der bis zum Callback im Cookie liegt. */
-    async start() {
+    /**
+     * Ziel der Weiterleitung zum Login und der Zustand, der bis zum Callback im Cookie liegt.
+     * `prompt` (z. B. `login`) geht unverändert an Pocket ID (ab v2.6).
+     */
+    async start({ prompt = null } = {}) {
       const pending = { state: b64url(randomBytes(24)), nonce: b64url(randomBytes(24)), verifier: b64url(randomBytes(32)) };
       const url = new URL((await config()).authorization_endpoint);
       url.search = new URLSearchParams({
@@ -49,6 +52,7 @@ export function createOidcLogin({ issuer, clientId, clientSecret = null, redirec
         nonce: pending.nonce,
         code_challenge: b64url(createHash('sha256').update(pending.verifier).digest()),
         code_challenge_method: 'S256',
+        ...(prompt ? { prompt } : {}),
       }).toString();
       return { url: url.href, pending };
     },

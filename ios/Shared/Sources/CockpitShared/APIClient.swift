@@ -149,14 +149,15 @@ public struct APIClient: Sendable {
         return try await Self.perform(request, session: session)
     }
 
-    /// Tauscht den Code aus dem Login-Blatt gegen Sitzungs-Cookie und Geräte-Token. Der Code
-    /// gilt für genau einen Versuch, auch ein Fehlschlag verbraucht ihn.
-    public static func redeem(baseURL: URL, code: String, verifier: String, device: String, session: URLSession = .shared) async throws -> Redemption {
-        struct Body: Encodable { let code: String; let verifier: String; let device: String }
+    /// Tauscht den Code aus dem Login-Blatt gegen einen Geräte-Token. Der Code gilt für genau
+    /// einen Versuch, auch ein Fehlschlag verbraucht ihn. `replaces`: der bisherige Token dieses
+    /// Geräts, den der Server dabei widerruft (ein Token je Gerät).
+    public static func redeem(baseURL: URL, code: String, verifier: String, device: String, replaces: String? = nil, session: URLSession = .shared) async throws -> Redemption {
+        struct Body: Encodable { let code: String; let verifier: String; let device: String; let replaces: String? }
         var request = URLRequest(url: baseURL.appending(path: "api/app/einloesen"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(Body(code: code, verifier: verifier, device: device))
+        request.httpBody = try JSONEncoder().encode(Body(code: code, verifier: verifier, device: device, replaces: replaces))
         return try await perform(request, session: session)
     }
 

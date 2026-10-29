@@ -75,17 +75,19 @@ public struct PendingShares: Sendable {
 
     /// Sendet alles nach. Gesendetes und vom Server Abgelehntes verschwindet; bei einem
     /// vorübergehenden Fehler bleibt der Eintrag für den nächsten Versuch liegen, ohne Netz oder
-    /// bei 401 auch der ganze Rest.
+    /// bei 401 auch der ganze Rest; dann ruft es `onUnauthorized` (die App meldet neu an).
     /// Liefert die abgelehnten Anfragen mit Fehler (zum Protokollieren).
     @discardableResult
-    public func flush(using api: APIClient) async -> [(share: PendingShare, error: Error)] {
+    public func flush(using api: APIClient, onUnauthorized: (@Sendable () async -> Void)? = nil) async -> [(share: PendingShare, error: Error)] {
         var rejected: [(PendingShare, Error)] = []
         for share in all() {
             do {
                 _ = try await send(share, using: api)
                 remove(share)
             } catch let error as APIError where error.isUnauthorized {
-                break  // gilt für alle Einträge: liegen lassen bis zur neuen Anmeldung
+                // Gilt für alle Einträge: liegen lassen bis zur neuen Anmeldung, die gleich startet.
+                await onUnauthorized?()
+                break
             } catch is URLError {
                 break  // kein Netz
             } catch where Self.isTemporary(error) {

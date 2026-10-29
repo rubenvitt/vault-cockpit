@@ -1369,7 +1369,10 @@ Vorlese-Player (VCP-91, Code in `src/web/app-access.js`). Dafür muss das Web-Co
    `=` (genau 43 Zeichen) und einen zufälligen `state` (8–128 Zeichen, gleicher
    Zeichenvorrat).
 2. Login-Blatt öffnen: `GET <PUBLIC_URL>/login?app=1&state=…&challenge=…`.
-   Das läuft wie der Web-Login über Pocket ID (nur `ALLOWED_SUBJECTS`) und endet
+   Das läuft wie der Web-Login über Pocket ID (nur `ALLOWED_SUBJECTS`), aber mit
+   `prompt=login`: Pocket ID (ab v2.6) fragt jedes Mal neu nach dem Passkey, auch
+   wenn es im Safari-Speicher noch angemeldet ist. So kann keine fremde App still
+   einen Login starten. Der Ablauf endet
    mit `303` auf `<PUBLIC_URL>/app/angemeldet?code=…&state=…`. Bei Abbruch oder
    abgelehntem Konto `…/app/angemeldet?error=access_denied&state=…`. Fehlen
    `state` oder `challenge` oder passen sie nicht, `400` (HTML). Das Ziel ist
@@ -1392,16 +1395,12 @@ Vorlese-Player (VCP-91, Code in `src/web/app-access.js`). Dafür muss das Web-Co
 POST /api/app/einloesen
 Content-Type: application/json
 
-{"code": "…", "verifier": "…", "device": "Rubens iPhone"}
+{"code": "…", "verifier": "…", "device": "Rubens iPhone", "replaces": "vct_…"}
 ```
 
 ```json
 {
   "ok": true,
-  "cookie": {
-    "name": "vc_session", "value": "…", "domain": "cockpit.example.org", "path": "/",
-    "expires": "2026-11-22T10:00:00.000Z", "secure": true, "httpOnly": true, "sameSite": "Lax"
-  },
   "token": { "token": "vct_…", "id": "…", "name": "Rubens iPhone", "scopes": ["app", "lesestapel"] }
 }
 ```
@@ -1410,26 +1409,26 @@ Der Code gilt für genau einen Versuch: Auch ein falscher Verifier verbraucht ih
 Ungültig, abgelaufen oder schon eingelöst gibt `400` mit `"error": "invalid_code"`
 (dann den ganzen Login neu starten, nie mit demselben Code wiederholen), ein
 leerer oder zu langer Gerätename (höchstens 80 Zeichen) und mehr als 20 Tokens
-`400` mit `"error": "bad_request"`. Mehr als 10 Versuche pro Minute (für alle
-zusammen) geben `429`. Jeder Login legt einen neuen Geräte-Token an; alte
-widerruft man unter **Einstellungen → API-Tokens**.
+`400` mit `"error": "bad_request"`. Mehr als 10 Versuche pro Minute vom selben
+Absender (hinter dem Reverse Proxy aus `X-Forwarded-For`) geben
+`429`. Ein Token je Gerät: `replaces` ist der bisherige Token des Geräts (die App
+schickt ihn mit, wenn sie noch einen hat), der Server widerruft ihn vor dem
+Anlegen des neuen. Ist er unbekannt, schon widerrufen oder kein App-Token, ändert
+sich nichts. Übrig gebliebene widerruft man unter **Einstellungen → API-Tokens**.
 
-Das Cookie ist dieselbe Sitzung wie im Browser (`domain` ohne Punkt: nur dieser
-Host); die native App braucht es nicht mehr und arbeitet nur mit dem Geräte-Token.
-Die Sitzung verlängert sich bei Nutzung, endet nach den Tagen ohne Nutzung und
-spätestens nach der längsten Sitzung aus **Einstellungen → Anmeldung** (Standard
-30 und 90 Tage); „Überall abmelden“ beendet alle Browser-Sitzungen, Geräte-Tokens
-nicht. Lehnt der Server den Geräte-Token ab (`401`, z. B. widerrufen), startet die
-App den Login oben neu.
+Ein Sitzungs-Cookie gibt es beim Einlösen nicht: Die native App arbeitet nur mit
+dem Geräte-Token, so liegt auf dem Gerät keine Kopie einer Web-Sitzung (die ist
+zustandslos signiert und gälte bis zum Ablauf, vgl. VCP-65). Lehnt der Server den
+Geräte-Token ab (`401`, z. B. widerrufen), startet die App den Login oben neu,
+auch wenn erst das Nachsenden von Geteiltem oder Fortschritt darauf stößt.
 
 Den Geräte-Token legt die App sicher ab (Keychain, mit der Share Extension
 geteilt). Er steht unter **Einstellungen → API-Tokens** mit dem Recht **App**
 und dem Gerätenamen und lässt sich dort widerrufen; danach gibt jeder Endpunkt
 sofort `401`. Er darf alles, was **Lesestapel** darf: Die Share Extension
 speichert über `POST /lesestapel/speichern` (siehe oben). Abmelden in der App
-widerruft ihn selbst (`POST /api/app/abmelden`) und löscht Cookies,
-Website-Daten und Keychain-Eintrag; das Sitzungs-Cookie ist zustandslos signiert,
-eine Kopie davon beendet nur „Überall abmelden“ oder der Ablauf.
+widerruft ihn selbst (`POST /api/app/abmelden`) und löscht Website-Daten
+früherer Versionen und den Keychain-Eintrag.
 
 **App-API** (Header `Authorization: Bearer vct_…`, kein Cookie, kein CSRF):
 

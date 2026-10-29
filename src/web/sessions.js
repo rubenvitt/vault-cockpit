@@ -57,17 +57,6 @@ export function createSessions({ signer, settings, allowedSubjects = [], secure 
     },
 
     /**
-     * Dieselbe frische Sitzung als Werte statt Set-Cookie, für die iOS-App
-     * (`WKHTTPCookieStore`, src/web/app-access.js). `domain` ohne Punkt davor:
-     * nur dieser Host, wie das Cookie aus `issue`.
-     */
-    issueValues(user, domain) {
-      const t = seconds();
-      const { value, exp } = sealed(fresh(user, t), t);
-      return { name: SESSION_COOKIE, value, domain, path: '/', expires: new Date(exp * 1000).toISOString(), secure, httpOnly: true, sameSite: 'Lax' };
-    },
-
-    /**
      * Die gültige Sitzung des Requests oder null. Das Subject wird erneut
      * geprüft, damit ein aus ALLOWED_SUBJECTS gestrichener Account nicht bis
      * zum Ablauf seines Cookies weiter hineinkommt. Cookies im alten Format

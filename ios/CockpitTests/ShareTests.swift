@@ -133,9 +133,12 @@ final class ShareTests: XCTestCase {
         XCTAssertEqual(pending.all().count, 2)
 
         respond(status: 401)
-        await pending.flush(using: client)
+        let logins = Counter()
+        await pending.flush(using: client) { await logins.increment() }
         XCTAssertEqual(seen.count, 1, "nach 401 bricht das Nachsenden ab")
         XCTAssertEqual(pending.all().count, 2)
+        let count = await logins.value
+        XCTAssertEqual(count, 1, "401 startet die neue Anmeldung")
     }
 
     func testFlushSkipsServerErrorButSendsTheRest() async throws {
@@ -161,4 +164,9 @@ final class ShareTests: XCTestCase {
         XCTAssertEqual((rejected.first?.error as? APIError)?.message, "Nicht gespeichert: Ungültige Adresse")
         XCTAssertTrue(pending.all().isEmpty)
     }
+}
+
+private actor Counter {
+    var value = 0
+    func increment() { value += 1 }
 }

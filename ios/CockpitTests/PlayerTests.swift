@@ -289,10 +289,21 @@ private actor FakeService: ListenService {
     /// Kein Netz für Liste, Text und Audio (anders als `offline`, das nur das Senden trifft).
     var unreachable = false
     func setUnreachable(_ value: Bool) { unreachable = value }
+    /// Zweiter Text „b“ in der Liste (zum Vorladen).
+    var secondItem = false
+    func setSecondItem(_ value: Bool) { secondItem = value }
+    /// Angefragte Texte, in Reihenfolge.
+    var textRequests: [String] = []
+    /// Token abgelehnt (401) für Liste, Text und Senden.
+    var revoked = false
+    func setRevoked(_ value: Bool) { revoked = value }
 
     func queue(minutes: Int) async throws -> Queue {
         if unreachable { throw URLError(.notConnectedToInternet) }
-        var list = ["zeit": minutes, "items": [["id": "a", "title": "Erster Text", "url": "https://example.org/a", "site": "example.org", "kind": "article", "minutes": 3, "remaining": 2, "progress": 0.4]]] as [String: Any]
+        if revoked { throw APIError(status: 401, code: "unauthorized", message: "Token abgelehnt. Bitte in der App neu anmelden.") }
+        var entries = [["id": "a", "title": "Erster Text", "url": "https://example.org/a", "site": "example.org", "kind": "article", "minutes": 3, "remaining": 2, "progress": 0.4]] as [[String: Any]]
+        if secondItem { entries.append(["id": "b", "title": "Zweiter Text", "url": "https://example.org/b", "site": "example.org", "kind": "article", "minutes": 3, "remaining": 3, "progress": 0]) }
+        var list = ["zeit": minutes, "items": entries] as [String: Any]
         if let voice { list["stimme"] = voice }
         return try JSONDecoder().decode(Queue.self, from: JSONSerialization.data(withJSONObject: list))
     }
@@ -307,11 +318,13 @@ private actor FakeService: ListenService {
     /// Wie der Server: die zuletzt gespeicherte Lesestelle, sonst Satz 2.
     func text(id: String) async throws -> ListenText {
         if unreachable { throw URLError(.notConnectedToInternet) }
+        textRequests.append(id)
         return listenText(id: id, anchor: saved.last { $0.id == id }?.anchor ?? 21)
     }
 
     func saveProgress(id: String, progress: Double, anchor: Int?) async throws -> Double {
         if offline { throw URLError(.notConnectedToInternet) }
+        if revoked { throw APIError(status: 401, code: "unauthorized", message: "Token abgelehnt. Bitte in der App neu anmelden.") }
         try? await Task.sleep(for: saveDelay)
         saved.append(ProgressUpdate(id: id, progress: progress, anchor: anchor ?? 0))
         return progress
@@ -378,6 +391,44 @@ final class PlayerTests: XCTestCase {
         XCTAssertEqual(saved, [.init(id: "a", progress: 34.0 / 51, anchor: 35)])
     }
 
+    func testPreloadsTheNextTextSoTheSwitchWorksWithoutNetwork() async {
+        let defaults = UserDefaults(suiteName: "test-\(UUID())")!
+        let speech = FakeSpeech()
+        let service = FakeService()
+        await service.setSecondItem(true)
+        let player = Player(minutes: 15, service: service, speech: speech, defaults: defaults)
+        defer { player.close() }
+
+        await player.start()
+        await waitUntil { await service.textRequests == ["a", "b"] }
+        let requests = await service.textRequests
+        XCTAssertEqual(requests, ["a", "b"], "der nächste Text lädt, während der erste spielt")
+
+        await service.setUnreachable(true)
+        player.send(.nextText)
+        XCTAssertEqual(player.machine.currentItem?.id, "b")
+        await waitUntil { speech.spoken.count == 2 }
+        XCTAssertEqual(speech.spoken, ["Zweiter Satz!", "Zweiter Satz!"], "Wechsel ohne Netz aus dem Vorrat")
+        XCTAssertNil(player.message)
+    }
+
+    func testRevokedTokenAsksForLoginWhileBufferStays() async {
+        let defaults = UserDefaults(suiteName: "test-\(UUID())")!
+        var buffered = PendingListening()
+        buffered.add(ProgressUpdate(id: "a", progress: 0.5, anchor: 21))
+        buffered.save(to: defaults)
+        let service = FakeService()
+        await service.setRevoked(true)
+        // Wie `AppModel.sendPendingListening`: ein Player nur zum Senden, nicht gestartet.
+        let player = Player(minutes: 15, service: service, speech: FakeSpeech(), defaults: defaults)
+        var unauthorized = 0
+        player.onUnauthorized = { unauthorized += 1 }
+
+        await player.flush()
+        XCTAssertEqual(unauthorized, 1, "401 startet die neue Anmeldung")
+        XCTAssertNotNil(PendingListening(defaults: defaults).next, "bleibt bis nach dem Login im Puffer")
+    }
+
     func testRejectedHighlightIsNotReportedAsRemembered() async {
         let defaults = UserDefaults(suiteName: "test-\(UUID())")!
         let speech = FakeSpeech()
@@ -398,6 +449,36 @@ final class PlayerTests: XCTestCase {
         player.remember()
         await waitUntil { player.message != nil }
         XCTAssertEqual(player.message, "Gemerkt.")
+    }
+}
+
+final class SpeechRateTests: XCTestCase {
+    func testStartsAt15AndLearnsFromRealSentences() {
+        let defaults = UserDefaults(suiteName: "test-\(UUID())")!
+        var rate = SpeechRate(defaults: defaults)
+        XCTAssertEqual(rate.charactersPerSecond, 15)
+
+        // 50 Einheiten in 2 s bei Tempo 1,25 sind 20 pro Sekunde bei Tempo 1: ein Zehntel davon.
+        XCTAssertTrue(rate.record(units: 50, seconds: 2, tempo: 1.25))
+        XCTAssertEqual(rate.charactersPerSecond, 15.5, accuracy: 0.0001)
+        rate.save(to: defaults)
+        XCTAssertEqual(SpeechRate(defaults: defaults).charactersPerSecond, 15.5, accuracy: 0.0001)
+    }
+
+    func testIgnoresShortSentencesAndClampsOutliers() {
+        var rate = SpeechRate()
+        XCTAssertFalse(rate.record(units: 10, seconds: 1, tempo: 1), "zu kurz")
+        XCTAssertFalse(rate.record(units: 40, seconds: 0.2, tempo: 1), "zu schnell vorbei")
+        XCTAssertEqual(rate.charactersPerSecond, 15)
+        // Netz hing 60 s: gemessen 0,5, begrenzt auf 5.
+        XCTAssertTrue(rate.record(units: 30, seconds: 60, tempo: 1))
+        XCTAssertEqual(rate.charactersPerSecond, 14, accuracy: 0.0001)
+    }
+
+    func testUnusableSavedValueFallsBackToStart() {
+        let defaults = UserDefaults(suiteName: "test-\(UUID())")!
+        defaults.set(500.0, forKey: SpeechRate.key)
+        XCTAssertEqual(SpeechRate(defaults: defaults).charactersPerSecond, 15)
     }
 }
 
