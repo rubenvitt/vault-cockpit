@@ -134,7 +134,13 @@ test('Lesen: URL speichern erscheint mit Titel, Quelle und Lesezeit im Eingang; 
       // Private Adresse: Meldung auf der Seite, nichts gespeichert.
       const local = await call('/aktion/lesen/speichern', { method: 'POST', form: { url: 'http://192.168.1.1/admin', csrf, back: '/lesen/eingang' } });
       assert.equal(local.status, 303);
-      assert.match(await (await call('/lesen/eingang')).text(), /class="toast error"[^>]*><span class="toast-text">Adressen im lokalen oder privaten Netz werden nicht geholt/);
+      const failed = await (await call('/lesen/eingang')).text();
+      assert.match(failed, /class="toast error"[^>]*><span class="toast-text">Adressen im lokalen oder privaten Netz werden nicht geholt/);
+      // Ohne JavaScript bleibt die eingegebene Adresse im Formular, das Formular steht offen; beim nächsten Laden ist sie weg.
+      assert.match(failed, /<details class="more inbox-save" open>[\s\S]*name="url"[^>]*value="http:\/\/192\.168\.1\.1\/admin"/);
+      assert.doesNotMatch(await (await call('/lesen/eingang')).text(), /value="http:\/\/192\.168/);
+      await call('/aktion/lesen/speichern', { method: 'POST', form: { url: 'http://192.168.1.2/', csrf, back: '/lesen/hinzufuegen' } });
+      assert.match(await (await call('/lesen/hinzufuegen')).text(), /name="url"[^>]*value="http:\/\/192\.168\.1\.2\/"/);
       const localhost = await call('/aktion/lesen/speichern', { method: 'POST', form: { url: 'http://localhost:3000/', csrf }, accept: 'application/json' });
       assert.equal(localhost.status, 400);
       const v6 = await call('/aktion/lesen/speichern', { method: 'POST', form: { url: 'http://[::1]:3000/', csrf }, accept: 'application/json' });

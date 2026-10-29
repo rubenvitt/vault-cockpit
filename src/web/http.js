@@ -474,8 +474,11 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   /** Seite hinter `back` mit Meldung (Weg ohne JavaScript, wenn eine Aktion scheitert). */
   const backPage = (req, res, back, session, opts) => {
     const url = new URL(back, publicUrl);
-    // Graph- und Lesen-Seiten rendern sich aus der Meldung im Cookie neu.
-    if (url.pathname === '/graph' || READING_PAGES[url.pathname]) return redirect(res, back, [flashCookie(opts.flash)]);
+    // Graph- und Lesen-Seiten rendern sich aus der Meldung im Cookie neu; die eingegebene Adresse geht mit (`draft`).
+    if (url.pathname === '/graph' || READING_PAGES[url.pathname]) {
+      const draft = opts.draft && url.pathname !== '/graph' ? String(opts.draft).slice(0, 2000) : null;
+      return redirect(res, back, [flashCookie(draft ? { ...opts.flash, draft } : opts.flash)]);
+    }
     if (url.pathname === '/planen' && plan) return planPage(req, res, url, session, opts);
     return url.pathname === '/notiz' && notes ? notePage(req, res, url, session, opts) : page(req, res, url, session, opts);
   };
@@ -656,7 +659,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       if (!(err instanceof ActionError)) throw err;
       logger.warn?.(`Cockpit-Aktion ${path} fehlgeschlagen: ${err.message}`);
       if (wantsJson) return json(res, err.status, { error: 'action_failed', message: err.message });
-      const draft = path === '/aktion/erfassen' || path === '/aktion/notiz/anhaengen' ? form.get('text') : null;
+      const draft = path === '/aktion/erfassen' || path === '/aktion/notiz/anhaengen' ? form.get('text') : path === '/aktion/lesen/speichern' ? form.get('url') : null;
       return backPage(req, res, back, session, { status: err.status, flash: { kind: 'error', message: err.message }, draft });
     }
     // `link`: Ziel zum Weitergehen in der Meldung (etwa die neue Source-Page nach dem Ingest), nur eigene Pfade.
