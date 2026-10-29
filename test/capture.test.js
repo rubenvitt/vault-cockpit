@@ -164,6 +164,19 @@ test('Zustand überlebt einen Neustart', () => {
   assert.deepEqual(createStateStore(join(root, '.state', 'capture.json')).get('k'), { id: 'x' });
 });
 
+test('Merkzettel aus einer Sicherung gilt sofort, der alte Stand im Speicher überschreibt ihn nicht (VCP-59)', () => {
+  const file = join(root, '.state', 'capture.json');
+  state.set('alt', 1);
+  const backup = createStateStore(null);
+  backup.set('gesichert', { id: 'x' });
+  state.replaceWith(backup.snapshot());
+  // Ein Durchgang der Brücke nach dem Wiederherstellen schreibt auf dem neuen Stand weiter.
+  state.set('neu', 2);
+  assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), { gesichert: { id: 'x' }, neu: 2 });
+  assert.equal(state.get('alt'), null);
+  assert.throws(() => state.replaceWith(Buffer.from('[]')), /kein JSON-Objekt/);
+});
+
 test('Zunder-Client ruft create_task über MCP auf', async () => {
   let seen;
   const client = createZunderClient({

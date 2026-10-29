@@ -513,7 +513,11 @@ const webHttp = process.env.WEB_CLIENT_ID
           'session-secret': process.env.SESSION_SECRET_FILE ?? '/data/session-secret',
         },
         // Die offene Datenbank als Schnappschuss; beim Wiederherstellen öffnet der Store sie neu.
-        live: { 'lesestapel.db': { read: () => reading.snapshot(), write: (buf) => reading.replaceWith(buf) } },
+        // Den Merkzettel hält die Brücke im Speicher: zurückgespielt gilt er sofort, sonst überschriebe sie ihn bis zum Neustart.
+        live: {
+          'lesestapel.db': { read: () => reading.snapshot(), write: (buf) => reading.replaceWith(buf) },
+          'capture-state.json': { read: () => captureState.snapshot(), write: (buf) => captureState.replaceWith(buf) },
+        },
       }),
       restart: () => {
         setTimeout(() => process.exit(0), 5000).unref();
