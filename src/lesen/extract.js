@@ -9,6 +9,8 @@ import { esc } from '../web/layout.js';
  */
 
 const WORDS_PER_MINUTE = 220;
+// Vorgelesen (Sprachausgabe, ElevenLabs) geht es langsamer: etwa 150 Wörter, rund 900 Zeichen pro Minute.
+const SPOKEN_WORDS_PER_MINUTE = 150;
 
 // Fliegen samt Inhalt raus.
 const DROP = new Set(['script', 'style', 'iframe', 'frame', 'frameset', 'object', 'embed', 'applet', 'svg', 'math', 'form', 'template', 'base', 'link', 'meta', 'noscript', 'button', 'input', 'select', 'textarea', 'option', 'canvas', 'title', 'head', 'source', 'track', 'map', 'dialog']);
@@ -85,6 +87,8 @@ export function sanitizeHtml(html, baseUrl = null) {
 
 const words = (text) => (text.match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu) ?? []).length;
 export const readingMinutes = (wordCount) => Math.max(1, Math.round(wordCount / WORDS_PER_MINUTE));
+/** Hördauer beim Vorlesen in Minuten (Tempo 1×), für „Unterwegs hören“. */
+export const listeningMinutes = (wordCount) => Math.max(1, Math.round(wordCount / SPOKEN_WORDS_PER_MINUTE));
 const squash = (s) => String(s ?? '').replace(/\s+/g, ' ').trim();
 
 /**

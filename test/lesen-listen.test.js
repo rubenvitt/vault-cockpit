@@ -5,9 +5,9 @@ import vm from 'node:vm';
 import { parseHTML } from 'linkedom';
 import { createReadingStore } from '../src/lesen/store.js';
 import { readingRoutes } from '../src/lesen/http.js';
-import { sanitizeHtml } from '../src/lesen/extract.js';
+import { sanitizeHtml, listeningMinutes } from '../src/lesen/extract.js';
 import { htmlText, anchorAt } from '../src/lesen/anchor.js';
-import { sentences } from '../src/lesen/listen.js';
+import { sentences, listenQueue } from '../src/lesen/listen.js';
 import { SpeechError } from '../src/lesen/tts.js';
 
 const said = (html) => sentences(html).map(({ start, end }) => htmlText(html).slice(start, end));
@@ -197,4 +197,18 @@ test('Hören: mit Stimme vom Server spielt jeder Satz als Audio, fällt sie aus,
   assert.equal(window.cockpitPlayer.state().message.text, 'ElevenLabs: Kontingent aufgebraucht. Die Gerätestimme liest weiter.');
   assert.equal(player.ownerDocument.querySelector('.player-msg [data-part=msg-text]').textContent, 'ElevenLabs: Kontingent aufgebraucht. Die Gerätestimme liest weiter.');
   assert.equal(played.length, 2);
+});
+
+test('Hören: Zeitfenster rechnet mit der Hördauer (150 Wörter/min), nicht der Lesezeit', () => {
+  const store = createReadingStore({ path: ':memory:' });
+  // 2400 Wörter: 11 Min. Lesezeit, passt ins Fenster; vorgelesen 16 Min., passt nicht.
+  store.addDocument({ url: 'https://blatt.test/lang', title: 'Lang', status: 'stapel', word_count: 2400, reading_minutes: 11 });
+  store.addDocument({ url: 'https://blatt.test/kurz', title: 'Kurz', status: 'stapel', word_count: 600, reading_minutes: 3 });
+  const { items } = listenQueue(store, 15);
+  assert.deepEqual(items.map((d) => [d.title, d.reading_minutes, d.remaining]), [['Kurz', 4, 4]]);
+  assert.equal(listeningMinutes(2400), 16);
+  assert.equal(listeningMinutes(1), 1);
+  // Ohne Wortzahl bleibt die gespeicherte Zeit.
+  store.addDocument({ url: 'https://blatt.test/alt', title: 'Alt', status: 'stapel', reading_minutes: 5 });
+  assert.ok(listenQueue(store, 15).items.some((d) => d.title === 'Alt' && d.reading_minutes === 5));
 });
