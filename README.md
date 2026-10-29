@@ -1410,7 +1410,7 @@ Ungültig, abgelaufen oder schon eingelöst gibt `400` mit `"error": "invalid_co
 (dann den ganzen Login neu starten, nie mit demselben Code wiederholen), ein
 leerer oder zu langer Gerätename (höchstens 80 Zeichen) und mehr als 20 Tokens
 `400` mit `"error": "bad_request"`. Mehr als 10 Versuche pro Minute vom selben
-Absender (hinter dem Reverse Proxy aus `X-Forwarded-For`) geben
+Absender (hinter dem Reverse Proxy der letzte Eintrag aus `X-Forwarded-For`) geben
 `429`. Ein Token je Gerät: `replaces` ist der bisherige Token des Geräts (die App
 schickt ihn mit, wenn sie noch einen hat), der Server widerruft ihn vor dem
 Anlegen des neuen. Ist er unbekannt, schon widerrufen oder kein App-Token, ändert
