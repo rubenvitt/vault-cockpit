@@ -385,3 +385,30 @@ test('/funke/tasks prüft die Eingabe und meldet fehlendes Zunder mit 503', asyn
     { zunder: null, zunderEnabled: false },
   );
 });
+
+test('/funke/tasks legt bei überlappendem Nachsenden nur eine Aufgabe an', async () => {
+  let release;
+  const gate = new Promise((res) => (release = res));
+  const zunder = fakeZunder();
+  const slow = { async createTask(args) { await gate; return zunder.createTask(args); } };
+  await withServer(
+    async (call) => {
+      const task = JSON.stringify({ id: 'f1', title: 'Paket abholen' });
+      const first = call('/funke/tasks', { body: task });
+      const second = call('/funke/tasks', { body: task });
+      await new Promise((res) => setTimeout(res, 50));
+      release();
+      const statuses = (await Promise.all([first, second])).map((r) => r.status).sort();
+      assert.deepEqual(statuses, [200, 201]);
+      assert.equal(zunderCalls.length, 1);
+    },
+    { zunder: slow },
+  );
+});
+
+test('/funke/tasks lehnt eine Beschreibung ab, die kein Text ist', async () => {
+  await withServer(async (call) => {
+    assert.equal((await call('/funke/tasks', { body: JSON.stringify({ id: 'a', title: 'x', description: 42 }) })).status, 400);
+    assert.equal((await call('/funke/tasks', { body: JSON.stringify({ id: 'b', title: 'x', description: null }) })).status, 201);
+  });
+});
