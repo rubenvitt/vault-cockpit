@@ -149,6 +149,13 @@ test('update_links: Codeblöcke enden nur am passenden Zaun', () => {
   assert.equal(readFileSync(join(root, 'projects/Epsilon.md'), 'utf8'), '# E\n\n````\n```\n[[inbox/Idee]]\n```\n````\n~~~\n```js\n[[inbox/Idee]]\n~~~\n[[projects/Alpha/Idee]]\n');
 });
 
+test('update_links: Frontmatter und Inline-Code bleiben unverändert', () => {
+  put('projects/Eta.md', '---\nquelle: "[[inbox/Idee]]"\n---\n# Eta\n\n`[[inbox/Idee]]` und [[inbox/Idee]]\n');
+  index.applyChanges(['projects/Eta.md']);
+  move({ path: 'inbox/Idee.md', folder: 'projects/Alpha', update_links: true });
+  assert.equal(readFileSync(join(root, 'projects/Eta.md'), 'utf8'), '---\nquelle: "[[inbox/Idee]]"\n---\n# Eta\n\n`[[inbox/Idee]]` und [[projects/Alpha/Idee]]\n');
+});
+
 test('update_links beim Umbenennen: Links per Name auf den neuen Namen', () => {
   const r = move({ path: 'inbox/Idee.md', folder: 'projects', name: 'Wärmepumpe', update_links: true });
   assert.equal(r.new_path, 'projects/Wärmepumpe.md');

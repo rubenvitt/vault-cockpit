@@ -163,7 +163,8 @@ export function createEditor({ vaultPath, index }) {
 
     /**
      * Schreibt Wikilinks und Einbettungen auf `from` (der Linktext vor `|` oder
-     * `#`, genau so geschrieben) auf `to` um, außerhalb von Codeblöcken.
+     * `#`, genau so geschrieben) auf `to` um, außerhalb von Frontmatter,
+     * Codeblöcken und Inline-Code, also genau dort, wo auch der Index Links zählt.
      * Für das Verschieben mit `update_links` (VCP-58); wie alle Änderungen nur
      * in eigenen, nicht vertraulichen Notizen und mit Abbruch, wenn der Sync
      * gleichzeitig schreibt. Liefert zusätzlich `count`.
@@ -178,7 +179,13 @@ export function createEditor({ vaultPath, index }) {
         const lines = content.split(/\r?\n/);
         let fence = null;
         let count = 0;
-        for (let i = 0; i < lines.length; i += 1) {
+        // Frontmatter wie `splitFrontmatter`: ab `---` bis zur nächsten Zeile, die mit `---` beginnt.
+        let start = 0;
+        if (lines[0]?.startsWith('---')) {
+          const end = lines.findIndex((l, i) => i > 0 && l.startsWith('---'));
+          if (end !== -1) start = end + 1;
+        }
+        for (let i = start; i < lines.length; i += 1) {
           // Ein Zaun schließt nur mit derselben Sorte, mindestens gleich lang und ohne Info-Text.
           const f = lines[i].match(/^\s*(`{3,}|~{3,})(.*)$/);
           if (f) {
@@ -187,10 +194,11 @@ export function createEditor({ vaultPath, index }) {
             continue;
           }
           if (fence) continue;
-          lines[i] = lines[i].replace(pattern, (_, open) => {
+          // Ungerade Teile sind Inline-Code und bleiben, wie sie sind.
+          lines[i] = lines[i].split(/(`[^`]*`)/).map((part, j) => (j % 2 ? part : part.replace(pattern, (_, open) => {
             count += 1;
             return `${open}${next}`;
-          });
+          }))).join('');
         }
         return { content: lines.join(eol), count };
       });
