@@ -110,7 +110,7 @@ export function createMailCapture({
           .replace('{name}', encodeURIComponent(part.name ?? 'teil'));
         // Der Token geht nur über https mit.
         if (new URL(url).protocol !== 'https:') throw new Error('Download-Adresse ohne https');
-        const res = await fetch(url, { headers: { authorization: headers.authorization }, signal: AbortSignal.timeout(30_000) });
+        const res = await fetch(url, { headers: { authorization: headers.authorization }, redirect: 'error', signal: AbortSignal.timeout(30_000) });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         if (Number(res.headers.get?.('content-length')) > MAX_BLOB) throw new Error('zu groß');
         // Mitzählen statt erst alles zu puffern: Ohne Content-Length gäbe es sonst keine Grenze.
