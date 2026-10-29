@@ -1,6 +1,6 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, readdirSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createCapture } from '../src/vault/capture.js';
@@ -113,6 +113,20 @@ test('dieselbe Capture-ID erzeugt keine zweite Zunder-Aufgabe', async () => {
   const again = await router.route({ text: '!Einmal', source: 'mail', captureId: 'm1' });
   assert.equal(again.duplicate, true);
   assert.equal(zunderCalls.length, 1);
+});
+
+test('dieselbe Capture-ID legt keine zweite Notiz an, auch nach dem Ablegen (VCP-56)', async () => {
+  const first = await router.route({ text: 'Gedanke', source: 'cockpit', captureId: 'c1' });
+  // Abgelegt: die Notiz liegt nicht mehr im Capture-Ordner.
+  renameSync(join(root, first.path), join(root, 'abgelegt.md'));
+  const again = await router.route({ text: 'Gedanke', source: 'cockpit', captureId: 'c1' });
+  assert.equal(again.duplicate, true);
+  assert.equal(again.path, first.path);
+  assert.deepEqual(inbox(), []);
+  // Auch nach einem Neustart, der Merkzettel liegt in einer Datei.
+  const restarted = createCaptureRouter({ capture, zunder: fakeZunder(), state: createStateStore(join(root, '.state', 'capture.json')), logger: quiet });
+  assert.equal((await restarted.route({ text: 'Gedanke', source: 'cockpit', captureId: 'c1' })).duplicate, true);
+  assert.deepEqual(inbox(), []);
 });
 
 test('! ohne eingerichtetes Zunder ist ein Fehler, keine stille Notiz', async () => {
