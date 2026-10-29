@@ -87,8 +87,9 @@ final class Player {
         let defaults = config.appGroup.isEmpty ? .standard : UserDefaults(suiteName: config.appGroup) ?? .standard
         var service: (any ListenService)?
         let offline = OfflineStore(root: OfflineStore.defaultRoot)
-        if let token = (try? KeychainStore(accessGroup: config.keychainGroup).token()) ?? nil {
-            service = OfflineListenService(online: APIClient(baseURL: config.serverURL, token: token), offline: offline)
+        let keychain = KeychainStore(accessGroup: config.keychainGroup)
+        if ((try? keychain.token()) ?? nil) != nil {
+            service = OfflineListenService(online: KeychainListenService(baseURL: config.serverURL, keychain: keychain), offline: offline)
         }
         #if DEBUG
         if DemoListenService.isRequested { service = DemoListenService() }

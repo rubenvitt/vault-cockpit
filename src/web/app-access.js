@@ -53,8 +53,9 @@ export const APP_CALLBACK_PATH = '/app/angemeldet';
 export const SITE_ASSOCIATION_PATH = '/.well-known/apple-app-site-association';
 const DEV_REDIRECT = 'cockpit://login';
 const CODE_SECONDS = 60;
-// Je Absender; die Tabelle räumt jeder Versuch auf, sie wächst also höchstens um die Absender einer Minute.
+// Je Absender; die Tabelle räumt jeder Versuch auf und hält höchstens REDEEM_SENDERS Absender einer Minute.
 const REDEEM_LIMIT = 10;
+const REDEEM_SENDERS = 256;
 const REDEEM_WINDOW = 60_000;
 const MAX_BODY = 16 * 1024;
 const STATE = /^[\w.~-]{8,128}$/;
@@ -80,13 +81,19 @@ export function createAppAccess({ tokens, reading, publicUrl, appId = `${APP_TEA
   /** Absender → Zeitpunkte der Versuche im laufenden Fenster. */
   const attempts = new Map();
 
-  /** Absender des Requests: hinter dem Proxy der erste Eintrag aus `X-Forwarded-For`, sonst die Gegenstelle. */
+  /**
+   * Absender des Requests: hinter dem Proxy der letzte Eintrag aus `X-Forwarded-For` (den setzt der
+   * Proxy selbst; weiter vorn steht, was der Client mitschickt), sonst die Gegenstelle.
+   */
   const senderOf = (req) => {
-    const forwarded = trustProxy ? String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim() : '';
+    const forwarded = trustProxy ? String(req.headers['x-forwarded-for'] ?? '').split(',').at(-1).trim() : '';
     return forwarded || req.socket?.remoteAddress || '?';
   };
 
-  /** Zählt den Versuch; false, wenn der Absender im Fenster schon `REDEEM_LIMIT` hatte. */
+  /**
+   * Zählt den Versuch; false, wenn der Absender im Fenster schon `REDEEM_LIMIT` hatte oder schon
+   * `REDEEM_SENDERS` andere Absender zählen (dann wartet ein neuer, bis Einträge ablaufen).
+   */
   const allowAttempt = (sender, t) => {
     for (const [k, list] of attempts) {
       const recent = list.filter((a) => a > t - REDEEM_WINDOW);
@@ -94,7 +101,7 @@ export function createAppAccess({ tokens, reading, publicUrl, appId = `${APP_TEA
       else attempts.delete(k);
     }
     const list = attempts.get(sender) ?? [];
-    if (list.length >= REDEEM_LIMIT) return false;
+    if (list.length >= REDEEM_LIMIT || (!list.length && attempts.size >= REDEEM_SENDERS)) return false;
     attempts.set(sender, [...list, t]);
     return true;
   };

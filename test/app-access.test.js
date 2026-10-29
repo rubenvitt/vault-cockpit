@@ -297,13 +297,21 @@ test('App-Login: nur ALLOWED_SUBJECTS', async () => {
 
 test('App-Login: Einlösen ist je Absender begrenzt', async () => {
   await withServer(async ({ redeem, clock }) => {
-    const from = (ip) => ({ 'x-forwarded-for': `${ip}, 10.0.0.1` });
+    // Der Proxy hängt die Adresse hinten an; was der Client vorn mitschickt, zählt nicht.
+    const from = (ip, spoofed = '192.0.2.1') => ({ 'x-forwarded-for': `${spoofed}, ${ip}` });
     for (let i = 0; i < 10; i++) assert.equal((await redeem({ code: `x${i}`, verifier: 'y' }, from('203.0.113.7'))).status, 400);
     assert.equal((await redeem({ code: 'x', verifier: 'y' }, from('203.0.113.7'))).status, 429);
+    assert.equal((await redeem({ code: 'x', verifier: 'y' }, from('203.0.113.7', '198.18.0.9'))).status, 429, 'vorn gefälscht hilft nicht');
     // Ein anderer Absender ist davon nicht betroffen.
     assert.equal((await redeem({ code: 'x', verifier: 'y' }, from('198.51.100.2'))).status, 400);
     clock.t += 61_000;
     assert.equal((await redeem({ code: 'x', verifier: 'y' }, from('203.0.113.7'))).status, 400);
+
+    // Höchstens 256 Absender je Minute: danach wartet ein neuer, bekannte zählen weiter.
+    clock.t += 61_000;
+    for (let i = 0; i < 256; i++) await redeem({ code: 'x', verifier: 'y' }, from(`10.1.${i >> 8}.${i & 255}`));
+    assert.equal((await redeem({ code: 'x', verifier: 'y' }, from('10.2.0.1'))).status, 429);
+    assert.equal((await redeem({ code: 'x', verifier: 'y' }, from('10.1.0.0'))).status, 400);
   });
 });
 

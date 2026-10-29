@@ -14,6 +14,29 @@ protocol ListenService: Sendable {
 
 extension APIClient: ListenService {}
 
+/// `APIClient` mit dem Token, der gerade in der Keychain liegt, bei jedem Aufruf neu gelesen:
+/// Meldet die App nach einem 401 neu an, arbeitet ein laufender Player gleich mit dem neuen Token
+/// weiter, statt mit dem abgelehnten erneut den Login auszulösen.
+struct KeychainListenService: ListenService {
+    let baseURL: URL
+    let keychain: KeychainStore
+
+    private func client() throws -> APIClient {
+        guard let token = try keychain.token() else {
+            throw APIError(status: 401, code: "unauthorized", message: "Bitte in der Cockpit-App neu anmelden.")
+        }
+        return APIClient(baseURL: baseURL, token: token)
+    }
+
+    func queue(minutes: Int) async throws -> Queue { try await client().queue(minutes: minutes) }
+    func text(id: String) async throws -> ListenText { try await client().text(id: id) }
+    func saveProgress(id: String, progress: Double, anchor: Int?) async throws -> Double {
+        try await client().saveProgress(id: id, progress: progress, anchor: anchor)
+    }
+    func addHighlight(_ highlight: NewHighlight) async throws -> HighlightResult { try await client().addHighlight(highlight) }
+    func audio(id: String, start: Int, end: Int) async throws -> Data { try await client().audio(id: id, start: start, end: end) }
+}
+
 #if DEBUG
 /// Fester deutscher Text ohne Server, für den Simulator (der unsignierte Build hat keinen
 /// Geräte-Token): `xcrun simctl launch booted dev.rubeen.cockpit -PlayerDemo` und für Previews.
