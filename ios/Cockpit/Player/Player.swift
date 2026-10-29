@@ -55,6 +55,8 @@ final class Player {
     /// Der nächste Text der Liste, schon geladen, solange der laufende spielt: Der Wechsel klappt
     /// dann auch bei gesperrtem Bildschirm und ohne Netz. Nur einer, der Schlüssel ist seine ID.
     @ObservationIgnored private var prefetched: (id: String, text: SpeechText)?
+    /// ID des vorgeladenen Textes (für Tests).
+    var prefetchedID: String? { prefetched?.id }
     /// Gelernte Sprechgeschwindigkeit für Dauer und Stelle auf dem Sperrbildschirm.
     @ObservationIgnored private var rate: SpeechRate
     /// Beginn und Länge des Satzes, der gerade gesprochen wird, zum Nachmessen.
@@ -259,7 +261,14 @@ final class Player {
     // shortcut: nur der Text; mit Stimme vom Server holt `ServerSpeech` den ersten Satz erst beim Wechsel und liest ohne Netz mit der Gerätestimme.
     private func prefetchNext() async {
         guard let service, let next = machine.nextItem, prefetched?.id != next.id else { return }
-        guard let listen = try? await service.text(id: next.id) else { return }
+        let listen: ListenText
+        do {
+            listen = try await service.text(id: next.id)
+        } catch {
+            // Nur ein abgelehnter Token zählt: Sonst merkt die App ihn erst beim nächsten Wechsel.
+            if (error as? APIError)?.isUnauthorized == true { onUnauthorized?() }
+            return
+        }
         // Inzwischen weitergesprungen: nur behalten, wenn er noch der nächste ist.
         if machine.nextItem?.id == next.id { prefetched = (next.id, SpeechText(listen)) }
     }

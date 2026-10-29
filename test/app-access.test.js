@@ -343,6 +343,28 @@ test('App-Login: ein Token je Gerät, der mitgeschickte bisherige wird widerrufe
   });
 });
 
+test('App-Login: abgelehnter Gerätename kostet den bisherigen Token nicht, volle Liste macht Platz', async () => {
+  await withServer(async ({ appLogin, redeem, tokens }) => {
+    const attempt = async (body) => {
+      const { verifier, challenge } = pkce();
+      const code = (await appLogin({ challenge })).searchParams.get('code');
+      return redeem({ code, verifier, ...body });
+    };
+    const old = await (await attempt({ device: 'Rubens iPhone' })).json();
+    const bad = await attempt({ device: 'x'.repeat(81), replaces: old.token.token });
+    assert.equal(bad.status, 400);
+    assert.ok(tokens.find(old.token.token), 'der alte Token gilt weiter');
+
+    // 20 Tokens: Ohne `replaces` ist kein Platz, mit ersetzt der neue den alten.
+    for (let i = 0; i < 19; i++) tokens.create(`Suche ${i}`, 'search');
+    assert.equal((await attempt({ device: 'Fremd' })).status, 400);
+    const res = await attempt({ device: 'Rubens iPhone', replaces: old.token.token });
+    assert.equal(res.status, 200);
+    assert.equal(tokens.find(old.token.token), null);
+    assert.equal(tokens.list().length, 20);
+  });
+});
+
 test('App-API: ohne, mit fremdem Recht und mit widerrufenem Token', async () => {
   await withServer(async ({ call, tokens }) => {
     const reads = ['/api/app/ich', '/api/app/stapel', '/api/app/text?id=a', '/api/app/audio?id=a&von=0&bis=1'];

@@ -400,7 +400,7 @@ final class PlayerTests: XCTestCase {
         defer { player.close() }
 
         await player.start()
-        await waitUntil { await service.textRequests == ["a", "b"] }
+        await waitUntil { player.prefetchedID == "b" }
         let requests = await service.textRequests
         XCTAssertEqual(requests, ["a", "b"], "der nächste Text lädt, während der erste spielt")
 

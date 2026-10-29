@@ -140,20 +140,27 @@ export function createAppAccess({ tokens, reading, publicUrl, appId = `${APP_TEA
     if (!entry || entry.exp <= t || given.length !== expected.length || !timingSafeEqual(given, expected)) {
       return fail(res, 400, 'Code ungültig, abgelaufen oder schon eingelöst. Bitte neu anmelden.', 'invalid_code');
     }
-    // Ein Token je Gerät: Den bisherigen widerrufen, bevor der neue entsteht (zählt sonst gegen MAX_TOKENS).
-    // Nur einen gültigen `app`-Token; ein unbekannter oder schon widerrufener ändert nichts.
-    const previous = typeof replaces === 'string' ? tokens.find(replaces) : null;
-    if (previous && previous.scope === 'app') {
-      tokens.revoke(previous.id);
-      logger.info?.(`App-Login: bisherigen Geräte-Token „${previous.name}“ widerrufen`);
-    }
+    // Ein Token je Gerät: Erst den neuen anlegen, dann den bisherigen widerrufen, damit ein
+    // abgelehnter Gerätename den funktionierenden Token nicht kostet. Nur einen gültigen
+    // `app`-Token; ein unbekannter oder schon widerrufener ändert nichts.
+    const found = typeof replaces === 'string' ? tokens.find(replaces) : null;
+    const previous = found?.scope === 'app' ? found : null;
+    const create = () => tokens.create(device, 'app');
     let created;
     try {
-      created = tokens.create(device, 'app');
+      try {
+        created = create();
+      } catch (err) {
+        // Volle Liste (Fehler ohne Feld): Der bisherige Token macht Platz, dann noch einmal.
+        if (!(err instanceof SettingsError) || err.field || !previous) throw err;
+        tokens.revoke(previous.id);
+        created = create();
+      }
     } catch (err) {
       if (err instanceof SettingsError) return fail(res, 400, err.message);
       throw err;
     }
+    if (previous && tokens.revoke(previous.id)) logger.info?.(`App-Login: bisherigen Geräte-Token „${previous.name}“ widerrufen`);
     logger.info?.(`App-Login: Geräte-Token „${created.name}“ für ${entry.user.subject}`);
     return json(res, 200, {
       ok: true,
