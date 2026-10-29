@@ -1306,6 +1306,9 @@ a.ingest-item-open:hover, a.ingest-item-open:focus-visible { color: var(--accent
 /* --- Lesen: Offline --- */
 /* Markierungen, die noch im Puffer auf Netz warten (lesen-doc.js, CSS Custom Highlight API) */
 ::highlight(lesen-wartet) { background-color: color-mix(in srgb, #facc15 22%, transparent); text-decoration: underline dashed var(--warn); }
+/* Entfernen wartet auf Netz (VCP-87): Text bleibt, die Farbe geht schon. */
+.lesen-text mark.hl[data-weg] { background: none; text-decoration: line-through dashed var(--warn); cursor: default; }
+.offline-missing { margin: 0.25rem 0 0; }
 
 /* --- Lesen: Querverbindungen --- */
 /* Seitenleiste der Leseansicht (src/web/static/lesen-verbinden.js); Treffer nutzen .lesen-notes, auf dem iPhone ein Blatt von unten */

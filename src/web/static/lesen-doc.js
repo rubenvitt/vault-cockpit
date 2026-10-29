@@ -16,9 +16,11 @@
 //   die Aktionen in src/lesen/highlights.js.
 //
 // Ohne Netz oder auf der gespeicherten Seite (VCP-80) gehen Markieren, Notiz,
-// Fortschritt und die Entscheidungen in den Puffer von /static/offline.js
-// (`window.cockpitPuffer`) und von dort später raus. Neue Markierungen tragen
-// dafür immer eine eigene ID (`cid`); wartende zeigt die Seite per CSS-Highlight.
+// Entfernen, In Inbox, Fortschritt und die Entscheidungen in den Puffer von
+// /static/offline.js (`window.cockpitPuffer`) und von dort später raus, auch
+// wenn erst das Senden zeigt, dass kein Netz da ist (Funkloch, VCP-87). Neue
+// Markierungen tragen dafür immer eine eigene ID (`cid`); wartende zeigt die
+// Seite per CSS-Highlight, wartendes Entfernen blendet die Markierung aus.
 (() => {
   'use strict';
 
@@ -37,9 +39,12 @@
   // offline.js läuft nach diesem Skript: erst beim Aufruf nachsehen.
   const puffer = () => window.cockpitPuffer;
   const NEW = '/aktion/lesen/markierung/neu';
+  const REMOVE = '/aktion/lesen/markierung/loeschen';
   const BUFFERED = {
     [NEW]: 'Markierung',
     '/aktion/lesen/markierung/notiz': 'Notiz',
+    [REMOVE]: 'Entfernen',
+    '/aktion/lesen/markierung/inbox': 'In Inbox',
     '/aktion/lesen/doc/fortschritt': 'Lesefortschritt',
     '/aktion/lesen/doc/status': 'Status',
     '/aktion/lesen/doc/fertig': 'Fertig, weg',
@@ -105,7 +110,7 @@
   });
   document.addEventListener('click', (e) => {
     if (!(e.target instanceof Element) || bar.contains(e.target)) return;
-    const mark = e.target.closest('.lesen-text mark[data-hl]');
+    const mark = e.target.closest('.lesen-text mark[data-hl]:not([data-weg])');
     if (mark && getSelection().isCollapsed) show({ id: mark.dataset.hl });
     else if (current?.id) hide();
   });
@@ -134,7 +139,7 @@
       if (note === null) return;
       return s.id ? post('/aktion/lesen/markierung/notiz', { id: s.id, notiz: note }) : post(NEW, { id: docId(), ...s.anchor, notiz: note, cid: newId() });
     }
-    if (cmd === 'delete' && s.id) return post('/aktion/lesen/markierung/loeschen', { id: s.id });
+    if (cmd === 'delete' && s.id) return post(REMOVE, { id: s.id });
     if (cmd === 'inbox') return post('/aktion/lesen/markierung/inbox', s.id ? { markierung: s.id } : { id: docId(), ...s.anchor, cid: newId() }, { reload: false });
     if (cmd === 'link') {
       const handled = !document.dispatchEvent(new CustomEvent('lesen:verbinden', { cancelable: true, detail: { docId: docId(), anchor: s.anchor ?? null, highlightId: s.id ?? null } }));
@@ -160,26 +165,37 @@
   // --- Ohne Netz: Puffer -------------------------------------------------------
 
   /**
-   * Legt die Aktion in den Puffer. Schlüssel: neue Markierung ihre `cid`, sonst
-   * Aktion und Ziel, damit nur der letzte Stand rausgeht. `true`, wenn es geklappt hat.
+   * Legt die Aktion in den Puffer. Schlüssel: neue Markierung ihre `cid`, eine
+   * neue Stelle für die Inbox Aktion und `cid`, sonst Aktion und Ziel, damit nur
+   * der letzte Stand rausgeht. `true`, wenn es geklappt hat.
    */
   async function buffer(action, fields, { quiet = false } = {}) {
     const p = puffer();
     const title = document.querySelector('.lesen-doc-head h1')?.textContent ?? '';
-    const id = action === NEW ? fields.cid : `${action}:${fields.id}`;
-    const ok = p ? await p.queue({ id, action, fields, label: `${BUFFERED[action]}: ${title}`, quiet }) : false;
+    // Das CSRF-Token holt der Puffer beim Nachsenden frisch; `back` braucht nur der Weg ohne JavaScript.
+    const rest = { ...fields };
+    delete rest.csrf;
+    delete rest.back;
+    const id = action === NEW ? rest.cid : `${action}:${rest.cid ?? rest.markierung ?? rest.id}`;
+    const ok = p ? await p.queue({ id, action, fields: rest, label: `${BUFFERED[action]}: ${title}`, quiet }) : false;
     if (quiet) return ok;
     if (!ok) {
       toast('Ohne Netz, und dieses Gerät kann gerade nichts zwischenspeichern. Nichts gespeichert.', { kind: 'error' });
       return false;
     }
     hide();
-    if (action === NEW) {
-      paint(fields);
-      getSelection().removeAllRanges();
-    }
+    getSelection().removeAllRanges();
+    if (action === NEW) paint(rest);
+    if (action === REMOVE) gone(rest.id);
     toast(`${BUFFERED[action]} wartet auf Netz und geht automatisch raus.`);
     return true;
+  }
+
+  /** Markierung, deren Entfernen wartet: im Text ohne Farbe, in der Seitenleiste weg. Der Text bleibt, die Anker stimmen weiter. */
+  function gone(id) {
+    for (const m of document.querySelectorAll(`.lesen-text mark[data-hl="${CSS.escape(id)}"]`)) m.dataset.weg = '';
+    const item = document.querySelector(`.lesen-notes li[data-hl="${CSS.escape(id)}"]`);
+    if (item) item.hidden = true;
   }
 
   // Wartende Markierungen als CSS-Highlight: ändert den Text nicht, die Anker stimmen weiter.
@@ -217,13 +233,16 @@
 
   // Beim Öffnen: Was für diesen Artikel noch im Puffer wartet, wieder zeigen.
   document.addEventListener('DOMContentLoaded', async () => {
-    for (const e of (await puffer()?.pending().catch(() => [])) ?? []) if (e.action === NEW && !e.error && e.fields.id === docId()) paint(e.fields);
+    for (const e of (await puffer()?.pending().catch(() => [])) ?? []) {
+      if (e.error) continue;
+      if (e.action === NEW && e.fields.id === docId()) paint(e.fields);
+      if (e.action === REMOVE) gone(e.fields.id);
+    }
   });
 
   // Entscheidungen ohne Netz (Fertig, weg · In den Vault · Zurück auf den Stapel): in den Puffer, der Server
   // schreibt die Notiz beim Nachsenden. Die Knöpfe bleiben, wie sie sind; die Meldung sagt, dass es wartet.
-  // shortcut: Im Funkloch mit `navigator.onLine` true gehen sie über cockpit.js und melden nur den Fehler;
-  // „Entfernen“ und „In Inbox“ puffern gar nicht. Bei Bedarf dort auf `err.offline` hin puffern.
+  const decision = (form) => buffer(form.getAttribute('action'), Object.fromEntries(new FormData(form)));
   document.addEventListener(
     'submit',
     async (e) => {
@@ -231,14 +250,12 @@
       if (!(form instanceof HTMLFormElement) || !form.hasAttribute('data-decide') || !puffer()?.offline()) return;
       e.preventDefault();
       e.stopImmediatePropagation();
-      // Das CSRF-Token holt der Puffer beim Nachsenden frisch.
-      const fields = Object.fromEntries(new FormData(form));
-      delete fields.csrf;
-      delete fields.back;
-      await buffer(form.getAttribute('action'), fields);
+      await decision(form);
     },
     true,
   );
+  // Funkloch: `navigator.onLine` sagt true, das Senden über cockpit.js scheitert. Dann fragt es hier nach.
+  window.cockpitLesen = { decision: (form) => (form.hasAttribute('data-decide') && BUFFERED[form.getAttribute('action')] ? decision(form) : Promise.resolve(false)) };
 
   /** Lesetext und Seitenleiste neu vom Server, mit den Markierungen an ihrer Stelle. */
   async function refresh() {

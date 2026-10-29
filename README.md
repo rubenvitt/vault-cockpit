@@ -531,7 +531,10 @@ nächsten Login raus. Was der Server ablehnt (z. B. Zunder antwortet nicht),
 bleibt mit Fehler in der Liste, bis man es erneut sendet, ins Feld zurückholt
 oder verwirft. Notizvorschau, Suche, Einstellungen und die JSON-Schnittstellen
 speichert der Service Worker nie; Abmelden und jeder neue Login löschen die
-gespeicherte Woche (der Puffer bleibt und geht mit der nächsten Anmeldung raus).
+gespeicherte Woche. Abmelden leert auch den Puffer (VCP-87): Vorher geht mit Netz
+noch raus, was geht (höchstens vier Sekunden); wartet danach noch etwas, fragt
+die Seite, ob es wirklich vom Gerät gelöscht werden soll. Eine abgelaufene
+Sitzung ist kein Abmelden: Dann bleibt der Puffer und geht nach dem Login raus.
 
 **Offline lesen** (VCP-80): Neben der Woche darf genau dieser Lesestoff auf dem
 Gerät liegen, und nichts sonst: die nächsten 30 Artikel des Stapels (Reihenfolge
@@ -548,8 +551,13 @@ er holt nur, was fehlt oder älter als einen Tag ist, und löscht, was nicht meh
 auf der Liste steht. Wer einen gespeicherten Artikel mit Netz öffnet, frischt ihn
 auf. Eine Synthese zeigt auch Titel und Pfade verlinkter oder ähnlicher Notizen
 (wie online), deren Inhalt nicht. Ohne Netz gehen in der Leseansicht
-**Markieren, Notizen, Fortschritt und die Entscheidungen** (Fertig, weg · In den Vault) in denselben Puffer wie die
-Schnelleingabe; wartende Markierungen sind gestrichelt unterlegt. Jede neue
+**Markieren, Notizen, Entfernen, In Inbox, Fortschritt und die Entscheidungen** (Fertig, weg · In den Vault) in denselben Puffer wie die
+Schnelleingabe, auch im Funkloch, wenn das Gerät sich für online hält und erst
+das Senden scheitert; wartende Markierungen sind gestrichelt unterlegt, eine
+Markierung, deren Entfernen wartet, ist durchgestrichen. Ein zweites Entfernen
+derselben Markierung meldet der Server als erledigt, nicht als Fehler. Auf einer
+gespeicherten Seite zeigen Stapel und Seitenleiste nur Artikel, die selbst
+offline vorliegen, mit dem Hinweis, wie viele fehlen. Jede neue
 Markierung bekommt auf dem Gerät eine ID, die der Server als ihre ID übernimmt
 (`cid` bei `/aktion/lesen/markierung/neu`): Dieselbe ID legt nie eine zweite an.
 Fortschritt, Status und Notiz gelten mit dem letzten Stand. Das CSRF-Token holt
