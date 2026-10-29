@@ -33,6 +33,13 @@
     return e;
   }
 
+  /** Farbpunkt; die Farbe über CSSOM, ein `style`-Attribut verbietet die CSP. */
+  function swatch(color) {
+    const s = el('span', { class: 'swatch' });
+    s.style.background = color;
+    return s;
+  }
+
   // --- Farben -------------------------------------------------------------------
 
   let colors = {};
@@ -274,7 +281,7 @@
       el('button', { type: 'button', class: 'close', 'aria-label': 'Schließen', text: '×', onclick: () => select(null) }),
       el('h3', { text: a.label }),
       el('span', { class: 'meta', text: [a.path, degree === 1 ? '1 Link' : `${degree} Links`].join(' · ') }),
-      g ? el('span', { class: 'meta' }, el('span', { class: 'swatch', style: `background:${g.color}` }), g.label) : null,
+      g ? el('span', { class: 'meta' }, swatch(g.color), g.label) : null,
       el('div', { class: 'chips' },
         chip('Nachbarschaft', { href: graphHref(a.path) }),
         canNotes ? chip('Notiz ansehen', { href: noteHref(a.path) }) : null),
@@ -417,7 +424,7 @@
         picked = picked === i ? null : i;
         renderLegend();
         renderer.refresh({ skipIndexation: true });
-      } }, el('span', { class: 'swatch', style: `background:${g.color}` }), g.label, el('span', { class: 'count meta', text: String(g.count) }))),
+      } }, swatch(g.color), g.label, el('span', { class: 'count meta', text: String(g.count) }))),
     );
     legend.hidden = false;
   }
