@@ -71,8 +71,8 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-const routesWith = (embedder) =>
-  readingRoutes({ store, logger: quiet, embedCache: createEmbedCache({ embedder: () => embedder, logger: quiet }), connections: { index: idx, semantic: () => semantic, policy, exporter } });
+const routesWith = (embedder, options = {}) =>
+  readingRoutes({ store, logger: quiet, embedCache: createEmbedCache({ embedder: () => embedder, logger: quiet }), connections: { index: idx, semantic: () => semantic, policy, exporter, ...options } });
 async function find(routes, params) {
   const r = await routes.pages['/api/lesen/verbindungen']({ url: new URL(`https://vault.test/api/lesen/verbindungen?${new URLSearchParams(params)}`) });
   return { status: r.status, ...JSON.parse(r.body) };
@@ -85,13 +85,18 @@ test('Querverbindungen: ähnlichste Markierungen anderer Texte und Synthesen/Kon
   assert.equal(r.status, 200);
   assert.equal(r.source, 'semantic');
   assert.equal(r.problem, null);
-  assert.deepEqual(r.highlights.map((h) => h.id), [hl.b.id, hl.c.id], 'eigenes Dokument fehlt, Reihenfolge nach Ähnlichkeit');
+  assert.deepEqual(r.highlights.map((h) => h.id), [hl.b.id], 'eigenes Dokument fehlt, „Kirsche“ liegt unter der Mindest-Ähnlichkeit');
   assert.equal(r.highlights[0].title, 'Zweiter Text');
   assert.equal(r.highlights[0].href, `/lesen/doc?id=${docs.b.id}#h-${hl.b.id}`);
-  assert.deepEqual(r.notes.map((n) => n.path), ['wiki/obst.md', 'wiki/birnen.md'], 'nur Synthesen und Konzepte, nichts Vertrauliches');
+  assert.deepEqual(r.notes.map((n) => n.path), ['wiki/obst.md'], 'nur Synthesen und Konzepte ab der Mindest-Ähnlichkeit, nichts Vertrauliches');
   assert.equal(r.notes[0].heading, 'Äpfel im Herbst');
   assert.match(r.notes[0].text, /Apfel Apfel/);
-  assert.ok(r.notes[0].score > r.notes[1].score);
+
+  // Ohne Schwelle kommen auch die schwachen Treffer, ähnlichste zuerst.
+  const all = await find(routesWith(fruitEmbedder(), { minScore: 0 }), { markierung: hl.a.id });
+  assert.deepEqual(all.highlights.map((h) => h.id), [hl.b.id, hl.c.id], 'Reihenfolge nach Ähnlichkeit');
+  assert.deepEqual(all.notes.map((n) => n.path), ['wiki/obst.md', 'wiki/birnen.md']);
+  assert.ok(all.notes[0].score > all.notes[1].score);
 
   // Eine Auswahl ohne Markierung wird direkt eingebettet.
   const sel = await find(routes, { doc: docs.a.id, text: 'Kirsche' });
@@ -103,7 +108,7 @@ test('Querverbindungen: ähnlichste Markierungen anderer Texte und Synthesen/Kon
 });
 
 test('Querverbindungen: Verknüpfen schreibt den Wikilink in die Lesestapel-Notiz, der Index kennt ihn, danach „Schon verknüpft“', async () => {
-  const routes = routesWith(fruitEmbedder());
+  const routes = routesWith(fruitEmbedder(), { minScore: 0 });
   const before = readFileSync(join(root, 'wiki/obst.md'), 'utf8');
   const r1 = await connect(routes, { markierung: hl.a.id, pfad: 'wiki/obst.md', abschnitt: 'Äpfel im Herbst' });
   assert.equal(r1.message, 'Verknüpft mit Obst');

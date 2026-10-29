@@ -1129,7 +1129,9 @@ nicht mehr an. Wikilinks zu einer Markierung schreibt `addLink` aus
 einer noch nicht gespeicherten Auswahl zeigt in der Seitenleiste der
 Leseansicht, auf dem iPhone als Blatt von unten, passende Stellen aus anderen
 Quellen: Markierungen anderer Texte aus dem Lesestapel und Synthesen und
-Konzepte (`type: synthesis` oder `concept`) mit ihrem ähnlichsten Abschnitt.
+Konzepte (`type: synthesis` oder `concept`) mit ihrem ähnlichsten Abschnitt,
+je höchstens sechs und nur ab einem Kosinus von 0,55 (bge-m3, am echten Vault
+gemessen: Passendes liegt darüber, der beste Treffer zu Unpassendem um 0,5).
 Die Auswahl wird dafür sofort eingebettet, nicht erst beim nächsten Indexlauf;
 die Embeddings der Markierungen liegen nur im Speicher und teilen sich
 Wiedersehen und Querverbindungen (`src/lesen/embed-cache.js`). Die eigene

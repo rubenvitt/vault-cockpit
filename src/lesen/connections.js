@@ -33,9 +33,17 @@ import { NOTE_TYPE, SECTION, blockId, parseLinks } from './vault-export.js';
  *   Markierung markiert der Client vorher über `/aktion/lesen/markierung/neu`.
  */
 
-/** shortcut: Typen nach der Vault-Konvention (`type: synthesis`, `type: concept`), nicht an einem echten Vault geprüft; bei Bedarf in die Einstellungen. */
+/** Typen nach der Vault-Konvention, am echten Vault geprüft (VCP-84): `wiki/concepts` hat `type: concept`, `wiki/synthesis` hat `type: synthesis`. */
 export const NOTE_TYPES = ['synthesis', 'concept'];
 const LIMIT = 6;
+/**
+ * Mindest-Kosinus für Markierungen und Notizen (bge-m3), am echten Vault
+ * gemessen (VCP-84): Passende Konzepte liegen bei 0,56 bis 0,68, der beste
+ * Treffer zu einer Auswahl ohne passendes Gegenstück (Spiele-Patchnotes, Lego
+ * mit dem Kind) bei 0,46 bis 0,51. Darunter zeigt die Seitenleiste lieber
+ * „Nichts Passendes gefunden“ als die besten sechs um jeden Preis.
+ */
+export const MIN_SCORE = 0.55;
 /** So lange wartet die Suche auf das Embedding der Auswahl, danach Volltext. */
 const QUERY_WAIT_MS = 4000;
 /** shortcut: verglichen werden höchstens die neuesten so vielen Markierungen; reicht für einige Jahre Lesen. */
@@ -52,7 +60,7 @@ const round = (x) => Math.round(x * 1000) / 1000;
  * `index`, `policy` wie für `/notiz`; `semantic` ist der semantische Index oder
  * ein Getter dafür, `exporter` die Lesestapel-Notizen (src/lesen/vault-export.js).
  */
-export function createConnections({ store, index, semantic = null, policy, exporter = null, embedCache = null, limit = LIMIT }) {
+export function createConnections({ store, index, semantic = null, policy, exporter = null, embedCache = null, limit = LIMIT, minScore = MIN_SCORE }) {
   const semanticOf = () => (typeof semantic === 'function' ? semantic() : semantic);
 
   /** Wie `listed` in src/cockpit/notes.js: eigene Notiz, nicht vertraulich, nicht ausgeschlossen. */
@@ -92,7 +100,8 @@ export function createConnections({ store, index, semantic = null, policy, expor
   /**
    * Ähnliche Stellen zu einer Markierung (`highlightId`) oder einer Auswahl
    * (`docId` + `text`):
-   * - `highlights`: `{ id, docId, title, text, note, href, score, linked }`, ähnlichste zuerst
+   * - `highlights`: `{ id, docId, title, text, note, href, score, linked }`, ähnlichste zuerst;
+   *   wie `notes` nur Treffer ab `minScore` (Volltext ohne Schwelle)
    * - `notes`: `{ path, title, type, heading, text, href, score, linked }`
    * - `linked`: schon verknüpfte Ziele `{ target, href }` (nur zu einer Markierung)
    * - `source`: `semantic` oder `text`, `problem`: Hinweis, warum nur Volltext
@@ -135,6 +144,7 @@ export function createConnections({ store, index, semantic = null, policy, expor
         .map((o, i) => ({ o, v: corpusVecs?.[i] }))
         .filter((x) => x.v)
         .map(({ o, v }) => ({ o, score: dot(vec, v) }))
+        .filter((x) => x.score >= minScore)
         .sort((a, b) => b.score - a.score)
         .slice(0, limit)
         .map(({ o, score }) => ({
@@ -150,7 +160,7 @@ export function createConnections({ store, index, semantic = null, policy, expor
       const allowed = new Set();
       for (const type of NOTE_TYPES) for (const p of index.filterPaths({ type })) if (p !== ownNote && listed(p)) allowed.add(p);
       const hits = semanticOf()?.searchVector(vec, { limit, allow: (p) => allowed.has(p) }) ?? [];
-      result.notes = hits.map((x) => noteHit(x.path, x, linkedPaths));
+      result.notes = hits.filter((x) => x.score >= minScore).map((x) => noteHit(x.path, x, linkedPaths));
       return result;
     }
 

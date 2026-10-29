@@ -32,7 +32,14 @@ const REVIEW = '/aktion/lesen/wiedersehen';
 const UNDO = '/aktion/lesen/wiedersehen/zurueck';
 const LINK = '/aktion/lesen/wiedersehen/verbindung';
 const MAX_WORDS = 4000;
-/** shortcut: Schwelle für bge-m3 geschätzt, nicht an echten Markierungen gemessen; bei zu vielen oder zu wenigen Treffern nachjustieren. */
+/**
+ * shortcut: Schwelle für bge-m3, an echten Lesestapel-Texten nur angenähert
+ * (VCP-84, Stand 29.10.2026 gibt es erst eine exportierte Markierung): Eine
+ * Kernaussage gegen Abschnitte anderer Texte zum selben Thema liegt bei 0,65
+ * bis 0,70, gegen den eigenen Text bei 0,84. Zwei kurze Markierungen liegen
+ * meist höher als Markierung gegen Abschnitt; 0,75 fasst also nur eng
+ * Verwandtes zusammen. Mit mehr Markierungen erneut prüfen.
+ */
 const CLUSTER_THRESHOLD = 0.75;
 /** shortcut: höchstens so viele Markierungen einer Woche fürs Clustering (O(n²)); reicht für eine normale Woche. */
 const CLUSTER_MAX_ITEMS = 200;

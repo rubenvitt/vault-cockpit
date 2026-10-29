@@ -35,7 +35,12 @@ import { blockId } from './vault-export.js';
 export const SECTION = 'aus-dem-lesestapel';
 const HEADING = 'Aus dem Lesestapel';
 const LABEL = 'Belege aus dem Lesestapel, das Cockpit schreibt bis zum Endmarker neu';
-/** shortcut: Schwelle für bge-m3 gegen den besten Abschnitt geschätzt, nicht an einem echten Vault geprüft; bei Bedarf in die Einstellungen. */
+/**
+ * Schwelle für bge-m3 gegen den besten Abschnitt, am echten Vault geprüft
+ * (VCP-84): Ein echter Beleg („Leistungsfähige AI-Systeme scheitern leise“ zu
+ * „AI Governance vs. API-Governance“, Abschnitt False Success) liegt bei 0,63,
+ * nur thematisch benachbarte Synthesen bei 0,54 bis 0,58, Unpassendes unter 0,5.
+ */
 export const MIN_SCORE = 0.6;
 const LIMIT = 5;
 /** shortcut: verglichen werden höchstens die neuesten so vielen Markierungen, wie bei den Querverbindungen. */
