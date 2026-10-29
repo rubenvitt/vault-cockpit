@@ -6,7 +6,7 @@ import { maskSecrets } from '../health/mask.js';
 import { FetchError, splitCredentials } from './fetch.js';
 import { ReadingError } from './store.js';
 import { readingPage } from './pages.js';
-import { discoverFeed, fetchFeedDefault, rememberBacklog, DEFAULT_INTERVAL } from './feeds.js';
+import { discoverFeed, fetchFeedDefault, rememberBacklog, DEFAULT_INTERVAL, AUTO_PAUSE_ERRORS } from './feeds.js';
 import { parseOpml, toOpml } from './opml.js';
 import { jsonReply } from './json.js';
 
@@ -70,6 +70,7 @@ const iconOf = (f) =>
 
 /** Zustand eines Feeds: `kind` (`paused`, `groupPaused`, `error`, `ok`, `new`) und der Text der Seite. */
 function feedState(f, tz, now = Date.now()) {
+  if (f.paused && f.error_count >= AUTO_PAUSE_ERRORS) return { kind: 'paused', text: `nach ${f.error_count} Fehlern pausiert: ${maskSecrets(f.last_error, { max: 160 })}` };
   if (f.paused) return { kind: 'paused', text: 'pausiert' };
   if (f.group_paused) return { kind: 'groupPaused', text: 'pausiert (Gruppe)' };
   if (f.error_count) return { kind: 'error', text: `Fehler (${f.error_count}×): ${maskSecrets(f.last_error, { max: 160 })}` };

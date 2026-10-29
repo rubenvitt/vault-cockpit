@@ -12,7 +12,7 @@ import { createHealth } from '../src/health/collect.js';
 import { createReadingStore } from '../src/lesen/store.js';
 import { readingRoutes } from '../src/lesen/http.js';
 import { FetchError, safeFetch } from '../src/lesen/fetch.js';
-import { parseFeed, findFeedLink, matchesFilter, createFeedPoller, isLinkStub } from '../src/lesen/feeds.js';
+import { parseFeed, findFeedLink, matchesFilter, createFeedPoller, isLinkStub, AUTO_PAUSE_ERRORS } from '../src/lesen/feeds.js';
 import { parseOpml, toOpml } from '../src/lesen/opml.js';
 import { docJson } from '../src/lesen/json.js';
 import { createSecretBox } from '../src/cockpit/secret-box.js';
@@ -918,4 +918,67 @@ test('Feeds: Der Hintergrundabruf holt kein PDF, der Link-Post behält seinen An
     assert.doesNotMatch(doc.content_text, /nicht anfassen/);
     assert.equal(isLinkStub(doc), true, 'bleibt Link-Post, der Ingest holt den Artikel');
   }
+});
+
+test('Feeds: Atom mit Präfix (atom:feed) wird gelesen, fremdes Präfix nicht', () => {
+  const xml = `<?xml version="1.0"?><atom:feed xmlns:atom="http://www.w3.org/2005/Atom"><atom:title>Präfix</atom:title><atom:link href="https://pre.test/"/>
+<atom:entry><atom:id>p1</atom:id><atom:title>Eins</atom:title><atom:link rel="alternate" href="/1"/><atom:updated>2026-10-19T10:00:00Z</atom:updated><atom:author><atom:name>Cy</atom:name></atom:author>
+<atom:content type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml"><p>Hallo</p></div></atom:content></atom:entry></atom:feed>`;
+  const f = parseFeed(xml, 'https://pre.test/feed');
+  assert.equal(f.title, 'Präfix');
+  assert.equal(f.siteUrl, 'https://pre.test/');
+  assert.deepEqual(f.entries.map((e) => [e.key, e.url, e.title, e.author, e.published]), [['p1', 'https://pre.test/1', 'Eins', 'Cy', Date.parse('2026-10-19T10:00:00Z')]]);
+  assert.match(f.entries[0].html, /<p>Hallo<\/p>/);
+  assert.throws(() => parseFeed('<x:feed xmlns:x="urn:anders"><x:entry/></x:feed>', 'https://pre.test/'), /Feed/);
+});
+
+test('Feeds: gelockerter Stichwort-Filter holt Aussortiertes nach, das noch im Feed steht', async () => {
+  const { store, feeds, poller, tick } = setup({ rssItems: [rssItem(1, { body: '<p>Rust kurz</p>' }), rssItem(2, { body: '<p>Python kurz</p>' })] });
+  store.updateFeed(feeds.blog.id, { keyword_filter: 'rust' });
+  await poller.runDue();
+  assert.deepEqual(docsOf(store, feeds.blog).map((d) => d.title), ['Beitrag 1']);
+  // Gleicher Filter noch einmal gespeichert: nichts wird neu geprüft.
+  store.updateFeed(feeds.blog.id, { keyword_filter: 'rust' });
+  tick(31);
+  await poller.runDue();
+  assert.equal(docsOf(store, feeds.blog).length, 1);
+  store.updateFeed(feeds.blog.id, { keyword_filter: 'rust, python' });
+  tick(31);
+  await poller.runDue();
+  assert.deepEqual(docsOf(store, feeds.blog).map((d) => d.title).sort(), ['Beitrag 1', 'Beitrag 2']);
+});
+
+test('Feeds: dauerhaft toter Feed pausiert nach AUTO_PAUSE_ERRORS Fehlern, Einschalten setzt die Fehler zurück', async () => {
+  const { store, feeds, poller, tick, routes } = setup();
+  for (const f of [feeds.blog, feeds.atom, feeds.json]) store.updateFeed(f.id, { paused: true });
+  for (let i = 0; i < AUTO_PAUSE_ERRORS; i++) {
+    await poller.runDue();
+    tick(24 * 60 + 1);
+  }
+  const dead = store.getFeed(feeds.kaputt.id);
+  assert.equal(dead.error_count, AUTO_PAUSE_ERRORS);
+  assert.equal(dead.paused, true);
+  const item = poller.health().items.find((i) => i.name === 'kaputt.test');
+  assert.deepEqual([item.state, item.summary], ['off', `nach ${AUTO_PAUSE_ERRORS} Fehlern pausiert`]);
+  assert.notEqual(poller.health().state, 'error', '/zustand nicht mehr dauerhaft gestört');
+
+  routes['https://kaputt.test/feed'] = rss([rssItem(1)]);
+  const on = store.updateFeed(feeds.kaputt.id, { paused: false });
+  assert.deepEqual([on.error_count, on.last_error, on.next_fetch_at], [0, null, null]);
+  await poller.runDue();
+  assert.equal(store.getFeed(feeds.kaputt.id).last_error, null);
+  assert.equal(docsOf(store, feeds.kaputt).length, 1);
+});
+
+test('Feeds: fehlendes Icon wird nach einer Woche noch einmal gesucht', async () => {
+  const { store, feeds, poller, tick, routes } = setup();
+  await poller.runDue();
+  assert.equal(store.getFeed(feeds.atom.id).icon, '');
+  routes['https://atom.test/favicon.ico'] = async () => ({ url: 'https://atom.test/favicon.ico', status: 200, contentType: 'image/x-icon', bytes: Buffer.from([4, 5]), headers: {} });
+  tick(31);
+  await poller.runDue();
+  assert.equal(store.getFeed(feeds.atom.id).icon, '', 'zu früh');
+  tick(7 * 24 * 60);
+  await poller.runDue();
+  assert.equal(store.getFeed(feeds.atom.id).icon, 'data:image/x-icon;base64,BAU=');
 });
