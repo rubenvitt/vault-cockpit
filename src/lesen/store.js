@@ -161,6 +161,12 @@ const FEED_SELECT = 'SELECT f.*, g.paused AS group_paused, g.to_stack AS group_t
 /** WHERE-Teil für den Gruppenfilter über `origin` (Dokumente kennen nur ihren Feed). */
 const groupWhere = (group) =>
   group == null ? ['1', []] : group === NO_FEED ? ["origin NOT LIKE 'feed:%'", []] : ["origin IN (SELECT 'feed:' || id FROM feeds WHERE group_id = ?)", [String(group)]];
+const titleKey = (t) => String(t ?? '').toLocaleLowerCase('de').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+/** Gleicher Artikel nach dem Titel? Fehlt einer, zählt die Adresse allein; „Titel“ passt auch zu „Titel – Seite“. */
+const sameTitle = (a, b) => {
+  const [x, y] = [titleKey(a), titleKey(b)];
+  return !x || !y || x === y || x.startsWith(`${y} `) || y.startsWith(`${x} `);
+};
 // node:sqlite bindet keine Booleans.
 const bindable = (v) => (typeof v === 'boolean' ? Number(v) : v === undefined ? null : v);
 
@@ -243,18 +249,25 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
     return row;
   };
 
-  /** Schon gespeichert? Erst per `client_id`, dann per Adresse (auch kanonisch). */
-  const findExisting = ({ client_id: clientId, url, canonical_url: canonical }) => {
+  /**
+   * Schon gespeichert? Erst per `client_id`, dann per Adresse (auch als
+   * kanonische eines vorhandenen). Über die eigene kanonische Adresse nur, wenn
+   * die Titel zusammenpassen: Manche Websites geben vielen Artikeln dieselbe
+   * Canonical (die Startseite, eine Rubrik), die dürfen nicht verschmelzen.
+   */
+  const findExisting = ({ client_id: clientId, url, canonical_url: canonical, title = null }) => {
     if (clientId) {
       const row = db.prepare('SELECT * FROM documents WHERE client_id = ?').get(clientId);
       if (row) return fromRow(row);
     }
-    const urls = [url, canonical].filter(Boolean);
-    if (!urls.length) return null;
-    const marks = urls.map(() => '?').join(', ');
-    return fromRow(db.prepare(`SELECT * FROM documents WHERE url IN (${marks}) OR canonical_url IN (${marks}) LIMIT 1`).get(...urls, ...urls));
+    if (url) {
+      const row = db.prepare('SELECT * FROM documents WHERE url = ? OR canonical_url = ? ORDER BY url = ? DESC LIMIT 1').get(url, url, url);
+      if (row) return fromRow(row);
+    }
+    if (!canonical || canonical === url) return null;
+    const rows = db.prepare('SELECT * FROM documents WHERE url = ? OR canonical_url = ? ORDER BY url = ? DESC').all(canonical, canonical, canonical);
+    return fromRow(rows.find((r) => sameTitle(r.title, title)) ?? null);
   };
-
   return {
     /**
      * Legt ein Dokument an, idempotent: Dieselbe `client_id` oder dieselbe

@@ -262,3 +262,17 @@ test('Lesestapel: Fassung 2 bekommt heard_at, Dokumente bleiben', () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('Lesestapel: website-weite Canonical legt verschiedene Artikel nicht zusammen, gleiche schon', () => {
+  const store = createReadingStore({ path: ':memory:' });
+  const a = store.addDocument({ url: 'https://blog.test/a', canonical_url: 'https://blog.test/artikel', title: 'Erster Artikel' }).doc;
+  // Andere Seite, dieselbe Canonical, anderer Titel: eigener Artikel.
+  const b = store.addDocument({ url: 'https://blog.test/b', canonical_url: 'https://blog.test/artikel', title: 'Ganz anderes Thema' });
+  assert.equal(b.duplicate, false);
+  // Dieselbe Canonical mit passendem Titel (etwa mit Tracking-Parametern geteilt): derselbe.
+  assert.equal(store.addDocument({ url: 'https://blog.test/a?utm=x', canonical_url: 'https://blog.test/artikel', title: 'Erster Artikel – Blog' }).doc.id, a.id);
+  // Ohne Titel entscheidet die Adresse allein, wie bisher.
+  assert.equal(store.addDocument({ url: 'https://blog.test/c', canonical_url: 'https://blog.test/artikel' }).doc.id, a.id);
+  // Die Adresse selbst ist die Canonical eines vorhandenen: derselbe.
+  assert.equal(store.addDocument({ url: 'https://blog.test/artikel', title: 'Was anderes' }).doc.id, a.id);
+});
