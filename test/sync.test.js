@@ -76,7 +76,7 @@ test('applyChanges führt Bilder in der Tabelle images, ohne Beobachter zu wecke
     unlinkSync(join(root, 'projects/Foto.PNG'));
     mgr.applyChanges(['projects/Foto.PNG', 'projects/Erste.md']);
     assert.deepEqual(mgr.imagesNamed('foto.png'), []);
-    assert.deepEqual(heard.map((c) => c.paths), [[], ['projects/Erste.md']]);
+    assert.deepEqual(heard.map((c) => c.paths), [['projects/Erste.md']]);
   } finally {
     off();
   }
