@@ -72,8 +72,8 @@ function fakeCaches(pages = []) {
 }
 
 const settle = () => new Promise((r) => setTimeout(r, 5));
-async function until(check, what) {
-  for (let i = 0; i < 200; i++) {
+async function until(check, what, ms = 1000) {
+  for (let i = 0; i < ms / 5; i++) {
     if (check()) return;
     await settle();
   }
@@ -304,6 +304,35 @@ test('Abmelden ohne Netz: Rückfrage, wenn noch etwas wartet; Abbrechen behält 
   assert.equal(page.idb.data.size, 0, 'auch der stille Fortschritt ist weg');
   assert.equal(page.caches.stores.has('cockpit-seiten'), false);
   assert.equal(page.requests.length, 0, 'ohne Netz kein Versuch zu senden');
+});
+
+test('Abmelden während eines hängenden Nachsendens: Nach dem Bestätigen geht nichts mehr raus', async () => {
+  let release;
+  const gate = new Promise((r) => (release = r));
+  const page = await loadPage({
+    html: LOGOUT,
+    onLine: false,
+    server: async (path) => {
+      if (path === '/api/sitzung') return { body: { csrf: 't1' } };
+      await gate;
+      return { body: { ok: true, message: 'ok' } };
+    },
+  });
+  for (const id of ['a', 'b']) await page.puffer.queue({ id, action: '/aktion/lesen/markierung/notiz', fields: { id, notiz: id }, label: `Notiz: ${id}` });
+  page.ctx.navigator.onLine = true;
+  page.logout();
+  // Die erste Notiz hängt, nach der Wartezeit fragt die Seite und löscht.
+  await until(() => page.submitted.length, 'Abmelden geht raus', 6000);
+  assert.equal(page.confirms.length, 1);
+  assert.equal(page.idb.data.size, 0);
+  release();
+  await settle();
+  await settle();
+  assert.deepEqual(
+    page.requests.filter((r) => r.path !== '/api/sitzung').map((r) => r.fields.id),
+    ['a'],
+    'b geht nach dem Bestätigen nicht mehr raus',
+  );
 });
 
 test('Gespeicherte Leseseite: Stapel und Seitenleiste zeigen nur Artikel, die offline vorliegen', async () => {

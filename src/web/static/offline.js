@@ -112,6 +112,8 @@
     await reload();
     const shown = entries.filter((e) => !e.quiet || e.error).length;
     if (shown && !window.confirm(`${shown === 1 ? 'Ein Eintrag wartet' : `${shown} Einträge warten`} noch auf Netz. Beim Abmelden ${shown === 1 ? 'wird er' : 'werden sie'} von diesem Gerät gelöscht und nicht gesendet. Trotzdem abmelden?`)) return false;
+    // Ein Lauf, der noch unterwegs ist, sendet danach nichts mehr; was schon raus ist, ist raus.
+    leaving = true;
     await Promise.all([forgetWeek(), clear().catch(() => {})]);
     entries = [];
     render();
@@ -212,6 +214,8 @@
   }
 
   let flushing = null;
+  // Abmelden bestätigt: Der Puffer ist gelöscht, ein laufender Lauf hört auf.
+  let leaving = false;
   /** Sendet, was wartet; `retry` nimmt auch Einträge mit Fehler noch einmal. Nie zwei Läufe gleichzeitig, auch nicht über Tabs. */
   function flush({ retry = false } = {}) {
     // Ohne Netz nicht einmal nach dem Token fragen (VCP-55).
@@ -261,6 +265,7 @@
     const sent = [];
     let failed = 0;
     for (const entry of todo) {
+      if (leaving) break;
       let r = await sendOne(entry, csrf);
       // Token veraltet (Sitzung inzwischen erneuert): einmal frisch holen und noch einmal.
       if (r === 'csrf') {

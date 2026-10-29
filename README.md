@@ -533,7 +533,9 @@ oder verwirft. Notizvorschau, Suche, Einstellungen und die JSON-Schnittstellen
 speichert der Service Worker nie; Abmelden und jeder neue Login löschen die
 gespeicherte Woche. Abmelden leert auch den Puffer (VCP-87): Vorher geht mit Netz
 noch raus, was geht (höchstens vier Sekunden); wartet danach noch etwas, fragt
-die Seite, ob es wirklich vom Gerät gelöscht werden soll. Eine abgelaufene
+die Seite, ob es wirklich vom Gerät gelöscht werden soll. Wer abbricht, bleibt
+angemeldet, Puffer und gespeicherte Seiten bleiben. Wer bestätigt, dessen noch
+laufendes Nachsenden schickt danach nichts mehr. Eine abgelaufene
 Sitzung ist kein Abmelden: Dann bleibt der Puffer und geht nach dem Login raus.
 
 **Offline lesen** (VCP-80): Neben der Woche darf genau dieser Lesestoff auf dem
