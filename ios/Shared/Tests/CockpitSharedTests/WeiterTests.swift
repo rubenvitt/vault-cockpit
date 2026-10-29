@@ -130,6 +130,20 @@ final class WeiterTests: XCTestCase {
         XCTAssertTrue(legacy.heard.isEmpty)
     }
 
+    func testTranscriptCanBeMarkedDone() throws {
+        let open = try JSONDecoder().decode(Episode.self, from: Data(#"{"id":"ep-offen","kind":"report","title":"Report: Offen","status":"transkript","createdAt":"2026-10-25T09:00:00.000Z","audio":false,"listen":"neu","heardAt":null}"#.utf8))
+        let done = try JSONDecoder().decode(Episode.self, from: Data(#"{"id":"ep-erledigt","kind":"podcast","title":"Podcast: Erledigt","status":"transkript","createdAt":"2026-10-24T09:00:00.000Z","audio":false,"listen":"gehoert","heardAt":"2026-10-26T08:00:00.000Z"}"#.utf8))
+        XCTAssertFalse(open.isHeard)
+        XCTAssertNil(open.doneLabel(timeZone: berlin))
+        XCTAssertTrue(done.isHeard)
+        XCTAssertEqual(done.doneLabel(timeZone: berlin), "erledigt am 26. Okt.")
+        XCTAssertNil(done.listenLabel(timeZone: berlin), "kein Hörstand ohne Audio")
+        let groups = EpisodeGroups([open, done])
+        XCTAssertEqual(groups.transcripts.map(\.id), ["ep-offen"])
+        XCTAssertEqual(groups.heard.map(\.id), ["ep-erledigt"])
+        XCTAssertTrue(groups.toHear.isEmpty)
+    }
+
     // MARK: Stores
 
     @MainActor

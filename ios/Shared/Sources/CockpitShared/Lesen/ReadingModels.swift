@@ -973,8 +973,8 @@ public struct Episode: Decodable, Equatable, Identifiable, Sendable {
     public var position: Int?
 
     public var isDone: Bool { status == EpisodeStatus.done }
-    /// Fertig und gehört: steht unter „Gehört“, eingeklappt.
-    public var isHeard: Bool { isDone && (listen == EpisodeListen.heard || (listen == nil && heardAt != nil)) }
+    /// Fertig und gehört (oder ein Transkript, erledigt): steht unter „Gehört“, eingeklappt.
+    public var isHeard: Bool { (isDone || isTranscript) && (listen == EpisodeListen.heard || (listen == nil && heardAt != nil)) }
     /// Fertig, angefangen, aber nicht zu Ende.
     public var isStarted: Bool { isDone && !isHeard && (position ?? 0) > 0 }
 
@@ -984,6 +984,11 @@ public struct Episode: Decodable, Equatable, Identifiable, Sendable {
         if isHeard { return heardAt.flatMap { WeiterFormat.day($0, timeZone: timeZone) }.map { "gehört am \($0)" } ?? "gehört" }
         if let position, position > 0 { return "angefangen, bei \(Self.clock(position))" }
         return "noch nicht gehört"
+    }
+    /// Erledigtes Transkript als Satz: „erledigt am 24. Okt.“; sonst nil.
+    public func doneLabel(timeZone: TimeZone = .current) -> String? {
+        guard isTranscript, isHeard else { return nil }
+        return heardAt.flatMap { WeiterFormat.day($0, timeZone: timeZone) }.map { "erledigt am \($0)" } ?? "erledigt"
     }
     public var isFailed: Bool { status == EpisodeStatus.failed }
     /// Erst nur das Transkript ist fertig; Audio entsteht auf Knopfdruck.
@@ -1054,7 +1059,7 @@ public enum EpisodeListen {
 }
 
 /// Folgen in Gruppen wie im Web (`episodeGroups`): Zum Hören (angefangene zuerst), Entsteht (auch
-/// fehlgeschlagene), Nur Transkript und Gehört.
+/// fehlgeschlagene), Nur Transkript und Gehört (auch erledigte Transkripte).
 public struct EpisodeGroups: Equatable, Sendable {
     public let toHear: [Episode]
     public let inProgress: [Episode]
@@ -1066,8 +1071,8 @@ public struct EpisodeGroups: Equatable, Sendable {
         let open = done.filter { !$0.isHeard }
         toHear = open.filter(\.isStarted) + open.filter { !$0.isStarted }
         inProgress = items.filter { $0.busy || $0.isFailed }
-        transcripts = items.filter(\.isTranscript)
-        heard = done.filter(\.isHeard)
+        transcripts = items.filter { $0.isTranscript && !$0.isHeard }
+        heard = items.filter { ($0.isDone || $0.isTranscript) && $0.isHeard }
     }
 }
 

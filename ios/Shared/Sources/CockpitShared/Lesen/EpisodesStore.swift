@@ -163,7 +163,7 @@ public final class EpisodesStore {
     /// Gruppe, bei Ablehnung zurück. Mit Rückgängig.
     @discardableResult
     public func markHeard(_ episode: Episode, _ heard: Bool = true) async -> Bool {
-        guard episode.isDone, let before = remote.model, let index = before.items.firstIndex(where: { $0.id == episode.id }), !busy.contains(episode.id) else { return false }
+        guard episode.isDone || episode.isTranscript, let before = remote.model, let index = before.items.firstIndex(where: { $0.id == episode.id }), !busy.contains(episode.id) else { return false }
         busy.insert(episode.id)
         defer { busy.remove(episode.id) }
         remote.model?.items[index].listen = heard ? EpisodeListen.heard : EpisodeListen.new

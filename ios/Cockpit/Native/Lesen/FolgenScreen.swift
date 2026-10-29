@@ -244,6 +244,7 @@ struct FolgenList: View {
                     model.open(path: CockpitFormat.notePath(path))
                 },
                 speak: { speak(episode) },
+                markDone: heardAction(episode),
                 share: episode.kind == "vorlesen" ? nil : { shareLink(episode) },
                 ingest: { ingest(episode) },
                 openIngest: openIngest,
@@ -273,7 +274,8 @@ struct FolgenList: View {
         AppModel.EpisodeRequest(episodeID: episode.id, title: episode.title, kind: episode.kindLabel, seconds: Double(episode.seconds ?? 0), bytes: episode.bytes ?? 0)
     }
 
-    /// „Als gehört markieren“ bzw. „Doch nicht gehört“; ältere Server kennen keinen Hörstand.
+    /// „Als gehört markieren“ bzw. „Doch nicht gehört“ (Transkript: „Als erledigt markieren“);
+    /// ältere Server kennen keinen Hörstand.
     private func heardAction(_ episode: Episode) -> (() -> Void)? {
         guard episode.listen != nil || episode.heardAt != nil else { return nil }
         let store = store
