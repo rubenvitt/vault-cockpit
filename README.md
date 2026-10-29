@@ -197,9 +197,10 @@ der Compose-Datei des Servers nachziehen.
 
 Der eigene Sync (VCP-13) soll Obsidian Sync ablösen: Das Cockpit ist selbst der
 Sync-Server, die Geräte gleichen sich über `/sync/v1` mit dem Vault-Ordner auf dem
-Server ab, ohne Sidecar. Fertig sind der Server (VCP-120) und der Merge bei
-Konflikten (VCP-122); der Client als Obsidian-Plugin, Geräte im Web-Cockpit,
-Verlauf, Verschlüsselung und der Umstieg folgen (VCP-121, VCP-123 bis VCP-126). Bis dahin bleibt
+Server ab, ohne Sidecar. Fertig sind der Server (VCP-120), der Merge bei
+Konflikten (VCP-122) und der Client als Obsidian-Plugin „Cockpit Sync“
+(VCP-121, [`obsidian-plugin/`](obsidian-plugin/README.md)); Geräte im
+Web-Cockpit, Verlauf, Verschlüsselung und der Umstieg folgen (VCP-123 bis VCP-126). Bis dahin bleibt
 Obsidian Headless der Standard.
 
 - Einschalten im Web-Cockpit unter **Einstellungen → Sync** („Eigener Sync“),
@@ -1642,7 +1643,8 @@ npm ci && npm test
 - `src/vault/` — Markdown-Parser, SQLite-FTS5-Index, Link-Graph, Policy, Capture, Bearbeiten
 - `src/mcp/` — MCP-Werkzeuge auf Basis von `@modelcontextprotocol/server` v2
 - `src/http/` — HTTP-Schicht, Protected Resource Metadata, Host-Prüfung
-- `src/sync/` — Sync-Adapter: Dateibeobachtung, inkrementeller Reindex, Sync-Status; `server/` ist der eigene Sync (Journal, Protokoll `/sync/v1`)
+- `src/sync/` — Sync-Adapter: Dateibeobachtung, inkrementeller Reindex, Sync-Status; `server/` ist der eigene Sync (Journal, Protokoll `/sync/v1`, 3-Wege-Merge)
+- `obsidian-plugin/` — Obsidian-Plugin „Cockpit Sync“, der Client des eigenen Syncs (eine Datei, kein Build)
 - `src/capture/` — Capture von außen: Endpunkte, Mail-Abruf, Zunder-Weiterleitung und -Brücke
 - `src/cockpit/` — Wochenmodell: ISO-Wochen, Feuer-Notiz (mit Flammen aus Zunder), Kalender (iCal mit Serienauflösung, CalDAV), Einstellungen, Zusammenstellung aus Zunder
 - `src/semantic/` — Embeddings (Ollama), Abschnitte, Vektorspeicher, hybride Suche
