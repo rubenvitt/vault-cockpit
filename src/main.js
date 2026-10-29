@@ -6,7 +6,8 @@ import { createIndexManager } from './vault/manager.js';
 import { loadPolicy } from './vault/policy.js';
 import { createCapture } from './vault/capture.js';
 import { createEditor } from './vault/edit.js';
-import { createSyncAdapter } from './sync/index.js';
+import { createSyncSwitch } from './sync/index.js';
+import { createSyncHttp } from './sync/server/http.js';
 import { createVaultMcpHandler } from './mcp/server.js';
 import { toWebRequest, writeWebResponse } from './http/bridge.js';
 import { createZunderClient } from './capture/zunder.js';
@@ -46,6 +47,7 @@ import { createCockpitActions } from './cockpit/actions.js';
 import { createWeekPlanner } from './cockpit/plan.js';
 import { createNoteDesk } from './cockpit/notes.js';
 import { createFlameNote } from './cockpit/flammen-notiz.js';
+import { createFlameBlocks } from './cockpit/flammen-bloecke.js';
 import { createOllamaEmbedder } from './semantic/embedder.js';
 import { createSemanticIndex } from './semantic/index.js';
 import { hybridSearch } from './semantic/search.js';
@@ -105,13 +107,6 @@ const index = createIndexManager({
   intervalMinutes: Number(process.env.REINDEX_INTERVAL_MIN ?? 15),
 });
 
-const SYNC_ADAPTER = process.env.SYNC_ADAPTER ?? 'obsidian-headless';
-const sync = createSyncAdapter({
-  kind: SYNC_ADAPTER,
-  vaultPath: VAULT_PATH,
-  statusFile: process.env.SYNC_STATUS_FILE || null,
-});
-
 const CAPTURE_FOLDER = process.env.CAPTURE_FOLDER ?? 'inbox';
 const capture = createCapture({ vaultPath: VAULT_PATH, folder: CAPTURE_FOLDER });
 const editor = createEditor({ vaultPath: VAULT_PATH, index });
@@ -136,6 +131,7 @@ const cockpitSettings = createSettingsStore({
     mailbox: process.env.MAIL_MAILBOX || 'Vault',
     doneMailbox: process.env.MAIL_DONE_MAILBOX || 'Archive',
     mailPollMinutes: Number(process.env.MAIL_POLL_MIN) || 5,
+    syncAdapter: process.env.SYNC_ADAPTER || 'obsidian-headless',
     embedUrl: process.env.EMBED_URL || null,
     embedModel: process.env.EMBED_MODEL || 'bge-m3',
     ttsProvider: process.env.TTS_PROVIDER || null,
@@ -143,6 +139,23 @@ const cockpitSettings = createSettingsStore({
     ...(process.env.ELEVENLABS_VOICE_ID ? { elevenlabsVoice: process.env.ELEVENLABS_VOICE_ID } : {}),
     ...(process.env.ELEVENLABS_MODEL ? { elevenlabsModel: process.env.ELEVENLABS_MODEL } : {}),
   },
+});
+
+// Welcher Sync den Vault-Ordner abgleicht, steht unter Einstellungen → Sync
+// (`SYNC_ADAPTER` gilt nur als Standard für ältere Deployments). Ein Wechsel
+// wirkt ohne Neustart; der eigene Sync legt Journal und Blobs neben den Index.
+const sync = createSyncSwitch({
+  kind: cockpitSettings.get().sync.adapter,
+  vaultPath: VAULT_PATH,
+  statusFile: process.env.SYNC_STATUS_FILE || null,
+  dataDir: dirname(INDEX_DB),
+});
+cockpitSettings.onChange(() => {
+  try {
+    sync.switchTo(cockpitSettings.get().sync.adapter);
+  } catch (err) {
+    console.error(`Sync: Wechsel fehlgeschlagen, es läuft weiter ${sync.name}: ${err.message}`);
+  }
 });
 
 // Vorlesen mit ElevenLabs („Unterwegs hören“): aus, bis unter Einstellungen →
@@ -186,7 +199,10 @@ const calendars = createCalendarSources({ settings: cockpitSettings });
 // Ob Zunder den Zugang annimmt, merkt sich der Client bei jedem Aufruf (Seite
 // „Zustand“); ein neuer Zugang fängt von vorn an.
 const zunderAccess = createRunLog();
+// Verlauf der Flammen, geteilt von Wochenansicht, Rückblick und Feuer-Notiz (VCP-118).
+const flameBlocks = createFlameBlocks();
 const cockpit = createCockpit({
+  flameBlocks,
   index,
   settings: cockpitSettings,
   calendars,
@@ -211,6 +227,11 @@ const captureRouter = createCaptureRouter({ capture, zunder, state: captureState
 // /capture und /funke. CAPTURE_TOKEN aus älteren Deployments gilt daneben weiter.
 const apiTokens = createTokenStore({ file: join(dirname(COCKPIT_SETTINGS_FILE), 'api-tokens.json') });
 const LEGACY_CAPTURE_TOKEN = process.env.CAPTURE_TOKEN || null;
+
+// Eigener Sync (VCP-13): Geräte gleichen sich über /sync/v1 ab, mit je einem
+// API-Token mit dem Recht „Sync“. Ohne eingeschalteten eigenen Sync antwortet
+// /sync/v1 mit 503.
+const syncHttp = createSyncHttp({ tokens: apiTokens, journal: () => sync.journal, onWrite: (path) => sync.notifyWrite(path) });
 
 // Lesestapel (VCP-77): Artikel, Markierungen und Feeds, neben den Einstellungen
 // unter /data. Lässt sich nicht neu bauen, gehört deshalb in die Sicherung.
@@ -313,7 +334,7 @@ sync.start({
 
 // Flammen der Woche mit gemessener Zeit in die Feuer-Notiz (VCP-52): nach
 // Start/Stopp im Cockpit und im Reindex-Intervall, abschaltbar in den Einstellungen.
-const flameNote = createFlameNote({ vaultPath: VAULT_PATH, index, editor, policy: POLICY, settings: cockpitSettings, zunder });
+const flameNote = createFlameNote({ vaultPath: VAULT_PATH, index, editor, policy: POLICY, settings: cockpitSettings, zunder, flameBlocks });
 setInterval(() => flameNote.round(), Number(process.env.REINDEX_INTERVAL_MIN ?? 15) * 60_000).unref();
 flameNote.round();
 // Eingeschaltet in den Einstellungen: gleich schreiben, nicht erst im nächsten Intervall (VCP-61).
@@ -337,6 +358,7 @@ const health = createHealth({
   calendars,
   flameNote,
   feeds: () => feedPoller.health(),
+  readingExport: () => readingExport.health(),
   // Letzter Erfolg und Fehler je Dienst überstehen einen Neustart (VCP-60).
   file: join(dirname(COCKPIT_SETTINGS_FILE), 'dienste-zustand.json'),
 });
@@ -570,6 +592,7 @@ const app = createApp({
   captureHttp,
   readingApi,
   searchHttp,
+  syncHttp,
   webHttp,
   degraded: () => health.degraded(),
   mcpHandler: async (req, res, principal, body) => {
@@ -585,10 +608,11 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`  Auth-Server : ${ISSUER} (wir sind reiner Resource Server)`);
   console.log(`  Scopes      : ${config.supportedScopes.join(', ')}`);
   console.log(`  Reindex     : alle ${process.env.REINDEX_INTERVAL_MIN ?? 15} Minuten${sync.name === 'none' ? '' : ', dazu bei jeder Dateiänderung'}`);
-  console.log(`  Sync        : ${SYNC_ADAPTER} (${sync.status().state})`);
+  console.log(`  Sync        : ${sync.name} (${sync.status().state})`);
   const tokenCount = (scope) => apiTokens.list().filter((t) => t.scope === scope).length;
   console.log(`  Capture     : /capture, /funke (${tokenCount('capture')} Capture-Tokens${LEGACY_CAPTURE_TOKEN ? ' + CAPTURE_TOKEN' : ''})${mail ? `, Mail aus „${mail.status().mailbox}“` : ''}`);
   console.log(`  Suche       : /api/search (${tokenCount('search')} Such-Tokens)`);
+  if (sync.journal) console.log(`  Eigener Sync: /sync/v1 (${tokenCount('sync')} Geräte-Tokens)`);
   console.log(`  Lesestapel  : /lesestapel/speichern (${tokenCount('lesestapel')} Lesestapel-Tokens)`);
   const z = zunderSource();
   console.log(`  Zunder      : ${z ? `${z} (! → Inbox, Brücke ${bridgeState()})` : `aus (Einstellungen → Zunder), Brücke ${bridgeState()}`}`);

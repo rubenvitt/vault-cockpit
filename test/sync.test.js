@@ -28,6 +28,38 @@ function nextBatch(batches, timeoutMs = 3000) {
   });
 }
 
+/** Wartet, bis eine Weile lang kein neues Paket mehr kommt. */
+async function settle(batches, quietMs) {
+  let seen;
+  do {
+    seen = batches.length;
+    await sleep(quietMs);
+  } while (batches.length !== seen);
+}
+
+/**
+ * Startet den Watcher und kehrt erst zurück, wenn er nachweislich Ereignisse
+ * liefert und sich beruhigt hat. Unter macOS (FSEvents) kommen die ersten
+ * Ereignisse erst nach einer Weile, und Ordner, die kurz vor dem Start
+ * angelegt wurden, können noch verspätet gemeldet werden. Eine Probe-Notiz
+ * zeigt, dass der Watcher läuft; danach ist batches leer.
+ */
+async function startLiveWatcher(dir, batches, debounceMs) {
+  const w = createVaultWatcher({ vaultPath: dir, onBatch: (b) => batches.push(b), debounceMs });
+  const deadline = Date.now() + 5000;
+  for (let i = 0; !batches.some((b) => b.paths?.includes('probe.md')); i++) {
+    if (Date.now() > deadline) {
+      w.stop();
+      throw new Error('Watcher liefert keine Ereignisse');
+    }
+    writeFileSync(join(dir, 'probe.md'), String(i));
+    await sleep(debounceMs * 2);
+  }
+  await settle(batches, debounceMs * 3);
+  batches.length = 0;
+  return w;
+}
+
 let root, dbPath, mgr;
 
 before(() => {
@@ -87,19 +119,20 @@ test('Watcher bündelt Notiz- und Bildänderungen und ignoriert versteckte Pfade
   mkdirSync(join(dir, 'notes'));
   mkdirSync(join(dir, '.obsidian'));
   const batches = [];
-  const w = createVaultWatcher({ vaultPath: dir, onBatch: (b) => batches.push(b), debounceMs: 100 });
+  const w = await startLiveWatcher(dir, batches, 100);
   try {
-    await sleep(50);
+    // Ereignisse kommen in Schreibreihenfolge. Lösen die versteckten Dateien
+    // oder der Anhang etwas aus, landet das im selben oder in einem früheren
+    // Paket als die Notizen.
     writeFileSync(join(dir, '.obsidian/workspace.json'), '{}');
+    writeFileSync(join(dir, '.obsidian/versteckt.md'), 'v');
     writeFileSync(join(dir, '.obsidian/x.png'), 'x');
     writeFileSync(join(dir, 'notes/doku.pdf'), 'x');
-    await sleep(150);
-    assert.equal(batches.length, 0, 'versteckte Dateien und andere Anhänge lösen nichts aus');
-
     writeFileSync(join(dir, 'notes/a.md'), 'a');
     writeFileSync(join(dir, 'notes/b.md'), 'b');
     writeFileSync(join(dir, 'notes/bild.png'), 'x');
     const batch = await nextBatch(batches);
+    assert.equal(batch.full, undefined, 'versteckte Dateien und andere Anhänge lösen keinen Komplettaufbau aus');
     assert.deepEqual(batch.paths.sort(), ['notes/a.md', 'notes/b.md', 'notes/bild.png']);
   } finally {
     w.stop();
@@ -112,12 +145,41 @@ test('Watcher verlangt einen Komplettaufbau, wenn ein Ordner umbenannt wird', as
   mkdirSync(join(dir, 'alt'));
   writeFileSync(join(dir, 'alt/n.md'), 'n');
   const batches = [];
-  const w = createVaultWatcher({ vaultPath: dir, onBatch: (b) => batches.push(b), debounceMs: 100 });
+  const w = await startLiveWatcher(dir, batches, 100);
   try {
-    await sleep(50);
     renameSync(join(dir, 'alt'), join(dir, 'neu'));
     const batch = await nextBatch(batches);
     assert.equal(batch.full, true);
+  } finally {
+    w.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Watcher plant für versteckte Pfade und andere Anhänge kein Paket ein', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'vault-watch-'));
+  mkdirSync(join(dir, 'notes'));
+  writeFileSync(join(dir, 'notes/doku.pdf'), 'x');
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const handlers = [];
+  const fakeWatch = (_p, _o, cb) => {
+    handlers.push(cb);
+    return { close() {}, on() {} };
+  };
+  const batches = [];
+  const w = createVaultWatcher({ vaultPath: dir, onBatch: (b) => batches.push(b), debounceMs: 100, watch: fakeWatch });
+  try {
+    handlers[0]('change', '.obsidian/workspace.json');
+    handlers[0]('rename', '.trash/alt.md');
+    handlers[0]('change', '.obsidian/x.png');
+    handlers[0]('change', 'notes/doku.pdf');
+    t.mock.timers.tick(10_000);
+    assert.deepEqual(batches, []);
+
+    handlers[0]('change', 'notes/a.md');
+    handlers[0]('rename', 'notes/bild.png');
+    t.mock.timers.tick(100);
+    assert.deepEqual(batches, [{ paths: ['notes/a.md', 'notes/bild.png'] }]);
   } finally {
     w.stop();
     rmSync(dir, { recursive: true, force: true });

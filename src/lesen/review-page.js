@@ -1,12 +1,12 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { ActionError } from '../cockpit/actions.js';
 import { describeWeek, parseWeekId, weekOf } from '../cockpit/week.js';
-import { esc } from '../web/layout.js';
+import { esc, assets } from '../web/layout.js';
 import { hidden } from '../web/render.js';
 import { readingPage } from './pages.js';
 import { dayStart } from './inbox.js';
 import { docLink } from './doc.js';
-import { inboxText } from './highlights.js';
+import { inboxText, noteTitle } from './highlights.js';
 import { REVIEW_STATES } from './store.js';
 import { createEmbedCache } from './embed-cache.js';
 import { MAX_BOX, SESSION_LIMIT, dueAt, dueCards, findClusters, isDue, keep, letGo, seenToday } from './review.js';
@@ -17,11 +17,19 @@ import { highlightJson, jsonReply } from './json.js';
  * In eigenen Worten oder Loslassen; darunter die Woche mit Themen-Balken,
  * „Querverbindung entdeckt“ und Export als Markdown. Ohne JavaScript Formulare
  * mit Weiterleitung, mit JavaScript schickt `/static/cockpit.js` sie als JSON
- * (Formular `.act`, Rückgängig in der Meldung).
+ * (Formular `.act`, Rückgängig in der Meldung), `/static/lesen-eingang.js`
+ * macht wie im Eingang Wischen und Tasten daraus (← Loslassen, → Behalten,
+ * W eigene Worte, Z rückgängig).
+ *
+ * Jede Entscheidung merkt sich den Stand davor (`review_prev`) und ihren
+ * Zeitpunkt (`reviewed_at`); die letzte von heute lässt sich wie im Eingang
+ * dauerhaft über „Rückgängig“ auf der Seite zurücknehmen (VCP-85). Eine Notiz,
+ * die „In eigenen Worten“ in die Inbox gelegt hat, bleibt dabei liegen, und
+ * die Meldung sagt das.
  *
  * Formularfelder:
  * - `/aktion/lesen/wiedersehen`: `id`, `ziel` (`behalten|worte|loslassen`), bei `worte` dazu `worte`, `cid`
- * - `/aktion/lesen/wiedersehen/zurueck`: `id`, `box`, `faellig`, `zustand` (der Stand vor der Entscheidung)
+ * - `/aktion/lesen/wiedersehen/zurueck`: `id`; ältere Clients schicken `box`, `faellig`, `zustand` mit (gilt nur ohne gemerkten Stand)
  * - `/aktion/lesen/wiedersehen/verbindung`: `ids` (Markierungen, durch Komma getrennt)
  *
  * `/api/lesen/wiedersehen?woche=` liefert die Karten von heute und die Woche
@@ -32,12 +40,31 @@ const REVIEW = '/aktion/lesen/wiedersehen';
 const UNDO = '/aktion/lesen/wiedersehen/zurueck';
 const LINK = '/aktion/lesen/wiedersehen/verbindung';
 const MAX_WORDS = 4000;
-/** shortcut: Schwelle für bge-m3 geschätzt, nicht an echten Markierungen gemessen; bei zu vielen oder zu wenigen Treffern nachjustieren. */
+/**
+ * shortcut: Schwelle für bge-m3, an echten Lesestapel-Texten nur angenähert
+ * (VCP-84, Stand 29.10.2026 gibt es erst eine exportierte Markierung): Eine
+ * Kernaussage gegen Abschnitte anderer Texte zum selben Thema liegt bei 0,65
+ * bis 0,70, gegen den eigenen Text bei 0,84. Zwei kurze Markierungen liegen
+ * meist höher als Markierung gegen Abschnitt; 0,75 fasst also nur eng
+ * Verwandtes zusammen. Mit mehr Markierungen erneut prüfen.
+ */
 const CLUSTER_THRESHOLD = 0.75;
 /** shortcut: höchstens so viele Markierungen einer Woche fürs Clustering (O(n²)); reicht für eine normale Woche. */
 const CLUSTER_MAX_ITEMS = 200;
 
 const name = (h) => h.doc_title || h.doc_url;
+/** Gemerkter Stand vor der letzten Entscheidung oder null. */
+const prevOf = (h) => {
+  try {
+    return h.review_prev ? JSON.parse(h.review_prev) : null;
+  } catch {
+    return null;
+  }
+};
+const shortQuote = (q) => {
+  const t = String(q).replace(/\s+/g, ' ').trim();
+  return t.length > 60 ? `${t.slice(0, 59).trimEnd()}…` : t;
+};
 const dateLabel = (iso, tz) => new Date(iso).toLocaleDateString('de-DE', { day: 'numeric', month: 'numeric', timeZone: tz });
 
 /** Woche aus `?woche=2026-W43`, sonst die aktuelle. */
@@ -74,11 +101,18 @@ function weekStats(items) {
   return { topics, docs: new Set(items.map((h) => h.doc_id)).size };
 }
 
-function renderCard(h, ctx, { canCapture }) {
+/** „Rückgängig“ der letzten Entscheidung von heute, wie im Eingang (Taste Z). */
+function renderUndo(last, ctx) {
+  if (!last) return '';
+  const label = `Rückgängig<span class="sr-only">: ${esc(shortQuote(last.quote))}</span>`;
+  return `<div class="inbox-row"><form method="post" action="${UNDO}" class="act inbox-undo">${hidden({ csrf: ctx.write.csrf, back: ctx.write.back, id: last.id })}<button type="submit" class="btn quiet" aria-keyshortcuts="z"><span aria-hidden="true">↶</span> ${label} <kbd aria-hidden="true">Z</kbd></button></form></div>`;
+}
+
+function renderCard(h, ctx, { canCapture, undo = '' }) {
   const write = { csrf: ctx.write.csrf, back: ctx.write.back };
   const meta = [`<a href="${esc(`${docLink(h.doc_id)}#h-${h.id}`)}">${esc(name(h))}</a>`, h.doc_site ? esc(h.doc_site) : null, `Box ${boxLabel(h)} von ${MAX_BOX}`].filter(Boolean).join(' · ');
   const words = canCapture
-    ? `<details class="wiedersehen-worte"><summary>In eigenen Worten</summary>
+    ? `<details class="wiedersehen-worte"><summary aria-keyshortcuts="w">In eigenen Worten <kbd aria-hidden="true">W</kbd></summary>
       <form method="post" action="${REVIEW}" class="act">${hidden({ ...write, id: h.id, ziel: 'worte', cid: randomUUID() })}
         <label><span class="sr-only">In eigenen Worten</span><textarea name="worte" rows="4" maxlength="${MAX_WORDS}" required placeholder="Was heißt das für mich?"></textarea></label>
         <button type="submit" class="btn">In die Inbox und weiter</button>
@@ -91,9 +125,10 @@ function renderCard(h, ctx, { canCapture }) {
     ${h.note ? `<p class="wiedersehen-note">${esc(h.note)}</p>` : ''}
   </article>
   <div class="wiedersehen-actions">
-    <form method="post" action="${REVIEW}" class="act wiedersehen-decide">${hidden({ ...write, id: h.id })}
-      <button type="submit" name="ziel" value="loslassen" class="btn">Loslassen</button>
-      <button type="submit" name="ziel" value="behalten" class="btn primary">Behalten</button>
+    ${undo}
+    <form method="post" action="${REVIEW}" class="act wiedersehen-decide wisch" data-links="loslassen" data-rechts="behalten">${hidden({ ...write, id: h.id })}
+      <button type="submit" name="ziel" value="loslassen" class="btn" aria-keyshortcuts="ArrowLeft l"><span aria-hidden="true">←</span> Loslassen <kbd aria-hidden="true">L</kbd></button>
+      <button type="submit" name="ziel" value="behalten" class="btn primary" aria-keyshortcuts="ArrowRight Enter b">Behalten <span aria-hidden="true">→</span> <kbd aria-hidden="true">↵</kbd></button>
     </form>
     ${words}
   </div>`;
@@ -145,9 +180,10 @@ export function renderReviewPage(model, ctx, opts) {
   const empty = later
     ? `<div class="inbox-empty"><p class="inbox-empty-title">Für heute reicht es</p><p class="meta">${later} ${later === 1 ? 'Markierung kommt' : 'Markierungen kommen'} morgen dran.</p></div>`
     : '<div class="inbox-empty"><p class="inbox-empty-title">Nichts fällig</p><p class="meta">Neue Markierungen kommen einen Tag später wieder. <a href="/lesen/markiert">Alle Markierungen</a></p></div>';
-  const body = `<div class="inbox wiedersehen">${progress}${card ? renderCard(card, ctx, opts) : empty}</div>
+  const undo = renderUndo(model.last, ctx);
+  const body = `<div class="inbox wiedersehen">${progress}${card ? renderCard(card, ctx, { ...opts, undo }) : empty}${!card && undo ? `<div class="wiedersehen-actions">${undo}</div>` : ''}</div>
 ${renderWeek(model, ctx, opts)}`;
-  return readingPage(ctx, { key: 'wiedersehen', title: 'Wiedersehen', body });
+  return readingPage(ctx, { key: 'wiedersehen', title: 'Wiedersehen', body, scripts: [assets.inbox] });
 }
 
 /**
@@ -178,14 +214,17 @@ export function reviewRoutes({ store, capture = null, embedder = () => null, emb
     if (!isDue(h, now())) throw new ActionError('Diese Markierung ist gerade nicht dran', 409);
     return h;
   };
-  const undoOf = (h) => ({ action: UNDO, fields: { id: h.id, box: h.review_box, faellig: h.review_due ?? '', zustand: h.review_state } });
+  const undoOf = (h) => ({ action: UNDO, fields: { id: h.id } });
 
   /** Was die Seite zeigt: Fällige, Zähler von heute, die Woche aus `?woche=` mit Häufungen. */
   async function model(ctx) {
     const t = now();
     // Ohne Grenze (`LIMIT -1`): auch alte Markierungen kommen wieder.
     const all = store.listHighlights({ limit: -1 });
-    const seen = all.filter((h) => seenToday(h, dayStart(t, ctx.tz), t)).length;
+    const today = all.filter((h) => seenToday(h, dayStart(t, ctx.tz)));
+    const seen = today.length;
+    // Die letzte Entscheidung von heute, die sich noch zurücknehmen lässt.
+    const last = today.filter(prevOf).sort((a, b) => b.reviewed_at.localeCompare(a.reviewed_at))[0] ?? null;
     const due = dueCards(all, t);
     const left = Math.min(due.length, Math.max(0, SESSION_LIMIT - seen));
     const w = weekFrom(ctx.url, t, ctx.tz);
@@ -193,7 +232,7 @@ export function reviewRoutes({ store, capture = null, embedder = () => null, emb
     const sample = items.slice(0, CLUSTER_MAX_ITEMS);
     const vectors = await vectorsFor(sample);
     const clusters = vectors ? findClusters(sample, vectors, { threshold: CLUSTER_THRESHOLD }).slice(0, 3) : [];
-    return { card: left ? due[0] : null, due, seen, left, later: due.length - left, w, items, clusters };
+    return { card: left ? due[0] : null, due, seen, left, later: due.length - left, last, w, items, clusters };
   }
 
   /** Markdown der Woche als Download (Web) und für die App. */
@@ -216,7 +255,7 @@ export function reviewRoutes({ store, capture = null, embedder = () => null, emb
        * Zähler wie „Heute x von y gesehen · n weitere morgen“ und die Woche.
        */
       async '/api/lesen/wiedersehen'(ctx) {
-        const { due, seen, left, later, w, items, clusters } = await model(ctx);
+        const { due, seen, left, later, last, w, items, clusters } = await model(ctx);
         const { topics, docs } = weekStats(items);
         const card = (h) => ({ ...highlightJson(h), box: boxLabel(h), dueAt: dueAt(h) });
         return jsonReply(200, {
@@ -229,6 +268,9 @@ export function reviewRoutes({ store, capture = null, embedder = () => null, emb
           maxBox: MAX_BOX,
           canCapture: Boolean(capture),
           cards: due.slice(0, left).map(card),
+          // Letzte Entscheidung von heute zum Zurücknehmen (wie `undo` im Eingang).
+          last: last && { ...highlightJson(last), decision: prevOf(last).ziel ?? null },
+          undo: last ? undoOf(last) : null,
           week: {
             id: w.id,
             year: w.year,
@@ -256,13 +298,14 @@ export function reviewRoutes({ store, capture = null, embedder = () => null, emb
         if (!['behalten', 'worte', 'loslassen'].includes(ziel)) throw new ActionError('Unbekannte Entscheidung');
         const h = dueOf(form.get('id'));
         let message = ziel === 'loslassen' ? 'Losgelassen' : 'Behalten';
+        const prev = { ziel, box: h.review_box, due: h.review_due ?? null, state: h.review_state };
         if (ziel === 'worte') {
           if (!capture) throw new ActionError('Die Vault-Inbox ist hier nicht angebunden', 503);
           const words = (form.get('worte') ?? '').trim();
           if (!words) throw new ActionError('Bitte in eigenen Worten etwas schreiben');
           if (words.length > MAX_WORDS) throw new ActionError(`Der Text ist zu lang (höchstens ${MAX_WORDS} Zeichen)`);
           const doc = store.get(h.doc_id);
-          const result = await capture({ text: inboxText({ quote: h.quote, note: words, doc }), captureId: form.get('cid') || null });
+          const result = await capture({ text: inboxText({ quote: h.quote, note: words, doc }), title: noteTitle('Gedanke zu', doc), captureId: form.get('cid') || null });
           if (!result.duplicate) logger.info?.(`Wiedersehen: eigene Worte zu ${doc.url} in die Inbox (${session.sub})`);
           try {
             await onOwnWords?.({ highlight: h, doc, words, result });
@@ -271,21 +314,25 @@ export function reviewRoutes({ store, capture = null, embedder = () => null, emb
             logger.warn?.(`Wiedersehen: Haken für eigene Worte fehlgeschlagen (${err.message})`);
           }
           message = `In der Inbox: ${result.path}`;
+          prev.inbox = result.path;
         }
-        store.updateHighlight(h.id, ziel === 'loslassen' ? letGo() : keep(h, now()));
+        const decided = { reviewed_at: new Date(now()).toISOString(), review_prev: JSON.stringify(prev) };
+        store.updateHighlight(h.id, { ...(ziel === 'loslassen' ? letGo() : keep(h, now())), ...decided });
         return { message, undo: undoOf(h) };
       },
 
       async [UNDO](form) {
         const h = highlightOf(form.get('id'));
-        const box = Number(form.get('box'));
-        const due = form.get('faellig') || null;
-        const state = form.get('zustand');
+        const prev = prevOf(h);
+        const box = Number(prev ? prev.box : form.get('box'));
+        const due = (prev ? prev.due : form.get('faellig')) || null;
+        const state = prev ? prev.state : form.get('zustand');
         if (!Number.isInteger(box) || box < 0 || box > MAX_BOX || (due && Number.isNaN(Date.parse(due))) || !REVIEW_STATES.includes(state)) {
           throw new ActionError('Lässt sich nicht zurücksetzen');
         }
-        store.updateHighlight(h.id, { review_box: box, review_due: due, review_state: state });
-        return { message: 'Wieder dran' };
+        store.updateHighlight(h.id, { review_box: box, review_due: due, review_state: state, reviewed_at: null, review_prev: null });
+        // Die Notiz aus „In eigenen Worten“ nimmt das Cockpit nicht zurück: Sie kann im Vault schon weiterbearbeitet sein.
+        return { message: prev?.inbox ? `Wieder dran. Die Notiz in der Inbox bleibt: ${prev.inbox}` : 'Wieder dran' };
       },
 
       async [LINK](form, session) {
@@ -297,7 +344,8 @@ export function reviewRoutes({ store, capture = null, embedder = () => null, emb
         const text = ['Querverbindung entdeckt', ...items.map((h) => inboxText({ quote: h.quote, note: h.note, doc: docs.get(h.doc_id) }))].join('\n\n');
         // Dieselbe Gruppe legt nur eine Notiz an.
         const captureId = `verbindung-${createHash('sha256').update(ids.join(',')).digest('hex').slice(0, 32)}`;
-        const result = await capture({ text, captureId });
+        const titles = [...new Set(items.map((h) => noteTitle('', docs.get(h.doc_id)).trim()))];
+        const result = await capture({ text, title: `Querverbindung ${titles.slice(0, 2).join(' und ')}${titles.length > 2 ? ' und mehr' : ''}`, captureId });
         if (!result.duplicate) logger.info?.(`Wiedersehen: Querverbindung aus ${items.length} Markierungen in die Inbox (${session.sub})`);
         return { message: `${result.duplicate ? 'Schon in der Inbox' : 'In der Inbox'}: ${result.path}`, result };
       },

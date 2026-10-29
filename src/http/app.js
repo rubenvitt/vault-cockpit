@@ -37,7 +37,7 @@ function send(res, status, body, headers = {}) {
  * nur die Protected Resource Metadata (RFC 9728), damit Claude den zuständigen
  * Authorization Server findet, und prüfen eingehende Bearer-Tokens.
  */
-export function createApp({ config, verifyToken, mcpHandler, captureHttp = null, readingApi = null, searchHttp = null, webHttp = null, degraded = () => false, logger = console }) {
+export function createApp({ config, verifyToken, mcpHandler, captureHttp = null, readingApi = null, searchHttp = null, syncHttp = null, webHttp = null, degraded = () => false, logger = console }) {
   const prmUrl = `${config.publicUrl}/.well-known/oauth-protected-resource/mcp`;
 
   const protectedResourceMetadata = () => ({
@@ -93,6 +93,9 @@ export function createApp({ config, verifyToken, mcpHandler, captureHttp = null,
     // Lesende Suche mit eigenem Token, siehe search/http.js.
     if (searchHttp?.matches(path)) return searchHttp.handle(req, res, url);
 
+    // Eigener Sync mit Geräte-Token; liest den Body selbst (Dateien bis 100 MB), siehe sync/server/http.js.
+    if (syncHttp?.matches(path)) return syncHttp.handle(req, res, url);
+
     // Web-Cockpit mit eigenem Browser-Login (Sitzungs-Cookie), siehe web/http.js.
     if (webHttp?.matches(path)) return webHttp.handle(req, res, url);
 
@@ -132,8 +135,8 @@ export function createApp({ config, verifyToken, mcpHandler, captureHttp = null,
     // eine zu strenge Prüfung ist eine dokumentierte Fehlerquelle.
     const origin = req.headers.origin;
     res.setHeader('access-control-allow-origin', origin ?? '*');
-    res.setHeader('access-control-expose-headers', 'WWW-Authenticate, MCP-Protocol-Version');
-    res.setHeader('access-control-allow-headers', 'Authorization, Content-Type, MCP-Protocol-Version, Mcp-Method, Mcp-Name');
+    res.setHeader('access-control-expose-headers', 'WWW-Authenticate, MCP-Protocol-Version, X-Sync-Hash, X-Sync-Seq, X-Sync-Mtime');
+    res.setHeader('access-control-allow-headers', 'Authorization, Content-Type, MCP-Protocol-Version, Mcp-Method, Mcp-Name, X-Sync-Client');
     res.setHeader('access-control-allow-methods', 'GET, POST, OPTIONS');
     if (req.method === 'OPTIONS') {
       res.writeHead(204);

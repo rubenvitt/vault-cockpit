@@ -1,6 +1,7 @@
 import { describeWeek, weekOf, parseWeekId, weekId, localDate, addDays } from './week.js';
 import { findFeuer } from './feuer.js';
 import { flameMinutes } from './flammen-notiz.js';
+import { createFlameBlocks } from './flammen-bloecke.js';
 
 const OPEN = ['open', 'in_progress', 'blocked'];
 
@@ -13,6 +14,9 @@ export function areaOf(task) {
   return 'Ohne Bereich';
 }
 
+/** Wie lange eine Seite höchstens auf den Verlauf der Flammen wartet (ms); danach zählt der letzte Block. */
+const PAGE_HISTORY_BUDGET_MS = 5_000;
+
 const byDue = (a, b) => String(a.due ?? '9999').localeCompare(String(b.due ?? '9999')) || a.title.localeCompare(b.title);
 
 /**
@@ -21,8 +25,12 @@ const byDue = (a, b) => String(a.due ?? '9999').localeCompare(String(b.due ?? '9
  *
  * Jede Quelle wird für sich geholt. Fällt eine aus (Zunder nicht erreichbar,
  * CalDAV-Passwort falsch), zeigt ihr Abschnitt den Fehler, der Rest bleibt.
+ *
+ * `flameBlocks` (`createFlameBlocks`) teilt den Verlauf der Flammen mit der
+ * Feuer-Notiz, damit Seiten und Notiz dieselben Minuten zeigen (VCP-118).
  */
-export function createCockpit({ index, settings, zunderFor, calendars = null, now = () => new Date(), logger = console }) {
+export function createCockpit({ index, settings, zunderFor, calendars = null, flameBlocks = null, now = () => new Date(), logger = console }) {
+  flameBlocks ??= createFlameBlocks({ logger });
   // Zunder-Client je Zugang wiederverwenden; ändert sich der Zugang in den
   // Einstellungen, entsteht ein neuer.
   let zunderCache = { key: null, client: null };
@@ -58,7 +66,21 @@ export function createCockpit({ index, settings, zunderFor, calendars = null, no
 
   const notConfigured = (what) => ({ ok: false, error: `${what} ist nicht eingerichtet`, unconfigured: true });
 
-  const minutesOf = (t) => flameMinutes(t) ?? 0;
+  const blocksOf = (zunder, tasks, scope) => flameBlocks.of(zunder, tasks, { scope, budgetMs: PAGE_HISTORY_BUDGET_MS });
+
+  /**
+   * Flammen-Minuten einer Aufgabe in der Woche: jeder Block zählt in der Woche,
+   * in der er begonnen hat. Ohne Verlauf nur der letzte Block (VCP-118).
+   */
+  const minutesIn = (t, blocks, week, tz) => {
+    const list = blocks?.length ? blocks : t.flame_started_at && t.flame_ended_at ? [{ start: t.flame_started_at, end: t.flame_ended_at }] : [];
+    return list
+      .filter((b) => {
+        const day = localDate(new Date(b.start), tz);
+        return day >= week.monday && day <= week.sunday;
+      })
+      .reduce((sum, b) => sum + (flameMinutes(t, [b]) ?? 0), 0);
+  };
 
   return {
     /**
@@ -97,10 +119,12 @@ export function createCockpit({ index, settings, zunderFor, calendars = null, no
       for (const t of [...phoenix, ...due]) if (t.status !== 'dropped') planned.set(t.id, t);
       const extra = closed.filter((t) => !planned.has(t.id));
       // Flammen-Zeit: jeder Block, der in dieser Woche begonnen hat.
+      const candidates = [...new Map([...planned.values(), ...closed].map((t) => [t.id, t])).values()];
+      const blocks = await blocksOf(zunder, candidates, `rueckblick ${week.id}`);
       const flamed = new Map();
-      for (const t of [...planned.values(), ...closed]) {
-        const start = t.flame_started_at ? localDate(new Date(t.flame_started_at), tz) : null;
-        if (start && start >= week.monday && start <= week.sunday && minutesOf(t)) flamed.set(t.id, t);
+      for (const t of candidates) {
+        const minutes = minutesIn(t, blocks.get(t.id), week, tz);
+        if (minutes) flamed.set(t.id, { t, minutes });
       }
 
       const areas = new Map();
@@ -115,7 +139,7 @@ export function createCockpit({ index, settings, zunderFor, calendars = null, no
         else a.open.push(task(t));
       }
       for (const t of extra) area(areaOf(t)).extra += 1;
-      for (const t of flamed.values()) area(areaOf(t)).minutes += minutesOf(t);
+      for (const { t, minutes } of flamed.values()) area(areaOf(t)).minutes += minutes;
 
       const list = [...areas.values()].sort((a, b) => b.planned - a.planned || b.minutes - a.minutes || a.area.localeCompare(b.area, 'de'));
       for (const a of list) a.open.sort(byDue);
@@ -125,7 +149,7 @@ export function createCockpit({ index, settings, zunderFor, calendars = null, no
         ok: true,
         areas: list,
         totals: { planned: sum('planned'), done: sum('done'), extra: sum('extra'), minutes: sum('minutes') },
-        flames: [...flamed.values()].filter((t) => t.phoenix?.role === 'flamme').map((t) => ({ ...task(t), minutes: minutesOf(t) })),
+        flames: [...flamed.values()].filter(({ t }) => t.phoenix?.role === 'flamme').map(({ t, minutes }) => ({ ...task(t), minutes })),
       };
     },
 
@@ -185,15 +209,17 @@ export function createCockpit({ index, settings, zunderFor, calendars = null, no
 
       // Flammen: Deep-Work-Blöcke der Woche. Geplant ist `due`, gemessen haben
       // Zunder und Timing — die Zeiten kommen von dort, nicht aus dem Vault.
+      // Gezählt werden alle Blöcke, wie in der Feuer-Notiz (VCP-118).
+      const flameTasks = phoenix.ok ? phoenix.data.filter((t) => t.phoenix?.role === 'flamme' && t.status !== 'dropped') : [];
+      const blocks = flameTasks.length ? await blocksOf(zunder, flameTasks, week.id) : new Map();
       const flames = phoenix.ok
-        ? phoenix.data
-            .filter((t) => t.phoenix?.role === 'flamme' && t.status !== 'dropped')
+        ? flameTasks
             .map((t) => ({
               ...task(t),
               startedAt: t.flame_started_at ?? null,
               endedAt: t.flame_ended_at ?? null,
               running: Boolean(t.flame_running),
-              minutes: flameMinutes(t),
+              minutes: flameMinutes(t, blocks.get(t.id) ?? null),
             }))
             .sort(byDue)
         : null;

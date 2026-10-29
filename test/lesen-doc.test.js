@@ -166,6 +166,10 @@ test('Markierungen: anlegen, Notiz, im Text als <mark>, nach neuem Holen noch an
     const del = await call('/aktion/lesen/markierung/loeschen', { method: 'POST', form: { csrf, id, back: `/lesen/doc?id=${doc.id}` } });
     assert.equal(del.status, 303);
     assert.equal(store.getHighlight(id), null);
+    // Noch einmal (nachgesendet aus dem Offline-Puffer, VCP-87): kein Fehler, nichts zum Rückgängigmachen.
+    const again = await call('/aktion/lesen/markierung/loeschen', { method: 'POST', form: { csrf, id }, json: true });
+    assert.equal(again.status, 200);
+    assert.deepEqual(await again.json(), { ok: true, message: 'Markierung war schon entfernt' });
     html = await page();
     assert.match(html, /Markierung entfernt[^]*action="\/aktion\/lesen\/markierung\/neu"[^]*name="cid" value="[^"]+"[^]*name="quote" value="einem Satz"/);
     const undo = await call('/aktion/lesen/markierung/neu', { method: 'POST', form: { csrf, id: doc.id, cid: id, quote: 'einem Satz', prefix: a.prefix, suffix: a.suffix, start: '' }, json: true });

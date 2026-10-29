@@ -103,8 +103,12 @@ struct NoteScreenBlockView: View {
                 .accessibilityHidden(true)
         case .image(let image):
             NoteScreenImage(image: image, actions: actions)
-        case .embed(let link):
-            NoteScreenEmbed(link: link, actions: actions)
+        case .embed(let link, let children):
+            if let children, link.status == .note {
+                NoteScreenEmbeddedNote(link: link, children: children, id: id, actions: actions)
+            } else {
+                NoteScreenEmbed(link: link, actions: actions)
+            }
         case .unknown:
             EmptyView()
         }
@@ -475,7 +479,78 @@ struct NoteScreenCode: View {
 
 // MARK: Einbettung
 
-/// `![[Notiz]]` als Verweis, `![[bild.png]]` als Bild, Dateien und fehlende Ziele nur benannt.
+/// `![[Notiz]]` mit Inhalt (`.note-embed` im Web, VCP-115): Kopfzeile mit Link auf die Notiz,
+/// darunter ihre Blöcke. Wie im Web Rand in Akzentfarbe, eine Einbettung in einer Einbettung
+/// hebt sich mit der anderen Fläche ab. Grenzen (Tiefe, Anzahl, Länge) setzt der Server.
+@MainActor
+struct NoteScreenEmbeddedNote: View {
+    let link: NoteWikilink
+    let children: [NoteBlock]
+    let id: String
+    let actions: NoteScreenActions
+
+    @Environment(\.noteEmbedDepth) private var depth
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Rectangle()
+                .fill(Theme.accentLine)
+                .frame(width: 3)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 8) {
+                header
+                if children.isEmpty {
+                    Text("Leer.")
+                        .font(.footnote)
+                        .foregroundStyle(Theme.text3)
+                } else {
+                    NoteScreenBlocks(blocks: children, actions: actions, prefix: "\(id)-")
+                        .environment(\.noteEmbedDepth, depth + 1)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .background(depth > 0 ? Theme.surface : Theme.surface2)
+        .clipShape(UnevenRoundedRectangle(bottomTrailingRadius: Theme.radius, topTrailingRadius: Theme.radius, style: .continuous))
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var header: some View {
+        Button {
+            actions.openLink(link.destination)
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: "arrow.turn.down.right")
+                    .accessibilityHidden(true)
+                Text(link.text)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .font(.footnote)
+            .foregroundStyle(Theme.accent)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Eingebettet: \(link.text)")
+        .accessibilityHint("Öffnet die Notiz")
+    }
+}
+
+private struct NoteEmbedDepthKey: EnvironmentKey {
+    static var defaultValue: Int { 0 }
+}
+
+extension EnvironmentValues {
+    /// Wie tief die Blöcke in Einbettungen stecken (0 = Text der Notiz selbst).
+    var noteEmbedDepth: Int {
+        get { self[NoteEmbedDepthKey.self] }
+        set { self[NoteEmbedDepthKey.self] = newValue }
+    }
+}
+
+/// `![[Notiz]]` ohne Inhalt als Verweis, `![[bild.png]]` als Bild, Dateien und fehlende Ziele nur benannt.
 @MainActor
 struct NoteScreenEmbed: View {
     let link: NoteWikilink

@@ -3,7 +3,7 @@ import { DEFAULT_HIDDEN_EVENTS } from '../cockpit/settings.js';
 import { esc, head, appHeader, icon } from './layout.js';
 import { backupSection, backupHint } from './backup-render.js';
 import { sessionSection, revokeForm } from './session-render.js';
-import { sectionStates, sectionNav, maskUrl, hostOf, KIND_LABELS as KIND_LABEL, SCOPE_LABELS as SCOPE_LABEL, languageOptions } from './settings-json.js';
+import { sectionStates, sectionNav, maskUrl, hostOf, KIND_LABELS as KIND_LABEL, SCOPE_LABELS as SCOPE_LABEL, languageOptions, syncOptions, SYNC_INTRO } from './settings-json.js';
 
 export { esc };
 
@@ -617,7 +617,7 @@ export function renderSettings({ stored, defaults, checks = {}, notice = null, e
   const token = `<input type="hidden" name="csrf" value="${esc(csrf)}">`;
   // Stand je Abschnitt (Text ohne HTML), derselbe wie in `/api/einstellungen`.
   const states = Object.fromEntries(Object.entries(sectionStates({ stored, defaults: d, checks })).map(([k, v]) => [k, v && [esc(v[0]), v[1]]]));
-  const { kalender: cal, zunder, mail, embeddings: embed, vorlesen: voice, bruecke: bridge, 'feuer-notiz': flameNote } = states;
+  const { kalender: cal, zunder, mail, embeddings: embed, vorlesen: voice, bruecke: bridge, 'feuer-notiz': flameNote, sync } = states;
   const tts = stored.tts ?? { provider: null, key: null, voice: null, model: null };
   const ttsDefault = (d.ttsProvider ?? (d.elevenlabsKey ? 'elevenlabs' : 'geraet')) === 'elevenlabs' ? 'ElevenLabs' : 'Gerät';
   const rows = stored.calendars.map((c, i) => calendarRow(c, i, checks[c.id])).join('');
@@ -761,6 +761,13 @@ ${backupHint(backup)}
     <label><span>Sprache <span class="hint">Podcast und Report</span></span><select name="episodes.language">${languageOptions(d)
       .map((o) => `<option value="${o.value}"${(stored.episodes?.language ?? '') === o.value ? ' selected' : ''}>${esc(o.label)}</option>`)
       .join('')}</select></label>
+  </div>
+</section>
+<section id="sync">
+  ${head2('Sync', sync)}
+  <p class="meta">${esc(SYNC_INTRO)}</p>
+  <div class="grid">
+    <label>Sync<select name="sync.adapter">${syncOptions(d).map((o) => `<option value="${esc(o.value)}"${(stored.sync?.adapter ?? '') === o.value ? ' selected' : ''}>${esc(o.label)}</option>`).join('')}</select></label>
   </div>
 </section>
 <section id="anzeige">

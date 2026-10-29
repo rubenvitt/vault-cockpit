@@ -16,13 +16,22 @@ import { EPISODE_LANGUAGES, DEFAULT_EPISODE_LANGUAGE } from '../lesen/languages.
  */
 
 export const KIND_LABELS = { ical: 'iCal-Abo', caldav: 'CalDAV' };
-export const SCOPE_LABELS = { search: 'Suche', capture: 'Capture', lesestapel: 'Lesestapel', app: 'App' };
+/** Die Sync-Wege, wie die Einstellungsseite sie nennt (src/sync/). */
+export const SYNC_LABELS = { 'obsidian-headless': 'Obsidian Sync (Sidecar)', cockpit: 'Eigener Sync (im Aufbau)', none: 'aus' };
+/** Was auf der Seite unter „Sync“ steht. */
+export const SYNC_INTRO = 'Wer den Vault-Ordner auf dem Server abgleicht. Es darf nur ein Sync pro Ordner laufen: Vor dem Wechsel auf den eigenen Sync den Sidecar vault-sync stoppen. Der Wechsel wirkt sofort, ohne Neustart. Geräte des eigenen Syncs brauchen einen API-Token mit dem Recht „Sync“.';
+export const syncOptions = (d) => [
+  { value: '', label: `Standard (${SYNC_LABELS[d.syncAdapter ?? 'obsidian-headless'] ?? d.syncAdapter})` },
+  ...Object.entries(SYNC_LABELS).map(([value, label]) => ({ value, label })),
+];
+export const SCOPE_LABELS = { search: 'Suche', capture: 'Capture', lesestapel: 'Lesestapel', app: 'App', sync: 'Sync' };
 /** Was ein Token mit diesem Recht darf, wie auf der Einstellungsseite. */
 const SCOPE_TEXT = {
   search: 'GET /api/search (ohne vertrauliche Ordner)',
   capture: '/capture und /funke, nur neue Notizen und Zunder-Aufgaben',
   lesestapel: '/lesestapel/speichern, nur Artikel und PDFs in den Eingang',
   app: 'Geräte-Token der iOS-App: /api/…, Aktionen und alles, was Lesestapel darf',
+  sync: 'Ein Gerät des eigenen Syncs: /sync/v1/…, liest und schreibt den ganzen Vault, auch vertrauliche Ordner',
 };
 const SET = 'gesetzt (leer lassen = unverändert)';
 
@@ -65,9 +74,11 @@ export function sectionStates({ stored, defaults: d, checks = {} }) {
   const voice = ttsChoice !== 'elevenlabs' ? ['Gerätestimme', 'off'] : !ttsKey ? ['ElevenLabs, es fehlt der API-Key', 'warn'] : [tts.key ? 'ElevenLabs' : 'ElevenLabs, Key aus der Umgebung', 'ok'];
   const bridge = (stored.bridge.enabled ?? d.bridgeEnabled) ? ['an', 'ok'] : ['aus', 'off'];
   const flameNote = (stored.flameNote?.enabled ?? d.flameNoteEnabled ?? true) ? ['an', 'ok'] : ['aus', 'off'];
+  const syncNow = stored.sync?.adapter ?? d.syncAdapter ?? 'obsidian-headless';
+  const sync = syncNow === 'none' ? ['aus', 'off'] : [SYNC_LABELS[syncNow] ?? syncNow, 'ok'];
   const problems = stored.calendars.filter((c) => checks[c.id] && !checks[c.id].ok).length;
   const kalender = !stored.calendars.length ? ['keine', 'off'] : problems ? [`${problems} von ${stored.calendars.length} nicht erreichbar`, 'warn'] : [`${stored.calendars.length} verbunden`, 'ok'];
-  return { kalender, zunder, bruecke: bridge, 'feuer-notiz': flameNote, mail, lesestapel: null, embeddings: embed, vorlesen: voice, anzeige: null, anmeldung: null };
+  return { kalender, zunder, bruecke: bridge, 'feuer-notiz': flameNote, mail, lesestapel: null, embeddings: embed, vorlesen: voice, sync, anzeige: null, anmeldung: null };
 }
 
 /** Abschnitte der Seite in ihrer Reihenfolge; Tokens, Kurzbefehle und Sicherung nur, wenn es sie gibt. */
@@ -81,6 +92,7 @@ export function sectionNav({ tokens = false, shortcuts = false, backup = false }
     ['lesestapel', 'Lesestapel'],
     ['embeddings', 'Embeddings'],
     ['vorlesen', 'Vorlesen'],
+    ['sync', 'Sync'],
     ['anzeige', 'Anzeige'],
     ['anmeldung', 'Anmeldung'],
     ...(tokens ? [['tokens', 'API-Tokens']] : []),
@@ -148,6 +160,10 @@ function formSections(stored, d) {
     'feuer-notiz': {
       intro: 'Trägt die Flammen der Woche mit den in Zunder gemessenen Minuten in den Abschnitt „Flammen“ der Feuer-Notiz ein, nach jedem Stopp und im Reindex-Intervall. Geschrieben wird nur zwischen den Markern cockpit:flammen.',
       fields: [field('flameNote.enabled', 'Flammen eintragen', { kind: 'select', value: choice(stored.flameNote?.enabled ?? null), options: onOff(d.flameNoteEnabled ?? true) })],
+    },
+    sync: {
+      intro: SYNC_INTRO,
+      fields: [field('sync.adapter', 'Sync', { kind: 'select', value: stored.sync?.adapter ?? '', options: syncOptions(d) })],
     },
     mail: {
       intro: 'Holt Mails aus einem Fastmail-Ordner ab und macht Notizen daraus, mit ! im Betreff Zunder-Aufgaben.',
@@ -310,7 +326,7 @@ export function settingsJson({ stored, defaults, checks = {}, tokens = null, cur
 const FIELDS = new Set([
   'tz', 'vaultName', 'inboxFolder',
   'zunder.url', 'zunder.token', 'zunder.clear',
-  'bridge.enabled', 'bridge.tag', 'flameNote.enabled', 'readingNotes.folder',
+  'bridge.enabled', 'bridge.tag', 'flameNote.enabled', 'readingNotes.folder', 'sync.adapter',
   'mail.token', 'mail.clear', 'mail.senders', 'mail.mailbox', 'mail.doneMailbox', 'mail.pollMinutes',
   'embed.url', 'embed.model',
   'tts.provider', 'tts.key', 'tts.clear', 'tts.voice', 'tts.model',
@@ -339,6 +355,7 @@ export function formOfSettings(stored) {
   put('bridge.tag', stored.bridge.tag);
   put('flameNote.enabled', choice(stored.flameNote?.enabled ?? null));
   put('readingNotes.folder', stored.readingNotes?.folder);
+  put('sync.adapter', stored.sync?.adapter);
   put('mail.senders', stored.mail.senders.join(', '));
   put('mail.mailbox', stored.mail.mailbox);
   put('mail.doneMailbox', stored.mail.doneMailbox);

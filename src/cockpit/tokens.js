@@ -7,7 +7,8 @@ import { SettingsError, writePrivate } from './settings.js';
  * Recht (`scope`): `search` für `GET /api/search`, `capture` für `/capture` und
  * `/funke` (iOS-Kurzbefehle, Funke), `lesestapel` für `/lesestapel/speichern`
  * (Artikel und PDFs in den Lesestapel), `app` für `/api/app/…` (Geräte-Token
- * der iOS-App, src/web/app-access.js). Ein `app`-Token darf zusätzlich alles,
+ * der iOS-App, src/web/app-access.js), `sync` für `/sync/v1/…` (ein Gerät des
+ * eigenen Syncs, src/sync/server/http.js). Ein `app`-Token darf zusätzlich alles,
  * was `lesestapel` darf, weil die Share Extension der App darüber speichert.
  * Tokens aus der Zeit vor den Rechten gelten als `search`; ein Token bekommt
  * nie nachträglich ein weiteres Recht.
@@ -18,7 +19,7 @@ import { SettingsError, writePrivate } from './settings.js';
  */
 
 export const MAX_TOKENS = 20;
-export const SCOPES = ['search', 'capture', 'lesestapel', 'app'];
+export const SCOPES = ['search', 'capture', 'lesestapel', 'app', 'sync'];
 /** Rechte, die ein Recht mit einschließt. */
 const INCLUDES = { app: ['lesestapel'] };
 const PREFIX = 'vct_';

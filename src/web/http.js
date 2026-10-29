@@ -13,7 +13,7 @@ import { renderReview, REVIEW_CSS } from './review-render.js';
 import { renderPlan, planRoutes, PLAN_CSS } from './plan-page.js';
 import { renderHealth, healthAlert, HEALTH_CSS } from './health-render.js';
 import { offlineFiles, readingOfflineUrls, OFFLINE_CSS, OFFLINE_MARK, SYNTHESIS_FOLDER } from './offline.js';
-import { SettingsError, MAX_CALENDARS, TTS_PROVIDERS } from '../cockpit/settings.js';
+import { SettingsError, MAX_CALENDARS, TTS_PROVIDERS, SYNC_ADAPTERS } from '../cockpit/settings.js';
 import { describeWeek, weekOf } from '../cockpit/week.js';
 import { ActionError, SETTABLE } from '../cockpit/actions.js';
 import { BackupError, MAX_BACKUP, checkPassphrase } from '../cockpit/backup.js';
@@ -750,6 +750,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       bridge: { enabled: choice('bridge.enabled'), tag: field('bridge.tag') },
       flameNote: { enabled: choice('flameNote.enabled') },
       readingNotes: { folder: field('readingNotes.folder') },
+      sync: { adapter: SYNC_ADAPTERS.includes(field('sync.adapter')) ? field('sync.adapter') : null },
       mail: {
         token: form.get('mail.clear') ? null : field('mail.token') || stored.mail.token,
         senders: list('mail.senders'),
