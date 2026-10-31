@@ -139,15 +139,17 @@
     });
   }
 
-  const summary = form.querySelector('[data-ingest-summary]');
-  const counter = form.querySelector('[data-ingest-count-for=summary]');
-  if (summary && counter) {
-    const max = Number(summary.maxLength) > 0 ? Number(summary.maxLength) : 80;
+  // Zähler unter Summary und TL;DR.
+  for (const name of ['summary', 'tldr']) {
+    const field = form.querySelector(`[name=${name}]`);
+    const counter = form.querySelector(`[data-ingest-count-for=${name}]`);
+    if (!field || !counter) continue;
+    const max = Number(field.maxLength) > 0 ? Number(field.maxLength) : 80;
     const show = () => {
-      counter.textContent = `${summary.value.length}/${max}`;
-      counter.classList.toggle('is-near', summary.value.length >= max - 8);
+      counter.textContent = `${field.value.length}/${max}`;
+      counter.classList.toggle('is-near', field.value.length >= max - Math.max(8, Math.round(max / 10)));
     };
-    summary.addEventListener('input', show);
+    field.addEventListener('input', show);
     show();
   }
 

@@ -45,6 +45,7 @@ const draftFor = (title, { evil = false } = {}) => ({
     slug: 'glaser-agenten-gedaechtnis',
     title: evil ? `${title} ${EVIL}` : title,
     summary: 'Wie Agenten sich erinnern, ohne den Kontext zu füllen',
+    tldr: 'Agenten merken sich Wichtiges außerhalb des Kontexts.',
     confidence: 'medium',
     tags: ['agents', 'memory'],
     body: `## Kern\n\nSiehe [[context-engineering]] und [Link](javascript:alert(3)).\n\n${evil ? EVIL : 'Ohne Tricks.'}`,
@@ -335,6 +336,7 @@ test('Ingest: Prüfansicht mit Digest, Source-Page, gruppierten Vorschlägen und
     // Source-Page: Felder mit den Werten des Entwurfs, Zähler bis 80, Text als Markdown.
     assert.match(page, /<input type="text" name="title" value="Agenten mit Gedächtnis" required>/);
     assert.match(page, /<span class="ingest-count" data-ingest-count-for="summary">53\/80<\/span><\/span><input type="text" name="summary" value="Wie Agenten sich erinnern, ohne den Kontext zu füllen" maxlength="80" data-ingest-summary>/);
+    assert.match(page, /data-ingest-count-for="tldr">\d+\/400<\/span><\/span><textarea name="tldr" rows="3" maxlength="400" data-ingest-tldr>Agenten merken sich Wichtiges außerhalb des Kontexts\.<\/textarea>/);
     assert.match(page, /<input type="text" name="slug" value="glaser-agenten-gedaechtnis" pattern=/);
     assert.match(page, /<input type="text" name="tags" value="agents, memory"/);
     assert.match(page, /<div class="md ingest-md"><h3 id="h-kern">Kern<\/h3>/);
@@ -386,13 +388,13 @@ test('Ingest: Übernehmen schickt gewählte Vorschläge und Felder, führt zum n
     ingest.put(a.id, 'bereit', { draft: draftFor('Erster') });
     const page = await html(`/lesen/ingest/doc?id=${a.id}`);
     const csrf = csrfFrom(page);
-    const form = new URLSearchParams({ csrf, back: `/lesen/ingest/doc?id=${a.id}`, id: a.id, title: '  Erster, besser  ', summary: 'Kurz', slug: 'erster-besser', tags: 'Agents, #memory, agents' });
+    const form = new URLSearchParams({ csrf, back: `/lesen/ingest/doc?id=${a.id}`, id: a.id, title: '  Erster, besser  ', summary: 'Kurz', tldr: 'Neu gefasst.', slug: 'erster-besser', tags: 'Agents, #memory, agents' });
     for (const id of ['v1', 's1', 'n1']) form.append('item', id);
     const res = await call('/aktion/lesen/ingest/uebernehmen', { method: 'POST', form });
     assert.equal(res.status, 303);
     assert.equal(res.headers.get('location'), `/lesen/ingest/doc?id=${b.id}`);
     const applied = ingest.calls.find((c) => c[0] === 'apply');
-    assert.deepEqual(applied, ['apply', a.id, { items: ['v1', 's1', 'n1'], source: { title: 'Erster, besser', summary: 'Kurz', slug: 'erster-besser', tags: ['agents', 'memory'] } }]);
+    assert.deepEqual(applied, ['apply', a.id, { items: ['v1', 's1', 'n1'], source: { title: 'Erster, besser', summary: 'Kurz', slug: 'erster-besser', tldr: 'Neu gefasst.', tags: ['agents', 'memory'] } }]);
     assert.equal(store.get(a.id).status, 'archiv');
     const next = await html(res.headers.get('location'));
     assert.match(next, /<span class="toast-text">Im Wiki: Erster, besser \+ 1 Seite, 1 verknüpft<\/span><a href="\/notiz\?pfad=wiki%2Fsources%2Ferster-besser\.md" class="toast-action">Source-Page öffnen<\/a>/);
@@ -419,7 +421,7 @@ test('Ingest: unterbrochenes Übernehmen steht in der Prüfansicht, die Felder d
     const page = await html(`/lesen/ingest/doc?id=${a.id}`);
     assert.match(page, /<section class="ingest-state" role="status"><p class="problem">Übernehmen unterbrochen: &quot;wiki\/concepts\/rag\.md&quot; wurde gerade anderweitig geändert\. &lt;b&gt;x&lt;\/b&gt;<\/p>/);
     assert.match(page, /Die Source-Page <a href="\/notiz\?pfad=wiki%2Fsources%2Fhalb-1234\.md">halb-1234<\/a> ist schon geschrieben/);
-    for (const name of ['title', 'summary', 'tags', 'slug']) assert.match(page, new RegExp(`name="${name}"[^>]*readonly>`), `${name} schreibgeschützt`);
+    for (const name of ['title', 'summary', 'tldr', 'tags', 'slug']) assert.match(page, new RegExp(`name="${name}"[^>]*readonly>`), `${name} schreibgeschützt`);
     assert.match(page, /<input type="text" name="slug" value="halb-1234"/, 'der Slug, den der Dienst festgelegt hat');
     assert.match(page, /wiki\/sources\/halb-1234\.md<\/span><\/h2>/);
 
