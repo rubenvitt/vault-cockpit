@@ -35,7 +35,7 @@ import { logStep, logTool } from './worklog.js';
  *
  * **Übernehmen** schreibt in festen Schritten, jeder für sich wiederholbar,
  * der Fortschritt steht in `applied`: Rohquelle über den Exporter (Volltext,
- * gelesen), Source-Page, gewählte neue Seiten, Ergänzungen bestehender
+ * gelesen), Source-Page (oben eine TL;DR als Callout `> [!tldr]`), gewählte neue Seiten, Ergänzungen bestehender
  * Synthesen (Abschnitt „### Aus [[source]] (Datum)“ unter „Ergänzungen“),
  * Verknüpfungen und Bestätigungen
  * an bestehenden Seiten, Eintrag in `wiki/log.md`, Frontmatter der Rohquelle,
@@ -82,6 +82,8 @@ const MAX_QUERIES_FROM_HIGHLIGHTS = 8;
 const MAX_FOCUS = { synthesis: 8, source: 8 };
 const EXCERPT = 700;
 const EXCERPT_TOTAL = 12_000;
+/** Länge der TL;DR oben auf der Source-Page. */
+export const TLDR_MAX = 400;
 const LIMITS = { verknuepfen: 12, neu: 8, synthese: 2, ergaenzen: 2, bestaetigung: 8, relation: 10, hinweise: 10 };
 
 const oneLine = (v, max = 200) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -132,6 +134,11 @@ function demoteHeadings(md) {
 }
 const stemOf = (path) => String(path).split('/').pop().replace(/\.md$/i, '');
 const escRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** TL;DR der Source-Page: eine Zeile ohne Wikilinks und Markdown-Fallen, höchstens TLDR_MAX Zeichen. */
+export function cleanTldr(v) {
+  const plain = String(v ?? '').replace(/\[\[(?:[^\]|]*\|)?([^\]]*)\]\]/g, '$1');
+  return safeWikiMarkdown(clip(plain, TLDR_MAX));
+}
 /** Source-Page? In deren `sources` stehen Rohquellen, keine anderen Source-Pages. */
 const isSourcePath = (path) => String(path ?? '').startsWith(`${WIKI_FOLDERS.source}/`);
 /** Slug in kebab-case ohne Umlaute; leer oder unbrauchbar → aus `fallback`. */
@@ -201,6 +208,7 @@ const PROMPT = [
   '- `digest.bestaetigt`: Kandidaten, deren Aussage der Text bestätigt (`path` exakt wie angegeben, `claim` = die bestätigte Aussage).',
   '- `digest.widerspricht`: Kandidaten, denen der Text widerspricht, mit `vorschlag` zur Auflösung.',
   '- `digest.dockt_an`: Kandidaten, an die der Text anschließt und die auf die neue Source-Page verweisen sollen (`warum` in einem Satz). Nur echte Bezüge, keine bloße Themennähe.',
+  '- `source.tldr`: TL;DR des Texts in ein bis drei Sätzen (höchstens 350 Zeichen), Deutsch, ohne Wikilinks: das Wichtigste für jemanden, der nur diese Zeilen liest. Steht ganz oben auf der Source-Page.',
   '- `source`: die Source-Page. `body` ist Markdown ohne Überschrift erster Ordnung und ohne Frontmatter: eine Destillation, keine Kopie (was ist neu, was ist relevant, was widerspricht Bestehendem), mit Wikilinks auf Kandidaten und auf deine neuen Seiten. `confidence` nach Qualität der Quelle (high nur bei sauber belegten Quellen).',
   '- `neu`: neue Seiten (kind entity, concept, synthesis oder question) mit Slug, Titel, Summary, kurzem Body (Markdown, Deutsch, ohne Überschrift erster Ordnung) und `warum`. Entity mit `entity_type`, Synthese mit `art` und `beteiligte` (Pfade der Kandidaten). Fragen als Frage formuliert. Leer lassen, wenn nichts davon trägt.',
   '- Synthese-Schritt: Gehe die Synthesen und Quellen unter <synthesen-und-quellen> einzeln durch. Bildet der Text mit einer anderen Quelle eine Querverbindung, lässt er sich mit ihr vergleichen oder widerspricht er ihr? Daraus 0–2 neue Synthesen in `neu` (kind synthesis): `art` querverbindung, vergleich oder widerspruch (bei einem erkannten Widerspruch bevorzugt eine Synthese mit art widerspruch), `beteiligte` mit mindestens einem Pfad einer anderen Quelle oder Synthese aus den Kandidaten (sonst wird sie verworfen), der Body benennt, was erst aus beiden zusammen sichtbar wird.',
@@ -233,11 +241,12 @@ const SCHEMA = {
     source: {
       type: 'object',
       additionalProperties: false,
-      required: ['slug', 'title', 'summary', 'confidence', 'tags', 'body'],
+      required: ['slug', 'title', 'summary', 'tldr', 'confidence', 'tags', 'body'],
       properties: {
         slug: { type: 'string' },
         title: { type: 'string' },
         summary: { type: 'string', description: 'höchstens 80 Zeichen' },
+        tldr: { type: 'string', description: 'ein bis drei Sätze, höchstens 350 Zeichen' },
         confidence: { type: 'string', enum: CONFIDENCE },
         tags: { type: 'array', items: { type: 'string' } },
         body: { type: 'string' },
@@ -309,7 +318,7 @@ function brief(draft) {
   return {
     version: draft.version,
     digest: { kernaussagen: draft.digest?.kernaussagen ?? [], neu: draft.digest?.neu ?? [] },
-    source: { slug: draft.source?.slug, title: draft.source?.title, summary: draft.source?.summary, confidence: draft.source?.confidence, tags: draft.source?.tags ?? [] },
+    source: { slug: draft.source?.slug, title: draft.source?.title, summary: draft.source?.summary, tldr: draft.source?.tldr ?? '', confidence: draft.source?.confidence, tags: draft.source?.tags ?? [] },
     hinweise: draft.hinweise ?? [],
     // Ohne Body und Begründung: genug für Zählung und Gruppen auf den Karten der Übersicht.
     items: (draft.items ?? []).map(({ id, kind, action, title, entity_type, art, default: def }) => ({ id, kind, action, title, entity_type, art, default: def })),
@@ -457,6 +466,7 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
       slug: cleanSlug(out?.source?.slug, title),
       title,
       summary: clip(out?.source?.summary ?? '', 80),
+      tldr: cleanTldr(out?.source?.tldr),
       confidence: CONFIDENCE.includes(out?.source?.confidence) ? out.source.confidence : 'medium',
       tags: cleanTags(out?.source?.tags ?? []),
       body: String(out?.source?.body ?? '').trim(),
@@ -814,12 +824,13 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
     }
   }
 
-  /** Source-Page: Frontmatter nach Mycel, H1, Destillation, Markiertes, Verknüpftes, Quelle. */
+  /** Source-Page: Frontmatter nach Mycel, H1, TL;DR als Callout, Destillation, Markiertes, Verknüpftes, Quelle. */
   function sourceContent({ doc, source, rawPath, relations, chosenStems, highlights }) {
     const rawStem = stemOf(rawPath);
     const url = /^https?:\/\//i.test(doc.url ?? '') ? doc.url : null;
     const d = today();
     const body = safeWikiMarkdown(source.body.trim());
+    const tldr = cleanTldr(source.tldr);
     const missing = chosenStems.filter((s) => !new RegExp(`\\[\\[${escRe(s)}(?:[|#\\]])`).test(body));
     // Zitat aus dem Artikel, Notiz vom Leser: `<…>` und fremde Bilder entschärft wie Claudes Text.
     const marks = highlights.map((h) => {
@@ -844,6 +855,8 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
       '',
       `# ${safeWikiMarkdown(source.title)}`,
       '',
+      // TL;DR ganz oben, als Callout: in Obsidian eingeklappt lesbar, beim Überfliegen zuerst da.
+      ...(tldr ? ['> [!tldr] TL;DR', `> ${tldr}`, ''] : []),
       ...(body ? [body, ''] : []),
       ...(marks.length ? ['## Markiert', '', ...marks, ''] : []),
       ...(missing.length ? ['## Verknüpft', '', ...missing.map((s) => `- [[${s}]]`), ''] : []),
@@ -931,6 +944,7 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
       const source = { ...draft.source };
       if (oneLine(edits.title)) source.title = oneLine(edits.title, 200);
       if (oneLine(edits.summary)) source.summary = clip(edits.summary, 80);
+      if (edits.tldr != null) source.tldr = cleanTldr(edits.tldr);
       if (oneLine(edits.slug)) source.slug = cleanSlug(edits.slug, source.title);
       if (edits.tags != null && oneLine([edits.tags].flat().join(' '))) source.tags = cleanTags(edits.tags);
 

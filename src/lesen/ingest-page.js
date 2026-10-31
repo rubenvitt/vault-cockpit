@@ -53,6 +53,8 @@ const liveLog = (id, log, tz) => `<div data-ingest-worklog="${esc(id)}">${worklo
 // So lange steht ein fertiges Einpflanzen noch in der Übersicht.
 const PLANT_RECENT_MS = 3 * 24 * 3_600_000;
 const SUMMARY_MAX = 80;
+/** Wie TLDR_MAX in src/lesen/ingest.js. */
+const TLDR_MAX = 400;
 
 /** Nur echte Wiki-Pfade werden Links; alles andere bleibt Text. */
 const wikiPath = (p) => typeof p === 'string' && /^wiki\/[^\0]+\.md$/.test(p) && !p.split('/').includes('..');
@@ -511,6 +513,7 @@ function sourceBlock(draft, applied, view) {
   const written = list(applied?.steps).includes('source');
   const lock = (on) => (on ? ' readonly' : '');
   const summary = String(s.summary ?? '');
+  const tldr = String(s.tldr ?? '');
   const tags = list(s.tags).join(', ');
   const meta = [s.confidence ? `Konfidenz: ${CONFIDENCE[s.confidence] ?? s.confidence}` : null, s.slug ? `wiki/sources/${s.slug}.md` : null].filter(Boolean);
   return `<section class="ingest-source" aria-labelledby="ingest-source">
@@ -518,6 +521,7 @@ function sourceBlock(draft, applied, view) {
     <div class="ingest-fields">
       <label class="ingest-field is-wide"><span>Titel</span><input type="text" name="title" value="${esc(s.title ?? '')}" required${lock(written)}></label>
       <label class="ingest-field is-wide"><span class="ingest-field-row">Summary <span class="ingest-count${summary.length > SUMMARY_MAX ? ' is-over' : ''}" data-ingest-count-for="summary">${summary.length}/${SUMMARY_MAX}</span></span><input type="text" name="summary" value="${esc(summary)}" maxlength="${SUMMARY_MAX}" data-ingest-summary${lock(written)}></label>
+      <label class="ingest-field is-wide"><span class="ingest-field-row">TL;DR <span class="ingest-count${tldr.length > TLDR_MAX ? ' is-over' : ''}" data-ingest-count-for="tldr">${tldr.length}/${TLDR_MAX}</span></span><textarea name="tldr" rows="3" maxlength="${TLDR_MAX}" data-ingest-tldr${lock(written)}>${esc(tldr)}</textarea></label>
       <label class="ingest-field"><span>Slug</span><input type="text" name="slug" value="${esc(s.slug ?? '')}" pattern="[a-z0-9]+(-[a-z0-9]+)*" spellcheck="false" autocapitalize="off" autocomplete="off" title="Kleinbuchstaben, Ziffern und Bindestriche"${lock(Boolean(applied?.slug))}></label>
       <label class="ingest-field"><span>Tags</span><input type="text" name="tags" value="${esc(tags)}" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="englisch, mit Komma"${lock(written)}></label>
     </div>
@@ -795,6 +799,7 @@ function appView(e) {
     source: {
       title: String(s.title ?? ''),
       summary: String(s.summary ?? ''),
+      tldr: String(s.tldr ?? ''),
       slug: String(s.slug ?? ''),
       tags: list(s.tags).map(String),
       confidence: s.confidence ?? null,
@@ -897,6 +902,7 @@ export function ingestRoutes({ store, ingest = null, planter = null, logger = co
         groups: groupItems(e.draft?.items).map((g) => ({ key: g.key, label: g.label, hint: g.hint, featured: Boolean(g.featured), items: g.items.map((i) => ({ id: i.id, label: kindLabel(i), default: i.default === true })) })),
         selected: list(e.draft?.items).filter((i) => i?.default === true).map((i) => i.id),
         summaryMax: SUMMARY_MAX,
+        tldrMax: TLDR_MAX,
         prev: nav.prev,
         next: nav.next,
         position: nav.position,
@@ -991,6 +997,8 @@ export function ingestRoutes({ store, ingest = null, planter = null, logger = co
           const v = form.get(key);
           if (typeof v === 'string' && v.trim()) source[key] = v.trim();
         }
+        // Leeres Feld heißt: keine TL;DR.
+        if (form.has('tldr')) source.tldr = String(form.get('tldr'));
         if (form.has('tags')) source.tags = [...new Set(String(form.get('tags')).split(/[,\n]/).map((t) => t.trim().toLowerCase().replace(/^#/, '')).filter(Boolean))];
         const order = readyIds();
         const r = await run(() => ingest.apply(id, { items, source }));

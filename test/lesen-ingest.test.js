@@ -79,6 +79,7 @@ const CLAUDE = () => ({
     slug: 'Glaser – Der Elastische Löop',
     title: 'Der elastische Loop',
     summary: 'Loop-Größe, Backpressure und Grading als Delegationsmodell für Agentenarbeit, sehr lang erklärt',
+    tldr: 'Agenten brauchen [[backpressure|Widerstand]] im Loop.\n\nSonst driften sie, <b>schnell</b>.',
     confidence: 'mittel',
     tags: ['Agentic Engineering', '#Backpressure', 'agents'],
     body: '# Doppelte Überschrift\n\nGlaser verbindet [[backpressure|Backpressure]] mit [[elastischer-loop]] und [[Robert Glaser]]; dazu [[unbekannt]] und [[synthese-loops|Synthese]].',
@@ -166,6 +167,8 @@ test('Entwurf: Text, Markierungen und Kandidaten gehen an Claude; die Antwort wi
   assert.deepEqual(d.source.slug, 'glaser-der-elastische-loeop');
   assert.equal(d.source.confidence, 'medium');
   assert.ok(d.source.summary.length <= 80 && d.source.summary.endsWith('…'));
+  // TL;DR: eine Zeile, Wikilinks werden Text, HTML entschärft.
+  assert.equal(d.source.tldr, 'Agenten brauchen Widerstand im Loop. Sonst driften sie, &lt;b>schnell&lt;/b>.');
   assert.deepEqual(d.source.tags, ['agentic-engineering', 'backpressure', 'agents']);
   // H1 weg, Links nur auf Kandidaten, neue oder vorhandene Seiten; der Rest wird Text.
   assert.equal(d.source.body, 'Glaser verbindet [[backpressure|Backpressure]] mit [[elastischer-loop]] und [[robert-glaser]]; dazu unbekannt und [[synthese-loops|Synthese]].');
@@ -337,6 +340,9 @@ relations:
 
 # Der elastische Loop (Glaser)
 
+> [!tldr] TL;DR
+> Agenten brauchen Widerstand im Loop. Sonst driften sie, &lt;b>schnell&lt;/b>.
+
 Glaser verbindet [[backpressure|Backpressure]] mit [[elastischer-loop]] und [[robert-glaser]]; dazu unbekannt und Synthese.
 
 ## Markiert
@@ -407,9 +413,11 @@ test('Übernehmen: Kollision beim Slug hängt eine Kurz-ID an; Links auf abgewä
   put('wiki/sources/glaser-der-elastische-loeop.md', '---\ntype: source\ntitle: Fremd\nsources:\n  - raw/anders.md\n---\n# Fremd\n');
   reindex();
   const { ingest } = await drafted();
-  const r = await ingest.apply(doc.id, { items: [], source: { slug: 'Glaser Der Elastische Löop' } });
+  const r = await ingest.apply(doc.id, { items: [], source: { slug: 'Glaser Der Elastische Löop', tldr: '  ' } });
   assert.equal(r.source, `wiki/sources/glaser-der-elastische-loeop-${blockId(doc.id).slice(3, 9)}.md`);
   assert.match(read(r.source), /mit Elastischer Loop und \[\[robert-glaser\]\]/);
+  // Geleerte TL;DR: kein Callout.
+  assert.doesNotMatch(read(r.source), /\[!tldr\]/);
   assert.deepEqual(r.linked, []);
   assert.match(read('wiki/log.md'), /- Neu: —\n- Verknüpft: —\n- Bestätigt: —\n$/);
 });
