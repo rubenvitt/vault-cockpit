@@ -150,6 +150,29 @@ export function splitCredentials(input) {
   return { url: normalizeUrl(url.href), auth };
 }
 
+// Parameternamen, unter denen private Feeds ihren Schlüssel mitgeben (?token=…, ?api_key=…, ?sig=…).
+const SECRET_PARAM = /token|key|secret|auth|sig|pass|session|sid|credential|access|hash|code/i;
+// Lange, zufällig wirkende Pfadteile (/feed/9f2c…e1/podcast.xml); YouTube-Kanal-IDs (24 Zeichen) bleiben darunter.
+const SECRET_SEGMENT = /^(?=.*\d)(?=.*[a-z])[A-Za-z0-9_-]{32,}$/i;
+
+/**
+ * Trägt die Adresse wahrscheinlich einen Zugangsschlüssel (Login in der
+ * Adresse, verdächtiger Parametername oder langer Zufallspfad)? Dann gilt der
+ * Feed als privat. Im Zweifel lieber ja: Ein öffentlicher Feed fehlt dann nur
+ * in der Vorsortierung, ein privater ginge sonst nach außen.
+ */
+export function urlCarriesSecret(input) {
+  let url;
+  try {
+    url = new URL(String(input ?? ''));
+  } catch {
+    return Boolean(input);
+  }
+  if (url.username || url.password) return true;
+  for (const name of url.searchParams.keys()) if (SECRET_PARAM.test(name)) return true;
+  return url.pathname.split('/').some((seg) => SECRET_SEGMENT.test(seg));
+}
+
 function parseTarget(input, base = undefined) {
   let url;
   try {
