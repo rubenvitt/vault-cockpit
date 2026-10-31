@@ -345,7 +345,15 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
     addDocument(fields) {
       if (!fields?.url) throw new ReadingError('Adresse fehlt');
       const existing = findExisting(fields);
-      if (existing) return { doc: existing, duplicate: true };
+      if (existing) {
+        // Dieselbe Adresse kommt jetzt aus einem privaten Feed: der vorhandene Eintrag wird privat (nur in diese Richtung).
+        const origin = String(fields.origin ?? '');
+        if (!existing.private && (fields.private || (origin.startsWith('feed:') && feedIsPrivate(rawFeed(origin.slice(5)))))) {
+          db.prepare('UPDATE documents SET private = 1 WHERE id = ?').run(existing.id);
+          return { doc: get(existing.id), duplicate: true };
+        }
+        return { doc: existing, duplicate: true };
+      }
       const status = fields.status ?? 'eingang';
       if (!STATUSES.includes(status)) throw new ReadingError(`Unbekannter Status ${status}`);
       if (fields.kind && !KINDS.includes(fields.kind)) throw new ReadingError(`Unbekannte Art ${fields.kind}`);

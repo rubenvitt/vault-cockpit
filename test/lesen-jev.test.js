@@ -317,3 +317,19 @@ test('Vorsortieren: Feeds mit Schlüssel in der Adresse gelten als privat', asyn
   const { rmSync } = await import('node:fs');
   rmSync(path, { force: true });
 });
+
+test('Vorsortieren: kommt eine schon gespeicherte Adresse aus einem privaten Feed, wird der Eintrag privat', () => {
+  const store = createReadingStore({ path: ':memory:' });
+  const { add } = feedDocs(store);
+  const pub = add(1);
+  assert.equal(store.isPrivate(pub.id), false);
+  const { doc, duplicate } = store.addDocument({ url: pub.url, title: pub.title, kind: 'feed', origin: 'feed:anderer', private: true });
+  assert.equal(duplicate, true);
+  assert.equal(doc.id, pub.id);
+  assert.equal(store.isPrivate(pub.id), true);
+  assert.deepEqual(store.pendingTriage(), []);
+  const { feed: tok } = store.addFeed({ url: 'https://privat.test/feed?token=x', title: 'Tok' });
+  const other = add(2);
+  store.addDocument({ url: other.url, kind: 'feed', origin: `feed:${tok.id}` });
+  assert.equal(store.isPrivate(other.id), true, 'auch über einen Feed mit Schlüssel in der Adresse');
+});
