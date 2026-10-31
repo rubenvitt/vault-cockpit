@@ -181,11 +181,12 @@ export function createFeedTriage({ store, decider, batch = 20, now = () => Date.
       last = { ...last, okAt: iso() };
       return true;
     } catch (err) {
-      store.saveTriageError(doc.id, String(err?.message ?? err));
       last = { ...last, errorAt: iso(), error: String(err?.message ?? err) };
       logger.warn?.(`Vorsortieren: ${doc.title ?? doc.url} ohne Urteil: ${err?.message ?? err}`);
       // Schlüssel falsch oder Kontingent leer: nicht weiter anfragen in diesem Durchgang.
+      // Der Eintrag kann nichts dafür, also zählt das nicht als Versuch.
       if (err?.status === 401 || err?.status === 403 || err?.status === 429) throw err;
+      store.saveTriageError(doc.id, String(err?.message ?? err));
       return false;
     }
   }

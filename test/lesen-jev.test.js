@@ -8,6 +8,7 @@ import { createReadingStore } from '../src/lesen/store.js';
 import { readingRoutes } from '../src/lesen/http.js';
 import { createJevDecider, createFeedTriage, triageFromAnswers, triageState, JevError, JEV_DEFAULT_MODEL } from '../src/lesen/jev.js';
 import { mergeSettingsForm, settingsJson } from '../src/web/settings-json.js';
+import { createSecretBox } from '../src/cockpit/secret-box.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
 const SECRET = 'x'.repeat(40);
@@ -107,6 +108,35 @@ test('Vorsortieren: 401 bricht den Durchgang ab, statt jeden Eintrag anzufragen'
   const decider = { model: 'm', decide: async () => { n += 1; throw new JevError('Jev antwortet 401', 401); } };
   await createFeedTriage({ store, decider: () => decider, logger: quiet }).runPending();
   assert.equal(n, 1);
+});
+
+test('Vorsortieren: falscher Key oder leeres Kontingent verbraucht keine Versuche', async () => {
+  const store = createReadingStore({ path: ':memory:' });
+  const { add } = feedDocs(store);
+  const a = add(1);
+  for (const status of [401, 403, 429, 429]) {
+    const decider = { model: 'm', decide: async () => { throw new JevError(`Jev antwortet ${status}`, status); } };
+    await createFeedTriage({ store, decider: () => decider, logger: quiet }).runPending();
+  }
+  assert.equal(store.getTriage(a.id)?.attempts ?? 0, 0);
+  assert.deepEqual(store.pendingTriage().map((d) => d.id), [a.id], 'bleibt für den nächsten Durchgang');
+});
+
+test('Vorsortieren: Einträge aus Feeds mit Zugangsdaten gehen nie an Jev', async () => {
+  const store = createReadingStore({ path: ':memory:', secrets: createSecretBox(SECRET) });
+  const { add } = feedDocs(store);
+  const open = add(1);
+  const { feed: priv } = store.addFeed({ url: 'https://privat.test/feed', auth: { user: 'ruben', password: 'pw_geheim_123' } });
+  store.addDocument({ url: 'https://privat.test/1', title: 'Privat', excerpt: 'geheim', kind: 'feed', origin: `feed:${priv.id}` });
+  store.addDocument({ url: 'https://privat.test/2', title: 'Geheimer Titel', kind: 'feed', origin: `feed:${priv.id}`, status: 'stapel' });
+  assert.deepEqual(store.recentKeptTitles(), [], 'behaltene Titel privater Feeds gehen nicht mit');
+  const seen = [];
+  const decider = { model: 'm', decide: async ({ state }) => { seen.push(state); return answer('lesen', { lesen: 0.8, stapel: 0.1, weg: 0.05, unklar: 0.05 }); } };
+  await createFeedTriage({ store, decider: () => decider, logger: quiet }).runPending();
+  assert.equal(seen.length, 1);
+  assert.ok(!JSON.stringify(seen).toLowerCase().includes('geheim'));
+  assert.deepEqual(store.pendingTriage(), []);
+  assert.ok(store.getTriage(open.id)?.judged_at);
 });
 
 test('Folgequote: Entscheidung gegen Vorschlag, unklar zählt nicht, Rückgängig nimmt das Label zurück', () => {

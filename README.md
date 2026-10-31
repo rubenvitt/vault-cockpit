@@ -743,7 +743,9 @@ die Karte trägt ihn als Abzeichen (volle Verteilung im Tooltip, in der App unte
 `doc.suggestion`). Entschieden wird weiter über die Knöpfe: Die Wahl wird zum Label,
 Rückgängig nimmt es zurück, und unter Zustand steht die Folgequote samt Kosten. An Jev
 gehen nur Titel, Quelle, Feed, Gruppe und Auszug öffentlicher Feed-Einträge und die
-Titel der zuletzt behaltenen Texte, nie Notizen. Die Version ist gepinnt
+Titel der zuletzt behaltenen Texte, nie Notizen. Feeds mit Zugangsdaten bleiben ganz
+außen vor, auch ihre Titel. Ein abgelehnter Key oder ein leeres Kontingent kostet
+keinen der drei Versuche je Eintrag. Die Version ist gepinnt
 (Standard `jev-1.14.0`); Aliase wie `jev-latest` lehnt das Cockpit ab. Ohne Key bleibt
 der Eingang, wie er war. Keine Umgebungsvariable.
 
