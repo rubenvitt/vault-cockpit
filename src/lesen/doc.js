@@ -197,6 +197,11 @@ const decided = (message, { doc, previous, changed }) => ({
   ...(changed ? { undo: { action: STATUS, fields: { id: doc.id, status: previous } } } : {}),
 });
 
+/** Kam die Aktion aus der Leseansicht (Formular mit `back` auf `/lesen/doc`)? Die App und „Weiter“ schicken keins. */
+const fromReader = (form) => (form.get('back') ?? '').startsWith('/lesen/doc?');
+/** Liste nach dem Schließen: der Eingang, wenn der Artikel dort lag, sonst der Stapel. */
+const listOf = (previous) => (previous === 'eingang' ? '/lesen/eingang' : '/lesen/stapel');
+
 /**
  * Seite und Aktionen der Leseansicht; `asAction` macht Fehler des Speichers zur
  * Meldung, `onChange(docId)` hört Statuswechsel, `exporter` schreibt die
@@ -265,9 +270,14 @@ export function docRoutes({ store, asAction, onChange = () => {}, exporter = nul
         const out = decided(STATUS_MESSAGE[status], r);
         return { ...out, message: out.message + kept };
       },
-      /** „Fertig, weg“: gelesen, keine Notiz; eine vorhandene bleibt unberührt. */
+      /**
+       * „Fertig, weg“: gelesen, keine Notiz; eine vorhandene bleibt unberührt.
+       * Aus der Leseansicht schließt es den Artikel: zurück in die Liste, aus der er
+       * kam (Eingang oder Stapel); Meldung und Rückgängig kommen dorthin mit.
+       */
       async '/aktion/lesen/doc/fertig'(form) {
-        return decided('Fertig, weg', await asAction(() => store.setStatus(form.get('id'), 'weg', { read: true })));
+        const out = decided('Fertig, weg', await asAction(() => store.setStatus(form.get('id'), 'weg', { read: true })));
+        return fromReader(form) ? { ...out, redirect: listOf(out.undo?.fields.status) } : out;
       },
       /** „In den Vault“: Notiz mit `lesestatus: gelesen`, mit `volltext=1` samt Volltext; dann archiviert. */
       async '/aktion/lesen/doc/vault'(form) {

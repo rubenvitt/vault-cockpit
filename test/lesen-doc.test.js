@@ -110,16 +110,32 @@ test('Leseansicht: Archivieren ohne JavaScript mit Meldung und Rückgängig, For
     assert.match(html, /Zurück auf den Stapel/);
     assert.equal((await call('/aktion/lesen/doc/status', { method: 'POST', form: { csrf, id: doc.id, status: 'quatsch' }, json: true })).status, 400);
 
-    // „Fertig, weg“ (VCP-96) ohne JavaScript: Weiterleitung, Meldung, Rückgängig, „Zurück auf den Stapel“.
+    // „Fertig, weg“ (VCP-96) ohne JavaScript: schließt den Artikel, Meldung und Rückgängig kommen in die Liste mit.
     const done = await call('/aktion/lesen/doc/fertig', { method: 'POST', form: { csrf, back, id: doc.id } });
     assert.equal(done.status, 303);
-    assert.equal(done.headers.get('location'), back);
+    assert.equal(done.headers.get('location'), '/lesen/stapel');
     assert.equal(store.get(doc.id).status, 'weg');
     assert.ok(store.get(doc.id).read_at);
+    const list = await call('/lesen/stapel').then((r) => r.text());
+    assert.match(list, /<span class="toast-text">Fertig, weg: Vom &lt;Lesen&gt;[^]*?name="status" value="archiv"[^]*?Rückgängig/);
     const after = await page();
-    assert.match(after, /<span class="toast-text">Fertig, weg: Vom &lt;Lesen&gt;[^]*?name="status" value="archiv"[^]*?Rückgängig/);
     assert.match(after, /data-decide="zurueck">[^]*?Zurück auf den Stapel/);
     assert.ok(!after.includes('data-decide="fertig"'));
+
+    // Rückgängig aus der Liste: Der Artikel liegt wieder, wo er war.
+    await call('/aktion/lesen/doc/status', { method: 'POST', form: { csrf, back: '/lesen/stapel', id: doc.id, status: 'archiv' } });
+    assert.equal(store.get(doc.id).status, 'archiv');
+
+    // Mit JavaScript (JSON) dasselbe Ziel als `redirect`; ohne Leseansicht als Herkunft (App, „Weiter“) bleibt es, wo es ist.
+    await call('/aktion/lesen/doc/status', { method: 'POST', form: { csrf, id: doc.id, status: 'eingang' } });
+    const viaJs = await (await call('/aktion/lesen/doc/fertig', { method: 'POST', form: { csrf, back, id: doc.id }, json: true })).json();
+    assert.equal(viaJs.redirect, '/lesen/eingang');
+    assert.deepEqual(viaJs.undo.fields, { id: doc.id, status: 'eingang' });
+    await call('/aktion/lesen/doc/status', { method: 'POST', form: { csrf, id: doc.id, status: 'stapel' } });
+    const fromWeiter = await call('/aktion/lesen/doc/fertig', { method: 'POST', form: { csrf, back: '/lesen/weiter', id: doc.id } });
+    assert.equal(fromWeiter.headers.get('location'), '/lesen/weiter');
+    const fromApp = await (await call('/aktion/lesen/doc/fertig', { method: 'POST', form: { csrf, id: doc.id }, json: true })).json();
+    assert.equal(fromApp.redirect, undefined);
 
     const saved = await call('/aktion/lesen/doc/fortschritt', { method: 'POST', form: { csrf, id: doc.id, fortschritt: '0.42', anker: '17' }, json: true });
     assert.equal(saved.status, 200);

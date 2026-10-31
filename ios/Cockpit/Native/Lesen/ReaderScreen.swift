@@ -87,6 +87,7 @@ struct ReaderScreen: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.dismiss) private var dismiss
     @AppStorage(ReaderAppearance.levelKey) private var level = ReaderAppearance.defaultLevel
     @AppStorage(ReaderAppearance.sansKey) private var sans = false
 
@@ -280,7 +281,7 @@ struct ReaderScreen: View {
             }
             if selection == nil || !store.canMark, showsDecisions(store, model) {
                 ReaderDecisionBar(fertig: model.decisions.fertig, vault: model.vault, busy: store.busy, onFinish: {
-                    decide(store) { await $0.finish() }
+                    decide(store, close: true) { await $0.finish() }
                 }, onVault: { fullText in
                     decide(store) { await $0.moveToVault(fullText: fullText) }
                 }, onClose: {
@@ -438,7 +439,7 @@ struct ReaderScreen: View {
             Section {
                 if model.decisions.fertig {
                     Button {
-                        decide(store) { await $0.finish() }
+                        decide(store, close: true) { await $0.finish() }
                     } label: {
                         Label("Fertig, weg", systemImage: "checkmark.circle")
                     }
@@ -639,10 +640,14 @@ struct ReaderScreen: View {
     }
 
     /// „Fertig, weg“, „In den Vault“, „Zurück auf den Stapel“; danach keine Leiste am Ende mehr.
-    private func decide(_ store: ReaderStore, _ action: @escaping @MainActor (ReaderStore) async -> Bool) {
+    /// Mit `close` („Fertig, weg“) schließt sich die Leseansicht; die Meldung mit „Rückgängig“
+    /// bleibt in der Ansicht darunter stehen.
+    private func decide(_ store: ReaderStore, close: Bool = false, _ action: @escaping @MainActor (ReaderStore) async -> Bool) {
         services?.context.toasts.signal(.selection)
         Task {
-            if await action(store) { decisionsClosed = true }
+            guard await action(store) else { return }
+            decisionsClosed = true
+            if close { dismiss() }
         }
     }
 
