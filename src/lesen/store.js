@@ -772,9 +772,11 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
     /** Titel der zuletzt behaltenen Texte (Stapel, gelesen, abgelegt), als Kontext fürs Vorsortieren. */
     recentKeptTitles(limit = 12) {
       return db
-        // Ohne Einträge aus Feeds mit Zugangsdaten: auch ihre Titel bleiben privat.
+        // Ohne Einträge aus Feeds mit Zugangsdaten: auch ihre Titel bleiben privat. Ist der
+        // Feed gelöscht, weiß man das nicht mehr, also bleiben auch diese Titel draußen.
         .prepare(`SELECT d.title FROM documents d LEFT JOIN feeds f ON d.origin LIKE 'feed:%' AND f.id = substr(d.origin, 6)
-          WHERE d.status IN ('stapel', 'archiv', 'abgelegt') AND d.title IS NOT NULL AND f.auth IS NULL
+          WHERE d.status IN ('stapel', 'archiv', 'abgelegt') AND d.title IS NOT NULL
+            AND (d.origin IS NULL OR d.origin NOT LIKE 'feed:%' OR (f.id IS NOT NULL AND f.auth IS NULL))
           ORDER BY d.status_changed_at DESC, d.rowid DESC LIMIT ?`)
         .all(limit)
         .map((r) => r.title);

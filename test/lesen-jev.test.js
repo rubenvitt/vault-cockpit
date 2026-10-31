@@ -130,6 +130,8 @@ test('Vorsortieren: Einträge aus Feeds mit Zugangsdaten gehen nie an Jev', asyn
   store.addDocument({ url: 'https://privat.test/1', title: 'Privat', excerpt: 'geheim', kind: 'feed', origin: `feed:${priv.id}` });
   store.addDocument({ url: 'https://privat.test/2', title: 'Geheimer Titel', kind: 'feed', origin: `feed:${priv.id}`, status: 'stapel' });
   assert.deepEqual(store.recentKeptTitles(), [], 'behaltene Titel privater Feeds gehen nicht mit');
+  store.deleteFeed(priv.id);
+  assert.deepEqual(store.recentKeptTitles(), [], 'auch nicht, wenn der Feed gelöscht ist');
   const seen = [];
   const decider = { model: 'm', decide: async ({ state }) => { seen.push(state); return answer('lesen', { lesen: 0.8, stapel: 0.1, weg: 0.05, unklar: 0.05 }); } };
   await createFeedTriage({ store, decider: () => decider, logger: quiet }).runPending();
