@@ -3,7 +3,7 @@ import { DEFAULT_HIDDEN_EVENTS } from '../cockpit/settings.js';
 import { esc, head, appHeader, icon } from './layout.js';
 import { backupSection, backupHint } from './backup-render.js';
 import { sessionSection, revokeForm } from './session-render.js';
-import { sectionStates, sectionNav, maskUrl, hostOf, KIND_LABELS as KIND_LABEL, SCOPE_LABELS as SCOPE_LABEL, languageOptions, syncOptions, SYNC_INTRO, SHADOW_HINT } from './settings-json.js';
+import { sectionStates, sectionNav, maskUrl, hostOf, KIND_LABELS as KIND_LABEL, SCOPE_LABELS as SCOPE_LABEL, languageOptions, syncOptions, SYNC_INTRO, SHADOW_HINT, JEV_INTRO } from './settings-json.js';
 
 export { esc };
 
@@ -617,7 +617,7 @@ export function renderSettings({ stored, defaults, checks = {}, notice = null, e
   const token = `<input type="hidden" name="csrf" value="${esc(csrf)}">`;
   // Stand je Abschnitt (Text ohne HTML), derselbe wie in `/api/einstellungen`.
   const states = Object.fromEntries(Object.entries(sectionStates({ stored, defaults: d, checks })).map(([k, v]) => [k, v && [esc(v[0]), v[1]]]));
-  const { kalender: cal, zunder, mail, embeddings: embed, vorlesen: voice, bruecke: bridge, 'feuer-notiz': flameNote, sync } = states;
+  const { kalender: cal, zunder, mail, embeddings: embed, vorlesen: voice, bruecke: bridge, 'feuer-notiz': flameNote, sync, lesestapel: reading } = states;
   const tts = stored.tts ?? { provider: null, key: null, voice: null, model: null };
   const ttsDefault = (d.ttsProvider ?? (d.elevenlabsKey ? 'elevenlabs' : 'geraet')) === 'elevenlabs' ? 'ElevenLabs' : 'Gerät';
   const rows = stored.calendars.map((c, i) => calendarRow(c, i, checks[c.id])).join('');
@@ -701,7 +701,7 @@ ${backupHint(backup)}
   ${stored.mail.token ? '<label class="checkline"><input type="checkbox" name="mail.clear" value="1"> eigenen Token löschen</label>' : ''}
 </section>
 <section id="lesestapel">
-  ${head2('Lesestapel')}
+  ${head2('Lesestapel', reading)}
   <p class="meta">Gelesene Texte mit Markierungen kommen als Notiz in diesen Ordner, jede Markierung mit Block-ID zum Verlinken. Das Cockpit schreibt danach nur den Bereich „Markierungen“ neu; in vertraulichen und Readwise-Ordnern legt es nichts an. Verworfenes, das ungelesen auf „Weg“ steht, löscht es nach so vielen Tagen (0 = nie); Gelesenes und Markiertes bleibt.</p>
   <div class="grid">
     <label>Ordner im Vault<input name="readingNotes.folder" value="${esc(stored.readingNotes?.folder ?? '')}" placeholder="${esc(d.readingNotesFolder ?? 'raw')}"></label>
@@ -724,6 +724,14 @@ ${backupHint(backup)}
       <option value="aus"${stored.ingest?.agent === false ? ' selected' : ''}>aus</option>
     </select></label>
   </div>
+  <h3>Eingang vorsortieren</h3>
+  <p class="meta">${esc(JEV_INTRO)}</p>
+  <div class="grid">
+    <label><span>Jev-API-Key <span class="hint">TypeSafe AI, leer = aus</span></span><input name="jev.key" type="password" autocomplete="new-password"
+      placeholder="${stored.jev?.key ? 'gesetzt (leer lassen = unverändert)' : ''}"></label>
+    <label><span>Version <span class="hint">feste Version, kein jev-latest</span></span><input name="jev.model" value="${esc(stored.jev?.model ?? '')}" placeholder="${esc(d.jevModel ?? '')}"></label>
+  </div>
+  ${stored.jev?.key ? '<label class="checkline"><input type="checkbox" name="jev.clear" value="1"> Key löschen, Vorsortieren aus</label>' : ''}
 </section>
 <section id="embeddings">
   ${head2('Embeddings', embed)}

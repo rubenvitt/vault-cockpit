@@ -60,6 +60,12 @@ Der Service liefert nur Werkzeuge und Zustand. Intelligenz kommt von außen per 
 (Claude-Chat, Claude Code, Routinen). Keine API-Kosten. Für Server-Automationen evtl.
 `claude -p` — vorher Nutzungsbedingungen prüfen.
 
+Ausnahme (VCP-136, 31.10.2026 von Ruben freigegeben): Das Vorsortieren des Feed-Eingangs
+fragt optional ein Entscheidungsmodell (Jev von TypeSafe AI, `src/lesen/jev.js`). Es ist
+ein Pilot: nur mit Key in den Einstellungen, nur Vorschlag und Reihenfolge, nur öffentliche
+Feed-Auszüge, Version gepinnt. Die Folgequote unter Zustand entscheidet nach 2 bis 4
+Wochen, ob es bleibt.
+
 ## Features
 
 - **Capture von überall:** Mail-Adresse, iOS-Kurzbefehl, Sprachmemo (transkribiert) → Inbox.

@@ -3,6 +3,7 @@ import { dirname } from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { ELEVENLABS_VOICE, ELEVENLABS_MODEL, ELEVENLABS_GUEST_VOICE } from '../lesen/tts.js';
 import { EPISODE_LANGUAGES, DEFAULT_EPISODE_LANGUAGE } from '../lesen/languages.js';
+import { JEV_DEFAULT_MODEL, JEV_ALIASES } from '../lesen/jev.js';
 
 /**
  * Einstellungen des Web-Cockpits, gepflegt auf der Seite `/einstellungen` und
@@ -55,6 +56,7 @@ const EMPTY = {
   tts: { provider: null, key: null, voice: null, model: null },
   episodes: { host: null, guest: null, model: null, language: null },
   ingest: { nightly: null, hour: null, model: null, limit: null, agent: null },
+  jev: { key: null, model: null },
   calendars: [],
   hiddenEvents: null,
   session: { idleDays: null, maxDays: null, generation: 0 },
@@ -188,6 +190,11 @@ export function validateSettings(input) {
     agent: typeof input.ingest?.agent === 'boolean' ? input.ingest.agent : null,
   };
 
+  // Vorsortieren mit Jev (VCP-136): ohne Key aus. Nur feste Versionen, keine Aliase, die Antworten still verschieben.
+  const jevModel = text(input.jev?.model, 64, 'Jev-Version', 'jev.model');
+  if (jevModel && (!MODEL_ID.test(jevModel) || JEV_ALIASES.includes(jevModel.toLowerCase()))) throw new SettingsError(`Jev-Version: eine feste Version wie ${JEV_DEFAULT_MODEL}, kein Alias wie jev-latest`, 'jev.model');
+  const jev = { key: text(input.jev?.key, 300, 'Jev-API-Key', 'jev.key'), model: jevModel };
+
   // `formIndex` (aus `fromForm`): Nummer im Formular, damit ein Fehler das richtige Feld `cal.N.…` nennt.
   const calField = (c, i, k) => `cal.${Number.isInteger(c.formIndex) ? c.formIndex : i}.${k}`;
   const calendars = (input.calendars ?? []).map((c, i) => {
@@ -215,7 +222,7 @@ export function validateSettings(input) {
     ? [...new Set(input.hiddenEvents.map((t) => text(t, 200, 'Ausgeblendeter Termin', 'hiddenEvents')).filter(Boolean))].slice(0, 50)
     : null;
 
-  return { tz, vaultName: text(input.vaultName, 200, 'Vault-Name', 'vaultName'), inboxFolder, zunder: { url: zunderUrl, token: zunderToken }, bridge, flameNote, readingNotes: { folder: readingFolder, trashDays }, sync: { adapter: syncAdapter, shadow: syncShadow }, mail, embed, tts, episodes, ingest, calendars, hiddenEvents, session: validateSession(input.session) };
+  return { tz, vaultName: text(input.vaultName, 200, 'Vault-Name', 'vaultName'), inboxFolder, zunder: { url: zunderUrl, token: zunderToken }, bridge, flameNote, readingNotes: { folder: readingFolder, trashDays }, sync: { adapter: syncAdapter, shadow: syncShadow }, mail, embed, tts, episodes, ingest, jev, calendars, hiddenEvents, session: validateSession(input.session) };
 }
 
 const days = (v, what, field) => {
@@ -289,6 +296,7 @@ export function createSettingsStore({ file = null, defaults = {}, logger = conso
     ingestModel: 'sonnet',
     ingestLimit: 20,
     ingestAgent: true,
+    jevModel: JEV_DEFAULT_MODEL,
     sessionIdleDays: 30,
     sessionMaxDays: 90,
     ...defaults,
@@ -354,6 +362,8 @@ export function createSettingsStore({ file = null, defaults = {}, logger = conso
           limit: stored.ingest?.limit ?? d.ingestLimit,
           agent: stored.ingest?.agent ?? d.ingestAgent,
         },
+        // Vorsortieren des Feed-Eingangs (VCP-136): nur mit eigenem Key, keine Umgebungsvariable.
+        jev: stored.jev?.key ? { key: stored.jev.key, model: stored.jev.model ?? d.jevModel, source: 'einstellungen' } : null,
         calendars: stored.calendars,
         hiddenEvents: stored.hiddenEvents ?? DEFAULT_HIDDEN_EVENTS,
         // Ohne Nutzung nie länger als die Obergrenze.

@@ -6,6 +6,7 @@ import { readingPage, saveForm, keptUrl } from './pages.js';
 import { groupChips, groupFilter } from './stack.js';
 import { KIND_LABELS, docJson, groupsJson, jsonReply } from './json.js';
 import { NO_FEED } from './store.js';
+import { TRIAGE_LABELS } from './jev.js';
 
 /**
  * Eingang sortieren (VCP-70): eine Karte nach der anderen, je Karte Weg,
@@ -18,6 +19,11 @@ import { NO_FEED } from './store.js';
  * (VCP-97); `back` und das Neuladen tragen die Query mit.
  *
  * `/api/lesen/eingang?gruppe=` liefert dasselbe als JSON für die App.
+ *
+ * Vorsortieren (VCP-136): Mit Jev in den Einstellungen steht im Eingang zuerst,
+ * was noch kein Urteil hat (selbst Gespeichertes), dann die Feed-Einträge nach
+ * dem Vorschlag; die Karte zeigt ihn als Abzeichen. Die Entscheidung über die
+ * Knöpfe wird zum Label (`store.setTriageDecision`), Rückgängig nimmt es zurück.
  */
 
 const SORT = '/aktion/lesen/sortieren';
@@ -51,7 +57,21 @@ export function whyHere(doc, { getFeed, tz }) {
   return 'Im Cockpit gespeichert';
 }
 
-function card(d, ctx, { getFeed, more }) {
+const pct = (v) => `${Math.round(100 * (v ?? 0))} %`;
+
+/** Vorschlag als Abzeichen, die volle Verteilung im Tooltip. */
+export function suggestionBadge(t) {
+  if (!t?.choice) return '';
+  const dist = Object.entries(t.probabilities ?? {}).map(([k, v]) => `${TRIAGE_LABELS[k] ?? k} ${pct(v)}`).join(', ');
+  const near = t.near == null ? '' : ` · Nähe ${t.near.toLocaleString('de-DE', { maximumFractionDigits: 1 })}/${t.near_max}`;
+  return `<p class="inbox-suggest" title="${esc(`${dist} (${t.model})`)}"><span class="badge ${esc(t.choice)}">Vorschlag: ${esc(TRIAGE_LABELS[t.choice] ?? t.choice)}</span> <span class="meta">${pct(t.probabilities?.[t.choice])}${near}</span></p>`;
+}
+
+/** Vorschlag für die App: Wahl, Verteilung, Nähe, Version. */
+const suggestionJson = (t) =>
+  t?.choice ? { choice: t.choice, label: TRIAGE_LABELS[t.choice] ?? t.choice, probabilities: t.probabilities, near: t.near, nearMax: t.near_max, model: t.model } : null;
+
+function card(d, ctx, { getFeed, more, triage = null }) {
   const site = siteOf(d);
   const meta = [
     site ? `<a href="${esc(href(d.url))}" rel="noopener noreferrer" target="_blank">${esc(site)}</a>` : null,
@@ -64,6 +84,7 @@ function card(d, ctx, { getFeed, more }) {
     <h2 class="inbox-title">${esc(name(d))}</h2>
     ${d.excerpt ? `<p class="inbox-excerpt">${esc(d.excerpt)}</p>` : ''}
     ${topics}
+    ${suggestionBadge(triage)}
     <p class="inbox-why"><strong>Warum hier?</strong> ${esc(whyHere(d, { getFeed, tz: ctx.tz }))} · ${esc(dateLabel(d.saved_at, ctx.tz))}</p>
   </article>`;
 }
@@ -73,14 +94,14 @@ const arrow = (a) => `<span aria-hidden="true">${a}</span>`;
 const choice = (ziel, label, key, keys, cls = '') =>
   `<button type="submit" name="ziel" value="${ziel}" class="btn${cls}" aria-keyshortcuts="${keys}">${label} <kbd aria-hidden="true">${key}</kbd></button>`;
 
-export function renderInboxPage({ doc, left, today, filter }, ctx, { getFeed, vault = false }) {
+export function renderInboxPage({ doc, left, today, filter, triage = null }, ctx, { getFeed, vault = false }) {
   const write = { csrf: ctx.write.csrf, back: ctx.write.back };
   const total = today.count + left;
   const progress = total
     ? `<div class="inbox-progress"><progress max="${total}" value="${today.count}">${today.count} von ${total}</progress><span class="meta">Heute ${today.count} von ${total} gesichtet</span></div>`
     : '';
   const stack = doc
-    ? card(doc, ctx, { getFeed, more: left > 1 })
+    ? card(doc, ctx, { getFeed, more: left > 1, triage })
     : '<div class="inbox-empty"><p class="inbox-empty-title">Eingang leer</p><p class="meta">Alles gesichtet. <a href="/lesen/stapel">Zum Stapel</a></p></div>';
   const undo = today.last
     ? `<form method="post" action="${SORT}" class="act inbox-undo">${hidden({ ...write, id: today.last.id, ziel: 'eingang' })}<button type="submit" class="btn quiet" aria-keyshortcuts="z">${arrow('↶')} Rückgängig<span class="sr-only">: ${esc(name(today.last))}</span> <kbd aria-hidden="true">Z</kbd></button></form>`
@@ -108,7 +129,7 @@ export function renderInboxPage({ doc, left, today, filter }, ctx, { getFeed, va
  * „Heute x von y gesichtet“, Rückgängig der letzten Entscheidung von heute,
  * Gruppen mit ihren Zählern und der aktive Filter.
  */
-function inboxJson({ doc, left, today, filter }, { store, tz, vault }) {
+function inboxJson({ doc, left, today, filter, triage = null }, { store, tz, vault }) {
   const feed = doc?.origin?.startsWith('feed:') ? store.getFeed(doc.origin.slice(5)) : null;
   const perGroup = store.inboxByGroup();
   return {
@@ -119,6 +140,7 @@ function inboxJson({ doc, left, today, filter }, { store, tz, vault }) {
       why: whyHere(doc, { getFeed: store.getFeed, tz }),
       savedLabel: dateLabel(doc.saved_at, tz),
       feed: feed && { id: feed.id, title: feed.title ?? null, url: feed.url, siteUrl: feed.site_url ?? null, groupId: feed.group_id ?? null },
+      suggestion: suggestionJson(triage),
     },
     left,
     more: left > 1,
@@ -132,13 +154,17 @@ function inboxJson({ doc, left, today, filter }, { store, tz, vault }) {
   };
 }
 
-/** Seite, JSON und Aktion für src/lesen/http.js; `vault` zeigt „Im Vault ablegen“. `now` nur für Tests. */
-export function inboxRoutes({ store, vault = false, now = () => Date.now() }) {
+/**
+ * Seite, JSON und Aktion für src/lesen/http.js; `vault` zeigt „Im Vault ablegen“.
+ * `triage()`: ob vorsortiert wird (Jev eingerichtet). `now` nur für Tests.
+ */
+export function inboxRoutes({ store, vault = false, triage = () => false, now = () => Date.now() }) {
   const model = (ctx) => {
     const filter = groupFilter(store, ctx.url);
     const { group } = filter;
-    const [doc = null] = store.list({ status: 'eingang', group, limit: 1 });
-    return { doc, left: store.counts({ group }).eingang, today: store.leftInboxSince(dayStart(now(), ctx.tz), { group }), filter };
+    const sorted = Boolean(triage());
+    const [doc = null] = store.list({ status: 'eingang', group, limit: 1, triage: sorted });
+    return { doc, left: store.counts({ group }).eingang, today: store.leftInboxSince(dayStart(now(), ctx.tz), { group }), filter, triage: doc ? store.getTriage(doc.id) : null };
   };
   return {
     pages: {
@@ -158,6 +184,8 @@ export function inboxRoutes({ store, vault = false, now = () => Date.now() }) {
           throw new ActionError(`${status === 'eingang' ? 'Lässt sich nicht mehr zurücklegen' : 'Liegt nicht mehr im Eingang'}: ${name(doc)}`, 409);
         }
         const r = store.setStatus(doc.id, status);
+        // Label fürs Vorsortieren: was Ruben gewählt hat (`lesen` ist eigener Knopf), Rückgängig nimmt es zurück.
+        if (r.changed) store.setTriageDecision(doc.id, status === 'eingang' ? null : ziel);
         const message = { weg: 'Weg', stapel: 'Auf dem Stapel', eingang: 'Zurück im Eingang' }[status];
         return {
           message: `${message}: ${name(doc)}${r.changed && r.previous === 'abgelegt' ? ' (die Notiz im Vault bleibt)' : ''}`,

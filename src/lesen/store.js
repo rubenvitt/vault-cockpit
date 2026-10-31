@@ -145,6 +145,25 @@ export const MIGRATIONS = [
   // Feed-Pflege (VCP-86): wann zuletzt ein Icon gesucht wurde; Einträge, die der Stichwort-Filter aussortiert hat.
   `ALTER TABLE feeds ADD COLUMN icon_checked_at TEXT;
   ALTER TABLE feed_entries ADD COLUMN filtered INTEGER NOT NULL DEFAULT 0;`,
+  // Vorsortieren (VCP-136): Urteil des Entscheidungsmodells je Feed-Eintrag mit voller
+  // Verteilung und Version; `decision` ist, was Ruben im Eingang tatsächlich gewählt hat.
+  `CREATE TABLE triage (
+    doc_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+    model TEXT,
+    choice TEXT,
+    probabilities TEXT,
+    confidence REAL,
+    near REAL,
+    near_max INTEGER,
+    near_probabilities TEXT,
+    rank REAL,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    judged_at TEXT,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    error TEXT,
+    decision TEXT,
+    decided_at TEXT
+  );`,
 ];
 
 /** Zustände eines Ingest-Entwurfs (src/lesen/ingest.js). */
@@ -170,6 +189,7 @@ const withoutAuth = ({ auth, ...row }) => row;
 const feedRow = (row) => (row ? { ...withoutAuth(row), has_auth: Boolean(row.auth), paused: Boolean(row.paused), to_stack: Boolean(row.to_stack), group_paused: Boolean(row.group_paused), group_to_stack: Boolean(row.group_to_stack) } : null);
 const parseJson = (v) => (v == null ? null : JSON.parse(v));
 const ingestRow = (row) => (row ? { ...row, draft: parseJson(row.draft), applied: parseJson(row.applied) } : null);
+const triageRow = (row) => (row ? { ...row, probabilities: parseJson(row.probabilities), near_probabilities: parseJson(row.near_probabilities) } : null);
 const groupRow = (row) => (row ? { ...row, paused: Boolean(row.paused), to_stack: Boolean(row.to_stack) } : null);
 const FEED_SELECT = 'SELECT f.*, g.paused AS group_paused, g.to_stack AS group_to_stack FROM feeds f LEFT JOIN feed_groups g ON g.id = f.group_id';
 /** WHERE-Teil für den Gruppenfilter über `origin` (Dokumente kennen nur ihren Feed). */
@@ -328,11 +348,15 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
      * Neueste zuerst; ohne `status` alle außer `weg`. Ohne Inhalt (`content_*`), der kommt mit `get`.
      * `group`: nur aus Feeds dieser Gruppe, `NO_FEED` nur nicht aus Feeds.
      */
-    list({ status = null, group = null, limit = 100, offset = 0 } = {}) {
+    list({ status = null, group = null, limit = 100, offset = 0, triage = false } = {}) {
       const cols = 'id, url, canonical_url, comments_url, title, author, site, kind, origin, excerpt, word_count, reading_minutes, status, previous_status, progress, scroll_anchor, topics, saved_at, status_changed_at, read_at, archived_at, heard_at, updated_at';
       const [where, args] = groupWhere(group);
+      // Vorsortiert (VCP-136): Ohne Urteil zuerst (selbst Gespeichertes, noch nicht beurteilt), dann nach Rang.
+      const order = triage
+        ? "(SELECT t.rank FROM triage t WHERE t.doc_id = documents.id AND t.judged_at IS NOT NULL) IS NOT NULL, (SELECT t.rank FROM triage t WHERE t.doc_id = documents.id) DESC, saved_at DESC, rowid DESC"
+        : 'saved_at DESC, rowid DESC';
       const rows = status
-        ? db.prepare(`SELECT ${cols} FROM documents WHERE status = ? AND ${where} ORDER BY saved_at DESC, rowid DESC LIMIT ? OFFSET ?`).all(status, ...args, limit, offset)
+        ? db.prepare(`SELECT ${cols} FROM documents WHERE status = ? AND ${where} ORDER BY ${order} LIMIT ? OFFSET ?`).all(status, ...args, limit, offset)
         : db.prepare(`SELECT ${cols} FROM documents WHERE status != 'weg' AND ${where} ORDER BY saved_at DESC, rowid DESC LIMIT ? OFFSET ?`).all(...args, limit, offset);
       return rows.map(fromRow);
     },
@@ -685,6 +709,70 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
       if (!ids.length) return new Map();
       const rows = db.prepare('SELECT doc_id, status FROM ingests WHERE doc_id IN (SELECT value FROM json_each(?))').all(JSON.stringify(ids));
       return new Map(rows.map((r) => [r.doc_id, r.status]));
+    },
+
+    // --- Vorsortieren (VCP-136) ----------------------------------------------
+
+    /** Urteil zum Dokument oder null; Verteilungen als Objekte. */
+    getTriage: (docId) => triageRow(db.prepare('SELECT * FROM triage WHERE doc_id = ?').get(String(docId ?? ''))),
+    /** Feed-Einträge im Eingang ohne Urteil, älteste zuerst; nach `maxAttempts` Fehlern nicht mehr. */
+    pendingTriage({ limit = 20, maxAttempts = 3 } = {}) {
+      return db
+        .prepare(`SELECT d.* FROM documents d LEFT JOIN triage t ON t.doc_id = d.id
+          WHERE d.status = 'eingang' AND d.origin LIKE 'feed:%' AND (t.doc_id IS NULL OR (t.judged_at IS NULL AND t.attempts < ?))
+          ORDER BY d.saved_at, d.rowid LIMIT ?`)
+        .all(maxAttempts, limit)
+        .map(fromRow);
+    },
+    /** Urteil speichern (überschreibt ein früheres, die Entscheidung bleibt). */
+    saveTriage(docId, row) {
+      const id = String(docId ?? '');
+      must(get(id), 'Dieses Dokument');
+      const json = (v) => (v == null ? null : JSON.stringify(v));
+      db.prepare(`INSERT INTO triage (doc_id, model, choice, probabilities, confidence, near, near_max, near_probabilities, rank, input_tokens, judged_at, error)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL)
+        ON CONFLICT(doc_id) DO UPDATE SET model = excluded.model, choice = excluded.choice, probabilities = excluded.probabilities, confidence = excluded.confidence,
+          near = excluded.near, near_max = excluded.near_max, near_probabilities = excluded.near_probabilities, rank = excluded.rank,
+          input_tokens = triage.input_tokens + excluded.input_tokens, judged_at = excluded.judged_at, error = NULL`).run(
+        id, row.model ?? null, row.choice ?? null, json(row.probabilities), row.confidence ?? null, row.near ?? null, row.near_max ?? null, json(row.near_probabilities), row.rank ?? null, row.input_tokens ?? 0, row.judged_at ?? iso(),
+      );
+      return triageRow(db.prepare('SELECT * FROM triage WHERE doc_id = ?').get(id));
+    },
+    /** Gescheiterter Versuch: zählt mit, damit ein kaputter Eintrag nicht ewig angefragt wird. */
+    saveTriageError(docId, error) {
+      const id = String(docId ?? '');
+      if (!get(id)) return;
+      db.prepare(`INSERT INTO triage (doc_id, attempts, error) VALUES (?, 1, ?)
+        ON CONFLICT(doc_id) DO UPDATE SET attempts = triage.attempts + 1, error = excluded.error`).run(id, String(error).slice(0, 500));
+    },
+    /** Rubens Entscheidung im Eingang als Label (`lesen`, `stapel`, `weg`); `null` (Rückgängig) nimmt sie zurück. */
+    setTriageDecision(docId, decision) {
+      db.prepare('UPDATE triage SET decision = ?, decided_at = ? WHERE doc_id = ? AND judged_at IS NOT NULL').run(decision ?? null, decision ? iso() : null, String(docId ?? ''));
+    },
+    /** Urteile je Dokument als Map, eine Abfrage. */
+    triageFor(docIds) {
+      const ids = [...new Set([...(docIds ?? [])].map(String))];
+      if (!ids.length) return new Map();
+      const rows = db.prepare('SELECT * FROM triage WHERE judged_at IS NOT NULL AND doc_id IN (SELECT value FROM json_each(?))').all(JSON.stringify(ids));
+      return new Map(rows.map((r) => [r.doc_id, triageRow(r)]));
+    },
+    /** Folgequote: Wie oft passt die Entscheidung zum Vorschlag? „unklar“ zählt nicht mit. */
+    triageStats() {
+      const r = db.prepare(`SELECT
+          COUNT(*) FILTER (WHERE judged_at IS NOT NULL) AS judged,
+          COUNT(*) FILTER (WHERE decision IS NOT NULL AND choice != 'unklar') AS decided,
+          COUNT(*) FILTER (WHERE decision IS NOT NULL AND choice != 'unklar' AND decision = choice) AS followed,
+          COUNT(*) FILTER (WHERE choice = 'unklar') AS unclear,
+          COALESCE(SUM(input_tokens), 0) AS input_tokens
+        FROM triage`).get();
+      return { judged: r.judged, decided: r.decided, followed: r.followed, unclear: r.unclear, input_tokens: r.input_tokens };
+    },
+    /** Titel der zuletzt behaltenen Texte (Stapel, gelesen, abgelegt), als Kontext fürs Vorsortieren. */
+    recentKeptTitles(limit = 12) {
+      return db
+        .prepare(`SELECT title FROM documents WHERE status IN ('stapel', 'archiv', 'abgelegt') AND title IS NOT NULL ORDER BY status_changed_at DESC, rowid DESC LIMIT ?`)
+        .all(limit)
+        .map((r) => r.title);
     },
 
     // --- Sicherung ------------------------------------------------------------
