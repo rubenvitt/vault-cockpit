@@ -130,6 +130,9 @@ test('Vorsortieren: Einträge aus Feeds mit Zugangsdaten gehen nie an Jev', asyn
   store.addDocument({ url: 'https://privat.test/1', title: 'Privat', excerpt: 'geheim', kind: 'feed', origin: `feed:${priv.id}` });
   store.addDocument({ url: 'https://privat.test/2', title: 'Geheimer Titel', kind: 'feed', origin: `feed:${priv.id}`, status: 'stapel' });
   assert.deepEqual(store.recentKeptTitles(), [], 'behaltene Titel privater Feeds gehen nicht mit');
+  store.setFeedAuth(priv.id, null);
+  assert.equal(store.getFeed(priv.id).has_auth, false);
+  assert.deepEqual(store.recentKeptTitles(), [], 'auch nicht, wenn das Login entfernt ist');
   store.deleteFeed(priv.id);
   assert.deepEqual(store.recentKeptTitles(), [], 'auch nicht, wenn der Feed gelöscht ist');
   const seen = [];

@@ -164,6 +164,10 @@ export const MIGRATIONS = [
     decision TEXT,
     decided_at TEXT
   );`,
+  // Privat (VCP-136): Einträge, die mit Zugangsdaten geholt wurden, bleiben privat, auch wenn
+  // der Feed später gelöscht wird oder seine Zugangsdaten verliert. Nie an Jev.
+  `ALTER TABLE documents ADD COLUMN private INTEGER NOT NULL DEFAULT 0;
+  UPDATE documents SET private = 1 WHERE origin LIKE 'feed:%' AND substr(origin, 6) IN (SELECT id FROM feeds WHERE auth IS NOT NULL);`,
 ];
 
 /** Zustände eines Ingest-Entwurfs (src/lesen/ingest.js). */
@@ -254,6 +258,9 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
   const getHighlight = (id) => db.prepare('SELECT * FROM highlights WHERE id = ?').get(String(id ?? '')) ?? null;
   const getFeed = (id) => feedRow(db.prepare(`${FEED_SELECT} WHERE f.id = ?`).get(String(id ?? '')));
   /** Zugangsdaten setzen (`{ user, password }`) oder mit `null` löschen; verschlüsselt, an den Feed gebunden. */
+  // Dokumente aus Feeds mit Zugangsdaten als privat markieren (nur in diese Richtung).
+  const markPrivate = (where, value) =>
+    db.prepare(`UPDATE documents SET private = 1 WHERE ${where} AND origin LIKE 'feed:%' AND substr(origin, 6) IN (SELECT id FROM feeds WHERE auth IS NOT NULL)`).run(value);
   const setFeedAuth = (id, auth) => {
     let sealed = null;
     if (auth) {
@@ -261,6 +268,7 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
       sealed = secrets.seal({ user: String(auth.user ?? ''), password: String(auth.password ?? '') }, `feed:${id}`);
     }
     db.prepare('UPDATE feeds SET auth = ? WHERE id = ?').run(sealed, String(id));
+    if (sealed) markPrivate("origin = ?", `feed:${id}`);
   };
   const getGroup = (id) => groupRow(db.prepare('SELECT * FROM feed_groups WHERE id = ?').get(String(id ?? '')));
   const listGroups = () => db.prepare('SELECT * FROM feed_groups ORDER BY position, name').all().map(groupRow);
@@ -337,6 +345,7 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
       const id = randomUUID();
       const cols = ['id', ...DOC_FIELDS, 'saved_at', 'status_changed_at', 'updated_at'];
       db.prepare(`INSERT INTO documents (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`).run(id, ...DOC_FIELDS.map((k) => bindable(row[k])), t, t, t);
+      markPrivate('id = ?', id);
       return { doc: get(id), duplicate: false };
     },
 
@@ -721,7 +730,7 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
         // Feeds mit Zugangsdaten sind privat: ihre Einträge gehen nie an Jev.
         .prepare(`SELECT d.* FROM documents d LEFT JOIN triage t ON t.doc_id = d.id
           JOIN feeds f ON f.id = substr(d.origin, 6) AND f.auth IS NULL
-          WHERE d.status = 'eingang' AND d.origin LIKE 'feed:%' AND (t.doc_id IS NULL OR (t.judged_at IS NULL AND t.attempts < ?))
+          WHERE d.status = 'eingang' AND d.private = 0 AND d.origin LIKE 'feed:%' AND (t.doc_id IS NULL OR (t.judged_at IS NULL AND t.attempts < ?))
           ORDER BY d.saved_at, d.rowid LIMIT ?`)
         .all(maxAttempts, limit)
         .map(fromRow);
@@ -775,7 +784,7 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
         // Ohne Einträge aus Feeds mit Zugangsdaten: auch ihre Titel bleiben privat. Ist der
         // Feed gelöscht, weiß man das nicht mehr, also bleiben auch diese Titel draußen.
         .prepare(`SELECT d.title FROM documents d LEFT JOIN feeds f ON d.origin LIKE 'feed:%' AND f.id = substr(d.origin, 6)
-          WHERE d.status IN ('stapel', 'archiv', 'abgelegt') AND d.title IS NOT NULL
+          WHERE d.status IN ('stapel', 'archiv', 'abgelegt') AND d.title IS NOT NULL AND d.private = 0
             AND (d.origin IS NULL OR d.origin NOT LIKE 'feed:%' OR (f.id IS NOT NULL AND f.auth IS NULL))
           ORDER BY d.status_changed_at DESC, d.rowid DESC LIMIT ?`)
         .all(limit)
