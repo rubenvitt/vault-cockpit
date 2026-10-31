@@ -234,10 +234,10 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
     db = new DatabaseSync(path);
     db.exec('PRAGMA foreign_keys = ON');
     migrate(db);
+    // Feeds mit Schlüssel in der Adresse erkennt erst der Code, nicht die Migration: bei jedem Öffnen nachziehen (auch nach replaceWith).
+    for (const row of db.prepare('SELECT id, url, auth FROM feeds').all()) if (feedIsPrivate(row)) db.prepare('UPDATE documents SET private = 1 WHERE origin = ? AND private = 0').run(`feed:${row.id}`);
   };
   open();
-  // Feeds mit Schlüssel in der Adresse erkennt erst der Code, nicht die Migration: bei jedem Start nachziehen.
-  for (const row of db.prepare('SELECT id, url, auth FROM feeds').all()) if (feedIsPrivate(row)) db.prepare('UPDATE documents SET private = 1 WHERE origin = ? AND private = 0').run(`feed:${row.id}`);
   const iso = () => new Date(now()).toISOString();
 
   /** UPDATE nur der erlaubten Felder, die in `patch` stehen. */
