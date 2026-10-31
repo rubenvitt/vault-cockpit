@@ -718,7 +718,9 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
     /** Feed-Einträge im Eingang ohne Urteil, älteste zuerst; nach `maxAttempts` Fehlern nicht mehr. */
     pendingTriage({ limit = 20, maxAttempts = 3 } = {}) {
       return db
+        // Feeds mit Zugangsdaten sind privat: ihre Einträge gehen nie an Jev.
         .prepare(`SELECT d.* FROM documents d LEFT JOIN triage t ON t.doc_id = d.id
+          JOIN feeds f ON f.id = substr(d.origin, 6) AND f.auth IS NULL
           WHERE d.status = 'eingang' AND d.origin LIKE 'feed:%' AND (t.doc_id IS NULL OR (t.judged_at IS NULL AND t.attempts < ?))
           ORDER BY d.saved_at, d.rowid LIMIT ?`)
         .all(maxAttempts, limit)
@@ -770,7 +772,10 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
     /** Titel der zuletzt behaltenen Texte (Stapel, gelesen, abgelegt), als Kontext fürs Vorsortieren. */
     recentKeptTitles(limit = 12) {
       return db
-        .prepare(`SELECT title FROM documents WHERE status IN ('stapel', 'archiv', 'abgelegt') AND title IS NOT NULL ORDER BY status_changed_at DESC, rowid DESC LIMIT ?`)
+        // Ohne Einträge aus Feeds mit Zugangsdaten: auch ihre Titel bleiben privat.
+        .prepare(`SELECT d.title FROM documents d LEFT JOIN feeds f ON d.origin LIKE 'feed:%' AND f.id = substr(d.origin, 6)
+          WHERE d.status IN ('stapel', 'archiv', 'abgelegt') AND d.title IS NOT NULL AND f.auth IS NULL
+          ORDER BY d.status_changed_at DESC, d.rowid DESC LIMIT ?`)
         .all(limit)
         .map((r) => r.title);
     },
