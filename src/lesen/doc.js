@@ -199,8 +199,14 @@ const decided = (message, { doc, previous, changed }) => ({
 
 /** Kam die Aktion aus der Leseansicht (Formular mit `back` auf `/lesen/doc`)? Die App und „Weiter“ schicken keins. */
 const fromReader = (form) => (form.get('back') ?? '').startsWith('/lesen/doc?');
-/** Liste nach dem Schließen: der Eingang, wenn der Artikel dort lag, sonst der Stapel. */
-const listOf = (previous) => (previous === 'eingang' ? '/lesen/eingang' : '/lesen/stapel');
+/**
+ * Liste nach dem Schließen: der Eingang, wenn der Artikel dort lag oder von dort
+ * per „Jetzt lesen“ kam (`von=eingang` in der Adresse der Leseansicht), sonst der Stapel.
+ */
+const listOf = (form, previous) => {
+  const von = new URLSearchParams((form.get('back') ?? '').split('?')[1]?.split('#')[0] ?? '').get('von');
+  return previous === 'eingang' || von === 'eingang' ? '/lesen/eingang' : '/lesen/stapel';
+};
 
 /**
  * Seite und Aktionen der Leseansicht; `asAction` macht Fehler des Speichers zur
@@ -277,7 +283,7 @@ export function docRoutes({ store, asAction, onChange = () => {}, exporter = nul
        */
       async '/aktion/lesen/doc/fertig'(form) {
         const out = decided('Fertig, weg', await asAction(() => store.setStatus(form.get('id'), 'weg', { read: true })));
-        return fromReader(form) ? { ...out, redirect: listOf(out.undo?.fields.status) } : out;
+        return fromReader(form) ? { ...out, redirect: listOf(form, out.undo?.fields.status) } : out;
       },
       /** „In den Vault“: Notiz mit `lesestatus: gelesen`, mit `volltext=1` samt Volltext; dann archiviert. */
       async '/aktion/lesen/doc/vault'(form) {
