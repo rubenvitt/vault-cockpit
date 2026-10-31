@@ -59,7 +59,7 @@ import { weiterRoutes } from './weiter.js';
  * um „Ingest“ mit der Zahl der bereiten Entwürfe; src/web/http.js reicht es als
  * `ctx.nav` an die Seiten.
  */
-export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefined, capture = null, review = {}, embedCache = null, connections = null, exporter = null, speech = null, episodes = null, readNote = null, publicUrl = '', ingest = null, planter = null, fragen = null, onChange = () => {}, logger = console }) {
+export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefined, capture = null, review = {}, embedCache = null, connections = null, exporter = null, speech = null, episodes = null, readNote = null, publicUrl = '', ingest = null, planter = null, fragen = null, triage = () => false, onChange = () => {}, logger = console }) {
   const feeds = feedRoutes({ store, fetchFeed, logger });
   /** Fehler aus Abruf und Speicher als Meldung für die Seite. */
   const asAction = async (run) => {
@@ -72,7 +72,7 @@ export function readingRoutes({ store, fetchPage = undefined, fetchFeed = undefi
     }
   };
 
-  const inbox = inboxRoutes({ store, vault: Boolean(exporter) });
+  const inbox = inboxRoutes({ store, vault: Boolean(exporter), triage });
 
   const add = addRoutes({ store, asAction, logger });
 

@@ -671,7 +671,7 @@ ist, mit letztem erfolgreichem Lauf und letztem Fehler samt Zeitpunkt und Text:
 Sync (Status, letzter Abgleich, Lebenszeichen des Sidecars), Index (Notizen,
 letzter Aufbau), Embeddings (Modell, Fortschritt), Mail-Abruf, Zunder-Brücke (neue
 Checkboxen und Abgleich getrennt), Zunder-Zugang (nimmt Zunder den Token an?) und
-Kalender (je Kalender), Feeds (je Feed) und Lesestapel → Vault. `vault_stats` liefert dieselben Dienste
+Kalender (je Kalender), Feeds (je Feed), Vorsortieren (Jev) und Lesestapel → Vault. `vault_stats` liefert dieselben Dienste
 unter `services`. Letzten Erfolg und letzten Fehler je Dienst hält
 `/data/dienste-zustand.json` fest: Nach einem Neustart steht der Dienst bis zu
 seinem nächsten Lauf auf „unbekannt“, die Zeiten davor bleiben sichtbar. Beim Laden der Seite werden Zunder
@@ -733,6 +733,19 @@ oder ein doppelt abgeschicktes Formular legt nichts Neues an. Gespeichert wird i
 `/data/lesestapel.db` (SQLite wie der Index, aber nicht neu baubar, deshalb in der
 [Sicherung](#sicherung-von-data)). Das Schema enthält schon Status, Fortschritt,
 Markierungen mit Textanker, Feeds und Rückgängig-Spur für die folgenden Ausbaustufen.
+
+**Vorsortieren mit Jev** (Pilot, VCP-136): Steht unter Einstellungen → Lesestapel ein
+Jev-API-Key (TypeSafe AI), fragt das Cockpit für jeden neuen Feed-Eintrag im Eingang
+einmal `POST /v1/systemone` (`src/lesen/jev.js`): eine Auswahl „Jetzt lesen / Stapel /
+Weg / Unklar“ und eine Skala „Nähe zu den zuletzt behaltenen Texten“. Der Eingang
+zeigt dann zuerst Selbstgespeichertes, danach die Feed-Einträge nach dem Vorschlag;
+die Karte trägt ihn als Abzeichen (volle Verteilung im Tooltip, in der App unter
+`doc.suggestion`). Entschieden wird weiter über die Knöpfe: Die Wahl wird zum Label,
+Rückgängig nimmt es zurück, und unter Zustand steht die Folgequote samt Kosten. An Jev
+gehen nur Titel, Quelle, Feed, Gruppe und Auszug öffentlicher Feed-Einträge und die
+Titel der zuletzt behaltenen Texte, nie Notizen. Die Version ist gepinnt
+(Standard `jev-1.14.0`); Aliase wie `jev-latest` lehnt das Cockpit ab. Ohne Key bleibt
+der Eingang, wie er war. Keine Umgebungsvariable.
 
 Das Holen ist gegen SSRF geschützt: nur `http`/`https`, keine Zugangsdaten in der
 Adresse, und jede Adresse wird nach der DNS-Auflösung geprüft, auch nach jeder

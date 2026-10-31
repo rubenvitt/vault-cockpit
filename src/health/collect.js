@@ -98,6 +98,8 @@ export function createHealth({
   flameNote = null,
   // Feeds des Lesestapels (src/lesen/feeds.js): liefert den Dienst fertig, je Feed ein Teil.
   feeds = null,
+  // Vorsortieren des Feed-Eingangs (src/lesen/jev.js): liefert den Dienst fertig.
+  triage = null,
   // Lesestapel → Vault (src/lesen/vault-export.js, `health`): liefert den Dienst fertig.
   readingExport = null,
   // Datei unter /data, die letzten Erfolg und letzten Fehler je Dienst über einen Neustart rettet (VCP-60).
@@ -151,6 +153,7 @@ export function createHealth({
       s.mail?.token,
       d.mailToken,
       stored.mail?.token,
+      s.jev?.key,
       ...s.calendars.flatMap((c) => [c.password, c.url]),
     ];
   }
@@ -366,7 +369,7 @@ export function createHealth({
       ...(s.summary ? { summary: maskSecrets(s.summary, { secrets: hidden, max: 200 }) } : {}),
       ...(s.items ? { items: s.items.map(clean) } : {}),
     });
-    const list = [syncService(), ...(index ? [indexService()] : []), embedService(), mailService(), bridgeService(), ...(flameNote ? [flameNoteService()] : []), zunderService(), calendarService(), ...(feeds ? [feeds()] : []), ...(readingExport ? [readingExport()] : [])]
+    const list = [syncService(), ...(index ? [indexService()] : []), embedService(), mailService(), bridgeService(), ...(flameNote ? [flameNoteService()] : []), zunderService(), calendarService(), ...(feeds ? [feeds()] : []), ...(triage ? [triage()] : []), ...(readingExport ? [readingExport()] : [])]
       .map(clean)
       .map(remember);
     persist();

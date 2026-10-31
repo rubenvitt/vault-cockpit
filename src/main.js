@@ -26,6 +26,7 @@ import { createReadingStore } from './lesen/store.js';
 import { createSecretBox } from './cockpit/secret-box.js';
 import { readingRoutes } from './lesen/http.js';
 import { createFeedPoller } from './lesen/feeds.js';
+import { createJevDecider, createFeedTriage } from './lesen/jev.js';
 import { createReadingApi } from './lesen/api.js';
 import { saveUrl } from './lesen/save.js';
 import { createMailReader } from './lesen/mail.js';
@@ -246,6 +247,17 @@ const reading = createReadingStore({
 // eigenen Abstand (Standard 30 min), Fehler verlängern ihn.
 const feedPoller = createFeedPoller({ store: reading });
 feedPoller.start();
+// Feed-Eingang vorsortieren (VCP-136): nur mit Jev-Key aus den Einstellungen; ohne bleibt der Eingang, wie er ist.
+// Der Client entsteht neu, sobald sich Key oder Version ändern.
+let jevClient = null;
+const jevDecider = () => {
+  const cfg = cockpitSettings.get().jev;
+  if (!cfg) return (jevClient = null);
+  if (jevClient?.key !== cfg.key || jevClient?.decider.model !== cfg.model) jevClient = { key: cfg.key, decider: createJevDecider({ key: cfg.key, model: cfg.model }) };
+  return jevClient.decider;
+};
+const feedTriage = createFeedTriage({ store: reading, decider: jevDecider });
+feedTriage.start();
 // Texte als Notiz in den Vault (VCP-75, VCP-96), Markierungen entprellt;
 // `readingExport.addLink` schreibt Wikilinks zu einer Markierung dorthin.
 const readingExport = createReadingExport({ vaultPath: VAULT_PATH, index, editor, policy: POLICY, store: reading, settings: cockpitSettings });
@@ -359,6 +371,7 @@ const health = createHealth({
   calendars,
   flameNote,
   feeds: () => feedPoller.health(),
+  triage: () => feedTriage.health(),
   readingExport: () => readingExport.health(),
   // Letzter Erfolg und Fehler je Dienst überstehen einen Neustart (VCP-60).
   file: join(dirname(COCKPIT_SETTINGS_FILE), 'dienste-zustand.json'),
@@ -512,6 +525,7 @@ const webHttp = process.env.WEB_CLIENT_ID
       // „In Inbox“ aus der Leseansicht nutzt die Schnelleingabe des Cockpits.
       reading: readingRoutes({
         store: reading,
+        triage: () => Boolean(jevDecider()),
         capture: (input) => cockpitActions.capture(input),
         embedCache,
         speech,

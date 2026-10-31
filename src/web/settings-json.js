@@ -36,6 +36,8 @@ const SCOPE_TEXT = {
   sync: 'Ein Gerät des eigenen Syncs: /sync/v1/…, liest und schreibt den ganzen Vault, auch vertrauliche Ordner',
 };
 const SET = 'gesetzt (leer lassen = unverändert)';
+/** Was unter „Eingang vorsortieren“ steht (VCP-136). */
+export const JEV_INTRO = 'Jev (TypeSafe AI) schlägt für neue Feed-Einträge im Eingang vor: jetzt lesen, Stapel, weg oder unklar, und sortiert danach. Es entscheidet nichts, die Knöpfe bleiben bei dir; was du wählst, misst die Folgequote unter Zustand. An Jev gehen nur Titel, Quelle und Auszug öffentlicher Feed-Einträge und die Titel zuletzt behaltener Texte, nie Notizen. Kostet Bruchteile eines Cents je Eintrag.';
 
 /** Adresse ohne Pfad und Abfrage: iCal-Adressen enthalten oft ein Geheimnis. */
 export const maskUrl = (url) => {
@@ -81,7 +83,8 @@ export function sectionStates({ stored, defaults: d, checks = {} }) {
   const sync = syncNow === 'none' && !shadow ? ['aus', 'off'] : [`${SYNC_LABELS[syncNow] ?? syncNow}${shadow ? ', Schattenbetrieb' : ''}`, 'ok'];
   const problems = stored.calendars.filter((c) => checks[c.id] && !checks[c.id].ok).length;
   const kalender = !stored.calendars.length ? ['keine', 'off'] : problems ? [`${problems} von ${stored.calendars.length} nicht erreichbar`, 'warn'] : [`${stored.calendars.length} verbunden`, 'ok'];
-  return { kalender, zunder, bruecke: bridge, 'feuer-notiz': flameNote, mail, lesestapel: null, embeddings: embed, vorlesen: voice, sync, anzeige: null, anmeldung: null };
+  const lesestapel = stored.jev?.key ? ['vorsortiert mit Jev', 'ok'] : null;
+  return { kalender, zunder, bruecke: bridge, 'feuer-notiz': flameNote, mail, lesestapel, embeddings: embed, vorlesen: voice, sync, anzeige: null, anmeldung: null };
 }
 
 /** Abschnitte der Seite in ihrer Reihenfolge; Tokens, Kurzbefehle und Sicherung nur, wenn es sie gibt. */
@@ -195,9 +198,14 @@ function formSections(stored, d) {
           field('ingest.limit', 'Höchstens je Nacht', { kind: 'number', hint: 'Texte', value: stored.ingest?.limit, placeholder: d.ingestLimit ?? 20 }),
           field('ingest.agent', 'Danach einpflanzen', { kind: 'select', hint: 'Agent arbeitet Übernommenes in die Seiten ein', value: choice(stored.ingest?.agent ?? null), options: onOff(d.ingestAgent ?? true) }),
         ].map((f) => ({ ...f, group: 'Ingest ins Wiki' })),
+        ...[
+          field('jev.key', 'Jev-API-Key', { kind: 'secret', hint: 'TypeSafe AI, leer = aus', placeholder: stored.jev?.key ? SET : '', set: stored.jev?.key, clear: stored.jev?.key ? 'jev.clear' : null, clearLabel: 'Key löschen, Vorsortieren aus' }),
+          field('jev.model', 'Version', { hint: 'feste Version, kein jev-latest', value: stored.jev?.model, placeholder: d.jevModel }),
+        ].map((f) => ({ ...f, group: 'Eingang vorsortieren' })),
       ],
       groups: {
         'Ingest ins Wiki': 'Claude entwirft für Texte auf dem Stapel einen Ingest ins Mycel-Wiki; ins Wiki kommt erst, was du unter Lesen → Ingest abhakst. Braucht CLAUDE_CODE_OAUTH_TOKEN wie die Folgen.',
+        'Eingang vorsortieren': JEV_INTRO,
       },
     },
     embeddings: {
@@ -339,11 +347,12 @@ const FIELDS = new Set([
   'tts.provider', 'tts.key', 'tts.clear', 'tts.voice', 'tts.model',
   'episodes.host', 'episodes.guest', 'episodes.model', 'episodes.language',
   'ingest.nightly', 'ingest.hour', 'ingest.model', 'ingest.limit', 'ingest.agent',
+  'jev.key', 'jev.clear', 'jev.model',
   'hiddenEvents', 'session.idleDays', 'session.maxDays', 'cal.auth',
 ]);
 const CAL_FIELD = /^cal\.(\d{1,2})\.(id|name|kind|url|auth|username|password|filter|remove)$/;
 /** Haken: gesetzt heißt an; leer, `0` oder `false` heißt aus (ein Formular ließe ihn dann weg). */
-const CHECKBOX = /^(?:zunder|mail|tts)\.clear$|^cal\.\d{1,2}\.(?:auth|remove)$/;
+const CHECKBOX = /^(?:zunder|mail|tts|jev)\.clear$|^cal\.\d{1,2}\.(?:auth|remove)$/;
 const OFF = new Set(['', '0', 'false', 'aus', 'nein']);
 
 /**
@@ -383,6 +392,7 @@ export function formOfSettings(stored) {
   put('ingest.model', stored.ingest?.model);
   put('ingest.limit', stored.ingest?.limit);
   put('ingest.agent', choice(stored.ingest?.agent ?? null));
+  put('jev.model', stored.jev?.model);
   put('session.idleDays', stored.session?.idleDays);
   put('session.maxDays', stored.session?.maxDays);
   put('cal.auth', '1');
