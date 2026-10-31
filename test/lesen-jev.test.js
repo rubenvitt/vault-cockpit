@@ -247,3 +247,21 @@ test('Eingang: Karte zeigt den Vorschlag, JSON trägt ihn, die Entscheidung wird
     assert.equal(store.getTriage(doc.id).decision, null);
   });
 });
+
+test('Vorsortieren: bekommt ein Feed mitten im Durchgang ein Login, geht nichts mehr von ihm hinaus', async () => {
+  const store = createReadingStore({ path: ':memory:', secrets: createSecretBox(SECRET) });
+  const { feed, add } = feedDocs(store);
+  add(1);
+  add(2);
+  let n = 0;
+  const decider = {
+    model: 'm',
+    decide: async () => {
+      n += 1;
+      store.setFeedAuth(feed.id, { user: 'ruben', password: 'pw_geheim_123' });
+      return answer('lesen', { lesen: 0.8, stapel: 0.1, weg: 0.05, unklar: 0.05 });
+    },
+  };
+  await createFeedTriage({ store, decider: () => decider, logger: quiet }).runPending();
+  assert.equal(n, 1);
+});
