@@ -244,8 +244,9 @@ public final class ReaderStore {
         context.toasts.signal(.success)
         switch await deliver(ReadingAction.markNew, fields) {
         case .sent(let response):
-            actions.show(response) { [weak self] undo in
-                Task { await self?.replay(undo) }
+            // Stark gehalten: „Fertig, weg“ schließt die Leseansicht, das Rückgängig im Toast muss trotzdem laufen.
+            actions.show(response) { undo in
+                Task { await self.replay(undo) }
             }
             await refresh()
             return response.highlight?.id ?? cid
@@ -283,8 +284,9 @@ public final class ReaderStore {
         defer { busy.remove(highlightID) }
         switch await deliver(ReadingAction.note, ["id": highlightID, "notiz": value]) {
         case .sent(let response):
-            actions.show(response) { [weak self] undo in
-                Task { await self?.replay(undo) }
+            // Stark gehalten: „Fertig, weg“ schließt die Leseansicht, das Rückgängig im Toast muss trotzdem laufen.
+            actions.show(response) { undo in
+                Task { await self.replay(undo) }
             }
             return true
         case .parked:
@@ -324,8 +326,9 @@ public final class ReaderStore {
         defer { busy.remove(id) }
         do {
             let response = try await actions.send(ReadingAction.markDelete, ["id": id])
-            actions.show(response) { [weak self] undo in
-                Task { await self?.replay(undo) }
+            // Stark gehalten: „Fertig, weg“ schließt die Leseansicht, das Rückgängig im Toast muss trotzdem laufen.
+            actions.show(response) { undo in
+                Task { await self.replay(undo) }
             }
             return true
         } catch {
@@ -396,8 +399,9 @@ public final class ReaderStore {
         context.toasts.signal(.success)
         switch await deliver(action, fields) {
         case .sent(let response):
-            actions.show(response) { [weak self] undo in
-                Task { await self?.replay(undo) }
+            // Stark gehalten: „Fertig, weg“ schließt die Leseansicht, das Rückgängig im Toast muss trotzdem laufen.
+            actions.show(response) { undo in
+                Task { await self.replay(undo) }
             }
             await refresh()
             return true

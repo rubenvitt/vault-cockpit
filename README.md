@@ -1099,7 +1099,10 @@ iOS-App ist „In den Vault“ mit Volltext, lange drücken bietet „ohne
 Volltext“). Wer `volltext` nicht mitschickt, bekommt wie bisher keinen; nur die
 Oberflächen setzen das Häkchen vorab. „Fertig, weg“ setzt den Status `weg` mit
 Lesedatum (`read_at`) und schreibt nichts in den Vault; eine schon vorhandene
-Notiz bleibt unangetastet. „Weg“ im Eingang hat kein Lesedatum, das Aufräumen
+Notiz bleibt unangetastet. Aus der Leseansicht schließt „Fertig, weg“ den
+Artikel: Im Web geht es zurück in den Eingang (lag er dort) oder auf den
+Stapel, in der App zurück zur vorigen Ansicht; die Meldung mit **Rückgängig**
+kommt mit. „Weg“ im Eingang hat kein Lesedatum, das Aufräumen
 unterscheidet beides: Stündlich löscht das Cockpit Texte, die seit mehr als
 **Verworfenes löschen nach Tagen** (Einstellungen → Lesestapel, Standard 30,
 0 = nie) ohne Lesedatum auf „Weg“ stehen; Gehörtes und Texte mit Markierungen
