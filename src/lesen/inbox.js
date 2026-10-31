@@ -163,7 +163,8 @@ export function inboxRoutes({ store, vault = false, now = () => Date.now() }) {
           message: `${message}: ${name(doc)}${r.changed && r.previous === 'abgelegt' ? ' (die Notiz im Vault bleibt)' : ''}`,
           doc: { id: doc.id, status: r.doc.status },
           undo: r.changed ? { action: SORT, fields: { id: doc.id, ziel: r.previous } } : null,
-          redirect: ziel === 'lesen' ? `/lesen/doc?id=${encodeURIComponent(doc.id)}` : null,
+          // `von=eingang`: „Fertig, weg“ führt danach zurück in den Eingang (src/lesen/doc.js), obwohl der Text jetzt auf dem Stapel liegt.
+          redirect: ziel === 'lesen' ? `/lesen/doc?id=${encodeURIComponent(doc.id)}&von=eingang` : null,
         };
       },
     },

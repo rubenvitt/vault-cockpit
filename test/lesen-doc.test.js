@@ -134,6 +134,12 @@ test('Leseansicht: Archivieren ohne JavaScript mit Meldung und Rückgängig, For
     await call('/aktion/lesen/doc/status', { method: 'POST', form: { csrf, id: doc.id, status: 'stapel' } });
     const fromWeiter = await call('/aktion/lesen/doc/fertig', { method: 'POST', form: { csrf, back: '/lesen/weiter', id: doc.id } });
     assert.equal(fromWeiter.headers.get('location'), '/lesen/weiter');
+    // Per „Jetzt lesen“ aus dem Eingang (`von=eingang`, Status schon `stapel`): zurück in den Eingang, Rückgängig auf den Stapel.
+    await call('/aktion/lesen/doc/status', { method: 'POST', form: { csrf, id: doc.id, status: 'stapel' } });
+    const viaInbox = await (await call('/aktion/lesen/doc/fertig', { method: 'POST', form: { csrf, back: `${back}&von=eingang`, id: doc.id }, json: true })).json();
+    assert.equal(viaInbox.redirect, '/lesen/eingang');
+    assert.equal(viaInbox.undo.fields.status, 'stapel');
+    await call('/aktion/lesen/doc/status', { method: 'POST', form: { csrf, id: doc.id, status: 'stapel' } });
     const fromApp = await (await call('/aktion/lesen/doc/fertig', { method: 'POST', form: { csrf, id: doc.id }, json: true })).json();
     assert.equal(fromApp.redirect, undefined);
 

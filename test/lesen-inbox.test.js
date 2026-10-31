@@ -156,7 +156,7 @@ test('Eingang: mit JavaScript als JSON, Jetzt lesen legt auf den Stapel und öff
 
     const read = await call(SORT, { form: { csrf, back: '/lesen/eingang', id: a.id, ziel: 'lesen' } });
     assert.equal(read.status, 303);
-    assert.equal(read.headers.get('location'), `/lesen/doc?id=${a.id}`);
+    assert.equal(read.headers.get('location'), `/lesen/doc?id=${a.id}&von=eingang`);
     assert.equal(store.get(a.id).status, 'stapel');
 
     const html = await page();
