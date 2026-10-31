@@ -1,5 +1,5 @@
 import { DOMParser, parseHTML } from 'linkedom';
-import { safeFetch, normalizeUrl, sameHost } from './fetch.js';
+import { safeFetch, normalizeUrl, sameHost, urlCarriesSecret } from './fetch.js';
 import { sanitizeHtml, readingMinutes } from './extract.js';
 import { fetchArticle } from './save.js';
 import { ReadingError } from './store.js';
@@ -372,7 +372,7 @@ export function createFeedPoller({ store, fetchFeed = fetchFeedDefault, fetchPag
         store.rememberEntry(feed.id, entry.key, null, { filtered: Boolean(entry.url) });
         continue;
       }
-      const { doc, duplicate } = store.addDocument({ ...(await article(entry, site, auth ? { url: feed.url, auth } : null)), kind: 'feed', origin: `feed:${feed.id}`, private: Boolean(auth), status: feed.to_stack || feed.group_to_stack ? 'stapel' : 'eingang' });
+      const { doc, duplicate } = store.addDocument({ ...(await article(entry, site, auth ? { url: feed.url, auth } : null)), kind: 'feed', origin: `feed:${feed.id}`, private: Boolean(auth) || urlCarriesSecret(feed.url), status: feed.to_stack || feed.group_to_stack ? 'stapel' : 'eingang' });
       store.rememberEntry(feed.id, entry.key, doc.id);
       if (!duplicate) added += 1;
     }

@@ -743,7 +743,8 @@ die Karte trägt ihn als Abzeichen (volle Verteilung im Tooltip, in der App unte
 `doc.suggestion`). Entschieden wird weiter über die Knöpfe: Die Wahl wird zum Label,
 Rückgängig nimmt es zurück, und unter Zustand steht die Folgequote samt Kosten. An Jev
 gehen nur Titel, Quelle, Feed, Gruppe und Auszug öffentlicher Feed-Einträge und die
-Titel der zuletzt behaltenen Texte, nie Notizen. Feeds mit Zugangsdaten bleiben ganz
+Titel der zuletzt behaltenen Texte, nie Notizen. Feeds mit Zugangsdaten oder mit einem
+Schlüssel in der Adresse (`?token=`, `?key=`, `?sig=` …, lange Zufallspfade) bleiben ganz
 außen vor, auch ihre Titel; was mit Login geholt wurde, bleibt privat, auch wenn der
 Feed später gelöscht wird oder das Login verliert. Ein abgelehnter Key oder ein leeres Kontingent kostet
 keinen der drei Versuche je Eintrag. Die Version ist gepinnt

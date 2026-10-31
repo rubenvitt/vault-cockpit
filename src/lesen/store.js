@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { writePrivate } from '../cockpit/settings.js';
+import { urlCarriesSecret } from './fetch.js';
 
 /**
  * Lesestapel (VCP-77): Artikel, Markierungen und Feeds in einer eigenen
@@ -190,7 +191,9 @@ const withoutAuth = ({ auth, ...row }) => row;
  * Feed mit den Einstellungen seiner Gruppe (`group_paused`, `group_to_stack`).
  * Es gilt Feed ODER Gruppe: `false` am Feed heißt „nichts Eigenes gesetzt“.
  */
-const feedRow = (row) => (row ? { ...withoutAuth(row), has_auth: Boolean(row.auth), paused: Boolean(row.paused), to_stack: Boolean(row.to_stack), group_paused: Boolean(row.group_paused), group_to_stack: Boolean(row.group_to_stack) } : null);
+// Privat: mit Zugangsdaten oder mit einem Schlüssel in der Adresse.
+const feedIsPrivate = (row) => Boolean(row?.auth) || urlCarriesSecret(row?.url);
+const feedRow = (row) => (row ? { ...withoutAuth(row), has_auth: Boolean(row.auth), private: feedIsPrivate(row), paused: Boolean(row.paused), to_stack: Boolean(row.to_stack), group_paused: Boolean(row.group_paused), group_to_stack: Boolean(row.group_to_stack) } : null);
 const parseJson = (v) => (v == null ? null : JSON.parse(v));
 const ingestRow = (row) => (row ? { ...row, draft: parseJson(row.draft), applied: parseJson(row.applied) } : null);
 const triageRow = (row) => (row ? { ...row, probabilities: parseJson(row.probabilities), near_probabilities: parseJson(row.near_probabilities) } : null);
@@ -233,6 +236,8 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
     migrate(db);
   };
   open();
+  // Feeds mit Schlüssel in der Adresse erkennt erst der Code, nicht die Migration: bei jedem Start nachziehen.
+  for (const row of db.prepare('SELECT id, url, auth FROM feeds').all()) if (feedIsPrivate(row)) db.prepare('UPDATE documents SET private = 1 WHERE origin = ? AND private = 0').run(`feed:${row.id}`);
   const iso = () => new Date(now()).toISOString();
 
   /** UPDATE nur der erlaubten Felder, die in `patch` stehen. */
@@ -258,9 +263,13 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
   const getHighlight = (id) => db.prepare('SELECT * FROM highlights WHERE id = ?').get(String(id ?? '')) ?? null;
   const getFeed = (id) => feedRow(db.prepare(`${FEED_SELECT} WHERE f.id = ?`).get(String(id ?? '')));
   /** Zugangsdaten setzen (`{ user, password }`) oder mit `null` löschen; verschlüsselt, an den Feed gebunden. */
-  // Dokumente aus Feeds mit Zugangsdaten als privat markieren (nur in diese Richtung).
-  const markPrivate = (where, value) =>
-    db.prepare(`UPDATE documents SET private = 1 WHERE ${where} AND origin LIKE 'feed:%' AND substr(origin, 6) IN (SELECT id FROM feeds WHERE auth IS NOT NULL)`).run(value);
+  // Dokumente privater Feeds als privat markieren (nur in diese Richtung).
+  const rawFeed = (id) => db.prepare('SELECT id, url, auth FROM feeds WHERE id = ?').get(String(id ?? ''));
+  const markFeedPrivate = (id) => db.prepare('UPDATE documents SET private = 1 WHERE origin = ? AND private = 0').run(`feed:${id}`);
+  const markIfPrivate = (id) => {
+    const row = rawFeed(id);
+    if (row && feedIsPrivate(row)) markFeedPrivate(row.id);
+  };
   const setFeedAuth = (id, auth) => {
     let sealed = null;
     if (auth) {
@@ -268,7 +277,7 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
       sealed = secrets.seal({ user: String(auth.user ?? ''), password: String(auth.password ?? '') }, `feed:${id}`);
     }
     db.prepare('UPDATE feeds SET auth = ? WHERE id = ?').run(sealed, String(id));
-    if (sealed) markPrivate("origin = ?", `feed:${id}`);
+    if (sealed) markFeedPrivate(id);
   };
   const getGroup = (id) => groupRow(db.prepare('SELECT * FROM feed_groups WHERE id = ?').get(String(id ?? '')));
   const listGroups = () => db.prepare('SELECT * FROM feed_groups ORDER BY position, name').all().map(groupRow);
@@ -343,11 +352,11 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
       const t = iso();
       const row = { ...Object.fromEntries(DOC_FIELDS.map((k) => [k, fields[k] ?? null])), kind: fields.kind ?? 'artikel', origin: fields.origin ?? 'formular', status, word_count: fields.word_count ?? 0, reading_minutes: fields.reading_minutes ?? 0, topics: JSON.stringify(fields.topics ?? []) };
       const id = randomUUID();
-      const cols = ['id', ...DOC_FIELDS, 'saved_at', 'status_changed_at', 'updated_at'];
-      db.prepare(`INSERT INTO documents (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`).run(id, ...DOC_FIELDS.map((k) => bindable(row[k])), t, t, t);
-      // Mit Login geholt (so wie der Abruf es sah, nicht wie der Feed jetzt steht) oder Feed hat jetzt eins.
-      if (fields.private) db.prepare('UPDATE documents SET private = 1 WHERE id = ?').run(id);
-      markPrivate('id = ?', id);
+      // Privat, wenn der Abruf es so sah (Login zum Zeitpunkt des Abrufs) oder der Feed es jetzt ist; in einem Schritt mit dem Anlegen.
+      const feedId = row.origin.startsWith('feed:') ? row.origin.slice(5) : null;
+      const priv = fields.private || (feedId && feedIsPrivate(rawFeed(feedId))) ? 1 : 0;
+      const cols = ['id', ...DOC_FIELDS, 'private', 'saved_at', 'status_changed_at', 'updated_at'];
+      db.prepare(`INSERT INTO documents (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`).run(id, ...DOC_FIELDS.map((k) => bindable(row[k])), priv, t, t, t);
       return { doc: get(id), duplicate: false };
     },
 
@@ -589,7 +598,10 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
     },
     updateFeed(id, patch) {
       const feed = must(getFeed(id), 'Diesen Feed');
-      inTransaction(() => update('feeds', id, feedPatch(feed, withGroup(patch)), FEED_EDIT));
+      inTransaction(() => {
+        update('feeds', id, feedPatch(feed, withGroup(patch)), FEED_EDIT);
+        markIfPrivate(id);
+      });
       return getFeed(id);
     },
     deleteFeed: (id) => db.prepare('DELETE FROM feeds WHERE id = ?').run(String(id ?? '')).changes > 0,

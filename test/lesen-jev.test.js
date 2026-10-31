@@ -276,3 +276,44 @@ test('Vorsortieren: mit Login geholt bleibt privat, auch wenn das Login vor dem 
   assert.equal(store.isPrivate(pub.id), false);
   assert.deepEqual(store.pendingTriage().map((d) => d.id), [pub.id]);
 });
+
+test('Vorsortieren: Feeds mit Schlüssel in der Adresse gelten als privat', async () => {
+  const { urlCarriesSecret } = await import('../src/lesen/fetch.js');
+  assert.equal(urlCarriesSecret('https://blatt.test/feed.xml'), false);
+  assert.equal(urlCarriesSecret('https://www.youtube.com/feeds/videos.xml?channel_id=UCabcdefghijklmnop123456'), false);
+  assert.equal(urlCarriesSecret('https://blatt.test/rss?format=atom'), false);
+  assert.equal(urlCarriesSecret('https://privat.test/feed?token=abc'), true);
+  assert.equal(urlCarriesSecret('https://privat.test/feed?api_key=abc'), true);
+  assert.equal(urlCarriesSecret('https://privat.test/feed/9f2c4e1a7b3d5c6e8f0a1b2c3d4e5f6a/podcast.xml'), true);
+
+  const path = `${process.env.TMPDIR ?? '/tmp'}/jev-token-${process.pid}-${Date.now()}.db`;
+  let store = createReadingStore({ path });
+  const { add } = feedDocs(store);
+  const pub = add(1);
+  const { feed } = store.addFeed({ url: 'https://privat.test/feed?token=s3cr3t', title: 'Privat' });
+  assert.equal(store.getFeed(feed.id).private, true);
+  const { doc } = store.addDocument({ url: 'https://privat.test/1', title: 'Privat 1', kind: 'feed', origin: `feed:${feed.id}` });
+  assert.equal(store.isPrivate(doc.id), true, 'neu angelegt: gleich privat');
+  assert.deepEqual(store.pendingTriage().map((d) => d.id), [pub.id]);
+
+  // Ein öffentlicher Feed bekommt eine Token-Adresse: seine Einträge werden privat.
+  const { feed: other } = store.addFeed({ url: 'https://drei.test/feed.xml', title: 'Drei' });
+  const { doc: early } = store.addDocument({ url: 'https://drei.test/1', title: 'Drei 1', kind: 'feed', origin: `feed:${other.id}` });
+  assert.equal(store.isPrivate(early.id), false);
+  store.updateFeed(other.id, { url: 'https://drei.test/feed.xml?key=abc' });
+  assert.equal(store.isPrivate(early.id), true);
+
+  // Bestand aus der Zeit vor der Erkennung wird beim Start nachgezogen.
+  const { feed: legacy } = store.addFeed({ url: 'https://vier.test/feed.xml', title: 'Vier' });
+  const { doc: old } = store.addDocument({ url: 'https://vier.test/1', title: 'Vier 1', kind: 'feed', origin: `feed:${legacy.id}` });
+  store.close?.();
+  const { DatabaseSync } = await import('node:sqlite');
+  const raw = new DatabaseSync(path);
+  raw.prepare('UPDATE feeds SET url = ? WHERE id = ?').run('https://vier.test/feed.xml?auth=xyz', legacy.id);
+  raw.close();
+  store = createReadingStore({ path });
+  assert.equal(store.isPrivate(old.id), true);
+  store.close?.();
+  const { rmSync } = await import('node:fs');
+  rmSync(path, { force: true });
+});
