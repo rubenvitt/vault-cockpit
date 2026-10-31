@@ -744,7 +744,8 @@ die Karte trägt ihn als Abzeichen (volle Verteilung im Tooltip, in der App unte
 Rückgängig nimmt es zurück, und unter Zustand steht die Folgequote samt Kosten. An Jev
 gehen nur Titel, Quelle, Feed, Gruppe und Auszug öffentlicher Feed-Einträge und die
 Titel der zuletzt behaltenen Texte, nie Notizen. Feeds mit Zugangsdaten bleiben ganz
-außen vor, auch ihre Titel. Ein abgelehnter Key oder ein leeres Kontingent kostet
+außen vor, auch ihre Titel; was mit Login geholt wurde, bleibt privat, auch wenn der
+Feed später gelöscht wird oder das Login verliert. Ein abgelehnter Key oder ein leeres Kontingent kostet
 keinen der drei Versuche je Eintrag. Die Version ist gepinnt
 (Standard `jev-1.14.0`); Aliase wie `jev-latest` lehnt das Cockpit ab. Ohne Key bleibt
 der Eingang, wie er war. Keine Umgebungsvariable.
