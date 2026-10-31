@@ -372,7 +372,7 @@ export function createFeedPoller({ store, fetchFeed = fetchFeedDefault, fetchPag
         store.rememberEntry(feed.id, entry.key, null, { filtered: Boolean(entry.url) });
         continue;
       }
-      const { doc, duplicate } = store.addDocument({ ...(await article(entry, site, auth ? { url: feed.url, auth } : null)), kind: 'feed', origin: `feed:${feed.id}`, status: feed.to_stack || feed.group_to_stack ? 'stapel' : 'eingang' });
+      const { doc, duplicate } = store.addDocument({ ...(await article(entry, site, auth ? { url: feed.url, auth } : null)), kind: 'feed', origin: `feed:${feed.id}`, private: Boolean(auth), status: feed.to_stack || feed.group_to_stack ? 'stapel' : 'eingang' });
       store.rememberEntry(feed.id, entry.key, doc.id);
       if (!duplicate) added += 1;
     }

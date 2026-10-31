@@ -265,3 +265,14 @@ test('Vorsortieren: bekommt ein Feed mitten im Durchgang ein Login, geht nichts 
   await createFeedTriage({ store, decider: () => decider, logger: quiet }).runPending();
   assert.equal(n, 1);
 });
+
+test('Vorsortieren: mit Login geholt bleibt privat, auch wenn das Login vor dem Speichern wegfiel', async () => {
+  const store = createReadingStore({ path: ':memory:' });
+  const { add } = feedDocs(store);
+  const pub = add(1);
+  const { feed } = store.addFeed({ url: 'https://zwei.test/feed.xml', title: 'Zwei' });
+  const { doc } = store.addDocument({ url: 'https://zwei.test/1', title: 'Mit Login', kind: 'feed', origin: `feed:${feed.id}`, private: true });
+  assert.equal(store.isPrivate(doc.id), true);
+  assert.equal(store.isPrivate(pub.id), false);
+  assert.deepEqual(store.pendingTriage().map((d) => d.id), [pub.id]);
+});

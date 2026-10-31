@@ -345,6 +345,8 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
       const id = randomUUID();
       const cols = ['id', ...DOC_FIELDS, 'saved_at', 'status_changed_at', 'updated_at'];
       db.prepare(`INSERT INTO documents (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`).run(id, ...DOC_FIELDS.map((k) => bindable(row[k])), t, t, t);
+      // Mit Login geholt (so wie der Abruf es sah, nicht wie der Feed jetzt steht) oder Feed hat jetzt eins.
+      if (fields.private) db.prepare('UPDATE documents SET private = 1 WHERE id = ?').run(id);
       markPrivate('id = ?', id);
       return { doc: get(id), duplicate: false };
     },
@@ -779,6 +781,11 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
       return { judged: r.judged, decided: r.decided, followed: r.followed, unclear: r.unclear, input_tokens: r.input_tokens };
     },
     /** Titel der zuletzt behaltenen Texte (Stapel, gelesen, abgelegt), als Kontext fürs Vorsortieren. */
+    /** Ist das Dokument privat (mit Login geholt)? Unbekannt zählt als privat. */
+    isPrivate(docId) {
+      const row = db.prepare('SELECT private FROM documents WHERE id = ?').get(String(docId ?? ''));
+      return !row || Boolean(row.private);
+    },
     recentKeptTitles(limit = 12) {
       return db
         // Ohne Einträge aus Feeds mit Zugangsdaten: auch ihre Titel bleiben privat. Ist der

@@ -174,7 +174,7 @@ export function createFeedTriage({ store, decider, batch = 20, now = () => Date.
   async function judge(d, doc) {
     const feed = doc.origin?.startsWith('feed:') ? store.getFeed(doc.origin.slice(5)) : null;
     // Frisch nachsehen: Bekam der Feed während des Durchgangs ein Login oder ist er weg, nichts senden.
-    if (!feed || feed.has_auth) return false;
+    if (!feed || feed.has_auth || store.isPrivate(doc.id)) return false;
     const group = feed?.group_id ? store.listGroups?.().find((g) => g.id === feed.group_id)?.name ?? null : null;
     const state = triageState(doc, { feed, group, kept: store.recentKeptTitles(12) });
     try {
