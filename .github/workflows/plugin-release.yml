@@ -21,9 +21,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           version=$(jq -r .version obsidian-plugin/manifest.json)
-          if gh release view "$version" > /dev/null 2>&1; then
+          draft=$(gh release view "$version" --json isDraft -q .isDraft 2> /dev/null || true)
+          if [ "$draft" = false ]; then
             echo "Release $version gibt es schon."
             exit 0
+          fi
+          # Ein abgebrochener Lauf hinterlässt einen Entwurf, den BRAT nicht sieht.
+          if [ "$draft" = true ]; then
+            gh release delete "$version" --yes
           fi
           gh release create "$version" \
             obsidian-plugin/main.js obsidian-plugin/manifest.json \
