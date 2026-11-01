@@ -15,15 +15,27 @@ Client für den eigenen Sync des Vault-Cockpits (VCP-13): gleicht den Vault übe
 
 ## Installieren
 
-Obsidian lädt Plugins aus `<Vault>/.obsidian/plugins/cockpit-sync/`. Dorthin
-gehören `main.js` und `manifest.json` aus diesem Ordner.
+Am einfachsten über [BRAT](https://github.com/TfTHacker/obsidian42-brat), auf
+Desktop und iPhone/iPad gleich:
 
-- **Desktop:** die beiden Dateien in den Ordner kopieren, Obsidian neu laden.
-- **iPhone/iPad:** Der eigene Sync überträgt `.obsidian` bewusst nicht. Am
-  einfachsten kommt das Plugin noch über Obsidian Sync aufs Gerät (dort
-  „Installierte Community-Plugins“ synchronisieren), bevor der eigene Sync
-  übernimmt. Ohne Obsidian Sync: den Ordner über die Dateien-App bzw. iCloud
-  an dieselbe Stelle legen.
+1. In Obsidian unter Community-Plugins „BRAT“ installieren und einschalten.
+2. In den BRAT-Einstellungen „Add Beta plugin“ wählen und
+   `rubenvitt/vault-cockpit` eintragen.
+3. „Cockpit Sync“ unter Community-Plugins einschalten.
+
+Updates holt der BRAT-Befehl „Check for updates“.
+
+Von Hand geht es auf dem Desktop auch: `main.js` und `manifest.json` nach
+`<Vault>/.obsidian/plugins/cockpit-sync/` kopieren und Obsidian neu laden. Der
+eigene Sync überträgt `.obsidian` bewusst nicht, das Plugin kommt also nicht
+von selbst auf die anderen Geräte.
+
+## Neue Version veröffentlichen
+
+`version` in `manifest.json` anheben. Der Workflow `plugin-release` legt beim
+Merge nach `main` den Release mit `main.js` und `manifest.json` an. Ohne neue
+Version entsteht kein Release, Änderungen an `main.js` kommen dann nicht auf
+die Geräte.
 
 ## Modi
 
