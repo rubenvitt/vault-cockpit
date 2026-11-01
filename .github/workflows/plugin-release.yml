@@ -1,0 +1,30 @@
+name: Plugin-Release
+
+# BRAT holt das Obsidian-Plugin aus GitHub-Releases. Tag, Titel und Version im
+# Manifest müssen gleich sein, deshalb entsteht ein Release nur aus einer neuen
+# Version in manifest.json.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'obsidian-plugin/manifest.json'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Release anlegen, falls die Version neu ist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(jq -r .version obsidian-plugin/manifest.json)
+          if gh release view "$version" > /dev/null 2>&1; then
+            echo "Release $version gibt es schon."
+            exit 0
+          fi
+          gh release create "$version" \
+            obsidian-plugin/main.js obsidian-plugin/manifest.json \
+            --target "$GITHUB_SHA" --title "$version" --generate-notes
