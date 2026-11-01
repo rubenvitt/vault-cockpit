@@ -34,7 +34,6 @@ try {
   // Unter Node (Tests) gibt es nur die Sync-Logik.
 }
 
-const VERSION = '0.1.0';
 const isHidden = (path) => path.split('/').some((part) => part.startsWith('.'));
 
 async function sha256(data) {
@@ -419,7 +418,7 @@ if (obsidian) {
       return requestUrl({
         url: `${base}${path}?${new URLSearchParams(params)}`,
         method,
-        headers: { authorization: `Bearer ${this.settings.token}`, 'x-sync-client': `obsidian-plugin/${VERSION}` },
+        headers: { authorization: `Bearer ${this.settings.token}`, 'x-sync-client': `obsidian-plugin/${this.manifest.version}` },
         body,
         contentType: body ? 'application/octet-stream' : undefined,
         throw: false,
