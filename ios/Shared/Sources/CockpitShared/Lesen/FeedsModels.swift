@@ -173,6 +173,9 @@ public struct FeedsModel: Decodable, Equatable, Sendable {
         bulk = try c.decodeIfPresent(FeedBulkInfo.self, forKey: .bulk) ?? .fallback
     }
 
+    /// Kennt der Server „Nur lesen“? Ältere ignorieren `nur_lesen`; dann zeigt die App den Schalter nicht.
+    public var supportsReadOnly: Bool { bulk.actions.contains(FeedBulkAction.readOnlyOn.verb) }
+
     /// Noch nichts abonniert und keine Gruppe („Noch keine Feeds abonniert.“).
     public var isEmpty: Bool { groups.isEmpty && ungrouped.isEmpty }
 
@@ -307,7 +310,7 @@ public struct FeedBulkInfo: Decodable, Equatable, Sendable {
     /// Stand von feeds-page.js, falls ein älterer Server `bulk` nicht mitschickt.
     public static let fallback = FeedBulkInfo(
         action: FeedAction.bulk,
-        actions: ["gruppe", "pausieren", "fortsetzen", "stapel-an", "stapel-aus", "lesen-an", "lesen-aus", "abstand", "entfernen"],
+        actions: ["gruppe", "pausieren", "fortsetzen", "stapel-an", "stapel-aus", "abstand", "entfernen"],
         newGroup: "neu"
     )
 }

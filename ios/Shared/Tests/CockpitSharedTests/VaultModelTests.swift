@@ -407,7 +407,8 @@ final class VaultModelTests: XCTestCase {
             XCTAssertFalse(try decode(MessageReply.self, name).message.isEmpty, name)
         }
         XCTAssertEqual(feeds.bulk, FeedBulkInfo(action: "/aktion/lesen/feeds/auswahl", actions: ["gruppe", "pausieren", "fortsetzen", "stapel-an", "stapel-aus", "lesen-an", "lesen-aus", "abstand", "entfernen"], newGroup: "neu"))
-        XCTAssertEqual(feeds.bulk, .fallback)
+        XCTAssertTrue(feeds.supportsReadOnly)
+        XCTAssertFalse(FeedBulkInfo.fallback.actions.contains("lesen-an"), "ältere Server ohne `bulk` kennen „Nur lesen“ nicht")
         XCTAssertEqual(feeds.summary, "3 Feeds · 1 pausiert · 1 mit Fehlern")
         XCTAssertEqual(feeds.failingCount, 1)
         XCTAssertEqual(feeds.groupName(of: kultur), "Kultur")
@@ -475,9 +476,8 @@ final class VaultModelTests: XCTestCase {
         XCTAssertEqual(body(.move(.group("g-1"))), "tun=gruppe&ziel=g-1&feed=a&feed=b")
         XCTAssertEqual(body(.move(.newGroup(" Kunst & Kultur "))), "tun=gruppe&ziel=neu&neu=Kunst%20%26%20Kultur&feed=a&feed=b")
         XCTAssertEqual(CockpitAPI.formBody(pairs: FeedBulkAction.move(.newGroup("X")).pairs(feeds: ["a"], newGroup: "+")), "tun=gruppe&ziel=%2B&neu=X&feed=a")
-        XCTAssertEqual(FeedBulkInfo.fallback.actions, ["gruppe", "pausieren", "fortsetzen", "stapel-an", "stapel-aus", "lesen-an", "lesen-aus", "abstand", "entfernen"])
         let verbs: [FeedBulkAction] = [.move(.ungrouped), .pause, .resume, .stackOn, .stackOff, .readOnlyOn, .readOnlyOff, .interval(5), .remove]
-        XCTAssertEqual(verbs.map(\.verb), FeedBulkInfo.fallback.actions)
+        XCTAssertEqual(verbs.map(\.verb), try decode(FeedsModel.self, "rest-lesen-feeds").bulk.actions)
     }
 
     // MARK: Fehler und Wege
