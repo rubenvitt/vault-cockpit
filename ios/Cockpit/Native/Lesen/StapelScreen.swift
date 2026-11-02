@@ -282,12 +282,16 @@ struct StapelScreen: View {
                 }
             }
         }
-        .accessibilityAction(named: "Im Vault ablegen") {
-            if vault { file(item) }
-        }
-        .accessibilityAction(named: "Ingest") {
-            guard ingestOn else { return }
-            if IngestBadge.opensReview(status) { openReview(item) } else if canDraft(status, stack) { draft(item) }
+        // Nur, was geht: „Nur lesen“ bietet VoiceOver weder Ablegen noch Ingest an.
+        .accessibilityActions {
+            if vault {
+                Button("Im Vault ablegen") { file(item) }
+            }
+            if ingestOn {
+                Button("Ingest") {
+                    if IngestBadge.opensReview(status) { openReview(item) } else if canDraft(status, stack) { draft(item) }
+                }
+            }
         }
     }
 

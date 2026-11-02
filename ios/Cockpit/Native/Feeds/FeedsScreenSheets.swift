@@ -90,10 +90,12 @@ struct FeedsScreenFeedSheet: View {
                     Toggle(isOn: $settings.toStack) {
                         Label("Direkt auf den Stapel", systemImage: "square.stack")
                     }
-                    Toggle(isOn: $settings.noIngest) {
-                        Label("Nur lesen", systemImage: "eyeglasses")
+                    if store.model?.supportsReadOnly == true {
+                        Toggle(isOn: $settings.noIngest) {
+                            Label("Nur lesen", systemImage: "eyeglasses")
+                        }
+                        .accessibilityHint("Kein Ingest, nicht in den Vault; nach dem Lesen nur „Fertig, weg“")
                     }
-                    .accessibilityHint("Kein Ingest, nicht in den Vault; nach dem Lesen nur „Fertig, weg“")
                 } footer: {
                     if let note = groupNote {
                         Text(note)
@@ -200,7 +202,9 @@ struct FeedsScreenFeedSheet: View {
 
     /// Was die Gruppe zusätzlich vorgibt.
     private var groupNote: String? {
-        let parts = [feed.groupPaused ? "pausiert" : nil, feed.groupToStack ? "direkt auf den Stapel" : nil, feed.groupNoIngest ? "nur zum Lesen" : nil].compactMap { $0 }
+        // „Nur lesen“ von der gewählten Gruppe, damit der Hinweis schon vor dem Speichern stimmt.
+        let selected = groups.first { $0.id == settings.groupId }
+        let parts = [feed.groupPaused ? "pausiert" : nil, feed.groupToStack ? "direkt auf den Stapel" : nil, selected?.noIngest == true ? "nur zum Lesen" : nil].compactMap { $0 }
         return parts.isEmpty ? nil : "Die Gruppe ist \(parts.joined(separator: " und ")); das gilt zusätzlich."
     }
 
@@ -340,8 +344,10 @@ struct FeedsScreenGroupSheet: View {
                     Toggle(isOn: $toStack) {
                         Label("Direkt auf den Stapel", systemImage: "square.stack")
                     }
-                    Toggle(isOn: $noIngest) {
-                        Label("Nur lesen", systemImage: "eyeglasses")
+                    if store.model?.supportsReadOnly == true {
+                        Toggle(isOn: $noIngest) {
+                            Label("Nur lesen", systemImage: "eyeglasses")
+                        }
                     }
                 } footer: {
                     Text("Gilt für alle Feeds der Gruppe, zusätzlich zu deren eigener Einstellung. „Nur lesen“: kein Ingest, nicht in den Vault, nach dem Lesen nur „Fertig, weg“.")
