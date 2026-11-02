@@ -798,6 +798,9 @@ test('Feeds-Seite: viele Feeds auf einmal verschieben, pausieren, einstellen und
     assert.deepEqual(ids.map((id) => store.getFeed(id).no_ingest), [true, false, true, false]);
     assert.equal(await toastAfter(call, await bulk({ tun: 'lesen-aus' }, [c])), '1 Feed wieder ingestierbar');
     assert.deepEqual(ids.map((id) => store.getFeed(id).no_ingest), [true, false, false, false]);
+    store.updateGroup(tech.id, { no_ingest: true });
+    assert.equal(await toastAfter(call, await bulk({ tun: 'lesen-aus' }, [a, b])), '2 Feeds wieder ingestierbar; 2 bleiben über die Gruppe „nur lesen“');
+    store.updateGroup(tech.id, { no_ingest: false });
     assert.equal(await toastAfter(call, await bulk({ tun: 'abstand', intervall: '2' }, [a, b])), '2 Feeds alle 5 min');
     assert.deepEqual(ids.map((id) => store.getFeed(id).interval_minutes), [5, 5, 30, 30]);
     assert.equal(await toastAfter(call, await bulk({ tun: 'abstand', intervall: 'x' }, [a])), 'Bitte einen Abstand in Minuten angeben');
