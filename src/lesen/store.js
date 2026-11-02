@@ -169,6 +169,10 @@ export const MIGRATIONS = [
   // der Feed später gelöscht wird oder seine Zugangsdaten verliert. Nie an Jev.
   `ALTER TABLE documents ADD COLUMN private INTEGER NOT NULL DEFAULT 0;
   UPDATE documents SET private = 1 WHERE origin LIKE 'feed:%' AND substr(origin, 6) IN (SELECT id FROM feeds WHERE auth IS NOT NULL);`,
+  // Nicht ingestieren: Einträge aus diesen Feeds (oder Gruppen) liest man nur, danach „Fertig, weg“.
+  // Kein Ingest, kein „In den Vault“; gilt, solange der Feed die Markierung trägt (`no_ingest` am Dokument).
+  `ALTER TABLE feeds ADD COLUMN no_ingest INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE feed_groups ADD COLUMN no_ingest INTEGER NOT NULL DEFAULT 0;`,
 ];
 
 /** Zustände eines Ingest-Entwurfs (src/lesen/ingest.js). */
@@ -177,28 +181,37 @@ const INGEST_EDIT = ['status', 'origin', 'draft', 'error', 'applied', 'model', '
 
 export class ReadingError extends Error {}
 
+/** Meldung für Einträge aus einem Feed (oder einer Gruppe) mit „Nur lesen“ (`no_ingest`). */
+export const NO_INGEST_MESSAGE = 'Aus einem Feed „nur lesen“: kein Ingest';
+
 const DOC_FIELDS = ['url', 'canonical_url', 'comments_url', 'title', 'author', 'site', 'kind', 'origin', 'client_id', 'excerpt', 'content_html', 'content_text', 'word_count', 'reading_minutes', 'status', 'topics'];
 const HIGHLIGHT_EDIT = ['quote', 'prefix', 'suffix', 'start_hint', 'note', 'color', 'review_box', 'review_due', 'review_state', 'reviewed_at', 'review_prev'];
-const FEED_EDIT = ['url', 'site_url', 'title', 'icon', 'paused', 'to_stack', 'keyword_filter', 'interval_minutes', 'etag', 'last_modified', 'last_fetch_at', 'last_error', 'error_count', 'next_fetch_at', 'group_id', 'icon_checked_at'];
-const GROUP_EDIT = ['name', 'paused', 'to_stack'];
+const FEED_EDIT = ['url', 'site_url', 'title', 'icon', 'paused', 'to_stack', 'keyword_filter', 'interval_minutes', 'etag', 'last_modified', 'last_fetch_at', 'last_error', 'error_count', 'next_fetch_at', 'group_id', 'icon_checked_at', 'no_ingest'];
+const GROUP_EDIT = ['name', 'paused', 'to_stack', 'no_ingest'];
 /** Filter `group` für `list`/`counts`: Gruppen-ID oder `ohne` (nicht aus einem Feed: Gespeichertes, Mail). */
 export const NO_FEED = 'ohne';
 
-const fromRow = (row) => (row ? { ...row, topics: JSON.parse(row.topics ?? '[]') } : null);
+const fromRow = (row) => (row ? { ...row, topics: JSON.parse(row.topics ?? '[]'), no_ingest: Boolean(row.no_ingest) } : null);
+/**
+ * Spalte `no_ingest` eines Dokuments: aus einem Feed, der (selbst oder über
+ * seine Gruppe) als „nicht ingestieren“ markiert ist. Gerechnet, nicht
+ * gespeichert: Die Markierung am Feed gilt sofort für alle seine Einträge.
+ */
+const NO_INGEST = "COALESCE((SELECT MAX(f.no_ingest, COALESCE(g.no_ingest, 0)) FROM feeds f LEFT JOIN feed_groups g ON g.id = f.group_id WHERE documents.origin = 'feed:' || f.id), 0) AS no_ingest";
 // Die verschlüsselten Zugangsdaten verlassen den Store nie, nur `has_auth` sagt, ob es welche gibt.
 const withoutAuth = ({ auth, ...row }) => row;
 /**
- * Feed mit den Einstellungen seiner Gruppe (`group_paused`, `group_to_stack`).
+ * Feed mit den Einstellungen seiner Gruppe (`group_paused`, `group_to_stack`, `group_no_ingest`).
  * Es gilt Feed ODER Gruppe: `false` am Feed heißt „nichts Eigenes gesetzt“.
  */
 // Privat: mit Zugangsdaten oder mit einem Schlüssel in der Adresse.
 const feedIsPrivate = (row) => Boolean(row?.auth) || urlCarriesSecret(row?.url);
-const feedRow = (row) => (row ? { ...withoutAuth(row), has_auth: Boolean(row.auth), private: feedIsPrivate(row), paused: Boolean(row.paused), to_stack: Boolean(row.to_stack), group_paused: Boolean(row.group_paused), group_to_stack: Boolean(row.group_to_stack) } : null);
+const feedRow = (row) => (row ? { ...withoutAuth(row), has_auth: Boolean(row.auth), private: feedIsPrivate(row), paused: Boolean(row.paused), to_stack: Boolean(row.to_stack), no_ingest: Boolean(row.no_ingest), group_paused: Boolean(row.group_paused), group_to_stack: Boolean(row.group_to_stack), group_no_ingest: Boolean(row.group_no_ingest) } : null);
 const parseJson = (v) => (v == null ? null : JSON.parse(v));
 const ingestRow = (row) => (row ? { ...row, draft: parseJson(row.draft), applied: parseJson(row.applied) } : null);
 const triageRow = (row) => (row ? { ...row, probabilities: parseJson(row.probabilities), near_probabilities: parseJson(row.near_probabilities) } : null);
-const groupRow = (row) => (row ? { ...row, paused: Boolean(row.paused), to_stack: Boolean(row.to_stack) } : null);
-const FEED_SELECT = 'SELECT f.*, g.paused AS group_paused, g.to_stack AS group_to_stack FROM feeds f LEFT JOIN feed_groups g ON g.id = f.group_id';
+const groupRow = (row) => (row ? { ...row, paused: Boolean(row.paused), to_stack: Boolean(row.to_stack), no_ingest: Boolean(row.no_ingest) } : null);
+const FEED_SELECT = 'SELECT f.*, g.paused AS group_paused, g.to_stack AS group_to_stack, g.no_ingest AS group_no_ingest FROM feeds f LEFT JOIN feed_groups g ON g.id = f.group_id';
 /** WHERE-Teil für den Gruppenfilter über `origin` (Dokumente kennen nur ihren Feed). */
 const groupWhere = (group) =>
   group == null ? ['1', []] : group === NO_FEED ? ["origin NOT LIKE 'feed:%'", []] : ["origin IN (SELECT 'feed:' || id FROM feeds WHERE group_id = ?)", [String(group)]];
@@ -259,7 +272,7 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
     }
   };
 
-  const get = (id) => fromRow(db.prepare('SELECT * FROM documents WHERE id = ?').get(String(id ?? '')));
+  const get = (id) => fromRow(db.prepare(`SELECT *, ${NO_INGEST} FROM documents WHERE id = ?`).get(String(id ?? '')));
   const getHighlight = (id) => db.prepare('SELECT * FROM highlights WHERE id = ?').get(String(id ?? '')) ?? null;
   const getFeed = (id) => feedRow(db.prepare(`${FEED_SELECT} WHERE f.id = ?`).get(String(id ?? '')));
   /** Zugangsdaten setzen (`{ user, password }`) oder mit `null` löschen; verschlüsselt, an den Feed gebunden. */
@@ -377,7 +390,7 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
      * `group`: nur aus Feeds dieser Gruppe, `NO_FEED` nur nicht aus Feeds.
      */
     list({ status = null, group = null, limit = 100, offset = 0, triage = false } = {}) {
-      const cols = 'id, url, canonical_url, comments_url, title, author, site, kind, origin, excerpt, word_count, reading_minutes, status, previous_status, progress, scroll_anchor, topics, saved_at, status_changed_at, read_at, archived_at, heard_at, updated_at';
+      const cols = `id, url, canonical_url, comments_url, title, author, site, kind, origin, excerpt, word_count, reading_minutes, status, previous_status, progress, scroll_anchor, topics, saved_at, status_changed_at, read_at, archived_at, heard_at, updated_at, ${NO_INGEST}`;
       const [where, args] = groupWhere(group);
       // Vorsortiert (VCP-136): Ohne Urteil zuerst (selbst Gespeichertes, noch nicht beurteilt), dann nach Rang.
       const order = triage
@@ -644,7 +657,7 @@ export function createReadingStore({ path, now = () => Date.now(), secrets = nul
     getGroup,
     /** In ihrer Reihenfolge (`position`). */
     listGroups,
-    /** Name, `paused`, `to_stack`; ein Name, den schon eine andere Gruppe trägt, gibt `ReadingError`. */
+    /** Name, `paused`, `to_stack`, `no_ingest`; ein Name, den schon eine andere Gruppe trägt, gibt `ReadingError`. */
     updateGroup(id, patch) {
       must(getGroup(id), 'Diese Gruppe');
       const p = { ...patch };

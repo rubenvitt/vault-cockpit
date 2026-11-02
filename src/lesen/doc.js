@@ -6,6 +6,7 @@ import { markHighlights, placeHighlights, weiterAt } from './anchor.js';
 import { textBlocks } from './blocks.js';
 import { docJson, highlightJson, jsonReply } from './json.js';
 import { ingestBadge } from './ingest-page.js';
+import { NO_INGEST_MESSAGE } from './store.js';
 import { toRead } from './stack.js';
 
 /**
@@ -93,9 +94,10 @@ function highlightList(highlights, orphans, ctx) {
  */
 function decide(doc, ctx, vault, ingest = null) {
   const form = (action, key, fields, body) => `<form method="post" action="${action}" class="act" data-decide="${key}">${hidden({ csrf: ctx.write.csrf, back: ctx.write.back, id: doc.id, ...fields })}${body}</form>`;
+  // Ohne „In den Vault“ (etwa aus einem Feed „nur lesen“) ist „Fertig, weg“ der Hauptknopf.
   return `<div class="lesen-decide">
       ${ingest ? ingestBadge(doc.id, ingest.status, { ctx, available: ingest.available, ready: 'Ingest prüfen' }) : ''}
-      ${decisions(doc, vault).fertig ? form('/aktion/lesen/doc/fertig', 'fertig', {}, '<button type="submit" class="btn">Fertig, weg <kbd>E</kbd></button>') : ''}
+      ${decisions(doc, vault).fertig ? form('/aktion/lesen/doc/fertig', 'fertig', {}, `<button type="submit" class="btn${vault ? '' : ' primary'}">Fertig, weg <kbd>E</kbd></button>`) : ''}
       ${vault ? form('/aktion/lesen/doc/vault', 'vault', {}, '<label class="lesen-volltext"><input type="checkbox" name="volltext" value="1" checked> mit Volltext</label><button type="submit" class="btn primary">In den Vault <kbd>V</kbd></button>') : ''}
       ${decisions(doc, vault).zurueck ? form(STATUS, 'zurueck', { status: 'stapel' }, '<button type="submit" class="btn quiet">Zurück auf den Stapel</button>') : ''}
     </div>`;
@@ -223,6 +225,7 @@ export function docRoutes({ store, asAction, onChange = () => {}, exporter = nul
   /** Darf die Notiz geschrieben werden? Sonst Meldung, und der Status bleibt (VCP-98). */
   const mustWrite = (doc) => {
     if (!exporter) throw new ActionError('Die Lesestapel-Notizen sind hier nicht angebunden', 503);
+    if (doc.no_ingest) throw new ActionError(`${NO_INGEST_MESSAGE}, auch nicht in den Vault`, 409);
     const reason = exporter.locked?.(doc.id);
     if (reason) throw new ActionError(`Nicht in den Vault geschrieben: ${reason}`, 409);
   };
@@ -246,12 +249,12 @@ export function docRoutes({ store, asAction, onChange = () => {}, exporter = nul
 
   /** Stand des Ingests für dieses Dokument (nur mit Dienst). */
   const ingestOf = (doc) => {
-    if (!ingest) return null;
+    if (!ingest || doc.no_ingest) return null;
     const m = ingest.statusFor([doc.id]);
     const status = (m instanceof Map ? m.get(doc.id) : m?.[doc.id]) ?? null;
     return { status, available: Boolean(ingest.available()?.ok) && ['eingang', 'stapel'].includes(doc.status) };
   };
-  const model = (doc) => ({ highlights: store.listHighlights({ docId: doc.id }), stackDocs: toRead(store.list({ status: 'stapel', limit: -1 })).slice(0, 30), counts: store.counts(), vault: Boolean(exporter), ingest: ingestOf(doc) });
+  const model = (doc) => ({ highlights: store.listHighlights({ docId: doc.id }), stackDocs: toRead(store.list({ status: 'stapel', limit: -1 })).slice(0, 30), counts: store.counts(), vault: Boolean(exporter) && !doc.no_ingest, ingest: ingestOf(doc) });
 
   return {
     pages: {

@@ -489,6 +489,35 @@ test('Stapel und Nachtlauf: nur Stapel-Dokumente ohne Entwurf, höchstens `limit
   assert.equal(ingest.nightly(), 0);
 });
 
+test('Nur lesen: Einträge aus einem Feed (oder seiner Gruppe) ohne Ingest werden nie entworfen, auch nicht nachts', async () => {
+  const { feed } = store.addFeed({ url: 'https://news.test/feed' });
+  const { group } = store.addGroup({ name: 'Ticker' });
+  const { feed: other } = store.addFeed({ url: 'https://ticker.test/feed', group_id: group.id });
+  const news = store.addDocument({ url: 'https://news.test/1', title: 'News', status: 'stapel', origin: `feed:${feed.id}`, content_html: HTML }).doc;
+  const tick = store.addDocument({ url: 'https://ticker.test/1', title: 'Ticker', status: 'stapel', origin: `feed:${other.id}`, content_html: HTML }).doc;
+  store.updateFeed(feed.id, { no_ingest: true });
+  store.updateGroup(group.id, { no_ingest: true });
+  assert.equal(store.get(news.id).no_ingest, true);
+  assert.equal(store.get(tick.id).no_ingest, true, 'über die Gruppe');
+  assert.equal(store.get(doc.id).no_ingest, false, 'nicht aus einem Feed');
+  assert.deepEqual(store.list({ status: 'stapel' }).map((d) => [d.title, d.no_ingest]).sort(), [['News', true], ['The Elastic Loop', false], ['Ticker', true]]);
+
+  const ingest = make();
+  assert.throws(() => ingest.request([news.id]), { message: 'Aus einem Feed „nur lesen“: kein Ingest', status: 409 });
+  assert.deepEqual(ingest.request([news.id, tick.id, doc.id]).queued, [doc.id]);
+  await ingest.idle();
+  assert.equal(ingest.requestStack(), 0, 'Stapel ohne die Nur-lesen-Einträge');
+  settings.save({ ingest: { nightly: true }, calendars: [] });
+  assert.equal(ingest.nightly(), 0);
+  assert.deepEqual([news.id, tick.id].map((id) => ingest.statusFor([id]).get(id) ?? null), [null, null]);
+
+  // Wieder ingestierbar: gilt sofort für die vorhandenen Einträge.
+  store.updateFeed(feed.id, { no_ingest: false });
+  assert.equal(store.get(news.id).no_ingest, false);
+  assert.deepEqual(ingest.request([news.id]).queued, [news.id]);
+  await ingest.idle();
+});
+
 test('Nachtlauf-Takt: einmal je Tag zur eingestellten Stunde in der Zeitzone, gemerkt in einer Datei', () => {
   let runs = 0;
   let t = new Date('2026-10-25T01:30:00Z'); // 02:30 in Berlin (Winterzeit ab heute)

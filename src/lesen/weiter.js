@@ -84,6 +84,7 @@ export function readInfo(doc, episodes = new Map()) {
 /**
  * Die Spur eines Textes: Gelesen · Entwurf · Im Wiki · Eingepflanzt, je Schritt
  * `done`, `busy`, `failed` oder `todo`. „Gespeichert“ fehlt, das ist jeder.
+ * Aus einem Feed „nur lesen“ (`no_ingest`) nur „Gelesen“.
  */
 export function trackOf(doc, ingest = null) {
   const read = isRead(doc);
@@ -91,8 +92,11 @@ export function trackOf(doc, ingest = null) {
   const plant = plantOf(ingest);
   const draft = s === 'bereit' || s === 'uebernommen' ? 'done' : BUSY.includes(s) ? 'busy' : s === 'fehler' ? 'failed' : 'todo';
   const planted = !plant ? 'todo' : plant.status === 'fertig' ? 'done' : plant.status === 'fehler' ? 'failed' : 'busy';
+  const gelesen = { key: 'gelesen', label: doc.heard_at && !(doc.read_at > doc.heard_at) ? 'Gehört' : 'Gelesen', state: read || s === 'uebernommen' ? 'done' : doc.progress > 0 ? 'busy' : 'todo' };
+  // Aus einem Feed „nur lesen“: Nach dem Lesen kommt nichts mehr.
+  if (doc.no_ingest) return [gelesen];
   return [
-    { key: 'gelesen', label: doc.heard_at && !(doc.read_at > doc.heard_at) ? 'Gehört' : 'Gelesen', state: read || s === 'uebernommen' ? 'done' : doc.progress > 0 ? 'busy' : 'todo' },
+    gelesen,
     { key: 'entwurf', label: 'Entwurf', state: draft },
     { key: 'wiki', label: 'Im Wiki', state: s === 'uebernommen' ? 'done' : 'todo' },
     { key: 'eingepflanzt', label: 'Eingepflanzt', state: planted },
@@ -165,7 +169,7 @@ export function weiterModel({ store, ingest = null, episodes = null }) {
   };
   const available = Boolean(ingest?.available?.()?.ok);
   // Was „Alle entwerfen“ einreiht: gelesen, ohne Entwurf oder mit verworfenem.
-  const draftable = available ? stages.entscheiden.filter((x) => !x.ingest || x.ingest.status === 'verworfen').map((x) => x.doc.id) : [];
+  const draftable = available ? stages.entscheiden.filter((x) => !x.doc.no_ingest && (!x.ingest || x.ingest.status === 'verworfen')).map((x) => x.doc.id) : [];
   return { stages, counts, available, draftable, next: nextStep(stages, counts, draftable) };
 }
 
@@ -233,6 +237,8 @@ function actions(x, ctx, { available, planting, vault }) {
     case 'pruefen':
       return [`<a href="${esc(ingestLink(id))}" class="btn primary">Prüfen${sr}</a>`, open('Text')];
     case 'entscheiden':
+      // Aus einem Feed „nur lesen“: nur noch „Fertig, weg“.
+      if (x.doc.no_ingest) return [form(FERTIG, {}, 'Fertig, weg', 'btn primary'), open()];
       return [
         available && x.ingest?.status !== 'uebernommen' ? form(ENTWERFEN, {}, 'Ins Wiki: entwerfen', 'btn primary') : '',
         vault ? form(VAULT, { volltext: '1' }, 'Nur in den Vault') : '',

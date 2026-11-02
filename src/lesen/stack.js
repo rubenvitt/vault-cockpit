@@ -169,14 +169,15 @@ export function stackRoutes({ store, vault = false, folgen = false, ingest = nul
       async '/lesen/stapel'(ctx) {
         const { minutes, sortParam, sort, filter, docs, decide } = query(ctx.url);
         // Im Vault ablegen (VCP-96): je Eintrag ein Formular, die Aktion steht in src/lesen/doc.js.
+        // Aus einem Feed „nur lesen“ weder ablegen noch ingestieren: nur lesen, dann „Fertig, weg“.
         const ablegen = vault
-          ? (d) => `<form method="post" action="/aktion/lesen/ablegen" class="act lesen-ablegen">${hidden({ csrf: ctx.write.csrf, back: ctx.write.back, id: d.id })}<button type="submit" class="btn quiet">Im Vault ablegen<span class="sr-only">: ${esc(d.title || d.url)}</span></button></form>`
+          ? (d) => d.no_ingest ? '' : `<form method="post" action="/aktion/lesen/ablegen" class="act lesen-ablegen">${hidden({ csrf: ctx.write.csrf, back: ctx.write.back, id: d.id })}<button type="submit" class="btn quiet">Im Vault ablegen<span class="sr-only">: ${esc(d.title || d.url)}</span></button></form>`
           : null;
         let file = ablegen;
         if (ingest) {
           const statuses = ingest.statusFor(docs.map((d) => d.id));
           const available = Boolean(ingest.available()?.ok);
-          const badge = (d) => ingestBadge(d.id, statusIn(statuses, d.id), { ctx, title: d.title || d.url, available });
+          const badge = (d) => d.no_ingest ? '' : ingestBadge(d.id, statusIn(statuses, d.id), { ctx, title: d.title || d.url, available });
           file = (d) => {
             const parts = [badge(d), ablegen ? ablegen(d) : ''].filter(Boolean).join('');
             return parts ? `<div class="lesen-item-acts">${parts}</div>` : '';
@@ -207,7 +208,7 @@ export function stackRoutes({ store, vault = false, folgen = false, ingest = nul
           // Gelesen oder gehört, aber noch nicht entschieden: steht unter `/api/lesen/weiter`, nicht in `items`.
           decide,
           // `ingest`: Status des Entwurfs (`bereit`, `entwirft` …) oder null; ohne Dienst fehlt das Feld.
-          items: items.map((d) => (ingest ? { ...stackItemJson(d), ingest: statusIn(statuses, d.id) } : stackItemJson(d))),
+          items: items.map((d) => (ingest ? { ...stackItemJson(d), ingest: d.no_ingest ? null : statusIn(statuses, d.id) } : stackItemJson(d))),
           ingest: Boolean(ingest),
           // Claude angebunden: „Ingest entwerfen“ geht (wie der Knopf im Stapel).
           ingestAvailable: Boolean(ingest?.available()?.ok),

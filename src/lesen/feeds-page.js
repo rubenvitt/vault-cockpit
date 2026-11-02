@@ -78,8 +78,11 @@ function feedState(f, tz, now = Date.now()) {
 }
 const status = (f, tz) => feedState(f, tz).text;
 
-/** Kurzinfo unter dem Titel: Host, Abstand, „direkt auf den Stapel“, Filter. */
-const metaOf = (f) => [host(f.url), f.has_auth ? 'mit Zugangsdaten' : null, `alle ${f.interval_minutes} min`, f.to_stack ? 'direkt auf den Stapel' : f.group_to_stack ? 'direkt auf den Stapel (Gruppe)' : null, f.keyword_filter ? `nur „${f.keyword_filter}“` : null].filter(Boolean).join(' · ');
+/** Kurzinfo unter dem Titel: Host, Abstand, „direkt auf den Stapel“, „nur lesen“, Filter. */
+const metaOf = (f) => [host(f.url), f.has_auth ? 'mit Zugangsdaten' : null, `alle ${f.interval_minutes} min`, f.to_stack ? 'direkt auf den Stapel' : f.group_to_stack ? 'direkt auf den Stapel (Gruppe)' : null, f.no_ingest ? 'nur lesen' : f.group_no_ingest ? 'nur lesen (Gruppe)' : null, f.keyword_filter ? `nur „${f.keyword_filter}“` : null].filter(Boolean).join(' · ');
+
+/** Merkmale einer Gruppe in einer Zeile: „pausiert · direkt auf den Stapel · nur lesen“. */
+const groupFlags = (g) => [g.paused ? 'pausiert' : null, g.to_stack ? 'direkt auf den Stapel' : null, g.no_ingest ? 'nur lesen' : null].filter(Boolean).join(' · ');
 
 /** Ein Feed für die App; Fehler maskiert wie auf der Seite, Icon nur als data:-Adresse. */
 export function feedJson(f, tz, now = Date.now()) {
@@ -94,12 +97,14 @@ export function feedJson(f, tz, now = Date.now()) {
     letter: (f.title || host(f.url)).slice(0, 1).toUpperCase(),
     paused: f.paused,
     toStack: f.to_stack,
+    noIngest: f.no_ingest,
     keywordFilter: f.keyword_filter ?? null,
     hasAuth: f.has_auth ?? false,
     intervalMinutes: f.interval_minutes,
     groupId: f.group_id ?? null,
     groupPaused: f.group_paused,
     groupToStack: f.group_to_stack,
+    groupNoIngest: f.group_no_ingest,
     lastFetchAt: f.last_fetch_at ?? null,
     nextFetchAt: f.next_fetch_at ?? null,
     errorCount: f.error_count ?? 0,
@@ -125,7 +130,8 @@ export function feedsJson({ feeds, groups = [], inbox = {} }, tz, now = Date.now
       position: i,
       paused: g.paused,
       toStack: g.to_stack,
-      flags: [g.paused ? 'pausiert' : null, g.to_stack ? 'direkt auf den Stapel' : null].filter(Boolean).join(' · ') || null,
+      noIngest: g.no_ingest,
+      flags: groupFlags(g) || null,
       inbox: inbox[g.id] ?? 0,
       canMoveUp: i > 0,
       canMoveDown: i < groups.length - 1,
@@ -138,6 +144,9 @@ export function feedsJson({ feeds, groups = [], inbox = {} }, tz, now = Date.now
     bulk: { action: '/aktion/lesen/feeds/auswahl', actions: ACTIONS.map(([v]) => v), newGroup: NEW_GROUP },
   };
 }
+
+/** Hinweis zu „Nur lesen“ (nicht ingestieren) in den Einstellungen von Feed und Gruppe. */
+const NOING = '<span class="hint">kein Ingest, nicht in den Vault; nach dem Lesen nur „Fertig, weg“</span>';
 
 /** Auswahl der Gruppe; ohne Gruppen gibt es nichts zu wählen. */
 const groupSelect = (groups, selected, label) =>
@@ -166,6 +175,7 @@ function feedItem(f, ctx, groups) {
         </fieldset>
         <label class="feed-check"><input type="checkbox" name="pausiert" value="1"${f.paused ? ' checked' : ''}> Pausiert</label>
         <label class="feed-check"><input type="checkbox" name="stapel" value="1"${f.to_stack ? ' checked' : ''}> Direkt auf den Stapel</label>
+        <label class="feed-check"><input type="checkbox" name="nur_lesen" value="1"${f.no_ingest ? ' checked' : ''}> Nur lesen ${NOING}</label>
         <label class="feed-field"><span>Stichwort-Filter <span class="hint">durch Komma getrennt, leer = alles</span></span><input name="filter" value="${esc(f.keyword_filter ?? '')}" autocomplete="off"></label>
         <label class="feed-field"><span>Abstand in Minuten</span><input name="intervall" type="number" min="${MIN_INTERVAL}" max="${MAX_INTERVAL}" value="${esc(f.interval_minutes)}" inputmode="numeric"></label>
         ${groupSelect(groups, f.group_id, '<span>Gruppe</span>')}
@@ -184,7 +194,7 @@ const feedList = (feeds, ctx, groups, empty) =>
 function groupSection(g, i, { feeds, groups, inbox, ctx }) {
   const token = hidden({ csrf: ctx.write.csrf, back, id: g.id });
   const n = inbox[g.id] ?? 0;
-  const flags = [g.paused ? 'pausiert' : null, g.to_stack ? 'direkt auf den Stapel' : null].filter(Boolean).join(' · ');
+  const flags = groupFlags(g);
   return `<details open class="feed-group" data-gruppe>
   <summary><span class="feed-group-name">${esc(g.name)}</span> <span class="count-badge">${n} neu</span></summary>
   <p class="meta"><a href="/lesen/eingang?gruppe=${encodeURIComponent(g.id)}">${n} ${n === 1 ? 'neuer Eintrag' : 'neue Einträge'} im Eingang</a>${flags ? ` · ${esc(flags)}` : ''}</p>
@@ -194,6 +204,7 @@ function groupSection(g, i, { feeds, groups, inbox, ctx }) {
       <label class="feed-field"><span>Name</span><input name="name" value="${esc(g.name)}" required autocomplete="off"></label>
       <label class="feed-check"><input type="checkbox" name="pausiert" value="1"${g.paused ? ' checked' : ''}> Pausiert</label>
       <label class="feed-check"><input type="checkbox" name="stapel" value="1"${g.to_stack ? ' checked' : ''}> Direkt auf den Stapel</label>
+      <label class="feed-check"><input type="checkbox" name="nur_lesen" value="1"${g.no_ingest ? ' checked' : ''}> Nur lesen ${NOING}</label>
       <p class="hint">Gilt für alle Feeds der Gruppe, zusätzlich zu deren eigener Einstellung.</p>
       <p class="feed-actions"><button type="submit" class="btn">Speichern</button></p>
     </form>
@@ -268,6 +279,8 @@ const ACTIONS = [
   ['fortsetzen', 'Fortsetzen'],
   ['stapel-an', 'Direkt auf den Stapel'],
   ['stapel-aus', 'Nicht mehr direkt auf den Stapel'],
+  ['lesen-an', 'Nur lesen (kein Ingest)'],
+  ['lesen-aus', 'Wieder ingestierbar'],
   ['abstand', 'Abstand ändern'],
   ['entfernen', 'Entfernen'],
 ];
@@ -393,6 +406,7 @@ export function feedRoutes({ store, fetchFeed = fetchFeedDefault, logger = conso
           ...(form.has('gruppe') ? { group_id: form.get('gruppe') } : {}),
           paused: form.get('pausiert') === '1',
           to_stack: form.get('stapel') === '1',
+          no_ingest: form.get('nur_lesen') === '1',
           keyword_filter: (form.get('filter') ?? '').trim() || null,
           interval_minutes: Number.isFinite(minutes) && minutes > 0 ? Math.round(Math.min(MAX_INTERVAL, Math.max(MIN_INTERVAL, minutes))) : feed.interval_minutes,
         }));
@@ -428,6 +442,10 @@ export function feedRoutes({ store, fetchFeed = fetchFeedDefault, logger = conso
             return apply({ to_stack: true }, 'legen direkt auf den Stapel');
           case 'stapel-aus':
             return apply({ to_stack: false }, 'legen in den Eingang');
+          case 'lesen-an':
+            return apply({ no_ingest: true }, 'nur zum Lesen, ohne Ingest');
+          case 'lesen-aus':
+            return apply({ no_ingest: false }, 'wieder ingestierbar');
           case 'abstand': {
             const minutes = Number(form.get('intervall'));
             if (!Number.isFinite(minutes) || minutes <= 0) throw new ActionError('Bitte einen Abstand in Minuten angeben');
@@ -469,7 +487,7 @@ export function feedRoutes({ store, fetchFeed = fetchFeedDefault, logger = conso
       },
       async '/aktion/lesen/gruppe/aendern'(form) {
         const group = groupOf(form);
-        const g = await asAction(() => store.updateGroup(group.id, { name: form.get('name'), paused: form.get('pausiert') === '1', to_stack: form.get('stapel') === '1' }));
+        const g = await asAction(() => store.updateGroup(group.id, { name: form.get('name'), paused: form.get('pausiert') === '1', to_stack: form.get('stapel') === '1', no_ingest: form.get('nur_lesen') === '1' }));
         return { message: `Gespeichert: ${g.name}` };
       },
       async '/aktion/lesen/gruppe/verschieben'(form) {
