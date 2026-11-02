@@ -444,8 +444,12 @@ export function feedRoutes({ store, fetchFeed = fetchFeedDefault, logger = conso
             return apply({ to_stack: false }, 'legen in den Eingang');
           case 'lesen-an':
             return apply({ no_ingest: true }, 'nur zum Lesen, ohne Ingest');
-          case 'lesen-aus':
-            return apply({ no_ingest: false }, 'wieder ingestierbar');
+          case 'lesen-aus': {
+            const out = await apply({ no_ingest: false }, 'wieder ingestierbar');
+            // Die Gruppe kann „Nur lesen“ weiter vorgeben; das gehört in die Meldung.
+            const held = ids.map((id) => store.getFeed(id)).filter((f) => f?.group_no_ingest).length;
+            return held ? { message: `${out.message}; ${held === 1 ? 'einer bleibt' : `${held} bleiben`} über die Gruppe „nur lesen“` } : out;
+          }
           case 'abstand': {
             const minutes = Number(form.get('intervall'));
             if (!Number.isFinite(minutes) || minutes <= 0) throw new ActionError('Bitte einen Abstand in Minuten angeben');
