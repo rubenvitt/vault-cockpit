@@ -205,6 +205,18 @@ struct FeedsScreenBulkBar: View {
                     Label("In den Eingang", systemImage: "tray")
                 }
             }
+            Section {
+                Button {
+                    apply(.readOnlyOn)
+                } label: {
+                    Label("Nur lesen (kein Ingest)", systemImage: "eyeglasses")
+                }
+                Button {
+                    apply(.readOnlyOff)
+                } label: {
+                    Label("Wieder ingestierbar", systemImage: "sparkles")
+                }
+            }
             Button(action: interval) {
                 Label("Abstand ändern …", systemImage: "clock.arrow.circlepath")
             }

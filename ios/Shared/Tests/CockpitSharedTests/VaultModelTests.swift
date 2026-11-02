@@ -406,7 +406,7 @@ final class VaultModelTests: XCTestCase {
         for name in ["rest-aktion-lesen-feed-abonnieren", "rest-aktion-lesen-feed-aendern", "rest-aktion-lesen-feeds-import", "rest-aktion-lesen-gruppe-anlegen", "rest-aktion-lesen-feeds-auswahl"] {
             XCTAssertFalse(try decode(MessageReply.self, name).message.isEmpty, name)
         }
-        XCTAssertEqual(feeds.bulk, FeedBulkInfo(action: "/aktion/lesen/feeds/auswahl", actions: ["gruppe", "pausieren", "fortsetzen", "stapel-an", "stapel-aus", "abstand", "entfernen"], newGroup: "neu"))
+        XCTAssertEqual(feeds.bulk, FeedBulkInfo(action: "/aktion/lesen/feeds/auswahl", actions: ["gruppe", "pausieren", "fortsetzen", "stapel-an", "stapel-aus", "lesen-an", "lesen-aus", "abstand", "entfernen"], newGroup: "neu"))
         XCTAssertEqual(feeds.bulk, .fallback)
         XCTAssertEqual(feeds.summary, "3 Feeds · 1 pausiert · 1 mit Fehlern")
         XCTAssertEqual(feeds.failingCount, 1)
@@ -441,6 +441,23 @@ final class VaultModelTests: XCTestCase {
         XCTAssertEqual(umlaut.needle, "über")
     }
 
+    /// „Nur lesen“ an Feed und Gruppe: dekodiert (ältere Server ohne Feld: aus) und als `nur_lesen` gespeichert.
+    func testFeedReadOnly() throws {
+        let json = """
+        {"groups": [{"id": "g", "name": "Ticker", "noIngest": true, "feeds": [{"id": "f", "url": "https://ticker.test/feed", "noIngest": false, "groupNoIngest": true}]}],
+         "ungrouped": [{"id": "n", "url": "https://news.test/feed", "noIngest": true}, {"id": "o", "url": "https://alt.test/feed"}]}
+        """
+        let model = try JSONDecoder().decode(FeedsModel.self, from: Data(json.utf8))
+        let group = try XCTUnwrap(model.groups.first)
+        XCTAssertTrue(group.noIngest)
+        XCTAssertEqual(group.feeds.map(\.groupNoIngest), [true])
+        XCTAssertEqual(model.ungrouped.map(\.noIngest), [true, false])
+        let settings = model.ungrouped[0].settings
+        XCTAssertTrue(settings.noIngest)
+        XCTAssertEqual(settings.fields(id: "n")["nur_lesen"], "1")
+        XCTAssertNil(model.ungrouped[1].settings.fields(id: "o")["nur_lesen"])
+    }
+
     /// Formular der Sammelleiste: `tun`, die passenden Felder, dann je Feed ein `feed`.
     func testFeedBulkPairs() {
         func body(_ action: FeedBulkAction, _ ids: [String] = ["a", "b", "a", ""]) -> String {
@@ -450,14 +467,16 @@ final class VaultModelTests: XCTestCase {
         XCTAssertEqual(body(.resume), "tun=fortsetzen&feed=a&feed=b")
         XCTAssertEqual(body(.stackOn), "tun=stapel-an&feed=a&feed=b")
         XCTAssertEqual(body(.stackOff), "tun=stapel-aus&feed=a&feed=b")
+        XCTAssertEqual(body(.readOnlyOn), "tun=lesen-an&feed=a&feed=b")
+        XCTAssertEqual(body(.readOnlyOff), "tun=lesen-aus&feed=a&feed=b")
         XCTAssertEqual(body(.interval(90)), "tun=abstand&intervall=90&feed=a&feed=b")
         XCTAssertEqual(body(.remove), "tun=entfernen&bestaetigt=1&feed=a&feed=b")
         XCTAssertEqual(body(.move(.ungrouped)), "tun=gruppe&ziel=&feed=a&feed=b")
         XCTAssertEqual(body(.move(.group("g-1"))), "tun=gruppe&ziel=g-1&feed=a&feed=b")
         XCTAssertEqual(body(.move(.newGroup(" Kunst & Kultur "))), "tun=gruppe&ziel=neu&neu=Kunst%20%26%20Kultur&feed=a&feed=b")
         XCTAssertEqual(CockpitAPI.formBody(pairs: FeedBulkAction.move(.newGroup("X")).pairs(feeds: ["a"], newGroup: "+")), "tun=gruppe&ziel=%2B&neu=X&feed=a")
-        XCTAssertEqual(FeedBulkInfo.fallback.actions, ["gruppe", "pausieren", "fortsetzen", "stapel-an", "stapel-aus", "abstand", "entfernen"])
-        let verbs: [FeedBulkAction] = [.move(.ungrouped), .pause, .resume, .stackOn, .stackOff, .interval(5), .remove]
+        XCTAssertEqual(FeedBulkInfo.fallback.actions, ["gruppe", "pausieren", "fortsetzen", "stapel-an", "stapel-aus", "lesen-an", "lesen-aus", "abstand", "entfernen"])
+        let verbs: [FeedBulkAction] = [.move(.ungrouped), .pause, .resume, .stackOn, .stackOff, .readOnlyOn, .readOnlyOff, .interval(5), .remove]
         XCTAssertEqual(verbs.map(\.verb), FeedBulkInfo.fallback.actions)
     }
 

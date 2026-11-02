@@ -209,7 +209,9 @@ struct StapelScreen: View {
     /// Zeile: Tipp öffnet die Leseansicht; das Ingest-Abzeichen darunter ist ein eigener Knopf
     /// (deshalb Knöpfe statt eines `NavigationLink`, der die ganze Zeile übernähme).
     private func row(_ item: StackItem, stack: ReadingStackModel) -> some View {
-        let vault = stack.vault
+        // „Nur lesen“ (Feed oder Gruppe): weder ablegen noch Ingest, nur lesen.
+        let vault = stack.vault && !item.isReadOnly
+        let ingestOn = stack.ingest == true && !item.isReadOnly
         let status = ingestStatus(item, stack)
         return VStack(alignment: .leading, spacing: 2) {
             Button {
@@ -226,7 +228,7 @@ struct StapelScreen: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            if stack.ingest == true {
+            if ingestOn {
                 ingestLine(item, status: status, available: stack.ingestAvailable == true)
                     .padding(.bottom, 4)
             }
@@ -257,7 +259,7 @@ struct StapelScreen: View {
                     Label("Im Vault ablegen", systemImage: "archivebox")
                 }
             }
-            if stack.ingest == true {
+            if ingestOn {
                 if IngestBadge.opensReview(status) {
                     Button {
                         openReview(item)
@@ -284,6 +286,7 @@ struct StapelScreen: View {
             if vault { file(item) }
         }
         .accessibilityAction(named: "Ingest") {
+            guard ingestOn else { return }
             if IngestBadge.opensReview(status) { openReview(item) } else if canDraft(status, stack) { draft(item) }
         }
     }

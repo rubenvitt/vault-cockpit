@@ -66,6 +66,12 @@ public struct ReadingDoc: Decodable, Equatable, Hashable, Identifiable, Sendable
     public let readAt: String?
     public let archivedAt: String?
     public let updatedAt: String?
+    /// Aus einem Feed (oder einer Gruppe) mit „Nur lesen“: kein Ingest, nicht in den Vault,
+    /// nach dem Lesen nur „Fertig, weg“. Ältere Server schicken das Feld nicht.
+    public let noIngest: Bool?
+
+    /// „Nur lesen“: weder Ingest noch Vault anbieten.
+    public var isReadOnly: Bool { noIngest == true }
 
     /// Titel, sonst die Adresse (`name` auf dem Server).
     public var displayTitle: String { title.flatMap { $0.isEmpty ? nil : $0 } ?? url }

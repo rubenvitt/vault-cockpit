@@ -391,6 +391,8 @@ struct WeiterItemCard: View {
         case "anhoeren":
             return [WeiterButton(item.episode?.isStarted == true ? "Weiterhören" : "Anhören", .play, primary: true), WeiterButton("Als gehört markieren", .heard)]
         case "entscheiden":
+            // „Nur lesen“ (Feed oder Gruppe): nur noch „Fertig, weg“.
+            if item.doc?.isReadOnly == true { return [WeiterButton("Fertig, weg", .finish, primary: true)] }
             var list: [WeiterButton] = []
             if weiter.ingestAvailable, item.ingest?.status != "uebernommen" { list.append(WeiterButton("Ins Wiki: entwerfen", .draft, primary: true)) }
             if weiter.vault { list.append(WeiterButton("Nur in den Vault", .vault)) }

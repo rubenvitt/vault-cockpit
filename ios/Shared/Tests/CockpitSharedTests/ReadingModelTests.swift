@@ -11,6 +11,15 @@ final class ReadingModelTests: XCTestCase {
 
     // MARK: Eingang und Stapel
 
+    /// „Nur lesen“ am Dokument (`noIngest`); ältere Server schicken das Feld nicht.
+    func testReadOnlyDoc() throws {
+        let base = #"{"id": "d", "url": "https://news.test/1", "kind": "feed", "kindLabel": "Feed-Eintrag", "wordCount": 0, "readingMinutes": 2, "status": "stapel", "progress": 0, "scrollAnchor": 0, "topics": [], "savedAt": "2026-11-02T10:00:00Z""#
+        let readOnly = try JSONDecoder().decode(StackItem.self, from: Data((base + #", "noIngest": true}"#).utf8))
+        XCTAssertTrue(readOnly.isReadOnly)
+        let old = try JSONDecoder().decode(StackItem.self, from: Data((base + "}").utf8))
+        XCTAssertFalse(old.isReadOnly)
+    }
+
     func testInbox() throws {
         let model = try decode(ReadingInboxModel.self, "lesen-eingang")
         let card = try XCTUnwrap(model.doc)
