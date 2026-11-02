@@ -24,12 +24,16 @@ public struct ReadingFeed: Decodable, Equatable, Identifiable, Sendable {
     public let paused: Bool
     /// Neue Einträge direkt auf den Stapel statt in den Eingang.
     public let toStack: Bool
+    /// „Nur lesen“: kein Ingest, nicht in den Vault, nach dem Lesen nur „Fertig, weg“.
+    public let noIngest: Bool
     /// Stichwort-Filter, durch Komma getrennt; nil = alles.
     public let keywordFilter: String?
     public let intervalMinutes: Int
     public let groupId: String?
     public let groupPaused: Bool
     public let groupToStack: Bool
+    /// „Nur lesen“ über die Gruppe.
+    public let groupNoIngest: Bool
     public let lastFetchAt: String?
     public let nextFetchAt: String?
     public let errorCount: Int
@@ -42,7 +46,7 @@ public struct ReadingFeed: Decodable, Equatable, Identifiable, Sendable {
     public let meta: String
 
     enum CodingKeys: String, CodingKey {
-        case id, url, host, siteUrl, title, icon, letter, paused, toStack, keywordFilter, intervalMinutes, groupId, groupPaused, groupToStack
+        case id, url, host, siteUrl, title, icon, letter, paused, toStack, noIngest, keywordFilter, intervalMinutes, groupId, groupPaused, groupToStack, groupNoIngest
         case lastFetchAt, nextFetchAt, errorCount, lastError, state, status, meta
     }
 
@@ -57,11 +61,13 @@ public struct ReadingFeed: Decodable, Equatable, Identifiable, Sendable {
         letter = try c.decodeIfPresent(String.self, forKey: .letter) ?? String(title.prefix(1)).uppercased()
         paused = try c.decodeIfPresent(Bool.self, forKey: .paused) ?? false
         toStack = try c.decodeIfPresent(Bool.self, forKey: .toStack) ?? false
+        noIngest = try c.decodeIfPresent(Bool.self, forKey: .noIngest) ?? false
         keywordFilter = try c.decodeIfPresent(String.self, forKey: .keywordFilter)
         intervalMinutes = try c.decodeIfPresent(Int.self, forKey: .intervalMinutes) ?? 30
         groupId = try c.decodeIfPresent(String.self, forKey: .groupId)
         groupPaused = try c.decodeIfPresent(Bool.self, forKey: .groupPaused) ?? false
         groupToStack = try c.decodeIfPresent(Bool.self, forKey: .groupToStack) ?? false
+        groupNoIngest = try c.decodeIfPresent(Bool.self, forKey: .groupNoIngest) ?? false
         lastFetchAt = try c.decodeIfPresent(String.self, forKey: .lastFetchAt)
         nextFetchAt = try c.decodeIfPresent(String.self, forKey: .nextFetchAt)
         errorCount = try c.decodeIfPresent(Int.self, forKey: .errorCount) ?? 0
@@ -87,7 +93,7 @@ public struct ReadingFeed: Decodable, Equatable, Identifiable, Sendable {
 
     /// Einstellungen zum Bearbeiten, vorbelegt mit dem gespeicherten Stand.
     public var settings: FeedSettings {
-        FeedSettings(paused: paused, toStack: toStack, filter: keywordFilter ?? "", intervalMinutes: intervalMinutes, groupId: groupId, url: url)
+        FeedSettings(paused: paused, toStack: toStack, noIngest: noIngest, filter: keywordFilter ?? "", intervalMinutes: intervalMinutes, groupId: groupId, url: url)
     }
 }
 
@@ -98,7 +104,9 @@ public struct FeedGroup: Decodable, Equatable, Identifiable, Sendable {
     public let position: Int
     public let paused: Bool
     public let toStack: Bool
-    /// „pausiert · direkt auf den Stapel“, nil ohne.
+    /// „Nur lesen“ für alle Feeds der Gruppe.
+    public let noIngest: Bool
+    /// „pausiert · direkt auf den Stapel · nur lesen“, nil ohne.
     public let flags: String?
     /// Neue Einträge der Gruppe im Eingang.
     public let inbox: Int
@@ -106,7 +114,7 @@ public struct FeedGroup: Decodable, Equatable, Identifiable, Sendable {
     public var canMoveDown: Bool
     public let feeds: [ReadingFeed]
 
-    enum CodingKeys: String, CodingKey { case id, name, position, paused, toStack, flags, inbox, canMoveUp, canMoveDown, feeds }
+    enum CodingKeys: String, CodingKey { case id, name, position, paused, toStack, noIngest, flags, inbox, canMoveUp, canMoveDown, feeds }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -115,6 +123,7 @@ public struct FeedGroup: Decodable, Equatable, Identifiable, Sendable {
         position = try c.decodeIfPresent(Int.self, forKey: .position) ?? 0
         paused = try c.decodeIfPresent(Bool.self, forKey: .paused) ?? false
         toStack = try c.decodeIfPresent(Bool.self, forKey: .toStack) ?? false
+        noIngest = try c.decodeIfPresent(Bool.self, forKey: .noIngest) ?? false
         flags = try c.decodeIfPresent(String.self, forKey: .flags)
         inbox = try c.decodeIfPresent(Int.self, forKey: .inbox) ?? 0
         canMoveUp = try c.decodeIfPresent(Bool.self, forKey: .canMoveUp) ?? false
@@ -209,6 +218,8 @@ public struct FeedsModel: Decodable, Equatable, Sendable {
 public struct FeedSettings: Equatable, Sendable {
     public var paused: Bool
     public var toStack: Bool
+    /// „Nur lesen“ (kein Ingest, nicht in den Vault).
+    public var noIngest: Bool
     /// Stichwort-Filter; leer = alles.
     public var filter: String
     public var intervalMinutes: Int
@@ -218,9 +229,10 @@ public struct FeedSettings: Equatable, Sendable {
     /// wie beim Abonnieren. Leer = unverändert.
     public var url: String
 
-    public init(paused: Bool = false, toStack: Bool = false, filter: String = "", intervalMinutes: Int = 30, groupId: String? = nil, url: String = "") {
+    public init(paused: Bool = false, toStack: Bool = false, noIngest: Bool = false, filter: String = "", intervalMinutes: Int = 30, groupId: String? = nil, url: String = "") {
         self.paused = paused
         self.toStack = toStack
+        self.noIngest = noIngest
         self.filter = filter
         self.intervalMinutes = intervalMinutes
         self.groupId = groupId
@@ -233,6 +245,7 @@ public struct FeedSettings: Equatable, Sendable {
         if !url.isEmpty { fields["url"] = url }
         if paused { fields["pausiert"] = "1" }
         if toStack { fields["stapel"] = "1" }
+        if noIngest { fields["nur_lesen"] = "1" }
         return fields
     }
 }
@@ -294,7 +307,7 @@ public struct FeedBulkInfo: Decodable, Equatable, Sendable {
     /// Stand von feeds-page.js, falls ein älterer Server `bulk` nicht mitschickt.
     public static let fallback = FeedBulkInfo(
         action: FeedAction.bulk,
-        actions: ["gruppe", "pausieren", "fortsetzen", "stapel-an", "stapel-aus", "abstand", "entfernen"],
+        actions: ["gruppe", "pausieren", "fortsetzen", "stapel-an", "stapel-aus", "lesen-an", "lesen-aus", "abstand", "entfernen"],
         newGroup: "neu"
     )
 }
@@ -318,6 +331,10 @@ public enum FeedBulkAction: Equatable, Sendable {
     case stackOn
     /// „In den Eingang“ (nicht mehr direkt auf den Stapel)
     case stackOff
+    /// „Nur lesen“ (kein Ingest)
+    case readOnlyOn
+    /// „Wieder ingestierbar“
+    case readOnlyOff
     /// „Abstand ändern“ in Minuten.
     case interval(Int)
     /// „Entfernen“; die App fragt vorher selbst nach.
@@ -331,6 +348,8 @@ public enum FeedBulkAction: Equatable, Sendable {
         case .resume: "fortsetzen"
         case .stackOn: "stapel-an"
         case .stackOff: "stapel-aus"
+        case .readOnlyOn: "lesen-an"
+        case .readOnlyOff: "lesen-aus"
         case .interval: "abstand"
         case .remove: "entfernen"
         }
@@ -352,7 +371,7 @@ public enum FeedBulkAction: Equatable, Sendable {
             pairs.append(("intervall", String(minutes)))
         case .remove:
             pairs.append(("bestaetigt", "1"))
-        case .pause, .resume, .stackOn, .stackOff:
+        case .pause, .resume, .stackOn, .stackOff, .readOnlyOn, .readOnlyOff:
             break
         }
         var seen = Set<String>()

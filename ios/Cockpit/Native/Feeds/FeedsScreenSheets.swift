@@ -90,6 +90,10 @@ struct FeedsScreenFeedSheet: View {
                     Toggle(isOn: $settings.toStack) {
                         Label("Direkt auf den Stapel", systemImage: "square.stack")
                     }
+                    Toggle(isOn: $settings.noIngest) {
+                        Label("Nur lesen", systemImage: "eyeglasses")
+                    }
+                    .accessibilityHint("Kein Ingest, nicht in den Vault; nach dem Lesen nur „Fertig, weg“")
                 } footer: {
                     if let note = groupNote {
                         Text(note)
@@ -196,7 +200,7 @@ struct FeedsScreenFeedSheet: View {
 
     /// Was die Gruppe zusätzlich vorgibt.
     private var groupNote: String? {
-        let parts = [feed.groupPaused ? "pausiert" : nil, feed.groupToStack ? "direkt auf den Stapel" : nil].compactMap { $0 }
+        let parts = [feed.groupPaused ? "pausiert" : nil, feed.groupToStack ? "direkt auf den Stapel" : nil, feed.groupNoIngest ? "nur zum Lesen" : nil].compactMap { $0 }
         return parts.isEmpty ? nil : "Die Gruppe ist \(parts.joined(separator: " und ")); das gilt zusätzlich."
     }
 
@@ -291,6 +295,7 @@ struct FeedsScreenGroupSheet: View {
     @State private var name: String
     @State private var paused: Bool
     @State private var toStack: Bool
+    @State private var noIngest: Bool
     @State private var confirmsDelete = false
 
     init(store: FeedsStore, group: FeedGroup, toasts: ToastCenter, remove: @escaping (FeedGroup) -> Void) {
@@ -301,6 +306,7 @@ struct FeedsScreenGroupSheet: View {
         _name = State(initialValue: group.name)
         _paused = State(initialValue: group.paused)
         _toStack = State(initialValue: group.toStack)
+        _noIngest = State(initialValue: group.noIngest)
     }
 
     /// Die Gruppe im aktuellen Stand (Reihenfolge ändert sich beim Verschieben).
@@ -314,7 +320,7 @@ struct FeedsScreenGroupSheet: View {
 
     private var busy: Bool { store.isBusy(.group(group.id)) }
     private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
-    private var isDirty: Bool { trimmedName != current.name || paused != current.paused || toStack != current.toStack }
+    private var isDirty: Bool { trimmedName != current.name || paused != current.paused || toStack != current.toStack || noIngest != current.noIngest }
 
     var body: some View {
         NavigationStack {
@@ -334,8 +340,11 @@ struct FeedsScreenGroupSheet: View {
                     Toggle(isOn: $toStack) {
                         Label("Direkt auf den Stapel", systemImage: "square.stack")
                     }
+                    Toggle(isOn: $noIngest) {
+                        Label("Nur lesen", systemImage: "eyeglasses")
+                    }
                 } footer: {
-                    Text("Gilt für alle Feeds der Gruppe, zusätzlich zu deren eigener Einstellung.")
+                    Text("Gilt für alle Feeds der Gruppe, zusätzlich zu deren eigener Einstellung. „Nur lesen“: kein Ingest, nicht in den Vault, nach dem Lesen nur „Fertig, weg“.")
                 }
                 Section {
                     Button {
@@ -415,7 +424,7 @@ struct FeedsScreenGroupSheet: View {
     private func save() {
         guard isDirty, !trimmedName.isEmpty, !busy else { return }
         Task {
-            if await store.updateGroup(current, name: trimmedName, paused: paused, toStack: toStack) {
+            if await store.updateGroup(current, name: trimmedName, paused: paused, toStack: toStack, noIngest: noIngest) {
                 toasts.signal(.success)
                 dismiss()
             }

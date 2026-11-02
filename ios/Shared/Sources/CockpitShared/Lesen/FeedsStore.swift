@@ -192,14 +192,15 @@ public final class FeedsStore {
         return await perform(.createGroup, FeedAction.createGroup, ["name": name], success: true)
     }
 
-    /// „Gruppe bearbeiten“: Name, Pause und „direkt auf den Stapel“ für alle ihre Feeds.
+    /// „Gruppe bearbeiten“: Name, Pause, „direkt auf den Stapel“ und „Nur lesen“ für alle ihre Feeds.
     @discardableResult
-    public func updateGroup(_ group: FeedGroup, name: String, paused: Bool, toStack: Bool) async -> Bool {
+    public func updateGroup(_ group: FeedGroup, name: String, paused: Bool, toStack: Bool, noIngest: Bool = false) async -> Bool {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return reject("Bitte einen Namen eingeben") }
         var fields = ["id": group.id, "name": name]
         if paused { fields["pausiert"] = "1" }
         if toStack { fields["stapel"] = "1" }
+        if noIngest { fields["nur_lesen"] = "1" }
         return await perform(.group(group.id), FeedAction.updateGroup, fields)
     }
 
