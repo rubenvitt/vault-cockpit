@@ -1284,9 +1284,15 @@ Markierung). Ohne JavaScript bleibt ein Hinweis.
 **Feeds** (`/lesen/feeds`, VCP-78): Eine Feed-Adresse abonnieren oder einfach die
 Website, das Cockpit findet den Feed dann über `<link rel="alternate">`. Gelesen
 werden RSS 2.0 (auch 1.0), Atom und JSON Feed. Je Feed lässt sich einstellen:
-pausieren, „direkt auf den Stapel“ statt in den Eingang, ein Stichwort-Filter
+pausieren, „direkt auf den Stapel“ statt in den Eingang, **Nur lesen**, ein Stichwort-Filter
 (durch Komma getrennt, eins davon muss in Titel oder Text stehen) und der Abstand
-(Standard 30 Minuten, 5 bis 1440). Ein Hintergrundlauf sieht jede Minute nach,
+(Standard 30 Minuten, 5 bis 1440). **Nur lesen** (auch für eine ganze Gruppe
+oder per Auswahl für viele Feeds) ist für Quellen, die man liest und dann
+vergisst: Ihre Einträge bekommen keinen Ingest (weder Knopf noch Nachtlauf noch
+„Alle entwerfen“), kein „In den Vault“ und kein „Im Vault ablegen“; nach dem
+Lesen ist „Fertig, weg“ der Hauptknopf, unter „Wie weiter?“ der einzige. Die
+Einstellung gilt sofort auch für schon geholte Einträge, solange der Feed
+besteht. Ein Hintergrundlauf sieht jede Minute nach,
 welche Feeds dran sind, und holt sie mit `ETag`/`Last-Modified`, höchstens drei
 gleichzeitig. Jeder neue Eintrag (erkannt an der GUID, sonst an der Adresse) wird
 genau einmal ein Dokument mit Herkunft `feed:<id>`; der erste Abruf eines neuen

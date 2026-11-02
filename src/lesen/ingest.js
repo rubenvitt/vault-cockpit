@@ -9,6 +9,7 @@ import { blockId, fullTextOf, slugOf } from './vault-export.js';
 import { breakTemplater, safeWikiMarkdown } from './wiki-markdown.js';
 import { parseNote } from '../vault/markdown.js';
 import { logStep, logTool } from './worklog.js';
+import { NO_INGEST_MESSAGE } from './store.js';
 
 /**
  * Ingest ins Mycel-Wiki: Claude entwirft, der Nutzer hakt ab, erst dann
@@ -694,9 +695,12 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
     if (!ok.ok) throw new IngestError(ok.reason, 409);
     const ids = [...new Set([docIds].flat().map((id) => String(id ?? '')).filter(Boolean))];
     if (ids.length === 1 && !store.get(ids[0])) throw new IngestError('Dieses Dokument gibt es nicht', 404);
+    // Aus einem Feed „nur lesen“: nie ein Entwurf, auch nicht nachts oder mit „Alle entwerfen“.
+    if (ids.length === 1 && store.get(ids[0]).no_ingest) throw new IngestError(NO_INGEST_MESSAGE, 409);
     const queued = [];
     for (const id of ids) {
-      if (!store.get(id)) continue;
+      const doc = store.get(id);
+      if (!doc || doc.no_ingest) continue;
       const cur = store.getIngest(id);
       if (cur && ['wartet', 'entwirft'].includes(cur.status)) continue;
       // Übernommenes nie neu entwerfen; angefangenes Übernehmen erst fortsetzen, ein neuer Entwurf verlöre den Fortschritt.
@@ -718,7 +722,7 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
   function requestStack({ origin = 'knopf', limit = Infinity } = {}) {
     const docs = store.list({ status: 'stapel', limit: 5000 }).reverse();
     const statuses = store.ingestStatuses(docs.map((d) => d.id));
-    const ids = docs.filter((d) => !statuses.has(d.id) || statuses.get(d.id) === 'fehler').map((d) => d.id).slice(0, limit);
+    const ids = docs.filter((d) => !d.no_ingest).filter((d) => !statuses.has(d.id) || statuses.get(d.id) === 'fehler').map((d) => d.id).slice(0, limit);
     if (!ids.length) return 0;
     return request(ids, { origin }).queued.length;
   }

@@ -38,6 +38,8 @@ export const docJson = (d) => ({
   heardAt: d.heard_at ?? null,
   archivedAt: d.archived_at ?? null,
   updatedAt: d.updated_at ?? null,
+  // Aus einem Feed „nur lesen“: kein Ingest, nicht in den Vault, nach dem Lesen nur „Fertig, weg“.
+  noIngest: Boolean(d.no_ingest),
 });
 
 /** Felder einer Markierung; aus Listen (`listHighlights` ohne `docId`) samt Titel, Adresse, Quelle und Themen des Dokuments. */

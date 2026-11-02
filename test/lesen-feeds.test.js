@@ -432,12 +432,12 @@ test('OPML: Gruppen als Ordner in ihrer Reihenfolge, Round-Trip ergibt dieselben
 
 // --- Seite ---------------------------------------------------------------------
 
-async function withWeb(run, routes = {}) {
+async function withWeb(run, routes = {}, extra = {}) {
   const store = createReadingStore({ path: ':memory:', secrets: createSecretBox(SECRET) });
   const webHttp = createWebHttp({
     cockpit: { week: async () => null },
     settings: createSettingsStore({ defaults: { tz: 'Europe/Berlin' }, logger: quiet }),
-    reading: readingRoutes({ store, fetchFeed: fakeFetch(routes), logger: quiet }),
+    reading: readingRoutes({ store, fetchFeed: fakeFetch(routes), logger: quiet, ...extra }),
     oidc: {},
     sessionSecret: SECRET,
     publicUrl: 'https://vault.test',
@@ -603,6 +603,74 @@ test('Feeds-Seite: Gruppen anlegen, umbenennen, einstellen, ordnen, löschen', a
   });
 });
 
+test('Nur lesen: am Feed oder an der Gruppe einstellen; Einträge ohne Ingest und Vault, „Fertig, weg“ als Hauptknopf', async () => {
+  const saved = [];
+  const exporter = { locked: () => null, save: (id) => (saved.push(id), { state: 'geschrieben', path: `Lesestapel/${id}.md` }) };
+  await withWeb(async ({ call, store }) => {
+    const csrf = await csrfOf(call);
+    const form = (path, fields) => call(path, { form: { csrf, back: '/lesen/feeds', ...fields } });
+    const { group } = store.addGroup({ name: 'Ticker' });
+    const { feed } = store.addFeed({ url: 'https://news.test/feed', title: 'News', interval_minutes: 30 });
+    const { feed: inGroup } = store.addFeed({ url: 'https://ticker.test/feed', title: 'Ticker', interval_minutes: 30, group_id: group.id });
+
+    let page = await (await call('/lesen/feeds')).text();
+    assert.match(page, /<input type="checkbox" name="nur_lesen" value="1"> Nur lesen <span class="hint">kein Ingest, nicht in den Vault; nach dem Lesen nur „Fertig, weg“<\/span>/);
+    await form('/aktion/lesen/feed/aendern', { id: feed.id, url: feed.url, intervall: '30', nur_lesen: '1' });
+    await form('/aktion/lesen/gruppe/aendern', { id: group.id, name: 'Ticker', nur_lesen: '1' });
+    assert.equal(store.getFeed(feed.id).no_ingest, true);
+    assert.deepEqual([store.getGroup(group.id).no_ingest, store.getFeed(inGroup.id).no_ingest, store.getFeed(inGroup.id).group_no_ingest], [true, false, true]);
+    page = await (await call('/lesen/feeds')).text();
+    assert.match(page, /name="nur_lesen" value="1" checked> Nur lesen/);
+    assert.match(page, /news\.test · alle 30 min · nur lesen</);
+    assert.match(page, /ticker\.test · alle 30 min · nur lesen \(Gruppe\)</);
+
+    const news = store.addDocument({ url: 'https://news.test/1', title: 'Kurzmeldung', status: 'stapel', origin: `feed:${feed.id}`, content_html: '<p>Kurz.</p>' }).doc;
+    const own = store.addDocument({ url: 'https://blog.test/1', title: 'Eigener Text', status: 'stapel', content_html: '<p>Lang.</p>' }).doc;
+    const reader = await (await call(`/lesen/doc?id=${news.id}`)).text();
+    assert.ok(!reader.includes('In den Vault'), 'kein „In den Vault“');
+    assert.match(reader, /<button type="submit" class="btn primary">Fertig, weg <kbd>E<\/kbd><\/button>/);
+    const ownReader = await (await call(`/lesen/doc?id=${own.id}`)).text();
+    assert.match(ownReader, /In den Vault/);
+    assert.match(ownReader, /<button type="submit" class="btn">Fertig, weg/);
+    const json = JSON.parse(await (await call(`/api/lesen/doc?id=${news.id}`)).text());
+    assert.deepEqual([json.vault, json.ingest, json.doc.noIngest], [false, null, true]);
+
+    // Stapel: kein „Im Vault ablegen“ für den Nur-lesen-Eintrag.
+    const stapel = await (await call('/lesen/stapel')).text();
+    assert.ok(stapel.includes('Im Vault ablegen<span class="sr-only">: Eigener Text'));
+    assert.ok(!stapel.includes('Im Vault ablegen<span class="sr-only">: Kurzmeldung'));
+
+    // Auch per Formular nicht in den Vault; „Fertig, weg“ geht.
+    const vault = await call('/aktion/lesen/doc/vault', { form: { csrf, back: '/lesen/stapel', id: news.id, volltext: '1' } });
+    assert.match(await toastAfter(call, vault), /Aus einem Feed „nur lesen“: kein Ingest, auch nicht in den Vault/);
+    const ablegen = await call('/aktion/lesen/ablegen', { form: { csrf, back: '/lesen/stapel', id: news.id } });
+    assert.match(await toastAfter(call, ablegen), /nur lesen/);
+    assert.deepEqual(saved, []);
+    assert.equal(store.get(news.id).status, 'stapel');
+    await call('/aktion/lesen/doc/fertig', { form: { csrf, back: '/lesen/stapel', id: news.id } });
+    assert.equal(store.get(news.id).status, 'weg');
+
+    // Wie weiter? Gelesen: nur „Fertig, weg“, kein „Nur in den Vault“.
+    const done = store.addDocument({ url: 'https://news.test/2', title: 'Gelesene Meldung', status: 'stapel', origin: `feed:${feed.id}`, content_html: '<p>Kurz.</p>' }).doc;
+    store.setProgress(done.id, 1);
+    store.setProgress(own.id, 1);
+    const weiter = await (await call('/lesen/weiter')).text();
+    const item = (title) => weiter.slice(weiter.indexOf(`>${title}</a>`), weiter.indexOf('\n  </li>', weiter.indexOf(`>${title}</a>`)));
+    assert.match(item('Gelesene Meldung'), /class="btn primary">Fertig, weg/);
+    assert.ok(!item('Gelesene Meldung').includes('Nur in den Vault'));
+    assert.ok(!item('Gelesene Meldung').includes('Entwurf'), 'Spur nur „Gelesen“');
+    assert.match(item('Eigener Text'), /Nur in den Vault/);
+
+    // Eingang: ohne „Im Vault ablegen“.
+    const inbox = store.addDocument({ url: 'https://ticker.test/1', title: 'Tickermeldung', status: 'eingang', origin: `feed:${inGroup.id}` }).doc;
+    const eingang = await (await call('/lesen/eingang')).text();
+    assert.match(eingang, /Tickermeldung/);
+    assert.ok(!eingang.includes('Im Vault ablegen'));
+    const inboxJson = JSON.parse(await (await call('/api/lesen/eingang')).text());
+    assert.deepEqual([inboxJson.doc.id, inboxJson.doc.noIngest, inboxJson.vault], [inbox.id, true, false]);
+  }, {}, { exporter });
+});
+
 test('Feeds-Seite: Feeds einer Gruppe zuordnen, nach Gruppe anzeigen mit neuen Einträgen', async () => {
   await withWeb(
     async ({ call, store }) => {
@@ -726,6 +794,10 @@ test('Feeds-Seite: viele Feeds auf einmal verschieben, pausieren, einstellen und
     assert.deepEqual(ids.map((id) => store.getFeed(id).to_stack), [false, true, false, true]);
     await bulk({ tun: 'stapel-aus' }, [d]);
     assert.equal(store.getFeed(d).to_stack, false);
+    assert.equal(await toastAfter(call, await bulk({ tun: 'lesen-an' }, [a, c])), '2 Feeds nur zum Lesen, ohne Ingest');
+    assert.deepEqual(ids.map((id) => store.getFeed(id).no_ingest), [true, false, true, false]);
+    assert.equal(await toastAfter(call, await bulk({ tun: 'lesen-aus' }, [c])), '1 Feed wieder ingestierbar');
+    assert.deepEqual(ids.map((id) => store.getFeed(id).no_ingest), [true, false, false, false]);
     assert.equal(await toastAfter(call, await bulk({ tun: 'abstand', intervall: '2' }, [a, b])), '2 Feeds alle 5 min');
     assert.deepEqual(ids.map((id) => store.getFeed(id).interval_minutes), [5, 5, 30, 30]);
     assert.equal(await toastAfter(call, await bulk({ tun: 'abstand', intervall: 'x' }, [a])), 'Bitte einen Abstand in Minuten angeben');

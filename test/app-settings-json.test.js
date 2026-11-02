@@ -553,7 +553,7 @@ test('Feeds als JSON: Gruppen mit Feeds, ohne Gruppe, Zustand; Aktionen und OPML
     assert.deepEqual(empty.body.groups, []);
     assert.deepEqual(empty.body.ungrouped, []);
     assert.deepEqual(empty.body.limits, { minInterval: 5, maxInterval: 1440, defaultInterval: 30, maxOpmlBytes: 2 * 1024 * 1024 });
-    assert.deepEqual(empty.body.bulk, { action: '/aktion/lesen/feeds/auswahl', actions: ['gruppe', 'pausieren', 'fortsetzen', 'stapel-an', 'stapel-aus', 'abstand', 'entfernen'], newGroup: 'neu' });
+    assert.deepEqual(empty.body.bulk, { action: '/aktion/lesen/feeds/auswahl', actions: ['gruppe', 'pausieren', 'fortsetzen', 'stapel-an', 'stapel-aus', 'lesen-an', 'lesen-aus', 'abstand', 'entfernen'], newGroup: 'neu' });
     keep('lesen-feeds-leer', empty.body);
 
     const group = await post('/aktion/lesen/gruppe/anlegen', { name: 'Technik' });
@@ -612,7 +612,7 @@ test('Feeds als JSON: Gruppen mit Feeds, ohne Gruppe, Zustand; Aktionen und OPML
     const [a] = body.ungrouped;
     assert.deepEqual(
       { ...a, nextFetchAt: undefined },
-      { id: atom.id, url: 'https://atom.test/feed.xml', host: 'atom.test', siteUrl: 'https://atom.test/', title: 'Atom-Seite', icon: null, letter: 'A', paused: true, toStack: true, keywordFilter: 'swift, ios', hasAuth: false, intervalMinutes: 5, groupId: null, groupPaused: false, groupToStack: false, lastFetchAt: null, nextFetchAt: undefined, errorCount: 0, lastError: null, state: 'paused', status: 'pausiert', meta: 'atom.test · alle 5 min · direkt auf den Stapel · nur „swift, ios“' },
+      { id: atom.id, url: 'https://atom.test/feed.xml', host: 'atom.test', siteUrl: 'https://atom.test/', title: 'Atom-Seite', icon: null, letter: 'A', paused: true, toStack: true, noIngest: false, keywordFilter: 'swift, ios', hasAuth: false, intervalMinutes: 5, groupId: null, groupPaused: false, groupToStack: false, groupNoIngest: false, lastFetchAt: null, nextFetchAt: undefined, errorCount: 0, lastError: null, state: 'paused', status: 'pausiert', meta: 'atom.test · alle 5 min · direkt auf den Stapel · nur „swift, ios“' },
     );
 
     // OPML-Export mit Geräte-Token; die Seite `/lesen/feeds.opml` bleibt beim Cookie.

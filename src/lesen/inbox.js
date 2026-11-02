@@ -114,7 +114,7 @@ export function renderInboxPage({ doc, left, today, filter, triage = null }, ctx
     </form>`
     : '';
   // Im Vault ablegen (VCP-96): ein Knopf, kein Wischen; die Aktion steht in src/lesen/doc.js.
-  const file = doc && vault
+  const file = doc && vault && !doc.no_ingest
     ? `<form method="post" action="/aktion/lesen/ablegen" class="act inbox-ablegen">${hidden({ ...write, id: doc.id })}<button type="submit" class="btn quiet" aria-keyshortcuts="a">Im Vault ablegen <kbd aria-hidden="true">A</kbd></button></form>`
     : '';
   const row = undo || file ? `<div class="inbox-row">${undo}${file}</div>` : '';
@@ -150,7 +150,8 @@ function inboxJson({ doc, left, today, filter, triage = null }, { store, tz, vau
     groups: groupsJson(filter.groups).map((g) => ({ ...g, count: perGroup[g.id] ?? 0 })),
     noFeedCount: store.counts({ group: NO_FEED }).eingang,
     showGroups: filter.groups.length > 0 || Boolean(filter.group),
-    vault,
+    // Aus einem Feed „nur lesen“ gibt es „Im Vault ablegen“ nicht.
+    vault: vault && !doc?.no_ingest,
   };
 }
 
