@@ -10,13 +10,18 @@ DESTINATION ?= platform=iOS Simulator,id=$(SIMULATOR_ID)
 XCODEBUILD = xcodebuild -project $(PROJECT) -scheme $(SCHEME) -destination '$(DESTINATION)' \
 	-derivedDataPath build CODE_SIGNING_ALLOWED=NO CURRENT_PROJECT_VERSION=$(BUILD_NUMBER)
 
-.PHONY: project build test shared-test clean
+.PHONY: project build mac test shared-test clean
 
 project:
 	xcodegen generate
 
 build: project
 	$(XCODEBUILD) build
+
+# macOS-App (Mac Catalyst) ohne Signieren.
+mac: project
+	xcodebuild -project $(PROJECT) -scheme $(SCHEME) -destination 'platform=macOS,variant=Mac Catalyst' \
+		-derivedDataPath build CODE_SIGNING_ALLOWED=NO CURRENT_PROJECT_VERSION=$(BUILD_NUMBER) build
 
 test: project shared-test
 	$(XCODEBUILD) test

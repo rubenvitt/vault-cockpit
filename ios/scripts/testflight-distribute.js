@@ -15,6 +15,7 @@
  *   WHATS_NEW                   Text für „Was testen“ (höchstens 4000 Zeichen)
  *   WHATS_NEW_LOCALE            Sprache, falls der Build noch keine hat; Standard de-DE
  *   BUNDLE_ID                   Standard dev.rubeen.cockpit
+ *   PLATFORM                    IOS (Standard) oder MAC_OS; beide Builds tragen dieselbe Nummer
  *   WAIT_MINUTES                so lange auf die Verarbeitung warten; Standard 45
  */
 import { sign } from 'node:crypto';
@@ -59,7 +60,7 @@ export function client({ keyId, issuerId, privateKey, fetch = globalThis.fetch }
 const q = (params) => new URLSearchParams(params).toString();
 
 export async function distribute({
-  request, bundleId, buildNumber, groups, whatsNew = '', locale = 'de-DE',
+  request, bundleId, buildNumber, groups, whatsNew = '', locale = 'de-DE', platform = 'IOS',
   waitMs = 45 * 60_000, pollMs = 30_000, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), log = console.log,
 }) {
   const apps = await request('GET', `/v1/apps?${q({ 'filter[bundleId]': bundleId })}`);
@@ -74,7 +75,7 @@ export async function distribute({
     return group;
   });
 
-  const build = await waitForBuild({ request, appId: app.id, buildNumber, waitMs, pollMs, sleep, log });
+  const build = await waitForBuild({ request, appId: app.id, buildNumber, platform, waitMs, pollMs, sleep, log });
 
   const text = whatsNew.trim().slice(0, WHATS_NEW_MAX);
   if (text) {
@@ -120,8 +121,8 @@ export async function distribute({
 }
 
 /** Der Build taucht erst einige Minuten nach dem Upload auf und ist dann eine Weile PROCESSING. */
-async function waitForBuild({ request, appId, buildNumber, waitMs, pollMs, sleep, log }) {
-  const path = `/v1/builds?${q({ 'filter[app]': appId, 'filter[version]': buildNumber, limit: '1' })}`;
+async function waitForBuild({ request, appId, buildNumber, platform, waitMs, pollMs, sleep, log }) {
+  const path = `/v1/builds?${q({ 'filter[app]': appId, 'filter[version]': buildNumber, 'filter[preReleaseVersion.platform]': platform, limit: '1' })}`;
   for (let waited = 0; ; waited += pollMs) {
     const [build] = (await request('GET', path)).data;
     const state = build?.attributes.processingState;
@@ -155,6 +156,7 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
     await distribute({
       request,
       bundleId: env.BUNDLE_ID || 'dev.rubeen.cockpit',
+      platform: env.PLATFORM || 'IOS',
       buildNumber: env.BUILD_NUMBER,
       groups,
       whatsNew: env.WHATS_NEW,

@@ -5,7 +5,7 @@ import PackageDescription
 let package = Package(
     name: "Shared",
     // macOS nur für `swift test` auf dem Mac (Observation braucht macOS 14).
-    platforms: [.iOS(.v17), .macOS(.v14)],
+    platforms: [.iOS(.v17), .macCatalyst(.v17), .macOS(.v14)],
     products: [
         .library(name: "CockpitShared", targets: ["CockpitShared"]),
     ],

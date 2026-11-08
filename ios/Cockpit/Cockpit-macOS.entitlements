@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!-- Mac Catalyst: wie Cockpit.entitlements, dazu die Sandbox (Pflicht für App Store und TestFlight).
+     Von Hand gepflegt; Cockpit.entitlements erzeugt xcodegen. Änderungen an Gruppen oder Domains in beiden. -->
+<dict>
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<!-- Sicherung, OPML und Kurzbefehle über das Teilen-Blatt bzw. die Dateiauswahl. -->
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:$(COCKPIT_SERVER_HOST)</string>
+		<string>webcredentials:$(COCKPIT_SERVER_HOST)</string>
+	</array>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.dev.rubeen.cockpit</string>
+	</array>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)dev.rubeen.cockpit.shared</string>
+	</array>
+</dict>
+</plist>

@@ -1,6 +1,6 @@
 name: iOS
 
-# Baut und testet die iOS-App auf dem Simulator, ohne Signieren.
+# Baut und testet die iOS-App auf dem Simulator und baut die macOS-App (Mac Catalyst), ohne Signieren.
 # `ios-test` ist ein Pflicht-Check für main. Er meldet sich deshalb bei jedem PR: Ohne Änderung
 # unter ios/ wird er übersprungen, und ein übersprungener Job gilt als bestanden.
 on:
@@ -38,3 +38,5 @@ jobs:
       - run: brew install xcodegen
       # Der Makefile wählt das erste verfügbare iPhone als Simulator.
       - run: make -C ios test
+      # Dieselbe App als macOS-App (Mac Catalyst), ohne Signieren.
+      - run: make -C ios mac

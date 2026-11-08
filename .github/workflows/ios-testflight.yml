@@ -4,6 +4,9 @@ name: iOS TestFlight
 # Betas nimmt App Store Connect nicht an). Startet von selbst bei jedem Push auf main, der ios/
 # ändert, dazu manuell oder per Tag `ios/v…` (geht auch für Branches, die noch nicht auf main sind).
 # Danach verteilt `distribute` den Build an die Gruppen aus der Repo-Variable TESTFLIGHT_GROUPS.
+# Mit der Repo-Variable TESTFLIGHT_MAC=true kommt dieselbe Nummer auch als macOS-App (Mac Catalyst)
+# hoch; dafür braucht die App in App Store Connect die Plattform macOS. Scheitert nur der Mac,
+# geht der iOS-Build trotzdem raus.
 on:
   workflow_dispatch:
   push:
@@ -21,6 +24,7 @@ jobs:
     runs-on: macos-latest
     outputs:
       build-number: ${{ steps.build-number.outputs.value }}
+      mac: ${{ steps.mac.outcome }}
     steps:
       - uses: actions/checkout@v4
       - run: brew install xcodegen
@@ -53,6 +57,16 @@ jobs:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: ios/scripts/testflight.sh
+      - name: macOS-App archivieren und hochladen
+        id: mac
+        if: vars.TESTFLIGHT_MAC == 'true'
+        continue-on-error: true
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          PLATFORM: mac
+        run: ios/scripts/testflight.sh
       - name: Zertifikat dieses Laufs widerrufen
         if: always()
         continue-on-error: true
@@ -70,6 +84,13 @@ jobs:
     if: vars.TESTFLIGHT_GROUPS != ''
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [IOS, MAC_OS]
+    # Den Mac nur, wenn sein Upload in diesem Lauf geklappt hat.
+    env:
+      ACTIVE: ${{ matrix.platform == 'IOS' || needs.upload.outputs.mac == 'success' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -78,6 +99,7 @@ jobs:
         with:
           node-version: 26
       - name: API-Key ablegen
+        if: env.ACTIVE == 'true'
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
@@ -86,7 +108,9 @@ jobs:
           (umask 077; printf '%s' "$ASC_KEY_P8_BASE64" | base64 --decode > "$key")
           echo "ASC_KEY_PATH=$key" >> "$GITHUB_ENV"
       - name: An Gruppen verteilen
+        if: env.ACTIVE == 'true'
         env:
+          PLATFORM: ${{ matrix.platform }}
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           BUILD_NUMBER: ${{ needs.upload.outputs.build-number }}

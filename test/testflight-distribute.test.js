@@ -95,3 +95,14 @@ test('ungültiger Build und Zeitüberschreitung brechen ab', async () => {
   await assert.rejects(run(fakeApi({ states: ['INVALID'] })), /INVALID/);
   await assert.rejects(run(fakeApi({ states: ['PROCESSING'] }), { waitMs: 60_000, pollMs: 30_000 }), /nach 1 Minuten nicht verarbeitet \(PROCESSING\)/);
 });
+
+test('sucht den Build der Plattform: iOS und Mac tragen dieselbe Nummer', async () => {
+  const platformOf = (calls) => calls.filter((c) => c.path.startsWith('/v1/builds?'))
+    .map((c) => new URLSearchParams(c.path.split('?')[1]).get('filter[preReleaseVersion.platform]'));
+  const ios = fakeApi();
+  await run(ios);
+  assert.deepEqual(platformOf(ios.calls), ['IOS']);
+  const mac = fakeApi();
+  await run(mac, { platform: 'MAC_OS' });
+  assert.deepEqual(platformOf(mac.calls), ['MAC_OS']);
+});
