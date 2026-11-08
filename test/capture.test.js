@@ -314,7 +314,7 @@ test('Zunder-Client findet eine Aufgabe nur am vollständigen Marker (VCP-132)',
     },
   });
   assert.deepEqual(await client.findByMarker('cockpit-capture:mail:m1'), { id: 'b', ref: 'ZUN-2', url: 'https://zunder.test/#/aufgabe/b' });
-  assert.deepEqual(calls[0], { name: 'search', args: { query: 'cockpit-capture:mail:m1', limit: 20 } });
+  assert.deepEqual(calls[0], { name: 'search', args: { query: '`cockpit-capture:mail:m1`', limit: 20 } }, 'mit Backticks: nur der ganze Marker');
   assert.deepEqual(calls.slice(1).map((c) => c.args.task_id), ['a', 'b'], 'nur Aufgaben, kein Projekt');
   assert.equal(await client.findByMarker('cockpit-capture:mail:m2'), null);
 });
