@@ -28,7 +28,9 @@ jobs:
   version:
     # Nur von main: Ein manueller Lauf auf einem anderen Branch würde sonst ungeprüften Code als
     # neueste Version veröffentlichen, die jede installierte App als Update anbietet.
-    if: github.ref == 'refs/heads/main'
+    # Ohne eigenes Release-Repo (Repo-Variable MAC_RELEASE_REPO) kein Release: Releases hier im Repo
+    # würde BRAT dem Obsidian-Plugin vorziehen (es nimmt die höchste Version aus allen Tags).
+    if: github.ref == 'refs/heads/main' && vars.MAC_RELEASE_REPO != ''
     runs-on: ubuntu-latest
     outputs:
       release: ${{ steps.plan.outputs.release }}
