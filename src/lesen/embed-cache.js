@@ -64,7 +64,15 @@ export function createEmbedCache({ embedder = () => null, waitMs = WAIT_MS, paus
         prev = job;
       }
       const waiting = [...new Set(texts.map((t) => inflight.get(key(t))).filter(Boolean))];
-      if (waiting.length && wait > 0) await Promise.race([Promise.all(waiting), delay(wait, null, { ref: false })]);
+      if (waiting.length && wait > 0) {
+        // Der Zeitgeber hält die Event-Loop offen, solange jemand wartet (sonst endet
+        // ein Prozess, der nur noch auf Ollama wartet, mitten im Aufruf; VCP-128),
+        // und wird abgeräumt, sobald die Embeddings vorher fertig sind.
+        const timeout = new AbortController();
+        const timer = delay(wait, null, { signal: timeout.signal }).catch(() => null);
+        await Promise.race([Promise.all(waiting), timer]);
+        timeout.abort();
+      }
       return texts.map((t) => cache.get(key(t)));
     },
 
