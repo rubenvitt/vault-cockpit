@@ -1,7 +1,8 @@
 // Service Worker des Web-Cockpits. Der Server stellt beim Ausliefern unter
 // `/sw.js` die Zeile `self.CONFIG = {…}` voran (src/web/offline.js): Version
-// (Inhalts-Hash der App-Hülle), die Dateien der App-Hülle und den Header, mit
-// dem er eine Seite für den Offline-Cache freigibt.
+// (Inhalts-Hash der App-Hülle), die Dateien der App-Hülle, den Header, mit
+// dem er eine Seite für den Offline-Cache freigibt, und den, mit dem das
+// Befüllen sie abruft (VCP-130).
 //
 // Gespeichert werden nur die App-Hülle, die Wochenansicht der laufenden
 // Woche und Lesestoff für unterwegs (VCP-80: Artikel vom Stapel, Synthesen,
@@ -12,7 +13,7 @@
 // sofort neu (VCP-98): Die alten trügen sonst Formulare und Skripte von vorher.
 'use strict';
 
-const { version, shell, mark, synthesis } = self.CONFIG;
+const { version, shell, mark, fill: FILL_HEADER, synthesis } = self.CONFIG;
 const SHELL = `cockpit-shell-${version}`;
 const PAGES = 'cockpit-seiten';
 const WEEK = '/';
@@ -113,8 +114,8 @@ function fill() {
   return filling;
 }
 
-// shortcut: Die Abrufe laufen mit der Sitzung und können eine Meldung oder einen Entwurf (Cookie) der
-// offenen Seite verbrauchen; bei Bedarf ein Header, mit dem der Server dabei nichts davon einlöst.
+// Die Abrufe laufen mit der Sitzung, also mit den Cookies der offenen Seite. Mit `FILL_HEADER` löst der
+// Server dabei weder Meldung noch Entwurf ein (VCP-130); die bleiben für den nächsten echten Seitenaufruf.
 async function fillReading() {
   const gen = generation;
   let res;
@@ -137,7 +138,7 @@ async function fillReading() {
     if (hit && !outdated(key, hit) && Date.now() - Date.parse(hit.headers.get('x-cockpit-stand') ?? '') < FRESH_MS) continue;
     let page;
     try {
-      page = await fetch(key, { credentials: 'same-origin', redirect: 'manual', cache: 'no-store' });
+      page = await fetch(key, { headers: { [FILL_HEADER]: '1' }, credentials: 'same-origin', redirect: 'manual', cache: 'no-store' });
     } catch {
       return;
     }
