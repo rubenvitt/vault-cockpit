@@ -132,6 +132,25 @@ export function createZunderClient({ url, token, fetch = globalThis.fetch, timeo
     },
 
     /**
+     * Sucht die Aufgabe, deren Beschreibung den Marker `` `marker` `` trägt
+     * (auch erledigte oder verworfene), und liefert `{ id, ref, url }` oder null.
+     * Damit findet die Erfassung eine Aufgabe wieder, die Zunder angelegt hat,
+     * deren Antwort aber nie ankam (VCP-132). Die Suche findet Teilwörter; erst
+     * der Marker in Backticks in der Beschreibung zählt als Treffer.
+     */
+    async findByMarker(marker) {
+      const out = await callTool('search', { query: marker, limit: 20 });
+      const hits = (out?.hits ?? []).filter((h) => h.entity === 'task');
+      for (const hit of hits) {
+        const task = (await callTool('get_task', { task_id: hit.id }))?.task;
+        if (task?.id && String(task.description ?? '').includes(`\`${marker}\``)) {
+          return { id: task.id, ref: task.ref ?? null, url: `${base}/#/aufgabe/${task.id}` };
+        }
+      }
+      return null;
+    },
+
+    /**
      * Legt eine Aufgabe an und liefert `{ id, ref, url }`. Ohne `location`
      * landet sie in der Zunder-Inbox; `due` (JJJJ-MM-TT) und `phoenix` sind optional.
      */
