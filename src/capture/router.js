@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { parseTaskLine, resolveTask, dueText, previewLine } from './syntax.js';
 import { localDate, weekOf, weekId } from '../cockpit/week.js';
 
@@ -138,54 +139,81 @@ export function createCaptureRouter({ capture, zunder = null, state, tz = 'Europ
   /**
    * Legt die Aufgabe in Zunder an und merkt sie sich unter `key`.
    *
-   * Mit Capture-ID trägt die Beschreibung einen Marker (`cockpit-<key>`), und
-   * vor dem Aufruf steht im Merkzettel „angefragt“. Kommt die Antwort von
-   * Zunder nicht an (Timeout, Netz), bleibt dieser Vermerk stehen; beim
-   * Nachsenden sucht das Cockpit dann erst nach dem Marker und legt nur neu
-   * an, wenn Zunder die Aufgabe wirklich nicht kennt (VCP-132). Der Vermerk
-   * hält auch den Plan von damals fest: Ein `morgen`, das erst am Folgetag
-   * nachgesendet wird, meint die Aufgabe, die schon in Zunder liegt.
+   * Mit Capture-ID geht ein Idempotenzschlüssel an Zunder (`client_ref`,
+   * VCP-141). Kam die Antwort beim ersten Mal nicht an (Timeout, Netz), legt
+   * Zunder beim Nachsenden nichts neu an, sondern liefert die Aufgabe von
+   * damals. Gemeldet wird sie so, wie sie in Zunder liegt: Ein `morgen`, das
+   * erst am Folgetag nachgesendet wird, meint die Aufgabe, die schon da ist.
    */
   async function createInZunder({ zunder, text, title, source, key }) {
     const { line, rest } = split(text, title);
     if (!line) throw new CaptureError('Nach dem ! fehlt der Text der Aufgabe');
     const p = await plan(line, zunder);
-    const marker = key ? `cockpit-${key}` : null;
-    const pendingKey = key ? `capture-pending:${key.slice('capture:'.length)}` : null;
     const result = (created, q = p) => ({ ...created, title: q.title, due: q.due, dueLabel: q.dueLabel, location: q.location ?? { kind: 'inbox' }, phoenix: q.phoenix, notes: q.notes });
 
-    const pending = pendingKey ? state.get(pendingKey) : null;
-    if (pending && zunder.findByMarker) {
-      const found = await zunder.findByMarker(marker);
-      if (found) {
-        const before = pending.plan ? { ...pending.plan, dueLabel: dueText(pending.plan.due, localDate(now(), currentTz() || 'Europe/Berlin')) } : p;
-        const task = result(found, before);
-        state.set(key, task);
-        state.delete(pendingKey);
-        logger.info?.(`Capture (${source}) → Zunder ${task.ref ?? task.id} war schon angelegt, Antwort ging verloren`);
-        return { ...task, duplicate: true };
-      }
-    }
+    const legacy = key ? await findLegacy({ zunder, source, key, p, result }) : null;
+    if (legacy) return legacy;
 
-    const footer = `_Erfasst über ${SOURCES[source] ?? source} (Vault Cockpit)_${marker ? ` · \`${marker}\`` : ''}`;
-    if (pendingKey) {
-      const { dueLabel, ...kept } = p;
-      state.set(pendingKey, { at: now().toISOString(), plan: kept });
-    }
+    const footer = `_Erfasst über ${SOURCES[source] ?? source} (Vault Cockpit)_`;
     const created = await zunder.createTask({
       title: p.title,
       description: rest ? `${rest}\n\n${footer}` : footer,
       due: p.due,
       location: p.location ? { kind: p.location.kind, id: p.location.id } : null,
       phoenix: p.phoenix,
+      clientRef: key ? clientRef(key) : null,
     });
-    const task = result(created);
-    if (key) {
+
+    if (created.existing) {
+      const { existing, deleted, task: found, ...ids } = created;
+      const task = result(ids, found ? fromZunder(found) : p);
       state.set(key, task);
-      state.delete(pendingKey);
+      logger[deleted ? 'warn' : 'info']?.(
+        `Capture (${source}) → Zunder ${task.ref ?? task.id} war schon angelegt, Antwort ging verloren${deleted ? ' (inzwischen gelöscht)' : ''}`,
+      );
+      return { ...task, duplicate: true };
     }
+
+    const task = result(created);
+    if (key) state.set(key, task);
     logger.info?.(`Capture (${source}) → Zunder ${task.ref ?? task.id}${p.location ? ` in ${p.location.name}` : ''}${p.due ? `, fällig ${p.due}` : ''}`);
     return task;
+  }
+
+  /** Eine Aufgabe aus Zunder als Plan für die Antwort; `dueLabel` vom heutigen Tag aus. */
+  function fromZunder(t) {
+    const due = t.due ? String(t.due).slice(0, 10) : null;
+    const loc = t.location;
+    const location =
+      loc?.kind && loc.kind !== 'inbox'
+        ? { kind: loc.kind, id: loc.id ?? null, name: loc.name ?? (loc.kind === 'loose' ? 'Lose' : ''), ...(loc.area_name ? { area_name: loc.area_name } : {}) }
+        : null;
+    return { title: t.title, due, dueLabel: dueText(due, localDate(now(), currentTz() || 'Europe/Berlin')), location, phoenix: t.phoenix ?? null, notes: [] };
+  }
+
+  /**
+   * Altbestand aus VCP-132: Bis VCP-141 stand vor dem Aufruf im Merkzettel der
+   * Vermerk „angefragt“ (`capture-pending:…`), und die Beschreibung trug den
+   * Marker `` `cockpit-<key>` ``. Solche Aufgaben kennt Zunder nicht unter
+   * `client_ref`. Liegt noch ein Vermerk, sucht das Cockpit deshalb einmal
+   * nach dem Marker, dann ist der Vermerk erledigt. Neue Vermerke entstehen
+   * nicht mehr.
+   */
+  async function findLegacy({ zunder, source, key, p, result }) {
+    const pendingKey = `capture-pending:${key.slice('capture:'.length)}`;
+    const pending = state.get(pendingKey);
+    if (!pending) return null;
+    const found = zunder.findByMarker ? await zunder.findByMarker(`cockpit-${key}`) : null;
+    if (!found) {
+      state.delete(pendingKey);
+      return null;
+    }
+    const before = pending.plan ? { ...pending.plan, dueLabel: dueText(pending.plan.due, localDate(now(), currentTz() || 'Europe/Berlin')) } : p;
+    const task = result(found, before);
+    state.set(key, task);
+    state.delete(pendingKey);
+    logger.info?.(`Capture (${source}) → Zunder ${task.ref ?? task.id} war schon angelegt, Antwort ging verloren`);
+    return { ...task, duplicate: true };
   }
 
   function toVault({ text, title, source, captureId, created }) {
@@ -248,4 +276,14 @@ export function createCaptureRouter({ capture, zunder = null, state, tz = 'Europ
       return toVault({ text: body, title, source, captureId, created });
     },
   };
+}
+
+/**
+ * Idempotenzschlüssel für Zunder (`client_ref`, höchstens 128 Zeichen aus
+ * `[A-Za-z0-9_.:-]`): `cockpit-capture:<quelle>:<id>`. Wird das bei einer
+ * langen Capture-ID zu lang, steht stattdessen ihr SHA-256 darin.
+ */
+export function clientRef(key) {
+  const ref = `cockpit-${key}`;
+  return ref.length <= 128 ? ref : `cockpit-sha256:${createHash('sha256').update(key).digest('hex')}`;
 }

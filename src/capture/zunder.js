@@ -134,8 +134,8 @@ export function createZunderClient({ url, token, fetch = globalThis.fetch, timeo
     /**
      * Sucht die Aufgabe, deren Beschreibung den Marker `` `marker` `` trägt
      * (auch erledigte oder verworfene), und liefert `{ id, ref, url }` oder null.
-     * Damit findet die Erfassung eine Aufgabe wieder, die Zunder angelegt hat,
-     * deren Antwort aber nie ankam (VCP-132). Die Suche vergleicht Teilzeichen;
+     * Nur noch für Altbestand: Aufgaben, die vor `client_ref` (VCP-141) mit
+     * Marker angelegt wurden und deren Antwort nie ankam (VCP-132). Die Suche vergleicht Teilzeichen;
      * gesucht wird darum mit den Backticks, sonst fänden sich bei `m1` auch
      * `m10`, `m11` … und verdrängten bei vielen solchen IDs den echten Treffer.
      * `get_task` prüft den Marker zur Sicherheit noch einmal.
@@ -155,18 +155,27 @@ export function createZunderClient({ url, token, fetch = globalThis.fetch, timeo
     /**
      * Legt eine Aufgabe an und liefert `{ id, ref, url }`. Ohne `location`
      * landet sie in der Zunder-Inbox; `due` (JJJJ-MM-TT) und `phoenix` sind optional.
+     *
+     * `clientRef` geht als Idempotenzschlüssel (`client_ref`, ZUN-57) mit:
+     * Kennt Zunder ihn schon, legt es nichts an und liefert die zuerst
+     * angelegte Aufgabe. Dann kommen zusätzlich `existing: true`, `task` (die
+     * Aufgabe, wie sie jetzt in Zunder liegt) und `deleted: true`, falls sie
+     * inzwischen gelöscht ist.
      */
-    async createTask({ title, description, vaultLinks, due = null, location = null, phoenix = null }) {
+    async createTask({ title, description, vaultLinks, due = null, location = null, phoenix = null, clientRef = null }) {
       const args = { title: clampTitle(title) };
       if (description) args.description = description;
       if (vaultLinks?.length) args.vault_links = vaultLinks;
       if (due) args.due = due;
       if (location) args.location = location;
       if (phoenix) args.phoenix = phoenix;
+      if (clientRef) args.client_ref = clientRef;
       const out = await callTool('create_task', args);
       const task = out?.task;
       if (!task?.id) throw new Error('Zunder hat keine Aufgabe zurückgegeben');
-      return { id: task.id, ref: task.ref ?? null, url: `${base}/#/aufgabe/${task.id}` };
+      const created = { id: task.id, ref: task.ref ?? null, url: `${base}/#/aufgabe/${task.id}` };
+      if (!out.existing) return created;
+      return { ...created, existing: true, ...(out.deleted ? { deleted: true } : {}), task };
     },
   };
 }
