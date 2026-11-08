@@ -57,7 +57,7 @@ public struct GitHubRelease: Decodable, Sendable {
     }
 }
 
-/// Neue Version der macOS-App im Direktvertrieb (Release `mac/vX.Y.Z`, siehe ios/scripts/mac-release.js).
+/// Neue Version der macOS-App im Direktvertrieb (Release `macos`, siehe ios/scripts/mac-release.js).
 public struct MacUpdate: Equatable, Sendable, Identifiable {
     public let version: AppVersion
     /// Release-Notizen (Markdown).
@@ -69,54 +69,52 @@ public struct MacUpdate: Equatable, Sendable, Identifiable {
     public let archiveSize: Int
     /// SHA-256 des Archivs (hex, klein), falls GitHub ihn kennt.
     public let archiveSHA256: String?
-    /// `Cockpit-X.Y.Z.dmg` zum Installieren von Hand.
+    /// `Cockpit.dmg` zum Installieren von Hand.
     public let diskImageURL: URL?
 
     public var id: AppVersion { version }
 }
 
-/// Sucht unter den Releases auf GitHub die neueste macOS-Version.
+/// Liest das Release der macOS-App auf GitHub.
+///
+/// Ein einziges, mitlaufendes Release mit dem Tag `macos`, das jede neue Version ersetzt; die Version
+/// steht im Titel („Cockpit für macOS 1.2.3“). Der Tag hat keine Ziffern und das Release ist eine
+/// Vorabversion, damit BRAT es für das Obsidian-Plugin im selben Repo nie wählt: BRAT liest die
+/// Version aus jedem Tag (`semver.coerce`), sortiert Tags ohne Version ans Ende und nimmt ohne
+/// Beta-Modus keine Vorabversionen.
 public enum MacUpdateFeed {
-    public static let tagPrefix = "mac/v"
+    public static let tag = "macos"
     public static let archiveName = "Cockpit-mac.zip"
+    public static let diskImageName = "Cockpit.dmg"
+    /// Öffentliches Repo: kein Token nötig (ohne Anmeldung 60 Abfragen pro Stunde und Adresse).
+    /// 404, solange es noch kein Release gibt.
+    public static let releaseURL = URL(string: "https://api.github.com/repos/rubenvitt/vault-cockpit/releases/tags/\(tag)")!
 
-    /// Releases des eigenen Release-Repos (`owner/name`, Info.plist `CockpitUpdateRepository`); nil für
-    /// alles andere. Eigenes Repo, weil BRAT im Cockpit-Repo das Release mit der höchsten Version nimmt
-    /// und `mac/v1.0.0` dem Obsidian-Plugin vorzöge. Öffentlich: kein Token nötig (ohne Anmeldung 60
-    /// Abfragen pro Stunde und Adresse).
-    public static func releasesURL(repository: String) -> URL? {
-        let parts = repository.split(separator: "/", omittingEmptySubsequences: false)
-        let allowed = Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.")
-        guard parts.count == 2, parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." && $0.allSatisfy(allowed.contains) }) else {
-            return nil
-        }
-        return URL(string: "https://api.github.com/repos/\(repository)/releases?per_page=30")
+    /// Version aus dem Titel des Releases: die letzte Angabe `X.Y.Z`; nil ohne.
+    static func version(fromTitle title: String?) -> AppVersion? {
+        title?.split(separator: " ").last.flatMap { AppVersion(String($0)) }
     }
 
-    /// Neuestes Release `mac/v…` über `current`, nicht Entwurf, nicht Vorabversion, mit Archiv; sonst nil.
-    public static func newest(in releases: [GitHubRelease], newerThan current: AppVersion) -> MacUpdate? {
-        let candidates = releases.compactMap { release -> MacUpdate? in
-            guard !release.draft, !release.prerelease, release.tagName.hasPrefix(tagPrefix),
-                  let version = AppVersion(String(release.tagName.dropFirst(tagPrefix.count))),
-                  version > current,
-                  let archive = release.assets.first(where: { $0.name == archiveName })
-            else { return nil }
-            let image = release.assets.first { $0.name.hasSuffix(".dmg") }
-            return MacUpdate(
-                version: version,
-                notes: release.body ?? "",
-                pageURL: release.htmlURL,
-                archiveURL: archive.browserDownloadURL,
-                archiveSize: archive.size,
-                archiveSHA256: sha256(archive.digest),
-                diskImageURL: image?.browserDownloadURL
-            )
-        }
-        return candidates.max { $0.version < $1.version }
+    /// Update aus dem Release `macos`, wenn es neuer als `current` ist und das Archiv hat; sonst nil.
+    public static func update(in release: GitHubRelease, newerThan current: AppVersion) -> MacUpdate? {
+        guard !release.draft, release.tagName == tag,
+              let version = version(fromTitle: release.name), version > current,
+              let archive = release.assets.first(where: { $0.name == archiveName })
+        else { return nil }
+        let image = release.assets.first { $0.name == diskImageName }
+        return MacUpdate(
+            version: version,
+            notes: release.body ?? "",
+            pageURL: release.htmlURL,
+            archiveURL: archive.browserDownloadURL,
+            archiveSize: archive.size,
+            archiveSHA256: sha256(archive.digest),
+            diskImageURL: image?.browserDownloadURL
+        )
     }
 
-    public static func newest(in data: Data, newerThan current: AppVersion) throws -> MacUpdate? {
-        try newest(in: JSONDecoder().decode([GitHubRelease].self, from: data), newerThan: current)
+    public static func update(in data: Data, newerThan current: AppVersion) throws -> MacUpdate? {
+        try update(in: JSONDecoder().decode(GitHubRelease.self, from: data), newerThan: current)
     }
 
     /// `sha256:ABC…` → `abc…`; nil für andere Verfahren oder ohne Digest.

@@ -109,7 +109,7 @@ export function releaseNotes({ version, previous, commits }) {
     lines.push(`### ${title}`, '');
     for (const item of items) lines.push(`- ${item.breaking ? '**Bricht Bisheriges:** ' : ''}${item.text}`);
   }
-  lines.push('', '---', '', `**Installieren:** \`Cockpit-${version}.dmg\` laden, öffnen und Cockpit in „Programme“ ziehen. Danach aktualisiert sich die App selbst (Menü „Cockpit“ → „Nach Updates suchen …“).`);
+  lines.push('', '---', '', `**Installieren:** \`Cockpit.dmg\` laden, öffnen und Cockpit in „Programme“ ziehen. Danach aktualisiert sich die App selbst (Menü „Cockpit“ → „Nach Updates suchen …“).`);
   if (previous) lines.push('', `Änderungen seit ${previous}: \`${TAG_PREFIX}${previous}…${TAG_PREFIX}${version}\``);
   return `${lines.join('\n')}\n`;
 }

@@ -27,8 +27,6 @@ settings:
     # YES nur im Direktvertrieb (scripts/mac-direct.sh): MacUpdater sucht neue Releases auf GitHub.
     # App Store und TestFlight aktualisieren selbst, dort bleibt es aus.
     COCKPIT_SELF_UPDATE: NO
-    # Release-Repo (owner/name) für MacUpdater; setzt scripts/mac-direct.sh aus MAC_RELEASE_REPO.
-    COCKPIT_UPDATE_REPOSITORY: ""
 
 packages:
   Shared:
@@ -73,7 +71,6 @@ targets:
         CockpitKeychainGroup: $(AppIdentifierPrefix)dev.rubeen.cockpit.shared
         CockpitAppGroup: group.dev.rubeen.cockpit
         CockpitSelfUpdate: $(COCKPIT_SELF_UPDATE)
-        CockpitUpdateRepository: $(COCKPIT_UPDATE_REPOSITORY)
         UIBackgroundModes: [audio]
         ITSAppUsesNonExemptEncryption: false
         UILaunchScreen: {}
