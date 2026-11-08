@@ -8,11 +8,10 @@ import OSLog
 import SwiftUI
 
 /// Selbst-Update der macOS-App im Direktvertrieb (Developer ID, siehe ios/README.md): sucht neue
-/// Releases `mac/vX.Y.Z` im eigenen Release-Repo auf GitHub (`MacUpdateFeed`, Info.plist
-/// `CockpitUpdateRepository`), lädt `Cockpit-mac.zip`, prüft Prüfsumme,
+/// Versionen im Release `macos` auf GitHub (`MacUpdateFeed`), lädt `Cockpit-mac.zip`, prüft Prüfsumme,
 /// Signatur (Team, Bundle-ID) und Gatekeeper, ersetzt die App nach dem Beenden und startet sie neu.
 ///
-/// Nur aktiv mit `CockpitSelfUpdate = YES` und einem Release-Repo in der Info.plist (`scripts/mac-direct.sh`); die
+/// Nur aktiv mit `CockpitSelfUpdate = YES` in der Info.plist (`scripts/mac-direct.sh`); die
 /// TestFlight- und App-Store-Builds aktualisiert Apple. Sparkle läuft unter Mac Catalyst nicht
 /// (AppKit), deshalb diese schlanke Variante.
 @MainActor
@@ -47,8 +46,6 @@ final class MacUpdater {
 
     let isEnabled: Bool
     let currentVersion: AppVersion?
-    /// Releases des Release-Repos; nil ohne gültiges `CockpitUpdateRepository`.
-    private let releasesURL: URL?
     private(set) var state: State = .idle
     var prompt: Prompt?
 
@@ -67,9 +64,7 @@ final class MacUpdater {
         bundleID = info?["CFBundleIdentifier"] as? String ?? ""
         let group = info?["CockpitKeychainGroup"] as? String ?? ""
         teamID = group.split(separator: ".").first.map(String.init) ?? ""
-        releasesURL = MacUpdateFeed.releasesURL(repository: info?["CockpitUpdateRepository"] as? String ?? "")
         isEnabled = (info?["CockpitSelfUpdate"] as? String) == "YES" && currentVersion != nil && teamID.count == 10
-            && releasesURL != nil
     }
 
     // MARK: Suchen
@@ -86,20 +81,21 @@ final class MacUpdater {
 
     /// `userInitiated`: aus dem Menü oder den Einstellungen, meldet auch „aktuell“ und Fehler.
     func check(userInitiated: Bool) async {
-        guard isEnabled, let currentVersion, let releasesURL else { return }
+        guard isEnabled, let currentVersion else { return }
         switch state {
         case .checking, .installing: return
         default: break
         }
         state = .checking
         do {
-            var request = URLRequest(url: releasesURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
+            var request = URLRequest(url: MacUpdateFeed.releaseURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
             request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
             request.setValue("Cockpit-macOS/\(currentVersion)", forHTTPHeaderField: "User-Agent")
             let (data, response) = try await URLSession.shared.data(for: request)
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-            guard status == 200 else { throw UpdateError("GitHub antwortet mit Status \(status).") }
-            if let update = try MacUpdateFeed.newest(in: data, newerThan: currentVersion) {
+            // 404: Es gibt noch kein Release.
+            guard status == 200 || status == 404 else { throw UpdateError("GitHub antwortet mit Status \(status).") }
+            if status == 200, let update = try MacUpdateFeed.update(in: data, newerThan: currentVersion) {
                 log.info("Update \(update.version, privacy: .public) verfügbar (installiert \(currentVersion, privacy: .public))")
                 state = .available(update)
                 if userInitiated || postponed != update.version { prompt = .available(update) }

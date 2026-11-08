@@ -333,19 +333,22 @@ nichts Neues.
 
 ## macOS-App direkt: DMG und Selbst-Update
 
-Ohne App Store: Jeder Push auf `main`, der die App ändert (`ios/` ohne Markdown), gibt ein
-GitHub-Release `mac/vX.Y.Z` (Workflow „macOS-Release“, `.github/workflows/mac-release.yml`) mit
+Ohne App Store: Jeder Push auf `main`, der die App ändert (`ios/` ohne Markdown), gibt eine neue
+Version (Workflow „macOS-Release“, `.github/workflows/mac-release.yml`) im Release
+[`macos`](https://github.com/rubenvitt/vault-cockpit/releases/tag/macos) mit
 
-- `Cockpit-X.Y.Z.dmg` zum Installieren: öffnen, Cockpit in „Programme“ ziehen. Die neueste liegt
-  unter `https://github.com/<MAC_RELEASE_REPO>/releases/latest`,
+- `Cockpit.dmg` zum Installieren: öffnen, Cockpit in „Programme“ ziehen. Fester Link auf die
+  neueste: <https://github.com/rubenvitt/vault-cockpit/releases/download/macos/Cockpit.dmg>,
 - `Cockpit-mac.zip` für das Update in der App.
 
-Die Releases liegen **in einem eigenen öffentlichen Repo** (Repo-Variable `MAC_RELEASE_REPO`,
-z. B. `rubenvitt/cockpit-mac`), nicht hier: BRAT holt für das Obsidian-Plugin alle Releases dieses
-Repos, liest die Version aus jedem Tag (`semver.coerce`) und nimmt die höchste. `mac/v1.0.0`
-schlüge das Plugin-Release `0.1.0`, und BRAT fände dort kein `manifest.json`. Hier im Repo setzt
-der Workflow nur den Git-Tag `mac/vX.Y.Z` (ohne Release, das sieht BRAT nicht), ab dem die
-nächste Version zählt. Ohne `MAC_RELEASE_REPO` läuft der Workflow nicht.
+**Ein mitlaufendes Release** statt eines Releases je Version: Jede neue Version ersetzt Dateien,
+Titel („Cockpit für macOS X.Y.Z“) und Notizen; die Versionen selbst stehen als Git-Tags
+`mac/vX.Y.Z` (ohne Release). Grund ist BRAT, das das Obsidian-Plugin aus den Releases desselben
+Repos holt: Es liest die Version aus jedem Release-Tag (`semver.coerce`) und nimmt die höchste,
+ein Release `mac/v1.0.0` schlüge also das Plugin-Release `0.1.0` (und BRAT fände dort kein
+`manifest.json`). Der Tag `macos` hat keine Ziffern, BRAT sortiert ihn deshalb hinter jede
+Plugin-Version, und als Vorabversion nimmt BRAT ihn auch ohne Beta-Modus nie. Ältere DMGs
+gibt es dadurch nicht mehr zum Download.
 
 **Version** wie bei semantic-release aus den Conventional Commits seit dem letzten Tag `mac/v…`,
 nur Commits unter `ios/` (`ios/scripts/mac-release.js`, Tests in `test/mac-release.test.js`):
@@ -355,20 +358,17 @@ Server gibt kein Release. Die erste Version ist `1.0.0`. Manuell gestartet (Acti
 Lauf, entsteht kein Tag, und der nächste Lauf nimmt dieselbe Version. Die Release-Notizen sind die
 Commit-Betreffe ohne Präfix, nach „Neu“, „Behoben“ und „Sonst“ gruppiert.
 
-**Bauen** (`ios/scripts/mac-direct.sh`, lokal mit `VERSION=1.2.3 MAC_RELEASE_REPO=owner/name
-ASC_KEY_ID=… ASC_ISSUER_ID=…`): archiviert mit `MARKETING_VERSION=X.Y.Z`, Hardened Runtime, ohne
-Sandbox (`COCKPIT_MAC_ENTITLEMENTS`), mit `COCKPIT_SELF_UPDATE=YES` und dem Release-Repo
-(`COCKPIT_UPDATE_REPOSITORY`, in der Info.plist `CockpitUpdateRepository`). Danach exportiert es mit Developer
+**Bauen** (`ios/scripts/mac-direct.sh`, lokal mit `VERSION=1.2.3 ASC_KEY_ID=… ASC_ISSUER_ID=…`):
+archiviert mit `MARKETING_VERSION=X.Y.Z`, Hardened Runtime, ohne Sandbox
+(`COCKPIT_MAC_ENTITLEMENTS`) und mit `COCKPIT_SELF_UPDATE=YES`. Danach exportiert es mit Developer
 ID (`method developer-id`, automatisch signiert), notarisiert mit dem API-Key (`notarytool`),
 heftet das Ticket an App und DMG (`stapler`) und prüft mit `spctl`. Ergebnis unter
 `ios/build/mac-direct/`.
 
 **Update in der App** (`Cockpit/MacUpdater.swift`, nur Mac Catalyst und nur mit
-`CockpitSelfUpdate = YES` und einem Release-Repo; TestFlight und App Store bleiben unberührt): Kurz
-nach dem Start und dann alle 6 Stunden fragt die App die Releases des Release-Repos ab
-(öffentlich, kein Token) und
-sucht das neueste `mac/v…` über der eigenen Version (`MacUpdateFeed` in `CockpitShared`). Gibt
-es eins, zeigt sie die Notizen mit „Jetzt aktualisieren“, „Auf GitHub ansehen“ und „Später“.
+`CockpitSelfUpdate = YES`; TestFlight und App Store bleiben unberührt): Kurz nach dem Start und
+dann alle 6 Stunden liest die App das Release `macos` (öffentlich, kein Token) und vergleicht die
+Version im Titel mit der eigenen (`MacUpdateFeed` in `CockpitShared`). Ist sie neuer, zeigt sie die Notizen mit „Jetzt aktualisieren“, „Auf GitHub ansehen“ und „Später“.
 „Später“ gilt bis zum nächsten Start. Von Hand: Menü „Cockpit“ → „Nach Updates suchen …“ oder
 Einstellungen → „Diese App“.
 
@@ -389,11 +389,6 @@ Sandbox.
 
 Einmal einrichten:
 
-- Ein öffentliches Repo für die Releases anlegen, z. B. `rubenvitt/cockpit-mac`, mit mindestens
-  einem Commit (etwa einer README mit dem Link auf `/releases/latest`); die Tags der Releases
-  entstehen auf seinem Standard-Branch. Im Cockpit-Repo die Variable `MAC_RELEASE_REPO` auf
-  `owner/name` setzen und als Secret `MAC_RELEASE_TOKEN` einen Fine-grained Token mit
-  „Contents: Read and write“ nur für dieses Repo hinterlegen.
 - Repo-Secrets wie für TestFlight (`ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8_BASE64`,
   `APPLE_TEAM_ID`). Für Developer ID und das Notarisieren braucht der API-Key die Rolle „Admin“.
 - Zertifikat „Developer ID Application“: Ohne weiteres signiert der Export mit dem von Apple

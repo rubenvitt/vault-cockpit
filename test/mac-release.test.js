@@ -42,7 +42,7 @@ test('releaseNotes: nach Art gruppiert, ohne Präfix, mit Hinweis zum Installier
   assert.match(notes, /### Neu\n\n- Updates in der App\n- \*\*Bricht Bisheriges:\*\* Neuer Server\n/);
   assert.match(notes, /### Behoben\n\n- Login auf dem Mac\n/);
   assert.match(notes, /### Sonst\n\n- Aufräumen\n/);
-  assert.match(notes, /Cockpit-1\.1\.0\.dmg/);
+  assert.match(notes, /`Cockpit\.dmg` laden/);
   assert.match(notes, /mac\/v1\.0\.0…mac\/v1\.1\.0/);
   assert.match(releaseNotes({ version: '1.0.0', previous: null, commits: [] }), /^Erste Version/);
 });
