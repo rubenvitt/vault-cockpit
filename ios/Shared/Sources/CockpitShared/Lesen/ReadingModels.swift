@@ -733,6 +733,52 @@ public struct ReviewCard: Decodable, Equatable, Identifiable, Sendable {
     }
 }
 
+/// Letzte Entscheidung von heute im Wiedersehen (`last`): die Markierung und was mit ihr
+/// geschah (`behalten`, `worte`, `loslassen`).
+public struct ReviewLast: Decodable, Equatable, Identifiable, Sendable {
+    public let highlight: ReadingHighlight
+    /// nil bei Ständen, die der Server ohne Ziel gemerkt hat.
+    public let decision: String?
+
+    public var id: String { highlight.id }
+
+    public init(highlight: ReadingHighlight, decision: String?) {
+        self.highlight = highlight
+        self.decision = decision
+    }
+
+    enum CodingKeys: String, CodingKey { case decision }
+
+    public init(from decoder: Decoder) throws {
+        highlight = try ReadingHighlight(from: decoder)
+        decision = try decoder.container(keyedBy: CodingKeys.self).decodeIfPresent(String.self, forKey: .decision)
+    }
+
+    /// „Behalten“, „Losgelassen“, „In eigenen Worten“.
+    public var decisionLabel: String? {
+        switch decision {
+        case "behalten": "Behalten"
+        case "loslassen": "Losgelassen"
+        case "worte": "In eigenen Worten"
+        default: nil
+        }
+    }
+
+    /// Zitat auf höchstens 60 Zeichen wie `shortQuote` in src/lesen/review-page.js.
+    public var shortQuote: String {
+        let text = highlight.quote.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard text.count > 60 else { return text }
+        var head = String(text.prefix(59))
+        while head.last?.isWhitespace == true { head.removeLast() }
+        return head + "…"
+    }
+
+    /// Für VoiceOver: „Rückgängig: Behalten, „Der Stapel darf warten.““.
+    public var undoAccessibilityLabel: String {
+        "Rückgängig: \([decisionLabel, "„\(shortQuote)“"].compactMap { $0 }.joined(separator: ", "))"
+    }
+}
+
 /// Nachbarwoche im Blätterer („‹ KW 42“).
 public struct ReadingWeekRef: Decodable, Equatable, Hashable, Sendable {
     public let id: String
@@ -796,6 +842,10 @@ public struct ReviewCardsModel: Decodable, Equatable, Sendable {
     /// „In eigenen Worten“ und „Als eigene Notiz anlegen“ gehen.
     public let canCapture: Bool
     public var cards: [ReviewCard]
+    /// Letzte Entscheidung von heute, die sich noch zurücknehmen lässt; nil = heute noch nichts.
+    public var last: ReviewLast?
+    /// Rückgängig dieser Entscheidung („↶ Rückgängig“), auch nach einem Neuladen.
+    public var undo: UndoAction?
     public let week: ReadingWeek
 
     /// „Heute 1 von 4 gesehen · 2 weitere morgen“, leer ohne Karten heute.
