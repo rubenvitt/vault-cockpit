@@ -18,7 +18,7 @@ final class MacUpdateTests: XCTestCase {
     func testUpdateFromRollingRelease() throws {
         let update = try XCTUnwrap(try MacUpdateFeed.update(in: Self.release(), newerThan: try XCTUnwrap(AppVersion("1.1.0"))))
         XCTAssertEqual(update.version.description, "1.3.0")
-        XCTAssertEqual(update.archiveURL.absoluteString, "https://github.com/rubenvitt/vault-cockpit/releases/download/macos/Cockpit-mac.zip")
+        XCTAssertEqual(update.archiveURL.absoluteString, "https://github.com/rubenvitt/vault-cockpit/releases/download/macos/Cockpit-mac-1.3.0.zip")
         XCTAssertEqual(update.diskImageURL?.lastPathComponent, "Cockpit.dmg")
         XCTAssertEqual(update.pageURL.absoluteString, "https://github.com/rubenvitt/vault-cockpit/releases/tag/macos")
         XCTAssertEqual(update.archiveSize, 12_345)
@@ -33,6 +33,16 @@ final class MacUpdateTests: XCTestCase {
         XCTAssertNil(try MacUpdateFeed.update(in: Self.release(title: "Cockpit für macOS"), newerThan: old), "ohne Version")
         XCTAssertNil(try MacUpdateFeed.update(in: Self.release(draft: true), newerThan: old), "Entwurf")
         XCTAssertNil(try MacUpdateFeed.update(in: Self.release(archive: "Cockpit.zip"), newerThan: old), "ohne Archiv")
+        // Titel noch alt, das neue Archiv schon da (Lauf zwischen Upload und Titel abgebrochen): das
+        // Archiv zum Titel zählt, nicht ein neueres.
+        XCTAssertNil(try MacUpdateFeed.update(in: Self.release(archive: "Cockpit-mac-1.4.0.zip"), newerThan: old), "Archiv passt nicht zum Titel")
+    }
+
+    func testVersionFromTitle() {
+        XCTAssertEqual(MacUpdateFeed.version(fromTitle: "Cockpit für macOS 1.3.0")?.description, "1.3.0")
+        XCTAssertEqual(MacUpdateFeed.version(fromTitle: "Cockpit für macOS 1.3.0 (Hotfix)")?.description, "1.3.0")
+        XCTAssertNil(MacUpdateFeed.version(fromTitle: "Cockpit für macOS"))
+        XCTAssertNil(MacUpdateFeed.version(fromTitle: nil))
     }
 
     func testReleaseURL() {
@@ -53,7 +63,7 @@ final class MacUpdateTests: XCTestCase {
 
     /// Antwort von `GET /repos/…/releases/tags/macos`, gekürzt; das echte Release ist eine Vorabversion.
     static func release(tag: String = "macos", title: String = "Cockpit für macOS 1.3.0", draft: Bool = false,
-                        archive: String = "Cockpit-mac.zip") -> Data {
+                        archive: String = "Cockpit-mac-1.3.0.zip") -> Data {
         let digest = String(repeating: "ab", count: 32)
         return Data("""
         {"tag_name": "\(tag)", "name": "\(title)", "body": "### Neu\\n\\n- Updates", "draft": \(draft), "prerelease": true,

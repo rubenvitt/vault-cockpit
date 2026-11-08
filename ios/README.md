@@ -339,10 +339,12 @@ Version (Workflow „macOS-Release“, `.github/workflows/mac-release.yml`) im R
 
 - `Cockpit.dmg` zum Installieren: öffnen, Cockpit in „Programme“ ziehen. Fester Link auf die
   neueste: <https://github.com/rubenvitt/vault-cockpit/releases/download/macos/Cockpit.dmg>,
-- `Cockpit-mac.zip` für das Update in der App.
+- `Cockpit-mac-X.Y.Z.zip` für das Update in der App.
 
 **Ein mitlaufendes Release** statt eines Releases je Version: Jede neue Version ersetzt Dateien,
-Titel („Cockpit für macOS X.Y.Z“) und Notizen; die Versionen selbst stehen als Git-Tags
+Titel („Cockpit für macOS X.Y.Z“) und Notizen, in dieser Reihenfolge: neues Archiv hochladen,
+Titel ändern, dann erst das alte Archiv löschen. Bricht ein Lauf dazwischen ab, passen Titel und
+Archiv trotzdem zusammen; die Versionen selbst stehen als Git-Tags
 `mac/vX.Y.Z` (ohne Release). Grund ist BRAT, das das Obsidian-Plugin aus den Releases desselben
 Repos holt: Es liest die Version aus jedem Release-Tag (`semver.coerce`) und nimmt die höchste,
 ein Release `mac/v1.0.0` schlüge also das Plugin-Release `0.1.0` (und BRAT fände dort kein
@@ -372,7 +374,7 @@ Version im Titel mit der eigenen (`MacUpdateFeed` in `CockpitShared`). Ist sie n
 „Später“ gilt bis zum nächsten Start. Von Hand: Menü „Cockpit“ → „Nach Updates suchen …“ oder
 Einstellungen → „Diese App“.
 
-Beim Aktualisieren lädt die App `Cockpit-mac.zip` und prüft vor dem Einspielen:
+Beim Aktualisieren lädt die App `Cockpit-mac-X.Y.Z.zip` (Version aus dem Titel) und prüft vor dem Einspielen:
 
 1. den SHA-256 aus GitHub,
 2. Bundle-ID und Version,
