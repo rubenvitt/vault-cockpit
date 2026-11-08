@@ -274,6 +274,41 @@ test('Adapter „cockpit“ liefert Journal und Zustand mit Geräten', () => {
   rmSync(d, { recursive: true, force: true });
 });
 
+test('Adapter „cockpit“ ohne Watcher: der Nachscan meldet Notizen und Bilder an den Index, andere Anhänge nicht', async () => {
+  const v = mkdtempSync(join(tmpdir(), 'sync-rescan-'));
+  const d = mkdtempSync(join(tmpdir(), 'sync-rescan-data-'));
+  const adapter = createSyncAdapter({
+    kind: 'cockpit',
+    vaultPath: v,
+    dataDir: d,
+    rescanMs: 20,
+    logger: quiet,
+    watch: () => {
+      throw new Error('kein Watcher');
+    },
+  });
+  const seen = [];
+  adapter.start({ onChanges: (b) => seen.push(b) });
+  assert.equal(adapter.status().watching, false);
+  // Erster Abgleich (setImmediate) und ein Nachscan auf leerem Vault: nichts zu melden.
+  await new Promise((r) => setTimeout(r, 60));
+  assert.deepEqual(seen, []);
+  mkdirSync(join(v, 'a'));
+  writeFileSync(join(v, 'a/notiz.md'), '# Notiz');
+  writeFileSync(join(v, 'a/bild.png'), 'png');
+  writeFileSync(join(v, 'a/dok.pdf'), 'pdf');
+  for (let i = 0; i < 50 && !seen.length; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(seen.length, 1);
+  assert.deepEqual([...seen[0].paths].sort(), ['a/bild.png', 'a/notiz.md']);
+  // Nur ein Anhang geändert: kein Paket an den Index.
+  writeFileSync(join(v, 'a/dok.pdf'), 'pdf 2');
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(seen.length, 1);
+  adapter.stop();
+  rmSync(v, { recursive: true, force: true });
+  rmSync(d, { recursive: true, force: true });
+});
+
 test('Journal: Datei über der Grenze wird übersprungen, nicht abgebrochen', () => {
   const v = mkdtempSync(join(tmpdir(), 'sync-big-'));
   const d = mkdtempSync(join(tmpdir(), 'sync-big-data-'));

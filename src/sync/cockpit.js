@@ -4,6 +4,9 @@ import { createVaultWatcher } from './watch.js';
 import { createSyncJournal } from './server/journal.js';
 import { isImagePath } from '../vault/images.js';
 
+/** Was der Index führt: Notizen und Bilder (VCP-114), keine anderen Anhänge. */
+const isIndexed = (path) => path.toLowerCase().endsWith('.md') || isImagePath(path);
+
 /**
  * Sync-Adapter für den eigenen Sync (VCP-13, Schritt 5 der Roadmap): Das
  * Cockpit ist selbst der Sync-Server, die Geräte gleichen sich über
@@ -17,7 +20,10 @@ import { isImagePath } from '../vault/images.js';
  *   letzte Kontakt eines Geräts.
  *
  * Ein voller Abgleich mit der Platte läuft beim Start und alle `rescanMs`
- * (Netz für Anhänge, die der Watcher bewusst nicht meldet).
+ * (Netz für Anhänge, die der Watcher bewusst nicht meldet). Was der
+ * Nachscan an Notizen und Bildern findet, geht an den Index: Ohne Watcher ist
+ * er der einzige Weg, über den Änderungen auf der Platte dort ankommen
+ * (VCP-135); mit Watcher fängt er verpasste Ereignisse auf.
  *
  * Mit `readOnly` läuft der Adapter im Schattenbetrieb (VCP-133) neben einem
  * anderen Sync: Das Journal folgt der Platte, Geräte können nur lesen und
@@ -81,14 +87,17 @@ export function createCockpitSyncAdapter({
       } catch (err) {
         logger.error?.(`Vault-Beobachtung nicht möglich (${err.message}), es bleibt der periodische Neuaufbau`);
       }
-      timer = setInterval(scan, rescanMs);
+      timer = setInterval(() => {
+        const paths = scan().filter(isIndexed);
+        if (paths.length) notify({ paths });
+      }, rescanMs);
       timer.unref?.();
     },
 
     /** Ein Gerät hat über die API geschrieben oder gelöscht. */
     notifyWrite(path) {
       // Bilder auch: Der Index führt sie in `images` (VCP-114).
-      if (path.toLowerCase().endsWith('.md') || isImagePath(path)) notify({ paths: [path] });
+      if (isIndexed(path)) notify({ paths: [path] });
     },
 
     status() {
