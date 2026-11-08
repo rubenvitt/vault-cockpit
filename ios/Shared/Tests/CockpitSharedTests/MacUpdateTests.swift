@@ -32,6 +32,17 @@ final class MacUpdateTests: XCTestCase {
         XCTAssertNil(try MacUpdateFeed.newest(in: Data("[]".utf8), newerThan: try XCTUnwrap(AppVersion("1.0"))))
     }
 
+    func testReleasesURLOnlyForOwnerAndName() {
+        XCTAssertEqual(MacUpdateFeed.releasesURL(repository: "rubenvitt/cockpit-mac")?.absoluteString,
+                       "https://api.github.com/repos/rubenvitt/cockpit-mac/releases?per_page=30")
+        XCTAssertNil(MacUpdateFeed.releasesURL(repository: ""))
+        XCTAssertNil(MacUpdateFeed.releasesURL(repository: "$(COCKPIT_UPDATE_REPOSITORY)"))
+        XCTAssertNil(MacUpdateFeed.releasesURL(repository: "rubenvitt"))
+        XCTAssertNil(MacUpdateFeed.releasesURL(repository: "rubenvitt/a/b"))
+        XCTAssertNil(MacUpdateFeed.releasesURL(repository: "rubenvitt/.."))
+        XCTAssertNil(MacUpdateFeed.releasesURL(repository: "ruben vitt/x"))
+    }
+
     func testDigestOnlySha256() {
         XCTAssertNil(MacUpdateFeed.sha256(nil))
         XCTAssertNil(MacUpdateFeed.sha256("sha512:abcd"))

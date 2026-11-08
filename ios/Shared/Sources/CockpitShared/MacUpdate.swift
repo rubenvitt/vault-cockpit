@@ -77,10 +77,21 @@ public struct MacUpdate: Equatable, Sendable, Identifiable {
 
 /// Sucht unter den Releases auf GitHub die neueste macOS-Version.
 public enum MacUpdateFeed {
-    /// Öffentliches Repo: kein Token nötig (ohne Anmeldung 60 Abfragen pro Stunde und Adresse).
-    public static let releasesURL = URL(string: "https://api.github.com/repos/rubenvitt/vault-cockpit/releases?per_page=30")!
     public static let tagPrefix = "mac/v"
     public static let archiveName = "Cockpit-mac.zip"
+
+    /// Releases des eigenen Release-Repos (`owner/name`, Info.plist `CockpitUpdateRepository`); nil für
+    /// alles andere. Eigenes Repo, weil BRAT im Cockpit-Repo das Release mit der höchsten Version nimmt
+    /// und `mac/v1.0.0` dem Obsidian-Plugin vorzöge. Öffentlich: kein Token nötig (ohne Anmeldung 60
+    /// Abfragen pro Stunde und Adresse).
+    public static func releasesURL(repository: String) -> URL? {
+        let parts = repository.split(separator: "/", omittingEmptySubsequences: false)
+        let allowed = Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.")
+        guard parts.count == 2, parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." && $0.allSatisfy(allowed.contains) }) else {
+            return nil
+        }
+        return URL(string: "https://api.github.com/repos/\(repository)/releases?per_page=30")
+    }
 
     /// Neuestes Release `mac/v…` über `current`, nicht Entwurf, nicht Vorabversion, mit Archiv; sonst nil.
     public static func newest(in releases: [GitHubRelease], newerThan current: AppVersion) -> MacUpdate? {

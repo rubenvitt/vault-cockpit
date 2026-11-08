@@ -7,6 +7,8 @@
 #
 # Umgebung:
 #   VERSION                     Pflicht, X.Y.Z (CFBundleShortVersionString, vgl. mac-release.js)
+#   MAC_RELEASE_REPO            Pflicht, owner/name des öffentlichen Release-Repos, in dem die App
+#                               nach Updates sucht (Info.plist CockpitUpdateRepository)
 #   ASC_KEY_ID, ASC_ISSUER_ID   Pflicht: automatisches Signieren und Notarisieren mit dem API-Key
 #   ASC_KEY_PATH                Standard ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8
 #   APPLE_TEAM_ID               Standard H95J852PKP
@@ -21,6 +23,8 @@ cd "$(dirname "$0")/.."
 
 : "${VERSION:?VERSION fehlt (X.Y.Z)}"
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "VERSION muss X.Y.Z sein: $VERSION" >&2; exit 1; }
+: "${MAC_RELEASE_REPO:?MAC_RELEASE_REPO fehlt (owner/name)}"
+[[ "$MAC_RELEASE_REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { echo "MAC_RELEASE_REPO muss owner/name sein: $MAC_RELEASE_REPO" >&2; exit 1; }
 : "${ASC_KEY_ID:?ASC_KEY_ID fehlt}"
 : "${ASC_ISSUER_ID:?ASC_ISSUER_ID fehlt}"
 ASC_KEY_PATH="${ASC_KEY_PATH:-$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8}"
@@ -92,6 +96,7 @@ xcodebuild -project Cockpit.xcodeproj -scheme Cockpit -configuration Release \
   -destination 'generic/platform=macOS,variant=Mac Catalyst' -archivePath "$ARCHIVE" \
   DEVELOPMENT_TEAM="$TEAM_ID" MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
   COCKPIT_MAC_ENTITLEMENTS=Cockpit/Cockpit-macOS-direct.entitlements COCKPIT_SELF_UPDATE=YES \
+  COCKPIT_UPDATE_REPOSITORY="$MAC_RELEASE_REPO" \
   ENABLE_HARDENED_RUNTIME=YES \
   "${AUTH[@]}" archive
 
@@ -103,6 +108,8 @@ xcodebuild -exportArchive -archivePath "$ARCHIVE" \
 codesign --verify --deep --strict --verbose=2 "$APP"
 actual="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
 [[ "$actual" == "$VERSION" ]] || { echo "Version im Bundle ist $actual statt $VERSION" >&2; exit 1; }
+feed="$(/usr/libexec/PlistBuddy -c 'Print :CockpitUpdateRepository' "$APP/Contents/Info.plist")"
+[[ "$feed" == "$MAC_RELEASE_REPO" ]] || { echo "Release-Repo im Bundle ist $feed statt $MAC_RELEASE_REPO" >&2; exit 1; }
 
 # Reicht eine Datei zur Notarisierung ein und bricht ab, wenn Apple sie nicht annimmt.
 notarize() {
