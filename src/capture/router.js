@@ -142,7 +142,9 @@ export function createCaptureRouter({ capture, zunder = null, state, tz = 'Europ
    * vor dem Aufruf steht im Merkzettel „angefragt“. Kommt die Antwort von
    * Zunder nicht an (Timeout, Netz), bleibt dieser Vermerk stehen; beim
    * Nachsenden sucht das Cockpit dann erst nach dem Marker und legt nur neu
-   * an, wenn Zunder die Aufgabe wirklich nicht kennt (VCP-132).
+   * an, wenn Zunder die Aufgabe wirklich nicht kennt (VCP-132). Der Vermerk
+   * hält auch den Plan von damals fest: Ein `morgen`, das erst am Folgetag
+   * nachgesendet wird, meint die Aufgabe, die schon in Zunder liegt.
    */
   async function createInZunder({ zunder, text, title, source, key }) {
     const { line, rest } = split(text, title);
@@ -150,12 +152,14 @@ export function createCaptureRouter({ capture, zunder = null, state, tz = 'Europ
     const p = await plan(line, zunder);
     const marker = key ? `cockpit-${key}` : null;
     const pendingKey = key ? `capture-pending:${key.slice('capture:'.length)}` : null;
-    const result = (created, extra = {}) => ({ ...created, title: p.title, due: p.due, dueLabel: p.dueLabel, location: p.location ?? { kind: 'inbox' }, phoenix: p.phoenix, notes: p.notes, ...extra });
+    const result = (created, q = p) => ({ ...created, title: q.title, due: q.due, dueLabel: q.dueLabel, location: q.location ?? { kind: 'inbox' }, phoenix: q.phoenix, notes: q.notes });
 
-    if (pendingKey && state.get(pendingKey) && zunder.findByMarker) {
+    const pending = pendingKey ? state.get(pendingKey) : null;
+    if (pending && zunder.findByMarker) {
       const found = await zunder.findByMarker(marker);
       if (found) {
-        const task = result(found);
+        const before = pending.plan ? { ...pending.plan, dueLabel: dueText(pending.plan.due, localDate(now(), currentTz() || 'Europe/Berlin')) } : p;
+        const task = result(found, before);
         state.set(key, task);
         state.delete(pendingKey);
         logger.info?.(`Capture (${source}) → Zunder ${task.ref ?? task.id} war schon angelegt, Antwort ging verloren`);
@@ -164,7 +168,10 @@ export function createCaptureRouter({ capture, zunder = null, state, tz = 'Europ
     }
 
     const footer = `_Erfasst über ${SOURCES[source] ?? source} (Vault Cockpit)_${marker ? ` · \`${marker}\`` : ''}`;
-    if (pendingKey) state.set(pendingKey, { at: now().toISOString() });
+    if (pendingKey) {
+      const { dueLabel, ...kept } = p;
+      state.set(pendingKey, { at: now().toISOString(), plan: kept });
+    }
     const created = await zunder.createTask({
       title: p.title,
       description: rest ? `${rest}\n\n${footer}` : footer,

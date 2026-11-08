@@ -178,6 +178,21 @@ test('Nachsenden nach verlorener Zunder-Antwort legt keine zweite Aufgabe an (VC
   assert.equal(zunder.calls.find, 1);
 });
 
+test('Wiederhergestellte Aufgabe meldet den Plan von damals, nicht den vom Tag des Nachsendens (VCP-132)', async () => {
+  const zunder = lossyZunder({ lose: 1 });
+  let at = new Date('2026-10-14T10:00:00Z');
+  const r = createCaptureRouter({ capture, zunder, state, now: () => at, logger: quiet });
+  await assert.rejects(r.route({ text: '!Paket abholen morgen', source: 'funke', captureId: 'f2' }), /timeout/);
+  assert.equal(zunder.tasks[0].due, '2026-10-15');
+
+  at = new Date('2026-10-15T10:00:00Z');
+  const again = await r.route({ text: '!Paket abholen morgen', source: 'funke', captureId: 'f2' });
+  assert.equal(again.id, 't1');
+  assert.equal(again.due, '2026-10-15', 'die Fälligkeit der Aufgabe in Zunder');
+  assert.equal(again.dueLabel, 'heute', 'Beschriftung vom Tag des Nachsendens aus');
+  assert.equal(state.get('capture:funke:f2').due, '2026-10-15');
+});
+
 test('Scheitert der Aufruf, bevor Zunder anlegt, legt das Nachsenden genau einmal an (VCP-132)', async () => {
   const zunder = lossyZunder({ down: 1 });
   const r = createCaptureRouter({ capture, zunder, state, logger: quiet });
