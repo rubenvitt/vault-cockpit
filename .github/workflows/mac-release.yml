@@ -29,6 +29,16 @@ permissions:
   contents: read
 
 jobs:
+  # Sagt im Lauf, warum nichts passiert, statt die Jobs stumm zu überspringen.
+  setup-missing:
+    if: github.ref == 'refs/heads/main' && vars.MAC_RELEASE_REPO == ''
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          msg="Kein macOS-Release: Repo-Variable MAC_RELEASE_REPO fehlt (siehe ios/README.md, Abschnitt macOS-App direkt)."
+          echo "::warning::$msg"
+          echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+
   version:
     # Nur von main: Ein manueller Lauf auf einem anderen Branch würde sonst ungeprüften Code als
     # neueste Version veröffentlichen, die jede installierte App als Update anbietet.
