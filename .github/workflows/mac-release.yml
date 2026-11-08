@@ -20,8 +20,15 @@ concurrency:
   group: mac-release
   cancel-in-progress: false
 
+# Standard nur lesen; das Release-Recht hat allein der Job `release`.
+permissions:
+  contents: read
+
 jobs:
   version:
+    # Nur von main: Ein manueller Lauf auf einem anderen Branch würde sonst ungeprüften Code als
+    # neueste Version veröffentlichen, die jede installierte App als Update anbietet.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
       release: ${{ steps.plan.outputs.release }}
@@ -88,7 +95,8 @@ jobs:
       - name: Release anlegen
         env:
           GH_TOKEN: ${{ github.token }}
-        # `--latest`: Der Link …/releases/latest führt zur neuesten DMG. Das Release legt den Tag an.
+        # Das Release legt den Tag an. `--latest` hält ein späteres Plugin-Release nicht davon ab,
+        # sich „latest“ zu nehmen; Links auf die DMG deshalb über die Liste `mac/v` (ios/README.md).
         run: |
           gh release create "$TAG" \
             "ios/build/mac-direct/Cockpit-$VERSION.dmg" ios/build/mac-direct/Cockpit-mac.zip \
