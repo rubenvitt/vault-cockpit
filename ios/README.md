@@ -312,9 +312,11 @@ Connect, und die `apple-app-site-association` des Servers gilt unverändert, der
 nichts Neues.
 
 - **Entitlements:** Auf dem Mac gelten `Cockpit/Cockpit-macOS.entitlements` und
-  `ShareExtension/ShareExtension-macOS.entitlements` (`CODE_SIGN_ENTITLEMENTS[sdk=macosx*]`):
-  wie auf iOS, dazu App Sandbox, Netzwerk und Dateiauswahl. Diese beiden Dateien pflegt
-  xcodegen nicht; ändern sich App Group, Keychain-Gruppe oder Domains, auch dort nachtragen.
+  `ShareExtension/ShareExtension-macOS.entitlements` (`CODE_SIGN_ENTITLEMENTS[sdk=macosx*]`, für
+  die App über `COCKPIT_MAC_ENTITLEMENTS`): wie auf iOS, dazu App Sandbox, Netzwerk und
+  Dateiauswahl. Der Direktvertrieb nimmt `Cockpit/Cockpit-macOS-direct.entitlements` (ohne
+  Sandbox, siehe unten). Diese Dateien pflegt xcodegen nicht; ändern sich App Group,
+  Keychain-Gruppe oder Domains, auch dort nachtragen.
 - **Unterschiede im Code** (`#if targetEnvironment(macCatalyst)`): Links nach außen öffnen im
   Standardbrowser statt im `SFSafariViewController` (`ExternalLink.present`), der Gerätename des
   Tokens heißt „Mac · Mac15,3 · …“ (`hw.model`), das Fenster ist mindestens 420 × 640 groß
@@ -325,6 +327,68 @@ nichts Neues.
   Vorschau usw.).
 - **CI:** `ios-test` baut nach den Tests auch `make mac`. Für TestFlight siehe unten
   (`PLATFORM=mac`, Repo-Variable `TESTFLIGHT_MAC`).
+- **Vertrieb:** über TestFlight (App Store Connect) oder direkt als DMG von GitHub mit
+  Selbst-Update (nächster Abschnitt). Beide haben dieselbe Bundle-ID; auf einem Mac nur einen
+  der beiden Wege nutzen.
+
+## macOS-App direkt: DMG und Selbst-Update
+
+Ohne App Store: Jeder Push auf `main`, der die App ändert (`ios/` ohne Markdown), gibt ein
+GitHub-Release `mac/vX.Y.Z` (Workflow „macOS-Release“, `.github/workflows/mac-release.yml`) mit
+
+- `Cockpit-X.Y.Z.dmg` zum Installieren: öffnen, Cockpit in „Programme“ ziehen. Die neueste
+  liegt immer unter [Releases](https://github.com/rubenvitt/vault-cockpit/releases/latest),
+- `Cockpit-mac.zip` für das Update in der App.
+
+**Version** wie bei semantic-release aus den Conventional Commits seit dem letzten Tag `mac/v…`,
+nur Commits unter `ios/` (`ios/scripts/mac-release.js`, Tests in `test/mac-release.test.js`):
+`feat` → Minor, `!` oder `BREAKING CHANGE:` → Major, alles andere → Patch. Ein Push nur auf den
+Server gibt kein Release. Die erste Version ist `1.0.0`. Manuell gestartet (Actions →
+„macOS-Release“ → Run workflow) gibt es auch ohne neue Commits ein Patch-Release. Scheitert ein
+Lauf, entsteht kein Tag, und der nächste Lauf nimmt dieselbe Version. Die Release-Notizen sind die
+Commit-Betreffe ohne Präfix, nach „Neu“, „Behoben“ und „Sonst“ gruppiert.
+
+**Bauen** (`ios/scripts/mac-direct.sh`, lokal mit `VERSION=1.2.3 ASC_KEY_ID=… ASC_ISSUER_ID=…`):
+archiviert mit `MARKETING_VERSION=X.Y.Z`, Hardened Runtime, ohne Sandbox
+(`COCKPIT_MAC_ENTITLEMENTS`) und mit `COCKPIT_SELF_UPDATE=YES`. Danach exportiert es mit Developer
+ID (`method developer-id`, automatisch signiert), notarisiert mit dem API-Key (`notarytool`),
+heftet das Ticket an App und DMG (`stapler`) und prüft mit `spctl`. Ergebnis unter
+`ios/build/mac-direct/`.
+
+**Update in der App** (`Cockpit/MacUpdater.swift`, nur Mac Catalyst und nur mit
+`CockpitSelfUpdate = YES`; TestFlight und App Store bleiben unberührt): Kurz nach dem Start und
+dann alle 6 Stunden fragt die App die Releases auf GitHub ab (öffentliches Repo, kein Token) und
+sucht das neueste `mac/v…` über der eigenen Version (`MacUpdateFeed` in `CockpitShared`). Gibt
+es eins, zeigt sie die Notizen mit „Jetzt aktualisieren“, „Auf GitHub ansehen“ und „Später“.
+„Später“ gilt bis zum nächsten Start. Von Hand: Menü „Cockpit“ → „Nach Updates suchen …“ oder
+Einstellungen → „Diese App“.
+
+Beim Aktualisieren lädt die App `Cockpit-mac.zip` und prüft vor dem Einspielen:
+
+1. den SHA-256 aus GitHub,
+2. Bundle-ID und Version,
+3. die Signatur gegen das eigene Team (`codesign -R`, Team aus der Keychain-Gruppe),
+4. Gatekeeper (`spctl`, also Developer ID und notarisiert).
+
+Danach startet sie ein kleines Skript in eigener Sitzung (`posix_spawn`, unter Catalyst gibt es
+kein `Process`) und beendet sich. Das Skript tauscht das Bundle aus und öffnet die neue App;
+klappt der Tausch nicht, legt es die alte zurück. Das geht nur aus einem beschreibbaren Ordner.
+Läuft Cockpit von der DMG oder aus „Downloads“ (App Translocation), bietet der Dialog die DMG
+zum Herunterladen an. Sparkle kommt nicht in Frage, weil es AppKit braucht und unter Mac Catalyst
+nicht läuft. Ohne Sandbox kann die App sich selbst ersetzen; die Share Extension behält ihre
+Sandbox.
+
+Einmal einrichten:
+
+- Repo-Secrets wie für TestFlight (`ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8_BASE64`,
+  `APPLE_TEAM_ID`). Für Developer ID und das Notarisieren braucht der API-Key die Rolle „Admin“.
+- Zertifikat „Developer ID Application“: Ohne weiteres signiert der Export mit dem von Apple
+  verwalteten Zertifikat (Cloud-Signing; legt der Account Holder bzw. ein Admin mit Zugriff auf
+  Cloud-verwaltete Zertifikate an). Scheitert das, das Zertifikat im Developer-Portal anlegen,
+  als `.p12` exportieren und als `DEVELOPER_ID_P12_BASE64` (base64) und
+  `DEVELOPER_ID_P12_PASSWORD` hinterlegen. Dann signiert das Skript auch die DMG selbst.
+- Die App-ID `dev.rubeen.cockpit` hat App Groups, Associated Domains und Keychain Sharing
+  schon; das automatische Signieren legt das Developer-ID-Profil dafür selbst an.
 
 ## TestFlight
 

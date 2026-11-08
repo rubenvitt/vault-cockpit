@@ -2,7 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <!-- Mac Catalyst: wie Cockpit.entitlements, dazu die Sandbox (Pflicht für App Store und TestFlight).
-     Von Hand gepflegt; Cockpit.entitlements erzeugt xcodegen. Änderungen an Gruppen oder Domains in beiden. -->
+     Von Hand gepflegt; Cockpit.entitlements erzeugt xcodegen. Änderungen an Gruppen oder Domains auch in
+     Cockpit.entitlements (project.yml) und Cockpit-macOS-direct.entitlements (Direktvertrieb). -->
 <dict>
 	<key>com.apple.security.app-sandbox</key>
 	<true/>

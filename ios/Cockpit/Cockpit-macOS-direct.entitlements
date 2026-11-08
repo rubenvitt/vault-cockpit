@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!-- Mac Catalyst im Direktvertrieb (Developer ID, scripts/mac-direct.sh): wie Cockpit-macOS.entitlements,
+     aber ohne App Sandbox, damit MacUpdater die App in „Programme“ ersetzen kann. Die Share Extension
+     behält ihre Sandbox. Von Hand gepflegt; Änderungen an Gruppen oder Domains in allen drei Dateien. -->
+<dict>
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:$(COCKPIT_SERVER_HOST)</string>
+		<string>webcredentials:$(COCKPIT_SERVER_HOST)</string>
+	</array>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.dev.rubeen.cockpit</string>
+	</array>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)dev.rubeen.cockpit.shared</string>
+	</array>
+</dict>
+</plist>
