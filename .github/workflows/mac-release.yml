@@ -97,9 +97,9 @@ jobs:
           DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
           DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
         run: ios/scripts/mac-direct.sh
-      # Reihenfolge, damit Titel und Archiv in jedem Zwischenstand zusammenpassen: neues Archiv
-      # `Cockpit-mac-X.Y.Z.zip` hochladen (das alte bleibt), Titel mit der Version ändern, erst dann
-      # die alten Archive löschen. Die App lädt das Archiv zur Version im Titel. Das Release wird
+      # Reihenfolge, damit Titel und Archiv in jedem Zwischenstand zusammenpassen, auch bei einer
+      # Wiederholung: neues Archiv `Cockpit-mac-X.Y.Z.zip` hochladen (das alte bleibt; ein schon
+      # vorhandenes dieser Version bleibt unangetastet), Titel ändern, erst dann alte Archive löschen. Die App lädt das Archiv zur Version im Titel. Das Release wird
       # ersetzt, nicht gelöscht, damit der Link auf Cockpit.dmg bleibt.
       - name: Release `macos` ersetzen
         env:
@@ -111,7 +111,13 @@ jobs:
           if gh release view macos > /dev/null 2>&1; then
             git tag -f macos "$GITHUB_SHA"
             git push -f origin refs/tags/macos
-            gh release upload macos "${files[@]}" --clobber
+            gh release upload macos ios/build/mac-direct/Cockpit.dmg --clobber
+            # Archiv dieser Version schon vollständig da (Wiederholung nach einem Abbruch): stehen
+            # lassen, sonst löschte --clobber es vor dem Upload, und scheitert der, fehlte das
+            # Archiv zum Titel. Ein unvollständiger Upload (state ≠ uploaded) wird ersetzt.
+            if ! gh release view macos --json assets -q '.assets[] | select(.state == "uploaded") | .name' | grep -qxF "$zip"; then
+              gh release upload macos "ios/build/mac-direct/$zip" --clobber
+            fi
             gh release edit macos --title "$title" --notes-file "$RUNNER_TEMP/notes.md" --prerelease
             gh release view macos --json assets -q '.assets[].name' \
               | { grep -E '^Cockpit-mac-.*[.]zip$' || true; } | { grep -vxF "$zip" || true; } \
