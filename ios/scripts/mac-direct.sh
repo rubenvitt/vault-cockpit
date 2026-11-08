@@ -3,7 +3,7 @@
 # Developer ID, ohne App Sandbox, mit Selbst-Update (siehe ios/README.md, „Direktvertrieb“),
 # notarisiert und geheftet. Ergebnis unter ios/build/mac-direct/:
 #   Cockpit.dmg             zum Installieren (Cockpit in „Programme“ ziehen)
-#   Cockpit-mac.zip         für das Update in der App (MacUpdater lädt genau diesen Namen)
+#   Cockpit-mac-<VERSION>.zip  für das Update in der App (MacUpdater lädt genau diesen Namen)
 #
 # Umgebung:
 #   VERSION                     Pflicht, X.Y.Z (CFBundleShortVersionString, vgl. mac-release.js)
@@ -33,7 +33,7 @@ OUT="build/mac-direct"
 ARCHIVE="$OUT/Cockpit.xcarchive"
 APP="$OUT/export/Cockpit.app"
 DMG="$OUT/Cockpit.dmg"
-ZIP="$OUT/Cockpit-mac.zip"
+ZIP="$OUT/Cockpit-mac-$VERSION.zip"
 rm -rf "$OUT"
 mkdir -p "$OUT"
 

@@ -64,7 +64,7 @@ public struct MacUpdate: Equatable, Sendable, Identifiable {
     public let notes: String
     /// Seite des Releases auf GitHub.
     public let pageURL: URL
-    /// `Cockpit-mac.zip`: die geheftete App, die `MacUpdater` einspielt.
+    /// `Cockpit-mac-X.Y.Z.zip`: die geheftete App, die `MacUpdater` einspielt.
     public let archiveURL: URL
     public let archiveSize: Int
     /// SHA-256 des Archivs (hex, klein), falls GitHub ihn kennt.
@@ -84,22 +84,24 @@ public struct MacUpdate: Equatable, Sendable, Identifiable {
 /// Beta-Modus keine Vorabversionen.
 public enum MacUpdateFeed {
     public static let tag = "macos"
-    public static let archiveName = "Cockpit-mac.zip"
+    /// Archiv mit der Version im Namen: Der Workflow lädt das neue hoch, ändert den Titel und löscht
+    /// erst dann das alte. Scheitert ein Schritt dazwischen, passen Titel und Archiv trotzdem zusammen.
+    public static func archiveName(for version: AppVersion) -> String { "Cockpit-mac-\(version).zip" }
     public static let diskImageName = "Cockpit.dmg"
     /// Öffentliches Repo: kein Token nötig (ohne Anmeldung 60 Abfragen pro Stunde und Adresse).
     /// 404, solange es noch kein Release gibt.
     public static let releaseURL = URL(string: "https://api.github.com/repos/rubenvitt/vault-cockpit/releases/tags/\(tag)")!
 
-    /// Version aus dem Titel des Releases: die letzte Angabe `X.Y.Z`; nil ohne.
+    /// Version aus dem Titel des Releases: die letzte Angabe `X.Y.Z` („… 1.2.3 (Hotfix)“ geht auch); nil ohne.
     static func version(fromTitle title: String?) -> AppVersion? {
-        title?.split(separator: " ").last.flatMap { AppVersion(String($0)) }
+        title?.split(separator: " ").compactMap { AppVersion(String($0)) }.last
     }
 
     /// Update aus dem Release `macos`, wenn es neuer als `current` ist und das Archiv hat; sonst nil.
     public static func update(in release: GitHubRelease, newerThan current: AppVersion) -> MacUpdate? {
         guard !release.draft, release.tagName == tag,
               let version = version(fromTitle: release.name), version > current,
-              let archive = release.assets.first(where: { $0.name == archiveName })
+              let archive = release.assets.first(where: { $0.name == archiveName(for: version) })
         else { return nil }
         let image = release.assets.first { $0.name == diskImageName }
         return MacUpdate(

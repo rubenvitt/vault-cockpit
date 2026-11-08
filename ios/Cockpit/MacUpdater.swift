@@ -8,7 +8,7 @@ import OSLog
 import SwiftUI
 
 /// Selbst-Update der macOS-App im Direktvertrieb (Developer ID, siehe ios/README.md): sucht neue
-/// Versionen im Release `macos` auf GitHub (`MacUpdateFeed`), lädt `Cockpit-mac.zip`, prüft Prüfsumme,
+/// Versionen im Release `macos` auf GitHub (`MacUpdateFeed`), lädt `Cockpit-mac-X.Y.Z.zip`, prüft Prüfsumme,
 /// Signatur (Team, Bundle-ID) und Gatekeeper, ersetzt die App nach dem Beenden und startet sie neu.
 ///
 /// Nur aktiv mit `CockpitSelfUpdate = YES` in der Info.plist (`scripts/mac-direct.sh`); die
@@ -134,7 +134,7 @@ final class MacUpdater {
             let (download, response) = try await URLSession.shared.download(from: update.archiveURL)
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             guard status == 200 else { throw UpdateError("Download fehlgeschlagen (Status \(status)).") }
-            let archive = staging.appending(path: MacUpdateFeed.archiveName)
+            let archive = staging.appending(path: MacUpdateFeed.archiveName(for: update.version))
             try fm.moveItem(at: download, to: archive)
 
             state = .installing(update, "Prüft Cockpit \(update.version) …")
