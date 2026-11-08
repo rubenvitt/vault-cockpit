@@ -118,8 +118,10 @@ final class ToastCenterTests: XCTestCase {
         XCTAssertEqual(toasts.toasts.map(\.message), ["Noch ein Fehler"])
     }
 
+    // async, nicht synchron: Die unter Linux erzeugte Testliste ruft synchrone Tests ohne
+    // Main-Actor auf und baut dann nicht (VCP-142). Gilt für alle @MainActor-Tests.
     @MainActor
-    func testActionDismissesAndRuns() {
+    func testActionDismissesAndRuns() async {
         let toasts = ToastCenter()
         var ran = false
         let toast = toasts.show("Erledigt", action: Toast.Action(label: "Rückgängig") { ran = true })

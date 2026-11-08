@@ -80,8 +80,10 @@ final class RoutingTests: XCTestCase {
         XCTAssertNil(NavigationDecision.decide(path: "https://evil.test/", server: server))
     }
 
+    // async wie in den Shared-Tests: @MainActor-Tests nie synchron, sonst baut die unter Linux
+    // erzeugte Testliste nicht (VCP-142).
     @MainActor
-    func testReadingLinksSwitchToTheReadingTab() {
+    func testReadingLinksSwitchToTheReadingTab() async {
         let model = app()
         XCTAssertEqual(model.readingSection, .weiter, "Lesen beginnt bei „Weiter“")
         model.open(path: "/lesen/stapel?zeit=15")
@@ -130,7 +132,7 @@ final class RoutingTests: XCTestCase {
     }
 
     @MainActor
-    func testPagesOpenAsSheetWithOwnStack() {
+    func testPagesOpenAsSheetWithOwnStack() async {
         let model = app()
         model.open(path: "/notiz?pfad=inbox%2Fa.md")
         XCTAssertEqual(model.pageSheet?.root, .note(path: "inbox/a.md", anchor: nil))
@@ -158,7 +160,7 @@ final class RoutingTests: XCTestCase {
     }
 
     @MainActor
-    func testSettingsLinks() {
+    func testSettingsLinks() async {
         let model = app()
         model.open(path: "/einstellungen#tokens")
         XCTAssertEqual(model.tab, .settings)

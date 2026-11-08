@@ -20,8 +20,10 @@ final class NowPlayingTests: XCTestCase {
         return model
     }
 
+    // async wie in den Shared-Tests: @MainActor-Tests nie synchron, sonst baut die unter Linux
+    // erzeugte Testliste nicht (VCP-142).
     @MainActor
-    func testPlayerOutlivesItsSheet() {
+    func testPlayerOutlivesItsSheet() async {
         let model = app()
         XCTAssertNil(model.nowPlaying)
         model.open(path: "/lesen/hoeren?zeit=30")
@@ -47,7 +49,7 @@ final class NowPlayingTests: XCTestCase {
     }
 
     @MainActor
-    func testOnlyOnePlayerAtATime() {
+    func testOnlyOnePlayerAtATime() async {
         let model = app()
         model.open(path: "/lesen/hoeren?zeit=15")
         let request = AppModel.EpisodeRequest(episodeID: "f1", title: "Vom Lesen", kind: "Podcast")
