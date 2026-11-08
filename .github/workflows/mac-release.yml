@@ -97,10 +97,19 @@ jobs:
           DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
           DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
         run: ios/scripts/mac-direct.sh
+      # Vor dem Veröffentlichen, damit jede Version an genau einem Commit hängt: Scheitert dieser
+      # Schritt, ist nichts veröffentlicht, und der nächste Lauf nimmt dieselbe Version neu. Scheitert
+      # danach das Veröffentlichen, setzt „Re-run failed jobs“ es mit demselben Commit fort (der Tag
+      # steht schon, der Push ist dann ein No-op); ein neuer Push zählt ab hier die nächste Version.
+      - name: Versions-Tag setzen
+        run: |
+          git tag "$TAG" "$GITHUB_SHA"
+          git push origin "refs/tags/$TAG"
       # Reihenfolge, damit Titel und Archiv in jedem Zwischenstand zusammenpassen, auch bei einer
       # Wiederholung: neues Archiv `Cockpit-mac-X.Y.Z.zip` hochladen (das alte bleibt; ein schon
-      # vorhandenes dieser Version bleibt unangetastet), Titel ändern, erst dann alte Archive löschen. Die App lädt das Archiv zur Version im Titel. Das Release wird
-      # ersetzt, nicht gelöscht, damit der Link auf Cockpit.dmg bleibt.
+      # vorhandenes dieser Version bleibt unangetastet), Titel ändern, erst dann alte Archive
+      # löschen. Die App lädt das Archiv zur Version im Titel. Das Release wird ersetzt, nicht
+      # gelöscht, damit der Link auf Cockpit.dmg bleibt.
       - name: Release `macos` ersetzen
         env:
           GH_TOKEN: ${{ github.token }}
@@ -108,10 +117,20 @@ jobs:
           zip="Cockpit-mac-$VERSION.zip"
           files=(ios/build/mac-direct/Cockpit.dmg "ios/build/mac-direct/$zip")
           title="Cockpit für macOS $VERSION"
+          api="repos/$GITHUB_REPOSITORY/releases"
           if gh release view macos > /dev/null 2>&1; then
             git tag -f macos "$GITHUB_SHA"
             git push -f origin refs/tags/macos
-            gh release upload macos ios/build/mac-direct/Cockpit.dmg --clobber
+            # DMG unter einem Zwischennamen hochladen, dann die alte löschen und die neue umbenennen:
+            # Scheitert der Upload, bleibt die alte Cockpit.dmg hinter dem festen Link.
+            cp ios/build/mac-direct/Cockpit.dmg "$RUNNER_TEMP/Cockpit-neu.dmg"
+            gh release upload macos "$RUNNER_TEMP/Cockpit-neu.dmg" --clobber
+            assets="$(gh api "$api/tags/macos" --jq '.assets[] | "\(.id) \(.name)"')"
+            old_dmg="$(awk '$2 == "Cockpit.dmg" { print $1 }' <<< "$assets")"
+            new_dmg="$(awk '$2 == "Cockpit-neu.dmg" { print $1 }' <<< "$assets")"
+            [ -n "$new_dmg" ] || { echo "Cockpit-neu.dmg fehlt nach dem Upload" >&2; exit 1; }
+            if [ -n "$old_dmg" ]; then gh api -X DELETE "$api/assets/$old_dmg"; fi
+            gh api -X PATCH "$api/assets/$new_dmg" -f name=Cockpit.dmg > /dev/null
             # Archiv dieser Version schon vollständig da (Wiederholung nach einem Abbruch): stehen
             # lassen, sonst löschte --clobber es vor dem Upload, und scheitert der, fehlte das
             # Archiv zum Titel. Ein unvollständiger Upload (state ≠ uploaded) wird ersetzt.
@@ -131,11 +150,6 @@ jobs:
           fi
           echo "### $title" >> "$GITHUB_STEP_SUMMARY"
           gh release view macos --json url -q .url >> "$GITHUB_STEP_SUMMARY"
-      # Ab diesem Tag zählt mac-release.js die nächste Version.
-      - name: Versions-Tag setzen
-        run: |
-          git tag "$TAG" "$GITHUB_SHA"
-          git push origin "refs/tags/$TAG"
       - name: Zertifikat dieses Laufs widerrufen
         if: always()
         continue-on-error: true

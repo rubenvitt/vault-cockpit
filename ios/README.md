@@ -356,8 +356,11 @@ gibt es dadurch nicht mehr zum Download.
 nur Commits unter `ios/` (`ios/scripts/mac-release.js`, Tests in `test/mac-release.test.js`):
 `feat` → Minor, `!` oder `BREAKING CHANGE:` → Major, alles andere → Patch. Ein Push nur auf den
 Server gibt kein Release. Die erste Version ist `1.0.0`. Manuell gestartet (Actions →
-„macOS-Release“ → Run workflow, nur von `main`) gibt es auch ohne neue Commits ein Patch-Release. Scheitert ein
-Lauf, entsteht kein Tag, und der nächste Lauf nimmt dieselbe Version. Die Release-Notizen sind die
+„macOS-Release“ → Run workflow, nur von `main`) gibt es auch ohne neue Commits ein Patch-Release. Der Tag
+`mac/vX.Y.Z` entsteht nach dem Bauen, aber vor dem Veröffentlichen, so hängt jede Version an
+genau einem Commit. Scheitert der Build, gibt es keinen Tag, und der nächste Lauf nimmt dieselbe
+Version. Scheitert erst das Veröffentlichen, setzt „Re-run failed jobs“ es mit demselben Commit
+fort. Die Release-Notizen sind die
 Commit-Betreffe ohne Präfix, nach „Neu“, „Behoben“ und „Sonst“ gruppiert.
 
 **Bauen** (`ios/scripts/mac-direct.sh`, lokal mit `VERSION=1.2.3 ASC_KEY_ID=… ASC_ISSUER_ID=…`):
