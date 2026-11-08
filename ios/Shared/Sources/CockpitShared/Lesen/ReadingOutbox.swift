@@ -105,6 +105,8 @@ public enum ReadingAction {
     public static let pdf = "/aktion/lesen/pdf"
     public static let review = "/aktion/lesen/wiedersehen"
     public static let reviewLink = "/aktion/lesen/wiedersehen/verbindung"
+    /// `id`: die letzte Entscheidung im Wiedersehen zurücknehmen (Box, Fälligkeit, Zustand merkt der Server).
+    public static let reviewUndo = "/aktion/lesen/wiedersehen/zurueck"
     public static let episodeNew = "/aktion/lesen/folge/neu"
     public static let episodeResume = "/aktion/lesen/folge/fortsetzen"
     public static let episodeSpeak = "/aktion/lesen/folge/sprechen"

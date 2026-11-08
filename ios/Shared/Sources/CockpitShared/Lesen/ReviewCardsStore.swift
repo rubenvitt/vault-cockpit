@@ -43,8 +43,11 @@ public enum ReviewDecision: String, Sendable {
 /// Wiedersehen: fällige Karten (Leitner-Boxen), „In eigenen Worten“, die Woche mit Zahlen,
 /// Themen und Querverbindungen, Markdown-Export.
 ///
-/// Eine Entscheidung nimmt die Karte sofort weg und zählt „gesehen“ hoch; lehnt der Server ab,
-/// kommt sie zurück. „Rückgängig“ setzt Box und Fälligkeit zurück und lädt neu.
+/// Eine Entscheidung nimmt die Karte sofort weg, zählt „gesehen“ hoch und bietet sie gleich als
+/// „Rückgängig“ an; lehnt der Server ab, kommt sie zurück. Die letzte Entscheidung von heute
+/// liefert der Server auch nach einem Neuladen (`undo`, `last`). „Rückgängig“ setzt Box und
+/// Fälligkeit zurück und lädt neu; nach „In eigenen Worten“ sagt die Meldung, dass die Notiz in
+/// der Inbox bleibt.
 @MainActor
 @Observable
 public final class ReviewCardsStore {
@@ -139,9 +142,12 @@ public final class ReviewCardsStore {
         remote.model?.cards.remove(at: index)
         remote.model?.seen = before.seen + 1
         remote.model?.left = max(0, before.left - 1)
+        remote.model?.last = ReviewLast(highlight: card.highlight, decision: fields["ziel"])
+        remote.model?.undo = UndoAction(action: ReadingAction.reviewUndo, fields: ["id": card.id])
         context.toasts.signal(fields["ziel"] == ReviewDecision.loslassen.rawValue ? .selection : .success)
         do {
             let response = try await actions.send(ReadingAction.review, fields)
+            if let undo = response.undo, remote.model?.last?.id == card.id { remote.model?.undo = undo }
             actions.show(response) { [weak self] undo in
                 Task { await self?.replay(undo) }
             }
@@ -151,16 +157,41 @@ public final class ReviewCardsStore {
                 remote.model?.cards.insert(card, at: min(index, cards.count))
                 remote.model?.seen = before.seen
                 remote.model?.left = before.left
+                if remote.model?.last?.id == card.id {
+                    remote.model?.last = before.last
+                    remote.model?.undo = before.undo
+                }
             }
             context.report(error)
             return false
         }
     }
 
-    /// Spielt ein Rückgängig ab („Wieder dran“) und lädt neu.
+    /// „↶ Rückgängig“: die letzte Entscheidung von heute zurücknehmen, auch nach einem Neuladen.
+    @discardableResult
+    public func undoLast() async -> Bool {
+        guard let undo = model?.undo else { return false }
+        return await replay(undo)
+    }
+
+    /// Ein Rückgängig läuft gerade (für den Knopf).
+    public var isUndoing: Bool {
+        model?.undo?.fields["id"].map { busy.contains($0) } ?? false
+    }
+
+    /// Spielt ein Rückgängig ab („Wieder dran“) und lädt neu; die Karte ist danach wieder dran.
     @discardableResult
     public func replay(_ undo: UndoAction) async -> Bool {
+        let id = undo.fields["id"] ?? undo.action
+        guard !busy.contains(id) else { return false }
+        busy.insert(id)
+        defer { busy.remove(id) }
         guard await actions.run(undo.action, undo.fields) != nil else { return false }
+        // Bis das Neuladen die nächste Entscheidung bringt, nicht dasselbe zweimal anbieten.
+        if remote.model?.undo == undo {
+            remote.model?.undo = nil
+            remote.model?.last = nil
+        }
         await refresh()
         return true
     }

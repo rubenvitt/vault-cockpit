@@ -1,0 +1,97 @@
+{
+  "ok": true,
+  "seen": 1,
+  "left": 1,
+  "later": 0,
+  "total": 2,
+  "limit": 20,
+  "maxBox": 5,
+  "canCapture": true,
+  "cards": [
+    {
+      "id": "33ee76c4-935d-4507-813a-4db33a848f66",
+      "docId": "446ad431-8d61-41be-b5b9-bb7447e92308",
+      "quote": "Der Stapel darf warten.",
+      "prefix": "",
+      "suffix": "",
+      "startHint": null,
+      "note": null,
+      "createdAt": "2026-10-23T09:07:32.037Z",
+      "updatedAt": "2026-10-23T09:07:32.037Z",
+      "reviewBox": 0,
+      "reviewDue": "2026-10-24T09:07:32.037Z",
+      "reviewState": "aktiv",
+      "docTitle": "Vom langsamen Lesen",
+      "docUrl": "https://zeit.example.org/lesen",
+      "docSite": "Zeit",
+      "docTopics": [
+        "Lesen"
+      ],
+      "box": 1,
+      "dueAt": "2026-10-24T09:07:32.037Z"
+    }
+  ],
+  "last": {
+    "id": "8a6773f9-66ea-4ad9-8424-bf44e1dc02c7",
+    "docId": "987633d3-38d7-464e-bb92-20478b15d73f",
+    "quote": "Speichern leichter ist als Lesen",
+    "prefix": "",
+    "suffix": "",
+    "startHint": null,
+    "note": "Kern des Arguments",
+    "createdAt": "2026-10-23T09:07:32.037Z",
+    "updatedAt": "2026-10-24T09:07:32.037Z",
+    "reviewBox": 2,
+    "reviewDue": "2026-10-27T09:07:32.037Z",
+    "reviewState": "aktiv",
+    "docTitle": "Warum der Stapel wächst",
+    "docUrl": "https://blatt.example.org/stapel",
+    "docSite": "Blatt",
+    "docTopics": [
+      "Lesen",
+      "Gewohnheit"
+    ],
+    "decision": "worte"
+  },
+  "undo": {
+    "action": "/aktion/lesen/wiedersehen/zurueck",
+    "fields": {
+      "id": "8a6773f9-66ea-4ad9-8424-bf44e1dc02c7"
+    }
+  },
+  "week": {
+    "id": "2026-W43",
+    "year": 2026,
+    "week": 43,
+    "monday": "2026-10-19",
+    "sunday": "2026-10-25",
+    "start": "2026-10-18T22:00:00.000Z",
+    "end": "2026-10-25T23:00:00.000Z",
+    "label": "19.10. – 25.10.",
+    "prev": {
+      "id": "2026-W42",
+      "week": 42
+    },
+    "next": {
+      "id": "2026-W44",
+      "week": 44
+    },
+    "stats": {
+      "highlights": 2,
+      "texts": 2,
+      "topics": 2
+    },
+    "topics": [
+      {
+        "label": "Lesen",
+        "count": 2
+      },
+      {
+        "label": "Gewohnheit",
+        "count": 1
+      }
+    ],
+    "clusters": [],
+    "export": "/api/lesen/wiedersehen.md?woche=2026-W43"
+  }
+}

@@ -6,8 +6,9 @@ import SwiftUI
 /// Behalten und „In eigenen Worten“; darunter die Woche mit Zahlen, Themen, Querverbindungen und
 /// Markdown-Export.
 ///
-/// Eine Entscheidung nimmt die Karte sofort weg (rechts hinaus behalten, links loslassen) und
-/// zeigt „Rückgängig“ in der Meldung. Zeigt sofort den gespeicherten Stand; beim Blättern in eine
+/// Eine Entscheidung nimmt die Karte sofort weg (rechts hinaus behalten, links loslassen; auch per
+/// Wischen) und zeigt „Rückgängig“ in der Meldung und dauerhaft neben dem Fortschritt: Die letzte
+/// Entscheidung von heute lässt sich auch nach einem Neuladen zurücknehmen. Zeigt sofort den gespeicherten Stand; beim Blättern in eine
 /// Woche ohne gespeicherten Stand bleibt die alte Woche gedimmt stehen, bis die neue da ist.
 @MainActor
 struct WiedersehenScreen: View {
@@ -108,14 +109,22 @@ struct WiedersehenScreen: View {
             if cards.total > 0 {
                 VStack(alignment: .leading, spacing: 6) {
                     LesenBar(value: Double(cards.seen) / Double(max(1, cards.total)), tint: Theme.accent)
-                    Text(cards.progressLabel)
-                        .font(.footnote)
-                        .foregroundStyle(Theme.text3)
-                        .contentTransition(.numericText(value: Double(cards.seen)))
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(cards.progressLabel)
+                            .font(.footnote)
+                            .foregroundStyle(Theme.text3)
+                            .contentTransition(.numericText(value: Double(cards.seen)))
+                            .accessibilityLabel(cards.progressLabel)
+                        Spacer(minLength: 0)
+                        if cards.undo != nil {
+                            undoButton(store, cards, live: live)
+                                .transition(.opacity)
+                        }
+                    }
                 }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(cards.progressLabel)
+                .accessibilityElement(children: .contain)
                 .animation(.snappy, value: cards.seen)
+                .animation(.snappy, value: cards.undo)
             }
             ZStack(alignment: .top) {
                 if let card = cards.cards.first {
@@ -144,6 +153,21 @@ struct WiedersehenScreen: View {
             }
             .animation(reduceMotion ? .easeOut(duration: 0.2) : .spring(response: 0.42, dampingFraction: 0.82), value: cards.cards.first?.id)
         }
+    }
+
+    /// „↶ Rückgängig“: die letzte Entscheidung von heute zurück (wie im Eingang); die Karte ist
+    /// danach wieder dran. Nach „In eigenen Worten“ sagt die Meldung, dass die Inbox-Notiz bleibt.
+    private func undoButton(_ store: ReviewCardsStore, _ cards: ReviewCardsModel, live: Bool) -> some View {
+        Button {
+            session.toasts.signal(.selection)
+            Task { await store.undoLast() }
+        } label: {
+            Text("↶ Rückgängig")
+        }
+        .buttonStyle(LesenQuietButtonStyle())
+        .disabled(!live || store.isUndoing)
+        .accessibilityLabel(cards.last?.undoAccessibilityLabel ?? "Rückgängig")
+        .accessibilityHint("Die Karte ist wieder dran")
     }
 
     /// Neue Karte wächst herein; die alte fliegt zur Seite der Entscheidung hinaus.

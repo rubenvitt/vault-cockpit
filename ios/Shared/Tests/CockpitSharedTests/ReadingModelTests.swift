@@ -203,10 +203,32 @@ final class ReadingModelTests: XCTestCase {
         XCTAssertEqual(model.week.clusters[0].id, model.week.clusters[0].ids.sorted().joined(separator: ","))
         XCTAssertEqual(model.week.export, "/api/lesen/wiedersehen.md?woche=2026-W43")
 
+        XCTAssertNil(model.last, "heute noch nichts entschieden")
+        XCTAssertNil(model.undo)
+
         let empty = try decode(ReviewCardsModel.self, "lesen-wiedersehen-leer")
         XCTAssertEqual(empty.week.id, "2020-W01")
         XCTAssertNil(empty.week.export)
         XCTAssertTrue(empty.week.clusters.isEmpty)
+    }
+
+    /// VCP-131: Die letzte Entscheidung von heute kommt mit dem Neuladen (`last`, `undo`).
+    func testReviewLastDecision() throws {
+        let model = try decode(ReviewCardsModel.self, "lesen-wiedersehen-heute")
+        XCTAssertEqual(model.progressLabel, "Heute 1 von 2 gesehen")
+        let last = try XCTUnwrap(model.last)
+        XCTAssertEqual(last.decision, "worte")
+        XCTAssertEqual(last.decisionLabel, "In eigenen Worten")
+        XCTAssertEqual(last.highlight.quote, "Speichern leichter ist als Lesen")
+        XCTAssertEqual(last.highlight.reviewBox, 2)
+        XCTAssertEqual(last.undoAccessibilityLabel, "Rückgängig: In eigenen Worten, „Speichern leichter ist als Lesen“")
+        XCTAssertEqual(model.undo, UndoAction(action: "/aktion/lesen/wiedersehen/zurueck", fields: ["id": last.id]))
+        XCTAssertFalse(model.cards.contains { $0.id == last.id })
+
+        let long = ReviewLast(highlight: ReadingHighlight(id: "h", docId: "d", quote: String(repeating: "Wort ", count: 20) + "\nEnde", createdAt: "2026-10-23T09:07:32.037Z"), decision: nil)
+        XCTAssertEqual(long.shortQuote.count, 60)
+        XCTAssertTrue(long.shortQuote.hasSuffix("Wort…"))
+        XCTAssertEqual(long.undoAccessibilityLabel, "Rückgängig: „\(long.shortQuote)“")
     }
 
     func testReviewEmptyTexts() throws {
@@ -331,9 +353,8 @@ final class ReadingModelTests: XCTestCase {
 
         let review = try decode(ReadingActionResponse.self, "lesen-aktion-wiedersehen")
         XCTAssertEqual(review.undo?.action, "/aktion/lesen/wiedersehen/zurueck")
-        // Zahlen im Rückgängig werden Text fürs Formular.
-        XCTAssertEqual(review.undo?.fields["box"], "0")
-        XCTAssertEqual(review.undo?.fields["zustand"], "aktiv")
+        // Den Stand vor der Entscheidung merkt sich der Server; das Rückgängig nennt nur die Karte.
+        XCTAssertEqual(review.undo?.fields, ["id": "3c68dd32-aad2-4e99-9ca7-33ec7275e374"])
     }
 
     // MARK: Wege

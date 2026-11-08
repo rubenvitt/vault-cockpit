@@ -248,6 +248,10 @@ final class ReadingStoreTests: XCTestCase {
         XCTAssertEqual(store.model?.left, 3)
         XCTAssertEqual(store.model?.progressLabel, "Heute 1 von 4 gesehen")
         XCTAssertEqual(formFields(transport.requests[1]), ["id": card.id, "ziel": "behalten"])
+        // Rückgängig steht gleich bereit, nicht nur in der Meldung.
+        XCTAssertEqual(store.model?.last?.id, card.id)
+        XCTAssertEqual(store.model?.last?.decision, "behalten")
+        XCTAssertEqual(store.model?.undo?.fields, ["id": card.id])
         let toast = try XCTUnwrap(context.toasts.toasts.last)
         XCTAssertEqual(toast.message, "Behalten")
         XCTAssertEqual(toast.action?.label, "Rückgängig")
@@ -255,8 +259,63 @@ final class ReadingStoreTests: XCTestCase {
         context.toasts.perform(toast.id)
         await waitUntil { transport.requests.count == 4 }
         XCTAssertEqual(path(of: transport.requests[2]), "/aktion/lesen/wiedersehen/zurueck")
-        XCTAssertEqual(formFields(transport.requests[2]), ["id": card.id, "box": "0", "faellig": "2026-10-24T09:07:32.037Z", "zustand": "aktiv"])
+        XCTAssertEqual(formFields(transport.requests[2]), ["id": card.id])
         XCTAssertEqual(path(of: transport.requests[3]), "/api/lesen/wiedersehen")
+    }
+
+    /// VCP-131: Nach einem Neuladen bietet der Knopf die letzte Entscheidung von heute an; nach
+    /// „In eigenen Worten“ sagt die Meldung, dass die Notiz in der Inbox bleibt.
+    @MainActor
+    func testReviewUndoLastAfterReload() async throws {
+        let message = "Wieder dran. Die Notiz in der Inbox bleibt: Inbox/Gedanke zu Vom langsamen Lesen.md"
+        let transport = server([
+            "/api/lesen/wiedersehen": "lesen-wiedersehen-heute",
+        ])
+        let context = try context(transport)
+        let store = ReviewCardsStore(context: context)
+        await store.load()
+        let undo = try XCTUnwrap(store.model?.undo)
+        let last = try XCTUnwrap(store.model?.last)
+        XCTAssertEqual(last.decision, "worte")
+        XCTAssertFalse(store.isUndoing)
+
+        transport.respond { request in
+            switch path(of: request) {
+            case "/aktion/lesen/wiedersehen/zurueck": return (200, json(#"{"ok":true,"message":"\#(message)"}"#))
+            default: return (200, try fixture("lesen-wiedersehen"))
+            }
+        }
+        let ok = await store.undoLast()
+        XCTAssertTrue(ok)
+        XCTAssertEqual(path(of: transport.requests[1]), "/aktion/lesen/wiedersehen/zurueck")
+        XCTAssertEqual(formFields(transport.requests[1]), undo.fields)
+        XCTAssertEqual(formFields(transport.requests[1]), ["id": last.id])
+        XCTAssertEqual(context.toasts.toasts.last?.message, message)
+        XCTAssertEqual(path(of: transport.requests[2]), "/api/lesen/wiedersehen")
+        XCTAssertNil(store.model?.undo, "nach dem Neuladen: heute nichts mehr zurückzunehmen")
+        XCTAssertNil(store.model?.last)
+
+        let again = await store.undoLast()
+        XCTAssertFalse(again)
+        XCTAssertEqual(transport.requests.count, 3)
+    }
+
+    /// Lehnt der Server eine Entscheidung ab, bietet der Knopf wieder die davor an.
+    @MainActor
+    func testReviewFailedDecisionRestoresUndo() async throws {
+        let transport = server(["/api/lesen/wiedersehen": "lesen-wiedersehen-heute"])
+        let context = try context(transport)
+        let store = ReviewCardsStore(context: context)
+        await store.load()
+        let before = try XCTUnwrap(store.model?.undo)
+        let card = try XCTUnwrap(store.current)
+
+        transport.respond { _ in throw URLError(.timedOut) }
+        let ok = await store.decide(card, .loslassen)
+        XCTAssertFalse(ok)
+        XCTAssertEqual(store.current?.id, card.id)
+        XCTAssertEqual(store.model?.undo, before)
+        XCTAssertEqual(store.model?.last?.decision, "worte")
     }
 
     @MainActor
