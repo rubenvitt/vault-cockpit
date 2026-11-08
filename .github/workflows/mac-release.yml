@@ -3,6 +3,10 @@ name: macOS-Release
 # Direktvertrieb der macOS-App (Mac Catalyst) über GitHub-Releases, ohne App Store: Jeder Push auf
 # main, der die App ändert (ios/ ohne Markdown), gibt ein Release `mac/vX.Y.Z` mit der notarisierten
 # DMG zum Installieren und `Cockpit-mac.zip` für das Update in der App (MacUpdater).
+# Die Releases liegen in einem eigenen öffentlichen Repo (Repo-Variable MAC_RELEASE_REPO, Token mit
+# Schreibrecht darauf im Secret MAC_RELEASE_TOKEN): BRAT nimmt im Cockpit-Repo das Release mit der
+# höchsten Version aus allen Tags, `mac/v1.0.0` schlüge das Obsidian-Plugin. Hier bleibt nur der
+# Git-Tag `mac/vX.Y.Z` für die Versionierung (Tags ohne Release sieht BRAT nicht).
 # Die Version folgt den Commits wie semantic-release (ios/scripts/mac-release.js): feat → Minor,
 # `!`/BREAKING CHANGE → Major, sonst Patch. Manuell gestartet gibt es auch ohne neue Commits ein
 # Patch-Release (z. B. nach einem gescheiterten Lauf; ohne Release bleibt die Version frei).
@@ -20,7 +24,7 @@ concurrency:
   group: mac-release
   cancel-in-progress: false
 
-# Standard nur lesen; das Release-Recht hat allein der Job `release`.
+# Standard nur lesen; Tags setzen darf allein der Job `release`.
 permissions:
   contents: read
 
@@ -63,6 +67,7 @@ jobs:
     env:
       VERSION: ${{ needs.version.outputs.version }}
       TAG: ${{ needs.version.outputs.tag }}
+      MAC_RELEASE_REPO: ${{ vars.MAC_RELEASE_REPO }}
     steps:
       - uses: actions/checkout@v4
       - run: brew install xcodegen
@@ -94,18 +99,21 @@ jobs:
           DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
           DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
         run: ios/scripts/mac-direct.sh
+      # Im Release-Repo: Dort gibt es nur diese Releases, …/releases/latest ist also die neueste DMG.
       - name: Release anlegen
         env:
-          GH_TOKEN: ${{ github.token }}
-        # Das Release legt den Tag an. `--latest` hält ein späteres Plugin-Release nicht davon ab,
-        # sich „latest“ zu nehmen; Links auf die DMG deshalb über die Liste `mac/v` (ios/README.md).
+          GH_TOKEN: ${{ secrets.MAC_RELEASE_TOKEN }}
         run: |
-          gh release create "$TAG" \
+          gh release create "$TAG" --repo "$MAC_RELEASE_REPO" \
             "ios/build/mac-direct/Cockpit-$VERSION.dmg" ios/build/mac-direct/Cockpit-mac.zip \
-            --target "$GITHUB_SHA" --title "Cockpit für macOS $VERSION" \
-            --notes-file "$RUNNER_TEMP/notes.md" --latest
+            --title "Cockpit für macOS $VERSION" --notes-file "$RUNNER_TEMP/notes.md" --latest
           echo "### Cockpit für macOS $VERSION" >> "$GITHUB_STEP_SUMMARY"
-          gh release view "$TAG" --json url -q .url >> "$GITHUB_STEP_SUMMARY"
+          gh release view "$TAG" --repo "$MAC_RELEASE_REPO" --json url -q .url >> "$GITHUB_STEP_SUMMARY"
+      # Hier nur der Tag (ohne Release), ab dem mac-release.js die nächste Version zählt.
+      - name: Tag setzen
+        run: |
+          git tag "$TAG" "$GITHUB_SHA"
+          git push origin "refs/tags/$TAG"
       - name: Zertifikat dieses Laufs widerrufen
         if: always()
         continue-on-error: true
