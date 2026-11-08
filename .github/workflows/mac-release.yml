@@ -138,7 +138,16 @@ jobs:
             new_dmg="$(awk '$2 == "Cockpit-neu.dmg" { print $1 }' <<< "$assets")"
             [ -n "$new_dmg" ] || { echo "Cockpit-neu.dmg fehlt nach dem Upload" >&2; exit 1; }
             if [ -n "$old_dmg" ]; then gh api -X DELETE "$api/assets/$old_dmg"; fi
-            gh api -X PATCH "$api/assets/$new_dmg" -f name=Cockpit.dmg > /dev/null
+            # Umbenennen mit Wiederholung: Bis es klappt, fehlt Cockpit.dmg. Scheitert es ganz, bleibt
+            # Cockpit-neu.dmg liegen; „Re-run failed jobs“ lädt sie neu und benennt sie um.
+            for attempt in 1 2 3 4 5; do
+              if gh api -X PATCH "$api/assets/$new_dmg" -f name=Cockpit.dmg > /dev/null; then break; fi
+              if [ "$attempt" = 5 ]; then
+                echo "::error::Cockpit-neu.dmg ließ sich nicht in Cockpit.dmg umbenennen; der feste Link fehlt bis zu einem neuen Lauf."
+                exit 1
+              fi
+              sleep $((attempt * 5))
+            done
             # Archiv dieser Version schon vollständig da (Wiederholung nach einem Abbruch): stehen
             # lassen, sonst löschte --clobber es vor dem Upload, und scheitert der, fehlte das
             # Archiv zum Titel. Ein unvollständiger Upload (state ≠ uploaded) wird ersetzt.
