@@ -135,11 +135,13 @@ export function createZunderClient({ url, token, fetch = globalThis.fetch, timeo
      * Sucht die Aufgabe, deren Beschreibung den Marker `` `marker` `` trägt
      * (auch erledigte oder verworfene), und liefert `{ id, ref, url }` oder null.
      * Damit findet die Erfassung eine Aufgabe wieder, die Zunder angelegt hat,
-     * deren Antwort aber nie ankam (VCP-132). Die Suche findet Teilwörter; erst
-     * der Marker in Backticks in der Beschreibung zählt als Treffer.
+     * deren Antwort aber nie ankam (VCP-132). Die Suche vergleicht Teilzeichen;
+     * gesucht wird darum mit den Backticks, sonst fänden sich bei `m1` auch
+     * `m10`, `m11` … und verdrängten bei vielen solchen IDs den echten Treffer.
+     * `get_task` prüft den Marker zur Sicherheit noch einmal.
      */
     async findByMarker(marker) {
-      const out = await callTool('search', { query: marker, limit: 20 });
+      const out = await callTool('search', { query: `\`${marker}\``, limit: 20 });
       const hits = (out?.hits ?? []).filter((h) => h.entity === 'task');
       for (const hit of hits) {
         const task = (await callTool('get_task', { task_id: hit.id }))?.task;
