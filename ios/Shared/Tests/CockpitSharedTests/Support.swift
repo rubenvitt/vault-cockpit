@@ -42,6 +42,12 @@ final class FakeTransport: HTTPTransport, @unchecked Sendable {
         for c in continuations { c.resume() }
     }
 
+    /// Gibt nur die älteste wartende Anfrage frei (für eine feste Reihenfolge der Antworten).
+    func releaseOldest() {
+        let first = lock.withLock { waiting.isEmpty ? nil : waiting.removeFirst() }
+        first?.resume()
+    }
+
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         let held = lock.withLock { () -> Bool in
             recorded.append(request)

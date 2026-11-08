@@ -300,6 +300,69 @@ final class ReadingStoreTests: XCTestCase {
         XCTAssertEqual(transport.requests.count, 3)
     }
 
+    /// Zwei Entscheidungen gleichzeitig, beide scheitern (erst die ältere): „Rückgängig“ zeigt nie
+    /// eine Entscheidung, die nicht durchging.
+    @MainActor
+    func testReviewOverlappingFailuresNeverOfferAFailedDecision() async throws {
+        let transport = server()
+        let context = try context(transport)
+        let store = ReviewCardsStore(context: context)
+        await store.load()
+        let cards = try XCTUnwrap(store.model?.cards)
+        let (a, b) = (cards[0], cards[1])
+        XCTAssertNil(store.model?.undo)
+
+        transport.respond { _ in throw URLError(.timedOut) }
+        transport.hold = true
+        let first = Task { await store.decide(a, .behalten) }
+        await waitUntil { transport.heldCount == 1 }
+        let second = Task { await store.decide(b, .loslassen) }
+        await waitUntil { transport.heldCount == 2 }
+        XCTAssertEqual(store.model?.last?.id, b.id)
+        XCTAssertEqual(store.model?.undo?.fields, ["id": b.id])
+
+        transport.releaseOldest()
+        let firstOK = await first.value
+        XCTAssertFalse(firstOK)
+        XCTAssertEqual(store.model?.last?.id, b.id, "die neuere läuft noch")
+
+        transport.releaseOldest()
+        let secondOK = await second.value
+        XCTAssertFalse(secondOK)
+        XCTAssertNil(store.model?.last, "beide gescheitert: nichts zurückzunehmen")
+        XCTAssertNil(store.model?.undo)
+    }
+
+    /// Die ältere geht durch, die neuere scheitert: „Rückgängig“ zeigt wieder die ältere.
+    @MainActor
+    func testReviewNewerFailureFallsBackToOlderSuccess() async throws {
+        let transport = server(["/aktion/lesen/wiedersehen": "lesen-aktion-wiedersehen"])
+        let context = try context(transport)
+        let store = ReviewCardsStore(context: context)
+        await store.load()
+        let cards = try XCTUnwrap(store.model?.cards)
+        let (a, b) = (cards[0], cards[1])
+
+        transport.hold = true
+        let first = Task { await store.decide(a, .behalten) }
+        await waitUntil { transport.heldCount == 1 }
+        let second = Task { await store.decide(b, .loslassen) }
+        await waitUntil { transport.heldCount == 2 }
+
+        transport.releaseOldest()
+        let firstOK = await first.value
+        XCTAssertTrue(firstOK)
+        XCTAssertEqual(store.model?.last?.id, b.id)
+
+        transport.respond { _ in throw URLError(.timedOut) }
+        transport.releaseOldest()
+        let secondOK = await second.value
+        XCTAssertFalse(secondOK)
+        XCTAssertEqual(store.model?.last?.id, a.id)
+        XCTAssertEqual(store.model?.last?.decision, "behalten")
+        XCTAssertEqual(store.model?.undo?.fields, ["id": a.id])
+    }
+
     /// Lehnt der Server eine Entscheidung ab, bietet der Knopf wieder die davor an.
     @MainActor
     func testReviewFailedDecisionRestoresUndo() async throws {

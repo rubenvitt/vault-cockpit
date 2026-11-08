@@ -66,6 +66,11 @@ public final class ReviewCardsStore {
     private var actions: ReadingActions { ReadingActions(context: context) }
     /// Erfassungs-ID je Karte für „In eigenen Worten“: ein zweiter Versuch legt nichts doppelt an.
     @ObservationIgnored private var wordIDs: [String: String] = [:]
+    /// Entscheidungen seit dem letzten ruhigen Stand, älteste zuerst. Scheitert eine, zeigt
+    /// „Rückgängig“ die neueste übrige (oder den Stand davor), nie eine, die nicht durchging.
+    @ObservationIgnored private var decisions: [(last: ReviewLast, undo: UndoAction, pending: Bool)] = []
+    /// `last`/`undo` vor der ersten Entscheidung in `decisions`.
+    @ObservationIgnored private var settled: (last: ReviewLast?, undo: UndoAction?) = (nil, nil)
 
     public init(context: CockpitContext) {
         self.context = context
@@ -142,12 +147,21 @@ public final class ReviewCardsStore {
         remote.model?.cards.remove(at: index)
         remote.model?.seen = before.seen + 1
         remote.model?.left = max(0, before.left - 1)
-        remote.model?.last = ReviewLast(highlight: card.highlight, decision: fields["ziel"])
-        remote.model?.undo = UndoAction(action: ReadingAction.reviewUndo, fields: ["id": card.id])
+        if !decisions.contains(where: \.pending) {
+            decisions = []
+            settled = (before.last, before.undo)
+        }
+        let last = ReviewLast(highlight: card.highlight, decision: fields["ziel"])
+        decisions.append((last, UndoAction(action: ReadingAction.reviewUndo, fields: ["id": card.id]), true))
+        showNewestDecision()
         context.toasts.signal(fields["ziel"] == ReviewDecision.loslassen.rawValue ? .selection : .success)
         do {
             let response = try await actions.send(ReadingAction.review, fields)
-            if let undo = response.undo, remote.model?.last?.id == card.id { remote.model?.undo = undo }
+            if let i = decisions.firstIndex(where: { $0.last.id == card.id }) {
+                decisions[i].pending = false
+                if let undo = response.undo { decisions[i].undo = undo }
+                if remote.model?.last?.id == card.id { showNewestDecision() }
+            }
             actions.show(response) { [weak self] undo in
                 Task { await self?.replay(undo) }
             }
@@ -157,13 +171,22 @@ public final class ReviewCardsStore {
                 remote.model?.cards.insert(card, at: min(index, cards.count))
                 remote.model?.seen = before.seen
                 remote.model?.left = before.left
-                if remote.model?.last?.id == card.id {
-                    remote.model?.last = before.last
-                    remote.model?.undo = before.undo
-                }
             }
+            decisions.removeAll { $0.last.id == card.id }
+            if remote.model?.last?.id == card.id { showNewestDecision() }
             context.report(error)
             return false
+        }
+    }
+
+    /// `last`/`undo` auf die neueste Entscheidung, die nicht gescheitert ist.
+    private func showNewestDecision() {
+        if let newest = decisions.last {
+            remote.model?.last = newest.last
+            remote.model?.undo = newest.undo
+        } else {
+            remote.model?.last = settled.last
+            remote.model?.undo = settled.undo
         }
     }
 
@@ -187,6 +210,8 @@ public final class ReviewCardsStore {
         busy.insert(id)
         defer { busy.remove(id) }
         guard await actions.run(undo.action, undo.fields) != nil else { return false }
+        decisions.removeAll { $0.undo == undo }
+        if settled.undo == undo { settled = (nil, nil) }
         // Bis das Neuladen die nächste Entscheidung bringt, nicht dasselbe zweimal anbieten.
         if remote.model?.undo == undo {
             remote.model?.undo = nil
