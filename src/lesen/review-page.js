@@ -46,9 +46,10 @@ const MAX_WORDS = 4000;
  * Kernaussage gegen Abschnitte anderer Texte zum selben Thema liegt bei 0,65
  * bis 0,70, gegen den eigenen Text bei 0,84. Zwei kurze Markierungen liegen
  * meist höher als Markierung gegen Abschnitt; 0,75 fasst also nur eng
- * Verwandtes zusammen. Mit mehr Markierungen erneut prüfen.
+ * Verwandtes zusammen. Mit mehr Markierungen erneut prüfen: `npm run messen:cluster`
+ * (src/cli/cluster-schwelle.js) misst echte Markierungspaare (VCP-129).
  */
-const CLUSTER_THRESHOLD = 0.75;
+export const CLUSTER_THRESHOLD = 0.75;
 /** shortcut: höchstens so viele Markierungen einer Woche fürs Clustering (O(n²)); reicht für eine normale Woche. */
 const CLUSTER_MAX_ITEMS = 200;
 
