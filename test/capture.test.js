@@ -123,6 +123,82 @@ test('dieselbe Capture-ID erzeugt keine zweite Zunder-Aufgabe', async () => {
   assert.equal(zunderCalls.length, 1);
 });
 
+/**
+ * Zunder-Attrappe mit Gedächtnis: `lose` Antworten gehen verloren, obwohl die
+ * Aufgabe angelegt ist (Timeout nach dem Schreiben); `down` Aufrufe scheitern,
+ * bevor Zunder etwas anlegt.
+ */
+function lossyZunder({ lose = 0, down = 0 } = {}) {
+  const tasks = [];
+  const calls = { create: 0, find: 0 };
+  return {
+    tasks,
+    calls,
+    async createTask(args) {
+      calls.create++;
+      if (down > 0) {
+        down--;
+        throw new Error('Zunder antwortet mit HTTP 503');
+      }
+      const id = `t${tasks.length + 1}`;
+      tasks.push({ id, ref: `ZUN-${tasks.length + 1}`, ...args });
+      if (lose > 0) {
+        lose--;
+        throw new Error('The operation was aborted due to timeout');
+      }
+      return { id, ref: `ZUN-${tasks.length}`, url: `https://zunder.test/#/aufgabe/${id}` };
+    },
+    async findByMarker(marker) {
+      calls.find++;
+      const t = tasks.find((x) => x.description.includes(`\`${marker}\``));
+      return t ? { id: t.id, ref: t.ref, url: `https://zunder.test/#/aufgabe/${t.id}` } : null;
+    },
+  };
+}
+
+test('Nachsenden nach verlorener Zunder-Antwort legt keine zweite Aufgabe an (VCP-132)', async () => {
+  const zunder = lossyZunder({ lose: 1 });
+  const r = createCaptureRouter({ capture, zunder, state, logger: quiet });
+  await assert.rejects(r.route({ text: '!Paket abholen', source: 'funke', captureId: 'f1' }), /timeout/);
+  assert.equal(zunder.tasks.length, 1, 'Zunder hat die Aufgabe trotzdem angelegt');
+  assert.match(zunder.tasks[0].description, /`cockpit-capture:funke:f1`/);
+
+  // Auch nach einem Neustart: der Vermerk „angefragt“ liegt in der Datei.
+  const restarted = createCaptureRouter({ capture, zunder, state: createStateStore(join(root, '.state', 'capture.json')), logger: quiet });
+  const again = await restarted.route({ text: '!Paket abholen', source: 'funke', captureId: 'f1' });
+  assert.equal(again.duplicate, true);
+  assert.equal(again.id, 't1');
+  assert.equal(again.title, 'Paket abholen');
+  assert.equal(zunder.tasks.length, 1);
+  assert.equal(zunder.calls.create, 1);
+
+  // Danach kennt der Merkzettel die Aufgabe, ohne Zunder zu fragen.
+  const third = await restarted.route({ text: '!Paket abholen', source: 'funke', captureId: 'f1' });
+  assert.equal(third.id, 't1');
+  assert.equal(zunder.calls.find, 1);
+});
+
+test('Scheitert der Aufruf, bevor Zunder anlegt, legt das Nachsenden genau einmal an (VCP-132)', async () => {
+  const zunder = lossyZunder({ down: 1 });
+  const r = createCaptureRouter({ capture, zunder, state, logger: quiet });
+  await assert.rejects(r.route({ text: '!Paket abholen', source: 'mail', captureId: 'm1' }), /503/);
+  const again = await r.route({ text: '!Paket abholen', source: 'mail', captureId: 'm1' });
+  assert.equal(again.duplicate, undefined);
+  assert.equal(zunder.tasks.length, 1);
+  assert.equal(zunder.calls.find, 1);
+  assert.deepEqual(state.keys('capture-pending:'), [], 'der Vermerk ist nach dem Anlegen weg');
+});
+
+test('Erstes Anlegen fragt Zunder nicht nach dem Marker; ohne Capture-ID gibt es keinen', async () => {
+  const zunder = lossyZunder();
+  const r = createCaptureRouter({ capture, zunder, state, logger: quiet });
+  await r.route({ text: '!Mit ID', source: 'api', captureId: 'a1' });
+  await r.route({ text: '!Ohne ID', source: 'api' });
+  assert.equal(zunder.calls.find, 0);
+  assert.match(zunder.tasks[0].description, /^_Erfasst über Capture-Endpunkt \(Vault Cockpit\)_ · `cockpit-capture:api:a1`$/);
+  assert.equal(zunder.tasks[1].description, '_Erfasst über Capture-Endpunkt (Vault Cockpit)_');
+});
+
 test('dieselbe Capture-ID legt keine zweite Notiz an, auch nach dem Ablegen (VCP-56)', async () => {
   const first = await router.route({ text: 'Gedanke', source: 'cockpit', captureId: 'c1' });
   // Abgelegt: die Notiz liegt nicht mehr im Capture-Ordner.
@@ -216,6 +292,31 @@ test('Zunder-Client meldet Ablehnungen mit der Begründung', async () => {
   await assert.rejects(client.createTask({ title: 'x' }), /Titel zu lang/);
   const down = createZunderClient({ url: 'https://zunder.test', token: 't', fetch: async () => new Response('', { status: 502 }) });
   await assert.rejects(down.createTask({ title: 'x' }), /HTTP 502/);
+});
+
+test('Zunder-Client findet eine Aufgabe nur am vollständigen Marker (VCP-132)', async () => {
+  const calls = [];
+  const tasks = {
+    a: { id: 'a', ref: 'ZUN-1', description: '_Erfasst_ · `cockpit-capture:mail:m10`' },
+    b: { id: 'b', ref: 'ZUN-2', description: '_Erfasst_ · `cockpit-capture:mail:m1`' },
+  };
+  const client = createZunderClient({
+    url: 'https://zunder.test',
+    token: 't',
+    fetch: async (_url, init) => {
+      const { name, arguments: args } = JSON.parse(init.body).params;
+      calls.push({ name, args });
+      const content =
+        name === 'search'
+          ? { hits: [{ entity: 'project', id: 'p' }, { entity: 'task', id: 'a' }, { entity: 'task', id: 'b' }] }
+          : { task: tasks[args.task_id] };
+      return Response.json({ jsonrpc: '2.0', id: 1, result: { structuredContent: content } });
+    },
+  });
+  assert.deepEqual(await client.findByMarker('cockpit-capture:mail:m1'), { id: 'b', ref: 'ZUN-2', url: 'https://zunder.test/#/aufgabe/b' });
+  assert.deepEqual(calls[0], { name: 'search', args: { query: 'cockpit-capture:mail:m1', limit: 20 } });
+  assert.deepEqual(calls.slice(1).map((c) => c.args.task_id), ['a', 'b'], 'nur Aufgaben, kein Projekt');
+  assert.equal(await client.findByMarker('cockpit-capture:mail:m2'), null);
 });
 
 // --- HTTP ---
@@ -403,6 +504,21 @@ test('/funke/tasks legt bei überlappendem Nachsenden nur eine Aufgabe an', asyn
       assert.equal(zunderCalls.length, 1);
     },
     { zunder: slow },
+  );
+});
+
+test('/funke/tasks: Nachsenden nach verlorener Zunder-Antwort ergibt keine Dublette (VCP-132)', async () => {
+  const zunder = lossyZunder({ lose: 1 });
+  await withServer(
+    async (call) => {
+      const task = JSON.stringify({ id: 'f-lost', title: 'Paket abholen' });
+      assert.equal((await call('/funke/tasks', { body: task })).status, 502);
+      const again = await call('/funke/tasks', { body: task });
+      assert.equal(again.status, 200);
+      assert.equal((await again.json()).id, 't1');
+      assert.equal(zunder.tasks.length, 1);
+    },
+    { zunder },
   );
 });
 
