@@ -337,14 +337,15 @@ Ohne App Store: Jeder Push auf `main`, der die App ändert (`ios/` ohne Markdown
 GitHub-Release `mac/vX.Y.Z` (Workflow „macOS-Release“, `.github/workflows/mac-release.yml`) mit
 
 - `Cockpit-X.Y.Z.dmg` zum Installieren: öffnen, Cockpit in „Programme“ ziehen. Die neueste
-  liegt immer unter [Releases](https://github.com/rubenvitt/vault-cockpit/releases/latest),
+  steht oben in der [Liste der macOS-Releases](https://github.com/rubenvitt/vault-cockpit/releases?q=mac%2Fv&expanded=true)
+  (nicht `/releases/latest`: Das kann auch ein Release des Obsidian-Plugins sein),
 - `Cockpit-mac.zip` für das Update in der App.
 
 **Version** wie bei semantic-release aus den Conventional Commits seit dem letzten Tag `mac/v…`,
 nur Commits unter `ios/` (`ios/scripts/mac-release.js`, Tests in `test/mac-release.test.js`):
 `feat` → Minor, `!` oder `BREAKING CHANGE:` → Major, alles andere → Patch. Ein Push nur auf den
 Server gibt kein Release. Die erste Version ist `1.0.0`. Manuell gestartet (Actions →
-„macOS-Release“ → Run workflow) gibt es auch ohne neue Commits ein Patch-Release. Scheitert ein
+„macOS-Release“ → Run workflow, nur von `main`) gibt es auch ohne neue Commits ein Patch-Release. Scheitert ein
 Lauf, entsteht kein Tag, und der nächste Lauf nimmt dieselbe Version. Die Release-Notizen sind die
 Commit-Betreffe ohne Präfix, nach „Neu“, „Behoben“ und „Sonst“ gruppiert.
 
