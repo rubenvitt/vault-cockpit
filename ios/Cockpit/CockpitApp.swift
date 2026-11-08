@@ -34,8 +34,13 @@ struct CockpitApp: App {
             .sheet(isPresented: $model.showsPlayer) { NowPlayingSheet(model: model) }
             #if targetEnvironment(macCatalyst)
             .onAppear { MacWindow.configure() }
+            // Direktvertrieb: sucht neue Versionen auf GitHub (aus in TestFlight/App Store).
+            .macUpdates(MacUpdater.shared)
             #endif
         }
+        #if targetEnvironment(macCatalyst)
+        .commands { MacUpdateCommands(updater: MacUpdater.shared) }
+        #endif
     }
 }
 

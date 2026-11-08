@@ -21,6 +21,12 @@ settings:
     COCKPIT_SERVER_URL: https://vault.rubeen.dev
     # Host von COCKPIT_SERVER_URL für Associated Domains (xcconfig kann ihn nicht ableiten).
     COCKPIT_SERVER_HOST: vault.rubeen.dev
+    # Entitlements der Mac-App: App Store/TestFlight mit Sandbox; scripts/mac-direct.sh setzt für
+    # den Direktvertrieb Cockpit/Cockpit-macOS-direct.entitlements (ohne Sandbox, für das Update).
+    COCKPIT_MAC_ENTITLEMENTS: Cockpit/Cockpit-macOS.entitlements
+    # YES nur im Direktvertrieb (scripts/mac-direct.sh): MacUpdater sucht neue Releases auf GitHub.
+    # App Store und TestFlight aktualisieren selbst, dort bleibt es aus.
+    COCKPIT_SELF_UPDATE: NO
 
 packages:
   Shared:
@@ -50,8 +56,9 @@ targets:
         SUPPORTS_MACCATALYST: YES
         DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: NO
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
-        # Auf dem Mac braucht die App die Sandbox; die Datei pflegt xcodegen nicht (siehe README).
-        CODE_SIGN_ENTITLEMENTS[sdk=macosx*]: Cockpit/Cockpit-macOS.entitlements
+        # Auf dem Mac braucht die App die Sandbox (außer im Direktvertrieb, siehe
+        # COCKPIT_MAC_ENTITLEMENTS); die Dateien pflegt xcodegen nicht (siehe README).
+        CODE_SIGN_ENTITLEMENTS[sdk=macosx*]: $(COCKPIT_MAC_ENTITLEMENTS)
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_PREVIEWS: YES
     info:
@@ -63,6 +70,7 @@ targets:
         CockpitServerURL: $(COCKPIT_SERVER_URL)
         CockpitKeychainGroup: $(AppIdentifierPrefix)dev.rubeen.cockpit.shared
         CockpitAppGroup: group.dev.rubeen.cockpit
+        CockpitSelfUpdate: $(COCKPIT_SELF_UPDATE)
         UIBackgroundModes: [audio]
         ITSAppUsesNonExemptEncryption: false
         UILaunchScreen: {}

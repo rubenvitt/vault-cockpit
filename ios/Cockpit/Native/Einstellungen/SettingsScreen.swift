@@ -135,6 +135,10 @@ struct SettingsScreen: View {
                         .truncationMode(.middle)
                 }
                 .accessibilityElement(children: .combine)
+                #if targetEnvironment(macCatalyst)
+                // Nur im Direktvertrieb (DMG von GitHub); sonst leer.
+                MacUpdateRow(updater: MacUpdater.shared)
+                #endif
                 Button(role: .destructive) {
                     confirmsLogout = true
                 } label: {

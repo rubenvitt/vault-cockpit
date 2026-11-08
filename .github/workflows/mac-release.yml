@@ -1,0 +1,108 @@
+name: macOS-Release
+
+# Direktvertrieb der macOS-App (Mac Catalyst) über GitHub-Releases, ohne App Store: Jeder Push auf
+# main, der die App ändert (ios/ ohne Markdown), gibt ein Release `mac/vX.Y.Z` mit der notarisierten
+# DMG zum Installieren und `Cockpit-mac.zip` für das Update in der App (MacUpdater).
+# Die Version folgt den Commits wie semantic-release (ios/scripts/mac-release.js): feat → Minor,
+# `!`/BREAKING CHANGE → Major, sonst Patch. Manuell gestartet gibt es auch ohne neue Commits ein
+# Patch-Release (z. B. nach einem gescheiterten Lauf; ohne Release bleibt die Version frei).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ios/**'
+      - '!ios/**/*.md'
+      - '.github/workflows/mac-release.yml'
+  workflow_dispatch:
+
+# Ein Release nach dem anderen, sonst rechnen zwei Läufe dieselbe Version aus.
+concurrency:
+  group: mac-release
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.plan.outputs.release }}
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      - id: plan
+        env:
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
+          NOTES_FILE: ${{ runner.temp }}/notes.md
+        run: node ios/scripts/mac-release.js
+      - if: steps.plan.outputs.release == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: ${{ runner.temp }}/notes.md
+
+  release:
+    needs: version
+    if: needs.version.outputs.release == 'true'
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      TAG: ${{ needs.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: ${{ runner.temp }}
+      - name: API-Key ablegen
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+        run: |
+          key="$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
+          (umask 077; printf '%s' "$ASC_KEY_P8_BASE64" | base64 --decode > "$key")
+          echo "ASC_KEY_PATH=$key" >> "$GITHUB_ENV"
+      # Wie beim TestFlight-Upload: Das automatische Signieren legt ein Entwicklungszertifikat an.
+      - name: Alte CI-Zertifikate widerrufen
+        continue-on-error: true
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: node ios/scripts/certificates-cleanup.js
+      - name: Bauen, signieren (Developer ID), notarisieren
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Optional; ohne signiert der Export mit dem von Apple verwalteten Developer-ID-Zertifikat.
+          DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+        run: ios/scripts/mac-direct.sh
+      - name: Release anlegen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # `--latest`: Der Link …/releases/latest führt zur neuesten DMG. Das Release legt den Tag an.
+        run: |
+          gh release create "$TAG" \
+            "ios/build/mac-direct/Cockpit-$VERSION.dmg" ios/build/mac-direct/Cockpit-mac.zip \
+            --target "$GITHUB_SHA" --title "Cockpit für macOS $VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md" --latest
+          echo "### Cockpit für macOS $VERSION" >> "$GITHUB_STEP_SUMMARY"
+          gh release view "$TAG" --json url -q .url >> "$GITHUB_STEP_SUMMARY"
+      - name: Zertifikat dieses Laufs widerrufen
+        if: always()
+        continue-on-error: true
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: node ios/scripts/certificates-cleanup.js
+      - name: API-Key löschen
+        if: always()
+        run: rm -f "$ASC_KEY_PATH"
