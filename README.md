@@ -318,8 +318,10 @@ nicht erreichbar, entsteht die Aufgabe trotzdem, in der Inbox.
 Mit `id` ist das Anlegen idempotent (dieselbe ID → `200` mit dem Ergebnis von
 damals; erlaubt sind Buchstaben, Ziffern und `_ . : -`, höchstens 128 Zeichen).
 Bei Aufgaben gilt das auch, wenn Zunder angelegt hat, die Antwort aber nicht
-ankam (`502`): Die Beschreibung trägt den Marker `` `cockpit-capture:<quelle>:<id>` ``,
-und beim Nachsenden sucht das Cockpit erst danach, bevor es neu anlegt. Antworten: `201 {"kind":"note","path"}` bzw.
+ankam (`502`): Das Cockpit schickt `cockpit-capture:<quelle>:<id>` als
+Idempotenzschlüssel (`client_ref`) an Zunder, und beim Nachsenden liefert Zunder die
+schon angelegte Aufgabe, statt eine zweite anzulegen. Das braucht einen Zunder mit
+`client_ref` (Schema 9). Antworten: `201 {"kind":"note","path"}` bzw.
 `201 {"kind":"task","id","ref","url","title","due","location","phoenix","notes"}`, `400` bei falscher Eingabe, `401` ohne
 gültigen Token, `502` wenn Zunder ablehnt, `503` bei `!` ohne Zunder.
 Jede Antwort trägt zusätzlich `message`, einen fertigen Satz für die Mitteilung

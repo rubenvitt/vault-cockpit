@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, readFileSync, readdirSync, renameSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createCapture } from '../src/vault/capture.js';
-import { createCaptureRouter, cleanTitle } from '../src/capture/router.js';
+import { createCaptureRouter, cleanTitle, clientRef } from '../src/capture/router.js';
 import { createStateStore } from '../src/capture/state.js';
 import { createZunderClient } from '../src/capture/zunder.js';
 import { createCaptureHttp } from '../src/capture/http.js';
@@ -126,13 +126,17 @@ test('dieselbe Capture-ID erzeugt keine zweite Zunder-Aufgabe', async () => {
 /**
  * Zunder-Attrappe mit Gedächtnis: `lose` Antworten gehen verloren, obwohl die
  * Aufgabe angelegt ist (Timeout nach dem Schreiben); `down` Aufrufe scheitern,
- * bevor Zunder etwas anlegt.
+ * bevor Zunder etwas anlegt. Ein bekannter `clientRef` legt nichts neu an
+ * (wie `client_ref` in Zunder, ZUN-57).
  */
 function lossyZunder({ lose = 0, down = 0 } = {}) {
   const tasks = [];
+  const refs = new Map();
   const calls = { create: 0, find: 0 };
+  const url = (id) => `https://zunder.test/#/aufgabe/${id}`;
   return {
     tasks,
+    refs,
     calls,
     async createTask(args) {
       calls.create++;
@@ -140,45 +144,55 @@ function lossyZunder({ lose = 0, down = 0 } = {}) {
         down--;
         throw new Error('Zunder antwortet mit HTTP 503');
       }
+      const known = args.clientRef ? refs.get(args.clientRef) : null;
+      if (known) {
+        const location = known.location ? { ...known.location, name: 'Gesundheit' } : { kind: 'inbox' };
+        return { id: known.id, ref: known.ref, url: url(known.id), existing: true, task: { ...known, location } };
+      }
       const id = `t${tasks.length + 1}`;
-      tasks.push({ id, ref: `ZUN-${tasks.length + 1}`, ...args });
+      const task = { id, ref: `ZUN-${tasks.length + 1}`, ...args };
+      tasks.push(task);
+      if (args.clientRef) refs.set(args.clientRef, task);
       if (lose > 0) {
         lose--;
         throw new Error('The operation was aborted due to timeout');
       }
-      return { id, ref: `ZUN-${tasks.length}`, url: `https://zunder.test/#/aufgabe/${id}` };
+      return { id, ref: task.ref, url: url(id) };
     },
     async findByMarker(marker) {
       calls.find++;
       const t = tasks.find((x) => x.description.includes(`\`${marker}\``));
-      return t ? { id: t.id, ref: t.ref, url: `https://zunder.test/#/aufgabe/${t.id}` } : null;
+      return t ? { id: t.id, ref: t.ref, url: url(t.id) } : null;
     },
   };
 }
 
-test('Nachsenden nach verlorener Zunder-Antwort legt keine zweite Aufgabe an (VCP-132)', async () => {
+test('Nachsenden nach verlorener Zunder-Antwort legt keine zweite Aufgabe an (VCP-132, VCP-141)', async () => {
   const zunder = lossyZunder({ lose: 1 });
   const r = createCaptureRouter({ capture, zunder, state, logger: quiet });
   await assert.rejects(r.route({ text: '!Paket abholen', source: 'funke', captureId: 'f1' }), /timeout/);
   assert.equal(zunder.tasks.length, 1, 'Zunder hat die Aufgabe trotzdem angelegt');
-  assert.match(zunder.tasks[0].description, /`cockpit-capture:funke:f1`/);
+  assert.equal(zunder.tasks[0].clientRef, 'cockpit-capture:funke:f1');
 
-  // Auch nach einem Neustart: der Vermerk „angefragt“ liegt in der Datei.
+  // Auch nach einem Neustart: Den Schlüssel kennt Zunder, nicht der Merkzettel.
   const restarted = createCaptureRouter({ capture, zunder, state: createStateStore(join(root, '.state', 'capture.json')), logger: quiet });
   const again = await restarted.route({ text: '!Paket abholen', source: 'funke', captureId: 'f1' });
   assert.equal(again.duplicate, true);
   assert.equal(again.id, 't1');
+  assert.equal(again.ref, 'ZUN-1');
   assert.equal(again.title, 'Paket abholen');
+  assert.deepEqual(again.location, { kind: 'inbox' });
   assert.equal(zunder.tasks.length, 1);
-  assert.equal(zunder.calls.create, 1);
+  assert.equal(zunder.calls.create, 2, 'das Nachsenden fragt Zunder mit demselben Schlüssel');
+  assert.equal(zunder.calls.find, 0, 'keine Suche mehr');
 
   // Danach kennt der Merkzettel die Aufgabe, ohne Zunder zu fragen.
   const third = await restarted.route({ text: '!Paket abholen', source: 'funke', captureId: 'f1' });
   assert.equal(third.id, 't1');
-  assert.equal(zunder.calls.find, 1);
+  assert.equal(zunder.calls.create, 2);
 });
 
-test('Wiederhergestellte Aufgabe meldet den Plan von damals, nicht den vom Tag des Nachsendens (VCP-132)', async () => {
+test('Wiederhergestellte Aufgabe meldet den Stand in Zunder, nicht den Plan vom Tag des Nachsendens (VCP-132, VCP-141)', async () => {
   const zunder = lossyZunder({ lose: 1 });
   let at = new Date('2026-10-14T10:00:00Z');
   const r = createCaptureRouter({ capture, zunder, state, now: () => at, logger: quiet });
@@ -190,7 +204,19 @@ test('Wiederhergestellte Aufgabe meldet den Plan von damals, nicht den vom Tag d
   assert.equal(again.id, 't1');
   assert.equal(again.due, '2026-10-15', 'die Fälligkeit der Aufgabe in Zunder');
   assert.equal(again.dueLabel, 'heute', 'Beschriftung vom Tag des Nachsendens aus');
+  assert.deepEqual(again.notes, []);
   assert.equal(state.get('capture:funke:f2').due, '2026-10-15');
+});
+
+test('Wiederhergestellte Aufgabe meldet die Stelle aus Zunder (VCP-141)', async () => {
+  const zunder = lossyZunder();
+  zunder.refs.set('cockpit-capture:api:a9', { id: 'tz', ref: 'ZUN-9', title: 'Zahnarzt', due: '2026-10-20T09:00:00+02:00', location: { kind: 'area', id: 'g1' }, phoenix: null });
+  const r = createCaptureRouter({ capture, zunder, state, now: () => new Date('2026-10-14T10:00:00Z'), logger: quiet });
+  const again = await r.route({ text: '!Zahnarzt', source: 'api', captureId: 'a9' });
+  assert.equal(again.duplicate, true);
+  assert.equal(again.ref, 'ZUN-9');
+  assert.equal(again.due, '2026-10-20');
+  assert.deepEqual(again.location, { kind: 'area', id: 'g1', name: 'Gesundheit' });
 });
 
 test('Scheitert der Aufruf, bevor Zunder anlegt, legt das Nachsenden genau einmal an (VCP-132)', async () => {
@@ -200,18 +226,49 @@ test('Scheitert der Aufruf, bevor Zunder anlegt, legt das Nachsenden genau einma
   const again = await r.route({ text: '!Paket abholen', source: 'mail', captureId: 'm1' });
   assert.equal(again.duplicate, undefined);
   assert.equal(zunder.tasks.length, 1);
-  assert.equal(zunder.calls.find, 1);
-  assert.deepEqual(state.keys('capture-pending:'), [], 'der Vermerk ist nach dem Anlegen weg');
+  assert.equal(zunder.calls.find, 0);
+  assert.deepEqual(state.keys('capture-pending:'), [], 'es entsteht kein Vermerk „angefragt“ mehr');
 });
 
-test('Erstes Anlegen fragt Zunder nicht nach dem Marker; ohne Capture-ID gibt es keinen', async () => {
+test('Capture-ID geht als client_ref mit, ohne Marker in der Beschreibung; ohne ID kein Schlüssel (VCP-141)', async () => {
   const zunder = lossyZunder();
   const r = createCaptureRouter({ capture, zunder, state, logger: quiet });
   await r.route({ text: '!Mit ID', source: 'api', captureId: 'a1' });
   await r.route({ text: '!Ohne ID', source: 'api' });
-  assert.equal(zunder.calls.find, 0);
-  assert.match(zunder.tasks[0].description, /^_Erfasst über Capture-Endpunkt \(Vault Cockpit\)_ · `cockpit-capture:api:a1`$/);
+  assert.equal(zunder.tasks[0].clientRef, 'cockpit-capture:api:a1');
+  assert.equal(zunder.tasks[0].description, '_Erfasst über Capture-Endpunkt (Vault Cockpit)_');
+  assert.equal(zunder.tasks[1].clientRef, null);
   assert.equal(zunder.tasks[1].description, '_Erfasst über Capture-Endpunkt (Vault Cockpit)_');
+});
+
+test('Lange Capture-IDs werden für client_ref gehasht und bleiben gültig (VCP-141)', () => {
+  const id = 'x'.repeat(128);
+  const ref = clientRef(`capture:ios-kurzbefehl:${id}`);
+  assert.match(ref, /^cockpit-sha256:[0-9a-f]{64}$/);
+  assert.match(ref, /^[A-Za-z0-9_.:-]{1,128}$/);
+  assert.equal(ref, clientRef(`capture:ios-kurzbefehl:${id}`), 'immer derselbe Schlüssel');
+  assert.notEqual(ref, clientRef(`capture:mail:${id}`));
+  assert.equal(clientRef('capture:funke:f1'), 'cockpit-capture:funke:f1');
+});
+
+test('Altbestand: Ein Vermerk „angefragt“ aus VCP-132 findet die Aufgabe noch über den Marker (VCP-141)', async () => {
+  const zunder = lossyZunder();
+  zunder.tasks.push({ id: 't1', ref: 'ZUN-1', description: '_Erfasst über Funke (Vault Cockpit)_ · `cockpit-capture:funke:alt`' });
+  state.set('capture-pending:funke:alt', { at: '2026-11-08T10:00:00Z', plan: { title: 'Paket abholen', due: null, location: null, phoenix: null, notes: [] } });
+  state.set('capture-pending:funke:weg', { at: '2026-11-08T10:00:00Z', plan: { title: 'Weg', due: null, location: null, phoenix: null, notes: [] } });
+  const r = createCaptureRouter({ capture, zunder, state, logger: quiet });
+
+  const found = await r.route({ text: '!Paket abholen', source: 'funke', captureId: 'alt' });
+  assert.equal(found.duplicate, true);
+  assert.equal(found.id, 't1');
+  assert.equal(zunder.calls.create, 0);
+
+  // Kennt Zunder den Marker nicht, wurde nie angelegt: einmal neu, mit Schlüssel.
+  const fresh = await r.route({ text: '!Weg', source: 'funke', captureId: 'weg' });
+  assert.equal(fresh.duplicate, undefined);
+  assert.equal(zunder.calls.create, 1);
+  assert.equal(zunder.tasks.at(-1).clientRef, 'cockpit-capture:funke:weg');
+  assert.deepEqual(state.keys('capture-pending:'), []);
 });
 
 test('dieselbe Capture-ID legt keine zweite Notiz an, auch nach dem Ablegen (VCP-56)', async () => {
@@ -295,6 +352,29 @@ test('Zunder-Client ruft create_task über MCP auf', async () => {
     arguments: { title: 'Test', description: 'D', vault_links: ['a.md'] },
   });
   assert.deepEqual(task, { id: 'abc', ref: null, url: 'https://zunder.test/#/aufgabe/abc' });
+});
+
+test('Zunder-Client sendet client_ref und meldet eine schon angelegte Aufgabe (VCP-141)', async () => {
+  const bodies = [];
+  let existing = false;
+  const client = createZunderClient({
+    url: 'https://zunder.test',
+    token: 't',
+    fetch: async (_url, init) => {
+      bodies.push(JSON.parse(init.body).params.arguments);
+      const task = { id: 'abc', ref: 'ZUN-7', title: 'Test', due: '2026-10-15' };
+      return Response.json({ jsonrpc: '2.0', id: 1, result: { structuredContent: existing ? { task, existing: true } : { task } } });
+    },
+  });
+  assert.deepEqual(await client.createTask({ title: 'Test', clientRef: 'cockpit-capture:api:a1' }), { id: 'abc', ref: 'ZUN-7', url: 'https://zunder.test/#/aufgabe/abc' });
+  assert.deepEqual(bodies[0], { title: 'Test', client_ref: 'cockpit-capture:api:a1' });
+  existing = true;
+  const again = await client.createTask({ title: 'Test', clientRef: 'cockpit-capture:api:a1' });
+  assert.equal(again.existing, true);
+  assert.equal(again.deleted, undefined);
+  assert.equal(again.task.due, '2026-10-15');
+  await client.createTask({ title: 'Ohne' });
+  assert.equal('client_ref' in bodies[2], false, 'ohne Schlüssel wie bisher');
 });
 
 test('Zunder-Client meldet Ablehnungen mit der Begründung', async () => {
