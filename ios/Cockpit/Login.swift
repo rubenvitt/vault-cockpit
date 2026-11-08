@@ -107,14 +107,27 @@ struct LoginRequest {
 
     @MainActor
     static var currentDeviceName: String {
+        #if targetEnvironment(macCatalyst)
+        // Unter Catalyst meldet `UIDevice` „iPad“ und `uname` nur „arm64“: „Mac · Mac15,3 · …“.
+        deviceName(name: "Mac", model: modelIdentifier, date: .now)
+        #else
         deviceName(name: UIDevice.current.name, model: modelIdentifier, date: .now)
+        #endif
     }
 
     private static var modelIdentifier: String {
+        #if targetEnvironment(macCatalyst)
+        var size = 0
+        sysctlbyname("hw.model", nil, &size, nil, 0)
+        var model = [CChar](repeating: 0, count: max(size, 1))
+        sysctlbyname("hw.model", &model, &size, nil, 0)
+        return String(cString: model)
+        #else
         if let simulated = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] { return simulated }
         var info = utsname()
         uname(&info)
         return withUnsafeBytes(of: &info.machine) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+        #endif
     }
 }
 

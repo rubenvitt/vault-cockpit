@@ -11,6 +11,7 @@ cd ios
 make project   # erzeugt Cockpit.xcodeproj
 make build     # Simulator-Build ohne Signieren
 make test      # Unit-Tests auf dem ersten verfügbaren iPhone-Simulator
+make mac       # macOS-App (Mac Catalyst) ohne Signieren
 ```
 
 - `DESTINATION='platform=iOS Simulator,name=iPhone 17'` wählt einen anderen Simulator.
@@ -301,6 +302,30 @@ Fehler-Domain, Code und Host (Kategorie `login`).
 Ohne Netz zeigt jeder Bildschirm den zuletzt gespeicherten Stand („Offline, Stand von …“);
 Schreibendes aus Schnelleingabe und Leseansicht wartet in deren Puffern.
 
+## macOS-App (Mac Catalyst)
+
+Dieselbe App läuft als macOS-App über Mac Catalyst („an iPad angepasst“), ab macOS 14.4 (wie
+iOS 17.4 für den Login mit https-Callback). Dafür unterstützt das Target auch das iPad
+(`TARGETED_DEVICE_FAMILY` `1,2`, Catalyst setzt die iPad-Familie voraus). Die Bundle-ID ist auf
+dem Mac dieselbe (`DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: NO`): eine App in App Store
+Connect, und die `apple-app-site-association` des Servers gilt unverändert, der Server braucht
+nichts Neues.
+
+- **Entitlements:** Auf dem Mac gelten `Cockpit/Cockpit-macOS.entitlements` und
+  `ShareExtension/ShareExtension-macOS.entitlements` (`CODE_SIGN_ENTITLEMENTS[sdk=macosx*]`):
+  wie auf iOS, dazu App Sandbox, Netzwerk und Dateiauswahl. Diese beiden Dateien pflegt
+  xcodegen nicht; ändern sich App Group, Keychain-Gruppe oder Domains, auch dort nachtragen.
+- **Unterschiede im Code** (`#if targetEnvironment(macCatalyst)`): Links nach außen öffnen im
+  Standardbrowser statt im `SFSafariViewController` (`ExternalLink.present`), der Gerätename des
+  Tokens heißt „Mac · Mac15,3 · …“ (`hw.model`), das Fenster ist mindestens 420 × 640 groß
+  (`MacWindow`). Haptik (`sensoryFeedback`) bleibt auf dem Mac stumm.
+- **Ein Fenster:** `UIApplicationSupportsMultipleScenes` ist `false`, weil `AppModel` für die ganze
+  App gilt.
+- **Teilen:** Die Share Extension „Zum Lesestapel“ steht auf dem Mac im Teilen-Menü (Safari,
+  Vorschau usw.).
+- **CI:** `ios-test` baut nach den Tests auch `make mac`. Für TestFlight siehe unten
+  (`PLATFORM=mac`, Repo-Variable `TESTFLIGHT_MAC`).
+
 ## TestFlight
 
 Lokal, mit API-Key unter `~/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8`:
@@ -312,7 +337,16 @@ ASC_KEY_ID=… ASC_ISSUER_ID=… ios/scripts/testflight.sh
 Das Skript erzeugt das Projekt, archiviert signiert (automatisch, `-allowProvisioningUpdates`)
 und lädt hoch. Die Build-Nummer ist ein UTC-Zeitstempel (`JJJJMMTT.HHMM`) und steigt so von
 selbst. `EXPORT_DESTINATION=export` signiert nur und legt die `.ipa` unter
-`ios/build/testflight/export` ab, ohne Upload. Weitere Variablen stehen im Kopf des Skripts.
+`ios/build/testflight/export` ab, ohne Upload. `PLATFORM=mac` archiviert die macOS-App (Mac
+Catalyst) und lädt sie als `.pkg` hoch (Export unter `ios/build/testflight-mac/export`). Weitere
+Variablen stehen im Kopf des Skripts.
+
+Für die macOS-App braucht die App in App Store Connect einmalig die Plattform macOS (App →
+„Plattform hinzufügen“ → macOS, gleiche Version wie iOS). Danach im Repo die Variable
+`TESTFLIGHT_MAC=true` setzen: Der Workflow lädt dann bei jedem Lauf nach dem iOS-Build dieselbe
+Nummer als macOS-Build hoch und verteilt ihn an dieselben Gruppen (`PLATFORM=MAC_OS` in
+`testflight-distribute.js`). Scheitert nur der Mac-Upload, geht der iOS-Build trotzdem raus; der
+Schritt ist dann im Lauf rot markiert. Auf dem Mac kommt der Build über die TestFlight-App.
 
 Auf diesem Mac (Xcode 27) scheitert das automatische Signieren mit dem API-Key an
 „Authentication failed … bearer token“, obwohl der Key mit der API funktioniert. Lokal deshalb

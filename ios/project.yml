@@ -42,7 +42,16 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.rubeen.cockpit
         PRODUCT_NAME: Cockpit
-        TARGETED_DEVICE_FAMILY: "1"
+        # iPhone und iPad; Mac Catalyst setzt die iPad-Familie voraus.
+        TARGETED_DEVICE_FAMILY: "1,2"
+        # macOS-App aus demselben Code (Mac Catalyst, „an iPad angepasst“), mit derselben
+        # Bundle-ID wie auf iOS: dieselbe App in App Store Connect, und die
+        # apple-app-site-association des Servers gilt für den Login auch auf dem Mac.
+        SUPPORTS_MACCATALYST: YES
+        DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: NO
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+        # Auf dem Mac braucht die App die Sandbox; die Datei pflegt xcodegen nicht (siehe README).
+        CODE_SIGN_ENTITLEMENTS[sdk=macosx*]: Cockpit/Cockpit-macOS.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_PREVIEWS: YES
     info:
@@ -57,10 +66,21 @@ targets:
         UIBackgroundModes: [audio]
         ITSAppUsesNonExemptEncryption: false
         UILaunchScreen: {}
+        # Ein Fenster: AppModel gilt für die ganze App (auf iPad und Mac sonst ⌘N für ein zweites).
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
+        # iPad (und damit Mac Catalyst) verlangt alle vier für geteilte Fenster.
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        # Kategorie im Finder/Launchpad auf dem Mac.
+        LSApplicationCategoryType: public.app-category.productivity
         # Nur für einen lokalen Entwicklungsserver per http (Debug-Überschreibung).
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
@@ -94,7 +114,12 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.rubeen.cockpit.share
-        TARGETED_DEVICE_FAMILY: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        # Wie die App: auf dem Mac im Teilen-Menü, mit Sandbox.
+        SUPPORTS_MACCATALYST: YES
+        DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: NO
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+        CODE_SIGN_ENTITLEMENTS[sdk=macosx*]: ShareExtension/ShareExtension-macOS.entitlements
     info:
       path: ShareExtension/Info.plist
       properties:
@@ -137,4 +162,6 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.rubeen.cockpit.tests
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: YES
         GENERATE_INFOPLIST_FILE: YES

@@ -51,9 +51,12 @@ enum ExternalLink {
         present(url)
     }
 
-    /// http(s) im `SFSafariViewController` über dem obersten Blatt.
+    /// http(s) im `SFSafariViewController` über dem obersten Blatt; auf dem Mac im Standardbrowser.
     @MainActor
     static func present(_ url: URL) {
+        #if targetEnvironment(macCatalyst)
+        UIApplication.shared.open(url)
+        #else
         let window = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow }.first
         guard var presenter = window?.rootViewController else {
             UIApplication.shared.open(url)
@@ -63,6 +66,7 @@ enum ExternalLink {
         let safari = SFSafariViewController(url: url)
         safari.preferredControlTintColor = .cockpitAccent
         presenter.present(safari, animated: true)
+        #endif
     }
 
     @MainActor

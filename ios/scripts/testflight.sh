@@ -9,6 +9,7 @@
 #   APPLE_TEAM_ID               Standard H95J852PKP
 #   BUILD_NUMBER                Standard UTC-Zeitstempel JJJJMMTT.HHMM (steigt mit jedem Lauf)
 #   EXPORT_DESTINATION          upload (Standard) oder export: nur signieren, nichts hochladen
+#   PLATFORM                    ios (Standard) oder mac: die macOS-App (Mac Catalyst) als .pkg
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -23,12 +24,19 @@ TEAM_ID="${APPLE_TEAM_ID:-H95J852PKP}"
 # Zwei Zahlen statt einer, damit jede Komponente in 32 Bit passt.
 BUILD_NUMBER="${BUILD_NUMBER:-$(date -u +%Y%m%d.%H%M)}"
 EXPORT_DESTINATION="${EXPORT_DESTINATION:-upload}"
+PLATFORM="${PLATFORM:-ios}"
+case "$PLATFORM" in
+  ios) DESTINATION='generic/platform=iOS' ;;
+  mac) DESTINATION='generic/platform=macOS,variant=Mac Catalyst' ;;
+  *) echo "PLATFORM muss ios oder mac sein" >&2; exit 1 ;;
+esac
 
 [[ "$XCODE_ACCOUNT" == 1 || -f "$ASC_KEY_PATH" ]] || { echo "API-Key nicht gefunden: $ASC_KEY_PATH" >&2; exit 1; }
 [[ "$EXPORT_DESTINATION" == upload || "$EXPORT_DESTINATION" == export ]] \
   || { echo "EXPORT_DESTINATION muss upload oder export sein" >&2; exit 1; }
 
 OUT="build/testflight"
+[[ "$PLATFORM" == ios ]] || OUT="build/testflight-$PLATFORM"
 ARCHIVE="$OUT/Cockpit.xcarchive"
 rm -rf "$OUT"
 mkdir -p "$OUT"
@@ -53,12 +61,12 @@ cat > "$OUT/ExportOptions.plist" <<PLIST
 </plist>
 PLIST
 
-echo "Build $BUILD_NUMBER, Team $TEAM_ID, Ziel $EXPORT_DESTINATION"
+echo "Build $BUILD_NUMBER ($PLATFORM), Team $TEAM_ID, Ziel $EXPORT_DESTINATION"
 
 xcodegen generate
 
 xcodebuild -project Cockpit.xcodeproj -scheme Cockpit -configuration Release \
-  -destination 'generic/platform=iOS' -archivePath "$ARCHIVE" \
+  -destination "$DESTINATION" -archivePath "$ARCHIVE" \
   DEVELOPMENT_TEAM="$TEAM_ID" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
   "${AUTH[@]}" archive
 
@@ -66,4 +74,4 @@ xcodebuild -exportArchive -archivePath "$ARCHIVE" \
   -exportOptionsPlist "$OUT/ExportOptions.plist" -exportPath "$OUT/export" \
   "${AUTH[@]}"
 
-echo "Fertig: Build $BUILD_NUMBER ($EXPORT_DESTINATION)"
+echo "Fertig: Build $BUILD_NUMBER ($PLATFORM, $EXPORT_DESTINATION)"

@@ -32,9 +32,26 @@ struct CockpitApp: App {
             }
             // Der große Player; geschlossen spielt er weiter, als Leiste über den Reitern (`nowPlayingBar`).
             .sheet(isPresented: $model.showsPlayer) { NowPlayingSheet(model: model) }
+            #if targetEnvironment(macCatalyst)
+            .onAppear { MacWindow.configure() }
+            #endif
         }
     }
 }
+
+#if targetEnvironment(macCatalyst)
+/// Fenster der Mac-App (Mac Catalyst): Die Oberfläche ist fürs iPhone gebaut, darunter wird sie eng.
+enum MacWindow {
+    static let minimumSize = CGSize(width: 420, height: 640)
+
+    @MainActor
+    static func configure() {
+        for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+            scene.sizeRestrictions?.minimumSize = minimumSize
+        }
+    }
+}
+#endif
 
 struct LoginView: View {
     let model: AppModel
