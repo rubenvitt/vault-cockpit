@@ -7,7 +7,7 @@ import { createSettingsStore } from '../src/cockpit/settings.js';
 import { findFeuer, sectionParagraph } from '../src/cockpit/feuer.js';
 import { createCockpit, areaOf } from '../src/cockpit/data.js';
 import { createFlameBlocks } from '../src/cockpit/flammen-bloecke.js';
-import { flameRows } from '../src/cockpit/flammen-notiz.js';
+import { flameRows, burnedSince, burnedInWeek } from '../src/cockpit/flammen-notiz.js';
 import { renderWeek, inline, dueTag } from '../src/web/render.js';
 import { noteOrigin } from '../src/web/note-render.js';
 import { buildIndex, openIndex } from '../src/vault/index.js';
@@ -548,6 +548,49 @@ test('Zweimal gebrannte Flamme: Wochenansicht, Rückblick und Feuer-Notiz zeigen
   const c3 = createCockpit({ index: fakeIndex([]), settings: settingsWith(), zunderFor: () => broken, now: fixedNow, logger: quiet });
   assert.equal((await c3.week('2026-W42')).flames.data.find((f) => f.id === 'f2').minutes, 90);
   assert.equal((await c3.review('2026-W42')).flames.find((f) => f.id === 'f2').minutes, 90);
+});
+
+test('Rückblick: ungeplant gebrannte Aufgabe zählt in ihren Bereich, dieselbe Summe wie die Feuer-Notiz (VCP-127)', async () => {
+  // Offen, ohne Fälligkeit, ohne Flammen-Markierung: weder geplant noch erledigt.
+  const unplanned = {
+    id: 'u1', title: 'Rücken üben', status: 'open', due: null, location: loc('Gesundheit'), phoenix: null,
+    flame_started_at: '2026-10-14T10:00:00Z', flame_ended_at: '2026-10-14T10:45:00Z', updated_at: '2026-10-14T10:45:00Z',
+  };
+  // Läuft seit dieser Woche: zählt noch nicht.
+  const running = { id: 'u2', title: 'Lesen', status: 'in_progress', due: null, location: loc('Gesundheit'), flame_running: true, flame_started_at: '2026-10-15T07:00:00Z', updated_at: '2026-10-15T07:00:00Z' };
+  const history = [
+    { seq: 1, field: 'flame_started_at', value: '2026-10-09T08:00:00Z' },
+    { seq: 2, field: 'flame_ended_at', value: '2026-10-09T08:40:00Z' },
+    { seq: 3, field: 'flame_started_at', value: '2026-10-13T08:00:00Z' },
+    { seq: 4, field: 'flame_ended_at', value: '2026-10-13T08:30:00Z' },
+    { seq: 5, field: 'flame_started_at', value: '2026-10-14T10:00:00Z' },
+    { seq: 6, field: 'flame_ended_at', value: '2026-10-14T10:45:00Z' },
+  ];
+  const zunder = { ...fakeZunder([...TASKS, unplanned, running]), async taskHistory(id) { return id === 'u1' ? history : []; } };
+  const blocks = createFlameBlocks({ logger: quiet });
+  const cockpit = createCockpit({ index: fakeIndex([]), settings: settingsWith(), zunderFor: () => zunder, flameBlocks: blocks, now: fixedNow, logger: quiet });
+
+  const review = await cockpit.review('2026-W42');
+  const health = review.areas.find((a) => a.area === 'Gesundheit');
+  // Der Block der Vorwoche zählt nicht, 30 + 45 min schon.
+  assert.deepEqual([health.planned, health.done, health.extra, health.minutes], [0, 0, 0, 75]);
+  assert.equal(review.totals.minutes, 90 + 75);
+  assert.equal(review.flames.some((f) => f.id === 'u1'), false);
+
+  // Feuer-Notiz: derselbe Weg (burnedSince, Block-Dienst, burnedInWeek).
+  const week = describeWeek({ year: 2026, week: 42 }, TZ);
+  const others = await burnedSince(zunder, week);
+  const all = await blocks.of(zunder, others, { scope: week.id });
+  const extra = burnedInWeek(others, all, week);
+  const note = flameRows([], { tz: TZ, blocks: extra.blocks, burned: extra.burned });
+  assert.equal(note.find((r) => r.title === 'Rücken üben').measured, String(health.minutes));
+
+  // Suche fällt aus: Rückblick bleibt, ohne die ungeplante Zeit.
+  const failing = { ...zunder, async filterTasks(f) { if (f.order_by === 'updated') throw new Error('HTTP 502'); return zunder.filterTasks(f); } };
+  const c2 = createCockpit({ index: fakeIndex([]), settings: settingsWith(), zunderFor: () => failing, now: fixedNow, logger: quiet });
+  const r2 = await c2.review('2026-W42');
+  assert.equal(r2.ok, true);
+  assert.equal(r2.areas.some((a) => a.area === 'Gesundheit'), false);
 });
 
 test('Flammen-Verlauf: eine Seite wartet nur bis zur Frist, die späte Antwort landet im Cache (VCP-118)', async () => {

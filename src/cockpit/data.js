@@ -1,6 +1,6 @@
 import { describeWeek, weekOf, parseWeekId, weekId, localDate, addDays } from './week.js';
 import { findFeuer } from './feuer.js';
-import { flameMinutes } from './flammen-notiz.js';
+import { flameMinutes, burnedSince, burnedInWeek } from './flammen-notiz.js';
 import { createFlameBlocks } from './flammen-bloecke.js';
 
 const OPEN = ['open', 'in_progress', 'blocked'];
@@ -87,7 +87,9 @@ export function createCockpit({ index, settings, zunderFor, calendars = null, fl
      * Wochenrückblick: je Lebensbereich erledigt gegen geplant (Big Rocks und
      * Flammen der Woche), was außerdem erledigt wurde, und die Flammen-Zeit je
      * Bereich. Geplant heißt wie in der Wochenansicht: in der Woche fällig oder
-     * Phönix-Markierung der Woche. Ungültige Kennung → null.
+     * Phönix-Markierung der Woche. Die Flammen-Zeit zählt auch Aufgaben, die
+     * ungeplant gebrannt haben, wie die Feuer-Notiz (VCP-127). Ungültige
+     * Kennung → null.
      */
     async review(id) {
       const config = settings.get();
@@ -120,10 +122,25 @@ export function createCockpit({ index, settings, zunderFor, calendars = null, fl
       const extra = closed.filter((t) => !planned.has(t.id));
       // Flammen-Zeit: jeder Block, der in dieser Woche begonnen hat.
       const candidates = [...new Map([...planned.values(), ...closed].map((t) => [t.id, t])).values()];
-      const blocks = await blocksOf(zunder, candidates, `rueckblick ${week.id}`);
+      // Auch Aufgaben, die ungeplant gebrannt haben, ohne fällig oder erledigt
+      // zu sein; dieselbe Suche wie in der Feuer-Notiz (VCP-127).
+      let others = [];
+      try {
+        others = (await burnedSince(zunder, week)).filter((t) => !candidates.some((c) => c.id === t.id));
+      } catch (err) {
+        logger.warn?.(`Cockpit: Rückblick ohne ungeplante Flammen — ${err.message}`);
+      }
+      const blocks = await blocksOf(zunder, [...candidates, ...others], `rueckblick ${week.id}`);
       const flamed = new Map();
       for (const t of candidates) {
         const minutes = minutesIn(t, blocks.get(t.id), week, tz);
+        if (minutes) flamed.set(t.id, { t, minutes });
+      }
+      // Wie in der Notiz: nur Blöcke dieser Woche, eine laufende Flamme zählt noch nicht.
+      const burned = burnedInWeek(others, blocks, week);
+      for (const t of burned.burned) {
+        const mine = burned.blocks.get(t.id);
+        const minutes = mine?.length ? flameMinutes(t, mine) : 0;
         if (minutes) flamed.set(t.id, { t, minutes });
       }
 

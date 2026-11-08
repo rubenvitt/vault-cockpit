@@ -494,7 +494,8 @@ Cockpit keine an, dann gehört ein neuer Feuersturm in Obsidian geplant. Der **W
 unter `/rueckblick` (in der Navigation, `?woche=` für frühere Wochen) zeigt je
 Bereich, was erledigt war und was geplant war (Phönix-Schritte und in der Woche
 Fälliges), was außerdem erledigt wurde, die Flammen-Zeit der Woche und was offen
-blieb.
+blieb. Die Flammen-Zeit zählt auch Blöcke an Aufgaben, die ungeplant gebrannt
+haben, mit denselben Minuten wie die Tabelle in der Feuer-Notiz.
 
 **Wissen:** `/wissen` sucht mit einer Frage in den Synthesen (Frontmatter
 `type: synthesis`, Hybrid-Suche mit Typfilter; `/api/suche` kennt `type` auch),
