@@ -115,7 +115,10 @@ jobs:
             # Archiv dieser Version schon vollständig da (Wiederholung nach einem Abbruch): stehen
             # lassen, sonst löschte --clobber es vor dem Upload, und scheitert der, fehlte das
             # Archiv zum Titel. Ein unvollständiger Upload (state ≠ uploaded) wird ersetzt.
-            if ! gh release view macos --json assets -q '.assets[] | select(.state == "uploaded") | .name' | grep -qxF "$zip"; then
+            # Abfrage für sich: Scheitert sie, bricht der Lauf ab (bash -e), statt wie bei
+            # „Archiv fehlt“ mit --clobber hochzuladen.
+            uploaded="$(gh release view macos --json assets -q '.assets[] | select(.state == "uploaded") | .name')"
+            if ! grep -qxF "$zip" <<< "$uploaded"; then
               gh release upload macos "ios/build/mac-direct/$zip" --clobber
             fi
             gh release edit macos --title "$title" --notes-file "$RUNNER_TEMP/notes.md" --prerelease
