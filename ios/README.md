@@ -402,9 +402,12 @@ Einmal einrichten:
   verwalteten Zertifikat (Cloud-Signing; legt der Account Holder bzw. ein Admin mit Zugriff auf
   Cloud-verwaltete Zertifikate an). Scheitert das, das Zertifikat im Developer-Portal anlegen,
   als `.p12` exportieren und als `DEVELOPER_ID_P12_BASE64` (base64) und
-  `DEVELOPER_ID_P12_PASSWORD` hinterlegen. Dann signiert das Skript auch die DMG selbst.
+  `DEVELOPER_ID_P12_PASSWORD` hinterlegen. Dann signiert der Export manuell: Mit dem API-Key
+  sucht das automatische Signieren nur das Cloud-Zertifikat. `scripts/developer-id-profiles.js`
+  holt deshalb die Developer-ID-Profile für App und Share Extension (oder legt sie an). Das
+  Skript signiert dann auch die DMG.
 - Die App-ID `dev.rubeen.cockpit` hat App Groups, Associated Domains und Keychain Sharing
-  schon; das automatische Signieren legt das Developer-ID-Profil dafür selbst an.
+  schon; die Profile übernehmen diese Fähigkeiten.
 
 ## TestFlight
 

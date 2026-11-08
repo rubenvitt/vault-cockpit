@@ -13,7 +13,8 @@
 #   BUILD_NUMBER                Standard UTC-Zeitstempel JJJJMMTT.HHMM
 #   DEVELOPER_ID_P12_BASE64     optional: Zertifikat „Developer ID Application“ (.p12, base64);
 #   DEVELOPER_ID_P12_PASSWORD   ohne nutzt der Export das von Apple verwaltete Zertifikat (Cloud).
-#                               Mit Zertifikat wird auch die DMG selbst signiert.
+#                               Mit Zertifikat signiert der Export manuell mit den Developer-ID-
+#                               Profilen (developer-id-profiles.js), auch die DMG wird signiert.
 #   NOTARIZE=0                  nicht notarisieren (nur zum Ausprobieren; Gatekeeper sperrt dann)
 set -euo pipefail
 
@@ -43,6 +44,7 @@ NOTARY=(--key "$ASC_KEY_PATH" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID")
 # Eigenes Zertifikat in einen Wegwerf-Schlüsselbund, sonst signiert der Export über Apples Cloud.
 KEYCHAIN=""
 SIGN_IDENTITY=""
+EXPORT_SIGNING="<key>signingStyle</key><string>automatic</string>"
 cleanup() {
   [[ -n "$KEYCHAIN" ]] && security delete-keychain "$KEYCHAIN" 2>/dev/null || true
 }
@@ -66,6 +68,13 @@ if [[ -n "${DEVELOPER_ID_P12_BASE64:-}" ]]; then
   # shellcheck disable=SC1111
   [[ -n "$SIGN_IDENTITY" ]] || { echo "Kein „Developer ID Application“-Zertifikat im .p12" >&2; exit 1; }
   echo "Signiere mit: $SIGN_IDENTITY"
+  # Manuell signieren: Automatisch fragt der Export mit dem API-Key nur nach Apples Cloud-Zertifikat
+  # („Cloud signing permission error“) und legt für ein eigenes Zertifikat kein Profil an.
+  serial="$(security find-certificate -c "$SIGN_IDENTITY" -p "$KEYCHAIN" | openssl x509 -noout -serial)"
+  profiles="$(ASC_KEY_PATH="$ASC_KEY_PATH" CERT_SERIAL="$serial" node scripts/developer-id-profiles.js)"
+  EXPORT_SIGNING="<key>signingStyle</key><string>manual</string>
+  <key>signingCertificate</key><string>Developer ID Application</string>
+  $profiles"
 fi
 
 cat > "$OUT/ExportOptions.plist" <<PLIST
@@ -76,7 +85,7 @@ cat > "$OUT/ExportOptions.plist" <<PLIST
   <key>method</key><string>developer-id</string>
   <key>destination</key><string>export</string>
   <key>teamID</key><string>$TEAM_ID</string>
-  <key>signingStyle</key><string>automatic</string>
+  $EXPORT_SIGNING
 </dict>
 </plist>
 PLIST
