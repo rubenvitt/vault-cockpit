@@ -14,7 +14,9 @@ import { createOllamaEmbedder } from '../semantic/embedder.js';
  * Markdown nach stdout, Fortschritt nach stderr. Liest die Datenbank nur,
  * läuft also auch neben dem Cockpit:
  *
- *   docker exec vault-cockpit node src/cli/cluster-schwelle.js > cluster.md
+ *   docker exec <container> node src/cli/cluster-schwelle.js > cluster.md
+ *
+ * `<container>` ist der Name des Cockpit-Containers (auf r-server `vault-mcp`).
  *
  * Der Bericht enthält Zitate aus den Markierungen.
  */
