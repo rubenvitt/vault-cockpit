@@ -18,9 +18,9 @@ final class MacUpdateTests: XCTestCase {
     func testUpdateFromRollingRelease() throws {
         let update = try XCTUnwrap(try MacUpdateFeed.update(in: Self.release(), newerThan: try XCTUnwrap(AppVersion("1.1.0"))))
         XCTAssertEqual(update.version.description, "1.3.0")
-        XCTAssertEqual(update.archiveURL.absoluteString, "https://github.com/rubenvitt/vault-cockpit/releases/download/macos/Cockpit-mac-1.3.0.zip")
+        XCTAssertEqual(update.archiveURL.absoluteString, "https://github.com/rubenvitt/vault-cockpit/releases/download/macos-0.0.0/Cockpit-mac-1.3.0.zip")
         XCTAssertEqual(update.diskImageURL?.lastPathComponent, "Cockpit.dmg")
-        XCTAssertEqual(update.pageURL.absoluteString, "https://github.com/rubenvitt/vault-cockpit/releases/tag/macos")
+        XCTAssertEqual(update.pageURL.absoluteString, "https://github.com/rubenvitt/vault-cockpit/releases/tag/macos-0.0.0")
         XCTAssertEqual(update.archiveSize, 12_345)
         XCTAssertEqual(update.archiveSHA256, String(repeating: "ab", count: 32))
         XCTAssertTrue(update.notes.hasPrefix("### Neu"))
@@ -46,7 +46,7 @@ final class MacUpdateTests: XCTestCase {
     }
 
     func testReleaseURL() {
-        XCTAssertEqual(MacUpdateFeed.releaseURL.absoluteString, "https://api.github.com/repos/rubenvitt/vault-cockpit/releases/tags/macos")
+        XCTAssertEqual(MacUpdateFeed.releaseURL.absoluteString, "https://api.github.com/repos/rubenvitt/vault-cockpit/releases/tags/macos-0.0.0")
     }
 
     func testDigestOnlySha256() {
@@ -61,18 +61,18 @@ final class MacUpdateTests: XCTestCase {
         XCTAssertEqual(MacUpdateFeed.displayNotes(notes), "Neu:\n\n- Updates in der App\n\nBehoben:\n\n- Login")
     }
 
-    /// Antwort von `GET /repos/…/releases/tags/macos`, gekürzt; das echte Release ist eine Vorabversion.
-    static func release(tag: String = "macos", title: String = "Cockpit für macOS 1.3.0", draft: Bool = false,
+    /// Antwort von `GET /repos/…/releases/tags/macos-0.0.0`, gekürzt; das echte Release ist eine Vorabversion.
+    static func release(tag: String = "macos-0.0.0", title: String = "Cockpit für macOS 1.3.0", draft: Bool = false,
                         archive: String = "Cockpit-mac-1.3.0.zip") -> Data {
         let digest = String(repeating: "ab", count: 32)
         return Data("""
         {"tag_name": "\(tag)", "name": "\(title)", "body": "### Neu\\n\\n- Updates", "draft": \(draft), "prerelease": true,
-         "html_url": "https://github.com/rubenvitt/vault-cockpit/releases/tag/macos",
+         "html_url": "https://github.com/rubenvitt/vault-cockpit/releases/tag/macos-0.0.0",
          "assets": [
            {"name": "Cockpit.dmg", "size": 99999,
-            "browser_download_url": "https://github.com/rubenvitt/vault-cockpit/releases/download/macos/Cockpit.dmg"},
+            "browser_download_url": "https://github.com/rubenvitt/vault-cockpit/releases/download/macos-0.0.0/Cockpit.dmg"},
            {"name": "\(archive)", "size": 12345, "digest": "sha256:\(digest)",
-            "browser_download_url": "https://github.com/rubenvitt/vault-cockpit/releases/download/macos/\(archive)"}
+            "browser_download_url": "https://github.com/rubenvitt/vault-cockpit/releases/download/macos-0.0.0/\(archive)"}
          ]}
         """.utf8)
     }

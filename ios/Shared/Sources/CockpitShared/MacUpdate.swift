@@ -77,13 +77,13 @@ public struct MacUpdate: Equatable, Sendable, Identifiable {
 
 /// Liest das Release der macOS-App auf GitHub.
 ///
-/// Ein einziges, mitlaufendes Release mit dem Tag `macos`, das jede neue Version ersetzt; die Version
-/// steht im Titel („Cockpit für macOS 1.2.3“). Der Tag hat keine Ziffern und das Release ist eine
-/// Vorabversion, damit BRAT es für das Obsidian-Plugin im selben Repo nie wählt: BRAT liest die
-/// Version aus jedem Tag (`semver.coerce`), sortiert Tags ohne Version ans Ende und nimmt ohne
-/// Beta-Modus keine Vorabversionen.
+/// Ein einziges, mitlaufendes Release mit dem Tag `macos-0.0.0`, das jede neue Version ersetzt; die
+/// Version steht im Titel („Cockpit für macOS 1.2.3“). Der Tag ergibt mit `semver.coerce` 0.0.0 und das
+/// Release ist eine Vorabversion, damit BRAT es für das Obsidian-Plugin im selben Repo nie wählt: BRAT
+/// nimmt die höchste Version aus den Release-Tags (jede Plugin-Version ist höher) und ohne Beta-Modus
+/// keine Vorabversionen. Ein Tag ganz ohne Ziffern reicht nicht, BRAT 2.0.x sortiert ihn nach Datum.
 public enum MacUpdateFeed {
-    public static let tag = "macos"
+    public static let tag = "macos-0.0.0"
     /// Archiv mit der Version im Namen: Der Workflow lädt das neue hoch, ändert den Titel und löscht
     /// erst dann das alte. Scheitert ein Schritt dazwischen, passen Titel und Archiv trotzdem zusammen.
     public static func archiveName(for version: AppVersion) -> String { "Cockpit-mac-\(version).zip" }
@@ -97,7 +97,7 @@ public enum MacUpdateFeed {
         title?.split(separator: " ").compactMap { AppVersion(String($0)) }.last
     }
 
-    /// Update aus dem Release `macos`, wenn es neuer als `current` ist und das Archiv hat; sonst nil.
+    /// Update aus dem Release `macos-0.0.0`, wenn es neuer als `current` ist und das Archiv hat; sonst nil.
     public static func update(in release: GitHubRelease, newerThan current: AppVersion) -> MacUpdate? {
         guard !release.draft, release.tagName == tag,
               let version = version(fromTitle: release.name), version > current,
