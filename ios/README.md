@@ -335,10 +335,10 @@ nichts Neues.
 
 Ohne App Store: Jeder Push auf `main`, der die App ändert (`ios/` ohne Markdown), gibt eine neue
 Version (Workflow „macOS-Release“, `.github/workflows/mac-release.yml`) im Release
-[`macos`](https://github.com/rubenvitt/vault-cockpit/releases/tag/macos) mit
+[`macos-0.0.0`](https://github.com/rubenvitt/vault-cockpit/releases/tag/macos-0.0.0) mit
 
 - `Cockpit.dmg` zum Installieren: öffnen, Cockpit in „Programme“ ziehen. Fester Link auf die
-  neueste: <https://github.com/rubenvitt/vault-cockpit/releases/download/macos/Cockpit.dmg>,
+  neueste: <https://github.com/rubenvitt/vault-cockpit/releases/download/macos-0.0.0/Cockpit.dmg>,
 - `Cockpit-mac-X.Y.Z.zip` für das Update in der App.
 
 **Ein mitlaufendes Release** statt eines Releases je Version: Jede neue Version ersetzt Dateien,
@@ -348,8 +348,10 @@ Archiv trotzdem zusammen; die Versionen selbst stehen als Git-Tags
 `mac/vX.Y.Z` (ohne Release). Grund ist BRAT, das das Obsidian-Plugin aus den Releases desselben
 Repos holt: Es liest die Version aus jedem Release-Tag (`semver.coerce`) und nimmt die höchste,
 ein Release `mac/v1.0.0` schlüge also das Plugin-Release `0.1.0` (und BRAT fände dort kein
-`manifest.json`). Der Tag `macos` hat keine Ziffern, BRAT sortiert ihn deshalb hinter jede
-Plugin-Version, und als Vorabversion nimmt BRAT ihn auch ohne Beta-Modus nie. Ältere DMGs
+`manifest.json`). Der Tag `macos-0.0.0` ergibt bei BRAT die Version 0.0.0 und liegt damit hinter
+jeder Plugin-Version; als Vorabversion nimmt BRAT ihn ohne Beta-Modus gar nicht. Ein Tag ganz ohne
+Ziffern (`macos`) reicht nicht: BRAT 2.0.x sortiert ihn dann nach Datum und nähme das neuere
+Mac-Release. Ältere DMGs
 gibt es dadurch nicht mehr zum Download.
 
 **Version** wie bei semantic-release aus den Conventional Commits seit dem letzten Tag `mac/v…`,
@@ -372,7 +374,7 @@ heftet das Ticket an App und DMG (`stapler`) und prüft mit `spctl`. Ergebnis un
 
 **Update in der App** (`Cockpit/MacUpdater.swift`, nur Mac Catalyst und nur mit
 `CockpitSelfUpdate = YES`; TestFlight und App Store bleiben unberührt): Kurz nach dem Start und
-dann alle 6 Stunden liest die App das Release `macos` (öffentlich, kein Token) und vergleicht die
+dann alle 6 Stunden liest die App das Release `macos-0.0.0` (öffentlich, kein Token) und vergleicht die
 Version im Titel mit der eigenen (`MacUpdateFeed` in `CockpitShared`). Ist sie neuer, zeigt sie die Notizen mit „Jetzt aktualisieren“, „Auf GitHub ansehen“ und „Später“.
 „Später“ gilt bis zum nächsten Start. Von Hand: Menü „Cockpit“ → „Nach Updates suchen …“ oder
 Einstellungen → „Diese App“.

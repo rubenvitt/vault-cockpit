@@ -3,11 +3,12 @@ name: macOS-Release
 # Direktvertrieb der macOS-App (Mac Catalyst) über GitHub-Releases, ohne App Store: Jeder Push auf
 # main, der die App ändert (ios/ ohne Markdown), gibt eine neue Version mit der notarisierten
 # `Cockpit.dmg` zum Installieren und `Cockpit-mac-X.Y.Z.zip` für das Update in der App (MacUpdater).
-# Beides liegt im mitlaufenden Release `macos`, das jede Version ersetzt (fester Link
-# …/releases/download/macos/Cockpit.dmg); die Versionen stehen als Git-Tags `mac/vX.Y.Z` (ohne Release).
-# Tag ohne Ziffern und Vorabversion, damit BRAT das Release nie als Obsidian-Plugin wählt: BRAT liest
-# die Version aus jedem Release-Tag (semver.coerce), sortiert Tags ohne Version ans Ende und nimmt
-# ohne Beta-Modus keine Vorabversionen.
+# Beides liegt im mitlaufenden Release mit dem Tag `macos-0.0.0`, das jede Version ersetzt (fester
+# Link …/releases/download/macos-0.0.0/Cockpit.dmg); die Versionen stehen als Git-Tags `mac/vX.Y.Z`
+# (ohne Release). Der Tag ergibt mit semver.coerce 0.0.0 und das Release ist eine Vorabversion,
+# damit BRAT es nie als Obsidian-Plugin wählt: BRAT nimmt die höchste Version aus den Release-Tags
+# (jede Plugin-Version ist höher) und ohne Beta-Modus keine Vorabversionen. Ein Tag ganz ohne
+# Ziffern reicht nicht: BRAT 2.0.x sortiert ihn dann nach Datum und nähme das neuere Mac-Release.
 # Die Version folgt den Commits wie semantic-release (ios/scripts/mac-release.js): feat → Minor,
 # `!`/BREAKING CHANGE → Major, sonst Patch. Manuell gestartet gibt es auch ohne neue Commits ein
 # Patch-Release (z. B. nach einem gescheiterten Lauf; ohne Release bleibt die Version frei).
@@ -110,30 +111,31 @@ jobs:
       # vorhandenes dieser Version bleibt unangetastet), Titel ändern, erst dann alte Archive
       # löschen. Die App lädt das Archiv zur Version im Titel. Das Release wird ersetzt, nicht
       # gelöscht, damit der Link auf Cockpit.dmg bleibt.
-      - name: Release `macos` ersetzen
+      - name: Release `macos-0.0.0` ersetzen
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: macos-0.0.0
         run: |
           zip="Cockpit-mac-$VERSION.zip"
           files=(ios/build/mac-direct/Cockpit.dmg "ios/build/mac-direct/$zip")
           title="Cockpit für macOS $VERSION"
           api="repos/$GITHUB_REPOSITORY/releases"
-          if gh release view macos > /dev/null 2>&1; then
+          if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
             # Nie auf eine ältere Version zurück (z. B. „Re-run failed jobs“ eines alten Laufs, nachdem
             # schon eine neuere veröffentlicht ist): Version im Titel lesen und vergleichen.
-            current="$(gh release view macos --json name -q .name | { grep -oE '[0-9]+[.][0-9]+[.][0-9]+' || true; } | tail -n 1)"
+            current="$(gh release view "$RELEASE_TAG" --json name -q .name | { grep -oE '[0-9]+[.][0-9]+[.][0-9]+' || true; } | tail -n 1)"
             if [ -n "$current" ] && [ "$current" != "$VERSION" ] \
               && [ "$(printf '%s\n%s\n' "$current" "$VERSION" | sort -V | tail -n 1)" = "$current" ]; then
-              echo "::error::Das Release macos hat schon $current, neuer als $VERSION; nichts veröffentlicht."
+              echo "::error::Das Release $RELEASE_TAG hat schon $current, neuer als $VERSION; nichts veröffentlicht."
               exit 1
             fi
-            git tag -f macos "$GITHUB_SHA"
-            git push -f origin refs/tags/macos
+            git tag -f "$RELEASE_TAG" "$GITHUB_SHA"
+            git push -f origin "refs/tags/$RELEASE_TAG"
             # DMG unter einem Zwischennamen hochladen, dann die alte löschen und die neue umbenennen:
             # Scheitert der Upload, bleibt die alte Cockpit.dmg hinter dem festen Link.
             cp ios/build/mac-direct/Cockpit.dmg "$RUNNER_TEMP/Cockpit-neu.dmg"
-            gh release upload macos "$RUNNER_TEMP/Cockpit-neu.dmg" --clobber
-            assets="$(gh api "$api/tags/macos" --jq '.assets[] | "\(.id) \(.name)"')"
+            gh release upload "$RELEASE_TAG" "$RUNNER_TEMP/Cockpit-neu.dmg" --clobber
+            assets="$(gh api "$api/tags/$RELEASE_TAG" --jq '.assets[] | "\(.id) \(.name)"')"
             old_dmg="$(awk '$2 == "Cockpit.dmg" { print $1 }' <<< "$assets")"
             new_dmg="$(awk '$2 == "Cockpit-neu.dmg" { print $1 }' <<< "$assets")"
             [ -n "$new_dmg" ] || { echo "Cockpit-neu.dmg fehlt nach dem Upload" >&2; exit 1; }
@@ -153,20 +155,20 @@ jobs:
             # Archiv zum Titel. Ein unvollständiger Upload (state ≠ uploaded) wird ersetzt.
             # Abfrage für sich: Scheitert sie, bricht der Lauf ab (bash -e), statt wie bei
             # „Archiv fehlt“ mit --clobber hochzuladen.
-            uploaded="$(gh release view macos --json assets -q '.assets[] | select(.state == "uploaded") | .name')"
+            uploaded="$(gh release view "$RELEASE_TAG" --json assets -q '.assets[] | select(.state == "uploaded") | .name')"
             if ! grep -qxF "$zip" <<< "$uploaded"; then
-              gh release upload macos "ios/build/mac-direct/$zip" --clobber
+              gh release upload "$RELEASE_TAG" "ios/build/mac-direct/$zip" --clobber
             fi
-            gh release edit macos --title "$title" --notes-file "$RUNNER_TEMP/notes.md" --prerelease
-            gh release view macos --json assets -q '.assets[].name' \
+            gh release edit "$RELEASE_TAG" --title "$title" --notes-file "$RUNNER_TEMP/notes.md" --prerelease
+            gh release view "$RELEASE_TAG" --json assets -q '.assets[].name' \
               | { grep -E '^Cockpit-mac-.*[.]zip$' || true; } | { grep -vxF "$zip" || true; } \
-              | while read -r old; do gh release delete-asset macos "$old" --yes; done
+              | while read -r old; do gh release delete-asset "$RELEASE_TAG" "$old" --yes; done
           else
-            gh release create macos "${files[@]}" --target "$GITHUB_SHA" --title "$title" \
+            gh release create "$RELEASE_TAG" "${files[@]}" --target "$GITHUB_SHA" --title "$title" \
               --notes-file "$RUNNER_TEMP/notes.md" --prerelease
           fi
           echo "### $title" >> "$GITHUB_STEP_SUMMARY"
-          gh release view macos --json url -q .url >> "$GITHUB_STEP_SUMMARY"
+          gh release view "$RELEASE_TAG" --json url -q .url >> "$GITHUB_STEP_SUMMARY"
       - name: Zertifikat dieses Laufs widerrufen
         if: always()
         continue-on-error: true
