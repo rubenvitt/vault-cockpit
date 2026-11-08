@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createWebHttp } from '../src/web/http.js';
-import { offlineFiles, OFFLINE_MARK } from '../src/web/offline.js';
+import { offlineFiles, OFFLINE_MARK, FILL_HEADER } from '../src/web/offline.js';
 import { assets } from '../src/web/layout.js';
 import { createCookieSigner } from '../src/web/session.js';
 import { createSettingsStore } from '../src/cockpit/settings.js';
@@ -290,7 +290,7 @@ async function loadWorker(swBody, network) {
     skipWaiting: async () => {},
     clients: { claim: async () => {} },
   };
-  const ctx = vm.createContext({ self, caches, fetch: (req) => network(req), Response, Headers, URL, Date, JSON });
+  const ctx = vm.createContext({ self, caches, fetch: (req, init) => network(req, init), Response, Headers, URL, Date, JSON });
   vm.runInContext(swBody, ctx);
   const dispatch = async (type, event = {}) => {
     const waits = [];
@@ -370,10 +370,13 @@ test('Service Worker: Lesestoff nur nach Liste und Freigabe, offline mit Stand, 
   await withCockpit(async ({ call }) => {
     const body = await (await call('/sw.js', { anon: true })).text();
     assert.equal(swConfig(body).synthesis, 'wiki/synthesis');
+    assert.equal(swConfig(body).fill, FILL_HEADER);
     let online = true;
     let listStatus = 200;
     let gate = null;
     const fetched = [];
+    // Seiten, die mit dem Header des Befüllens geholt wurden (VCP-130).
+    const asFill = [];
     const page = (text, mark = 'lesen') => new Response(`<!doctype html>\n<html lang="de"><body>${text}</body></html>`, { headers: { 'content-type': 'text/html; charset=utf-8', ...(mark ? { [OFFLINE_MARK]: mark } : {}) } });
     const urls = [
       '/lesen/stapel',
@@ -386,11 +389,12 @@ test('Service Worker: Lesestoff nur nach Liste und Freigabe, offline mit Stand, 
       '/notiz?pfad=wiki%2Fsynthesis%2F..%2F..%2Fprivat%2Fx.md',
       '/einstellungen',
     ];
-    const sw = await loadWorker(body, async (req) => {
+    const sw = await loadWorker(body, async (req, init) => {
       if (!online) throw new TypeError('Failed to fetch');
       const u = new URL(typeof req === 'string' ? req : req.url, 'https://vault.test');
       const path = u.pathname + u.search;
       fetched.push(path);
+      if (init?.headers?.[FILL_HEADER] === '1') asFill.push(path);
       if (u.pathname === '/api/lesen/offline') return new Response(JSON.stringify({ ok: true, urls }), { status: listStatus, headers: { 'content-type': 'application/json' } });
       if (gate && u.pathname !== '/logout') await gate;
       if (path === '/') return page('KW 42', 'woche');
@@ -406,6 +410,9 @@ test('Service Worker: Lesestoff nur nach Liste und Freigabe, offline mit Stand, 
     await fill();
     assert.deepEqual(stored(), ['/', '/lesen/doc?id=a', '/lesen/stapel', '/notiz?pfad=wiki%2Fsynthesis%2FA.md', '/wissen']);
     assert.ok(!fetched.some((p) => p.includes('inbox') || p.includes('privat') || p === '/einstellungen'), 'nicht freigegebene Seiten werden nicht einmal geholt');
+    // Jede Seite des Befüllens trägt den Header, damit der Server keinen Entwurf und keine Meldung einlöst; Öffnen nicht.
+    assert.deepEqual(asFill.sort(), fetched.filter((p) => p !== '/' && p !== '/api/lesen/offline').sort());
+    assert.ok(!asFill.includes('/'));
 
     // Noch frisch: Ein zweites Befüllen holt nur die Liste und, was noch fehlt.
     fetched.length = 0;

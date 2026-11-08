@@ -33,6 +33,12 @@ import { SYNTHESIS } from './synthesis-render.js';
 /** Antwort-Header, mit dem der Server eine Seite für den Offline-Cache freigibt. */
 export const OFFLINE_MARK = 'x-cockpit-offline';
 
+/**
+ * Anfrage-Header (Wert `1`), mit dem der Service Worker Lesestoff befüllt (VCP-130):
+ * Die Seite löst dann weder Meldung noch Entwurf aus Cookies ein, die gehören der offenen Seite.
+ */
+export const FILL_HEADER = 'x-cockpit-befuellen';
+
 /** Ordner der Synthesen; nur Notizen darunter dürfen offline liegen. */
 export const SYNTHESIS_FOLDER = 'wiki/synthesis';
 export const OFFLINE_DOCS = 30;
@@ -107,7 +113,7 @@ export function offlineFiles(files, { html }) {
   const h = createHash('sha256').update(SW_SOURCE);
   for (const [path, body] of shell) h.update(`\0${path}\0`).update(body);
   const version = h.digest('base64url').slice(0, 10);
-  const config = { version, shell: shell.map(([path]) => path), mark: OFFLINE_MARK, synthesis: SYNTHESIS_FOLDER };
+  const config = { version, shell: shell.map(([path]) => path), mark: OFFLINE_MARK, fill: FILL_HEADER, synthesis: SYNTHESIS_FOLDER };
   return {
     version,
     entries: [

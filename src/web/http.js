@@ -12,7 +12,7 @@ import { noteJson } from './note-json.js';
 import { renderReview, REVIEW_CSS } from './review-render.js';
 import { renderPlan, planRoutes, PLAN_CSS } from './plan-page.js';
 import { renderHealth, healthAlert, HEALTH_CSS } from './health-render.js';
-import { offlineFiles, readingOfflineUrls, OFFLINE_CSS, OFFLINE_MARK, SYNTHESIS_FOLDER } from './offline.js';
+import { offlineFiles, readingOfflineUrls, OFFLINE_CSS, OFFLINE_MARK, FILL_HEADER, SYNTHESIS_FOLDER } from './offline.js';
 import { SettingsError, MAX_CALENDARS, TTS_PROVIDERS, SYNC_ADAPTERS } from '../cockpit/settings.js';
 import { shadowMarkdown, GRACE_MS } from '../sync/shadow-report.js';
 import { describeWeek, weekOf } from '../cockpit/week.js';
@@ -281,12 +281,15 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
 
   /** Meldung für die nächste Seite (ohne JavaScript): signiert, eine Minute gültig. */
   const flashCookie = (flash) => cookie(FLASH, signer.seal({ ...flash, exp: Math.floor(now() / 1000) + 60 }), { secure, maxAge: 60 });
+  /** Abruf des Service Workers zum Befüllen (VCP-130): Meldung und Entwurf gehören der offenen Seite. */
+  const filling = (req) => req.headers[FILL_HEADER] === '1';
   const takeFlash = (req, res) => {
-    const raw = parseCookies(req.headers.cookie)[FLASH];
+    const raw = filling(req) ? null : parseCookies(req.headers.cookie)[FLASH];
     if (!raw) return null;
     res.appendHeader('set-cookie', cookie(FLASH, '', { secure, maxAge: 0 }));
     return signer.open(raw, now());
   };
+  const takeDraft = (req, res, fits) => (filling(req) ? null : sessions.takeDraft(req, res, fits));
 
   /** Nur Pfade dieser Seite als Rücksprungziel, damit der Login kein offener Redirect ist. */
   const safeNext = (n) => (typeof n === 'string' && /^\/(?!\/)[^\\\s]*$/.test(n) ? n : '/');
@@ -368,7 +371,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     const model = await cockpit.week(id || null);
     if (!model) return send(res, 400, renderMessage('Unbekannte Woche', `„${id}“ ist keine Kalenderwoche wie 2026-W42.`, { link: { href: '/', label: 'Zur laufenden Woche' } }));
     const back = url.pathname + url.search;
-    const kept = draft === null && actions ? sessions.takeDraft(req, res, (d) => d.action === '/aktion/erfassen') : null;
+    const kept = draft === null && actions ? takeDraft(req, res, (d) => d.action === '/aktion/erfassen') : null;
     // Nur die laufende Woche darf der Service Worker für offline behalten, und nie mit einem Entwurf im Feld.
     const offline = !id && status === 200 && !kept && !draft ? { [OFFLINE_MARK]: 'woche' } : {};
     return send(res, status, renderWeek(model, { user: session.name ?? session.sub, write: writeContext(req), back, flash: flash ?? takeFlash(req, res) ?? (kept ? DRAFT_FLASH : null), draft: draft ?? kept?.text ?? null, focus: url.searchParams.has('erfassen') || Boolean(kept), alert: health ? healthAlert(health.failing()) : '' }), offline);
@@ -439,7 +442,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     const origin = noteOrigin(url.searchParams.get('zurueck'), req.headers.referer, new URL(publicUrl).origin);
     if (origin && !url.searchParams.has('zurueck')) url.searchParams.set('zurueck', origin.path);
     const back = url.pathname + url.search;
-    const kept = draft === null && actions ? sessions.takeDraft(req, res, (d) => d.action === '/aktion/notiz/anhaengen' && d.back === back) : null;
+    const kept = draft === null && actions ? takeDraft(req, res, (d) => d.action === '/aktion/notiz/anhaengen' && d.back === back) : null;
     const html = renderNote(note, {
       origin,
       user: session.name ?? session.sub,

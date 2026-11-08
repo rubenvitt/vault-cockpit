@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { generateKeyPairSync, createSign, createHash, randomBytes } from 'node:crypto';
 import { createApp } from '../src/http/app.js';
 import { createWebHttp } from '../src/web/http.js';
+import { FILL_HEADER } from '../src/web/offline.js';
 import { loadShortcuts } from '../src/web/shortcuts.js';
 import { createOidcLogin } from '../src/web/oidc.js';
 import { createCookieSigner, parseCookies } from '../src/web/session.js';
@@ -1717,6 +1718,50 @@ test('Offline-Cache: eine Wochenansicht mit wiederhergestelltem Entwurf wird nic
     },
     {},
     { actions, clock },
+  );
+});
+
+test('Offline-Befüllen: Synthese mit offenem Entwurf oder Meldung löst nichts ein, normales Öffnen schon (VCP-130)', async () => {
+  const clock = { t: Date.now() };
+  const synth = { path: 'wiki/synthesis/A.md', folder: 'wiki/synthesis', title: 'Architektur statt Disziplin', frontmatter: { type: 'synthesis' }, tags: [], body: 'Text\n', inInbox: false };
+  const base = fakeNotes();
+  const notes = { ...base, get: (p) => (p === synth.path ? synth : base.get(p)) };
+  await withServer(
+    async ({ call, login, jar }) => {
+      const back = '/notiz?pfad=wiki%2Fsynthesis%2FA.md';
+      const fill = () => call(back, { headers: { [FILL_HEADER]: '1' } });
+      await login();
+      const csrf = csrfFrom(await (await call(back)).text());
+      clock.t += 31 * DAY_MS;
+      await call('/aktion/notiz/anhaengen', { method: 'POST', form: { pfad: synth.path, text: 'Nachtrag', csrf, back }, origin: 'https://vault.test' });
+      await login('/');
+      assert.ok(jar.vc_draft);
+
+      // Befüllen: Seite ohne Entwurf, darf in den Cache, das Cookie bleibt liegen.
+      const filled = await fill();
+      assert.equal(filled.status, 200);
+      assert.ok(!(await filled.text()).includes('Nachtrag'));
+      assert.equal(filled.headers.get('x-cockpit-offline'), 'lesen');
+      assert.ok(!filled.headers.getSetCookie().some((c) => c.startsWith('vc_draft=')));
+      assert.ok(jar.vc_draft);
+
+      // Normales Öffnen löst ihn weiter ein, und so nicht in den Cache.
+      const opened = await call(back);
+      assert.match(await opened.text(), /<textarea name="text"[^>]*>Nachtrag<\/textarea>/);
+      assert.equal(opened.headers.get('x-cockpit-offline'), null);
+      assert.equal(jar.vc_draft, undefined);
+
+      // Ebenso die Meldung nach einer Aktion: Befüllen lässt sie stehen, erst die Seite zeigt sie.
+      const fresh = csrfFrom(await (await call(back)).text());
+      await call('/aktion/notiz/anhaengen', { method: 'POST', form: { pfad: synth.path, text: 'Mehr', csrf: fresh, back }, origin: 'https://vault.test' });
+      assert.ok(jar.vc_flash);
+      assert.ok(!(await (await fill()).text()).includes('toast-text'));
+      assert.ok(jar.vc_flash);
+      assert.match(await (await call(back)).text(), /class="toast ok"[^>]*><span class="toast-text">/);
+      assert.equal(jar.vc_flash, undefined);
+    },
+    {},
+    { actions: fakeActions(), notes, clock },
   );
 });
 
