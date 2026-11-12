@@ -221,16 +221,25 @@ function burningBar(model, tz, ctx) {
   </div>`;
 }
 
+/** Bewusst gewählter Phönix-Schritt der angezeigten Woche (nicht bloß fällig). */
+const isStep = (t, week) => Boolean(week) && t.phoenix === 'feuer_schritt' && t.fire === week.id;
+
+/**
+ * Eine Aufgabe als Zeile: Haken, Titel, dahinter Schild „Schritt“, Fälligkeit
+ * und Ort, rechts Flamme und Menü. Die beiden Knöpfe zeigt das Stylesheet an
+ * Geräten mit Maus erst bei Hover oder Tastaturfokus der Zeile.
+ */
 function taskItem(t, tz, ctx = {}, { area = false, mark = null, live = false, inbox = false, flame = false } = {}) {
   const meta = [t.ref, area ? t.area : t.project, ...(t.extra ? [t.extra] : [])].filter(Boolean).map(esc).join(' · ');
   const due = dueTag(t, tz, ctx.today);
+  const step = isStep(t, ctx.week) ? ` <span class="step" title="Phönix-Schritt KW ${ctx.week.week}">Schritt</span>` : '';
   const writable = ctx.write && t.id;
   const lead = writable
     ? tickForm(t, ctx)
     : `<span class="mark" aria-label="${esc(t.status)}">${mark ?? STATUS_MARK[t.status] ?? '○'}</span>`;
   return `<li class="task status-${esc(t.status)}${due.tone === 'overdue' ? ' overdue' : ''}" data-id="${esc(t.id ?? '')}" data-status="${esc(t.status)}" data-title="${esc(t.title)}">
     ${lead}
-    <span class="body"><a href="${esc(t.url)}">${esc(t.title)}</a>${due.html ? ` ${due.html}` : ''}${meta || live ? `<span class="meta">${meta}${live ? `${meta ? ' · ' : ''}<span class="live">läuft</span>` : ''}</span>` : ''}</span>
+    <span class="body"><a href="${esc(t.url)}">${esc(t.title)}</a>${step}${due.html ? ` ${due.html}` : ''}${meta || live ? ` <span class="meta">${meta}${live ? `${meta ? ' · ' : ''}<span class="live">läuft</span>` : ''}</span>` : ''}</span>
     ${writable && flame && t.status !== 'done' && t.status !== 'dropped' ? flameButton(t, ctx) : ''}
     ${writable ? taskMenu(t, { ...ctx, tz }, { inbox }) : ''}
   </li>`;
@@ -306,46 +315,78 @@ function feuerSection(model, tz, vaultName, ctx) {
   </section>`;
 }
 
+/**
+ * Ein Lebensbereich der Big Rocks: Kopfzeile (Name, erledigt/gesamt, dünner
+ * Fortschritt als Linie) und darunter die Aufgaben, Phönix-Schritte zuerst.
+ * Jeder Bereich klappt ohne JavaScript auf und zu. Komplett erledigte sind zu
+ * (VCP-54); `data-fold` markiert Bereiche ohne offenen Phönix-Schritt, die
+ * `/static/cockpit.js` auf schmalen Bildschirmen zuklappt.
+ */
+function rockGroup(g, tz, ctx) {
+  const steps = g.tasks.filter((t) => isStep(t, ctx.week));
+  const tasks = [...steps, ...g.tasks.filter((t) => !isStep(t, ctx.week))];
+  const allDone = g.tasks.length > 0 && g.done === g.tasks.length;
+  const fold = !allDone && !steps.some((t) => t.status !== 'done');
+  return `<details class="rock${allDone ? ' all-done' : ''}" data-keep="rock:${esc(g.area)}"${allDone ? '' : ' open'}${fold ? ' data-fold' : ''}>
+          <summary><h3>${esc(g.area)} <span class="count" data-count>${g.done}/${g.tasks.length}</span></h3>
+          <progress class="rock-progress" value="${g.done}" max="${g.tasks.length}" aria-hidden="true"></progress></summary>
+          <ul>${tasks.map((t) => taskItem(t, tz, ctx, { flame: true, live: t.running })).join('')}</ul>
+        </details>`;
+}
+
+/**
+ * Verteilt Gruppen auf zwei Spalten, ohne die Reihenfolge zu ändern: die
+ * ersten links, der Rest rechts, so dass beide etwa gleich lang werden
+ * (`weight`: Zeilen einer Gruppe). Auf dem iPhone stehen die Spalten
+ * untereinander, die Rangfolge bleibt. Auch für die Planung (plan-page.js).
+ */
+export function inColumns(groups, weight) {
+  const total = groups.reduce((n, g) => n + weight(g), 0);
+  // Der Schnitt mit dem kleinsten Unterschied; bei Gleichstand ist die linke Spalte die längere.
+  let left = 0;
+  let cut = groups.length;
+  let best = Infinity;
+  for (let i = 0; i < groups.length; i++) {
+    left += weight(groups[i]);
+    const diff = Math.abs(2 * left - total);
+    if (diff < best || (diff === best && left >= total / 2 && cut === i)) {
+      best = diff;
+      cut = i + 1;
+    }
+  }
+  return [groups.slice(0, cut), groups.slice(cut)].filter((col) => col.length);
+}
+
 function rocksSection(model, tz, ctx) {
   const r = model.rocks;
   let body;
   if (!r.ok) body = problem(r);
   else if (!r.data.length) body = '<p class="empty">Diese Woche ist nichts fällig und kein Phönix-Schritt markiert.</p>';
   else {
-    body = `<div class="rocks">${r.data
-      .map(
-        (g) => {
-          const items = `<ul>${g.tasks.map((t) => taskItem(t, tz, ctx, { flame: true, live: t.running })).join('')}</ul>`;
-          const count = `<span class="count" data-count>${g.done}/${g.tasks.length}</span>`;
-          // Komplett erledigte Bereiche klappen auf eine Zeile zusammen (VCP-54); aufklappen geht ohne JavaScript.
-          if (g.tasks.length && g.done === g.tasks.length) {
-            return `<details class="rock all-done">
-          <summary><h3>${esc(g.area)} ${count}</h3></summary>
-          ${items}
-        </details>`;
-          }
-          return `<article class="rock">
-          <h3>${esc(g.area)} ${count}</h3>
-          <progress class="rock-progress" value="${g.done}" max="${g.tasks.length}" aria-hidden="true"></progress>
-          ${items}
-        </article>`;
-        },
-      )
+    // Ein komplett erledigter Bereich ist eine Zeile, sonst Kopfzeile plus Aufgaben.
+    body = `<div class="rocks">${inColumns(r.data, (g) => (g.tasks.length && g.done === g.tasks.length ? 1 : g.tasks.length + 1.5))
+      .map((col) => `<div class="rocks-col">${col.map((g) => rockGroup(g, tz, ctx)).join('')}</div>`)
       .join('')}</div>`;
     if (r.partial) body += '<p class="problem">Nicht alle Zunder-Abfragen haben geantwortet; die Liste ist unvollständig.</p>';
   }
   return `<section class="big-rocks"><h2>Big Rocks${planLink(ctx, 'Woche planen')}</h2>${body}</section>`;
 }
 
+const eventCount = (n) => `${n} ${n === 1 ? 'Termin' : 'Termine'}`;
+
+/**
+ * Termine der Woche als ruhige Spalten, heute hervorgehoben. Vergangene Tage
+ * der laufenden Woche stehen eingeklappt in einer Zeile mit der Zahl ihrer
+ * Termine (`<details>`, klappt ohne JavaScript auf); so bleibt den kommenden
+ * Tagen die Breite.
+ */
 function calendarSection(model, tz) {
   const c = model.calendar;
   if (!c.ok) return `<section class="termine"><h2>Termine</h2>${problem(c)}</section>`;
-  // Vergangene Tage der laufenden Woche treten zurück; auf dem iPhone bleibt nur die Zahl.
   const todayAt = c.data.findIndex((d) => d.today);
-  const days = c.data
-    .map(
-      (d, i) => `<div class="day${d.today ? ' today' : ''}${i < todayAt ? ' past' : ''}">
-        <h3>${esc(d.label)}${i < todayAt && d.events.length ? ` <span class="day-count">${d.events.length} ${d.events.length === 1 ? 'Termin' : 'Termine'}</span>` : ''}</h3>
+  // Heute steht schmal ganz oben in „Heute“; die Wochenliste zeigt dann nur die Zahl (Stylesheet).
+  const dayBlock = (d, cls) => `<div class="day${cls}">
+        <h3>${esc(d.label)}${d.today && d.events.length ? ` <span class="day-count">${eventCount(d.events.length)}, siehe Heute</span>` : ''}</h3>
         ${
           d.events.length
             ? `<ul>${d.events
@@ -359,23 +400,32 @@ function calendarSection(model, tz) {
                 .join('')}</ul>`
             : '<p class="empty">frei</p>'
         }
-      </div>`,
-    )
-    .join('');
+      </div>`;
+  const past = todayAt > 0 ? c.data.slice(0, todayAt) : [];
+  const rest = c.data.slice(past.length);
+  let earlier = '';
+  if (past.length) {
+    const from = past[0].label.slice(0, 2);
+    const to = past.at(-1).label.slice(0, 2);
+    const n = past.reduce((sum, d) => sum + d.events.length, 0);
+    earlier = `<details class="days-past more-items" data-keep="tage-vorbei">
+      <summary>${esc(from === to ? from : `${from}–${to}`)} <span class="hint">vorbei · ${n ? eventCount(n) : 'keine Termine'}</span></summary>
+      <div class="week week-past">${past.map((d) => dayBlock(d, ' past')).join('')}</div>
+    </details>`;
+  }
   const failed = (c.errors ?? [])
     .map((e) => `<p class="problem">${esc(e.calendar)}: ${esc(e.error)}</p>`)
     .join('');
   const today = todayAt >= 0 ? c.data[todayAt].events.length : null;
-  return `<section class="termine"><h2>Termine${today != null ? ` <span class="hint">heute ${today ? `${today} ${today === 1 ? 'Termin' : 'Termine'}` : 'frei'}</span>` : ''}</h2>${failed}<div class="week">${days}</div></section>`;
+  return `<section class="termine"><h2>Termine${today != null ? ` <span class="hint">heute ${today ? eventCount(today) : 'frei'}</span>` : ''}</h2>${failed}${earlier}<div class="week">${rest.map((d) => dayBlock(d, d.today ? ' today' : '')).join('')}</div></section>`;
 }
 
 /**
  * „Heute“ für die laufende Woche (VCP-54): Termine von heute und die Big
  * Rocks, die heute fällig (auch schon erledigt) oder seit Wochenbeginn
- * überfällig sind, kompakt an
- * einer Stelle. Nur auf schmalen Bildschirmen sichtbar und dort ganz oben; der
- * Desktop zeigt dasselbe in Termine und Big Rocks. Älteres Überfälliges steht
- * direkt darunter in „Aufgaben“.
+ * überfällig sind, kompakt an einer Stelle. Am Desktop steht die Karte oben
+ * neben dem Feuer, auf schmalen Bildschirmen ganz oben. Älteres Überfälliges
+ * steht in „Aufgaben“.
  */
 function heuteSection(model, tz, ctx) {
   if (!model.week.current || !model.today) return '';
@@ -403,18 +453,39 @@ function heuteSection(model, tz, ctx) {
   return `<section class="heute" aria-label="Heute"><h2>Heute <span class="hint">${esc(day?.label ?? dueLabel(model.today, tz))}</span></h2>${body}</section>`;
 }
 
+/** So viele Einträge zeigen „Aufgaben“ und die Inbox-Listen sofort; der Rest steckt hinter „N weitere“. */
+const SHOWN = 5;
+
+/**
+ * Liste mit den ersten Einträgen, der Rest in `<details>` (klappt ohne
+ * JavaScript auf). Ein einzelner Überhang bleibt sichtbar: „1 weitere“ wäre so
+ * hoch wie der Eintrag selbst. `keep` ist die Kennung, über die
+ * `/static/cockpit.js` das Aufgeklappte nach einer Aktion offen hält.
+ */
+function capped(items, keep, attrs = '') {
+  const cut = items.length > SHOWN + 1 ? SHOWN : items.length;
+  const rest = items.slice(cut);
+  return `<ul${attrs}>${items.slice(0, cut).join('')}</ul>${
+    rest.length ? `<details class="more-items" data-keep="${keep}"><summary>${rest.length} weitere</summary><ul${attrs}>${rest.join('')}</ul></details>` : ''
+  }`;
+}
+
 function tasksSection(model, tz, ctx) {
   const t = model.tasks;
   let body;
   if (!t.ok) body = problem(t);
   else if (!t.data.length) body = '<p class="empty">Nichts in Arbeit, nichts überfällig.</p>';
-  else body = `<ul>${t.data.map((x) => taskItem(x, tz, ctx, { area: true })).join('')}</ul>`;
+  else body = capped(t.data.map((x) => taskItem(x, tz, ctx, { area: true })), 'aufgaben-mehr');
   return `<section class="tasks"><h2>Aufgaben <span class="hint">in Arbeit und überfällig</span>${t.ok && t.data.length ? ` <span class="count-badge">${t.data.length}</span>` : ''}</h2>${body}</section>`;
 }
 
-/** Liste, die das Script nach dem Erfassen ergänzt; leer zeigt sie „Leer.“. */
+/**
+ * Inbox-Liste, die das Script nach dem Erfassen ergänzt (vorn in der ersten
+ * Liste); leer zeigt sie „Leer.“. Beide Teile tragen `data-list`, daran
+ * erkennt `/static/offline.js` die Einträge der Inbox.
+ */
 const inboxList = (name, items) =>
-  `${items.length ? '' : `<p class="empty" data-empty="${name}">Leer.</p>`}<ul data-list="${name}"${items.length ? '' : ' hidden'}>${items.join('')}</ul>`;
+  `${items.length ? '' : `<p class="empty" data-empty="${name}">Leer.</p>`}${capped(items, `${name}-mehr`, ` data-list="${name}"${items.length ? '' : ' hidden'}`)}`;
 
 function inboxSection(model, tz, vaultName, ctx) {
   const { vault, zunder, folder } = model.inbox;
@@ -437,8 +508,10 @@ function inboxSection(model, tz, vaultName, ctx) {
   else tasks = inboxList('zunder-inbox', zunder.data.map((x) => taskItem(x, tz, { ...ctx, targets: model.inbox.targets }, { inbox: true })));
   const open = (vault.ok ? vault.data.length : 0) + (zunder.ok ? zunder.data.length : 0);
   return `<section id="inbox" class="inbox"><h2>Inbox${open ? ` <span class="count-badge" data-inbox-count>${open}</span>` : ''}</h2>
-    <h3>Vault <span class="hint">${esc(folder)}/</span></h3>${notes}
-    <h3>Zunder</h3>${tasks}
+    <div class="inbox-lists">
+    <div><h3>Vault <span class="hint">${esc(folder)}/</span></h3>${notes}</div>
+    <div><h3>Zunder</h3>${tasks}</div>
+    </div>
   </section>`;
 }
 
@@ -478,6 +551,22 @@ export function flashToast(flash, ctx) {
 }
 
 /**
+ * Blättern zwischen den Wochen (Woche, Planen, Rückblick). `href(id)` liefert
+ * die Adresse einer Woche, `href(null)` die der laufenden. Schmal bleiben nur
+ * die Pfeile (die KW steht im `aria-label`) und „Heute“ statt „Diese Woche“,
+ * damit Umschalter und Blättern in eine Zeile passen.
+ */
+export function weekPager(w, href, { verb = '' } = {}) {
+  const prev = Number(w.prev.slice(6));
+  const next = Number(w.next.slice(6));
+  return `<nav class="pager" aria-label="Wochen">
+    <a href="${esc(href(w.prev))}" rel="prev" class="pager-step" aria-label="Vorige Woche${verb}, KW ${prev}"><span aria-hidden="true">‹</span> <span class="pager-kw">KW ${prev}</span></a>
+    ${w.current ? '<span class="pager-now" aria-current="date">Diese Woche</span>' : `<a href="${esc(href(null))}" class="pager-now" aria-label="Diese Woche"><span class="pager-kw">Diese Woche</span><span class="pager-short" aria-hidden="true">Heute</span></a>`}
+    <a href="${esc(href(w.next))}" rel="next" class="pager-step" aria-label="Nächste Woche${verb}, KW ${next}"><span class="pager-kw">KW ${next}</span> <span aria-hidden="true">›</span></a>
+  </nav>`;
+}
+
+/**
  * @param {object} [opts.write]  `{ csrf, captureId }`, wenn die Seite schreiben darf
  * @param {string} [opts.back]   Rücksprung nach einer Aktion ohne JavaScript
  * @param {object} [opts.flash]  `{ kind, message, undo }` aus der letzten Aktion
@@ -489,8 +578,6 @@ export function renderWeek(model, { user = null, write = null, back = '/', flash
   const w = model.week;
   const title = weekTitle(w);
   const ctx = { write, back, week: w, today: model.today ?? null };
-  const prev = Number(w.prev.slice(6));
-  const next = Number(w.next.slice(6));
   return `<!doctype html>
 <html lang="de">
 ${head(title.short, { script: Boolean(write) })}
@@ -500,11 +587,7 @@ ${appHeader({ current: 'woche', user, alert })}
   <h1>${esc(title.short)} <span class="range">${esc(title.range)}</span></h1>
   <div class="page-tools">
   ${weekSwitch(w.id, 'woche', { plan: Boolean(write?.plan), thisWeek: w.current })}
-  <nav class="pager" aria-label="Wochen">
-    <a href="/?woche=${esc(w.prev)}" rel="prev" class="pager-step" aria-label="Vorige Woche, KW ${prev}"><span aria-hidden="true">‹</span> KW ${prev}</a>
-    ${w.current ? '<span class="pager-now" aria-current="date">Diese Woche</span>' : '<a href="/" class="pager-now">Diese Woche</a>'}
-    <a href="/?woche=${esc(w.next)}" rel="next" class="pager-step" aria-label="Nächste Woche, KW ${next}">KW ${next} <span aria-hidden="true">›</span></a>
-  </nav>
+  ${weekPager(w, (id) => (id ? `/?woche=${id}` : '/'))}
   </div>
 </div>
 ${write ? `<div class="capture-wrap">${captureBar(ctx, draft, focus)}</div>` : ''}
@@ -794,6 +877,8 @@ ${backupHint(backup)}
     <label><span>Vault-Name in Obsidian <span class="hint">für Links</span></span><input name="vaultName" value="${esc(stored.vaultName ?? '')}" placeholder="${esc(d.vaultName ?? '')}"></label>
     <label>Inbox-Ordner im Vault<input name="inboxFolder" value="${esc(stored.inboxFolder ?? '')}" placeholder="${esc(d.inboxFolder)}"></label>
   </div>
+  <label class="field area-order"><span>Reihenfolge der Bereiche <span class="hint">ein Name pro Zeile, wie in Zunder; leer = alphabetisch</span></span><textarea name="areaOrder" rows="${Math.min(12, Math.max(4, (stored.areaOrder ?? []).length + 1))}" autocomplete="off" spellcheck="false" placeholder="Selbstverwirklichung&#10;Partnerschaft&#10;Arbeit">${esc((stored.areaOrder ?? []).join('\n'))}</textarea></label>
+  <p class="meta area-order-hint">Big Rocks und Planung zeigen die Lebensbereiche in dieser Reihenfolge, das Wichtigste zuerst. Bereiche, die hier fehlen, folgen alphabetisch dahinter.</p>
 </section>
 ${sessionSection(stored, d)}
 <p class="save-bar"><span class="meta">Leere Geheimnisfelder behalten den gespeicherten Wert.</span><button type="submit" class="primary">Speichern</button></p>

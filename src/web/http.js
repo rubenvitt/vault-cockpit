@@ -809,6 +809,8 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       jev: { key: form.get('jev.clear') ? null : field('jev.key') || stored.jev?.key || null, model: field('jev.model') },
       calendars: calendarsIn,
       hiddenEvents: form.has('hiddenEvents') ? field('hiddenEvents').split(',') : stored.hiddenEvents,
+      // Ein Name pro Zeile. Fehlt das Feld (App-JSON, Teilformular), bleibt die gespeicherte Rangfolge.
+      areaOrder: form.has('areaOrder') ? field('areaOrder').split(/\r?\n/) : stored.areaOrder,
       // Die Generation ändert nur „Überall abmelden“.
       session: { idleDays: field('session.idleDays'), maxDays: field('session.maxDays'), generation: stored.session.generation },
     };

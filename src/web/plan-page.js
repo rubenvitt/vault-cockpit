@@ -1,11 +1,13 @@
-import { esc, dueLabel, formHead, flashToast } from './render.js';
+import { esc, dueLabel, formHead, flashToast, weekPager, inColumns } from './render.js';
 import { head, appHeader, weekSwitch } from './layout.js';
 
 /**
  * Planungsseite `/planen?woche=…` (VCP-47): Zunder-Aufgaben suchen und in die
  * Woche holen, Vorschläge aus den Bereichen der Big Rocks, Flamme einplanen,
- * und was schon in der Woche steht, mit „Aus der Woche“. Jede Aktion ist ein
- * Formular; `/static/cockpit.js` schickt es ohne Seitenwechsel und tauscht danach `main`.
+ * und was schon in der Woche steht, mit „Aus der Woche“. Die Abschnitte stehen
+ * untereinander in voller Breite; Bereiche erscheinen in der Rangfolge aus den
+ * Einstellungen (`areaOrder`). Jede Aktion ist ein Formular;
+ * `/static/cockpit.js` schickt es ohne Seitenwechsel und tauscht danach `main`.
  */
 
 const STATUS_LABEL = { in_progress: 'in Arbeit', blocked: 'blockiert' };
@@ -80,22 +82,36 @@ function findSection(model, ctx) {
   return `<section class="plan-find"><h2>Zur Woche hinzufügen</h2>${form}${body}</section>`;
 }
 
+/**
+ * Vorschläge je Bereich der Big Rocks. Nur Bereiche mit Vorschlägen (oder
+ * einem Fehler) bekommen eine eigene Gruppe; die übrigen stehen in einer
+ * Zeile, jeder Name führt zu „alle offenen“ des Bereichs.
+ */
 function suggestSection(model, ctx) {
   const w = model.week;
+  const all = (g) => planHref({ woche: w.id, bereich: g.areaId });
   let body;
   if (!model.suggestions.length) {
     body = '<p class="empty">Noch keine Big Rocks in dieser Woche. Über die Suche oder einen Bereich die erste Aufgabe holen.</p>';
   } else {
-    body = `<div class="rocks">${model.suggestions
+    const filled = model.suggestions.filter((g) => !g.ok || g.tasks.length);
+    const empty = model.suggestions.filter((g) => g.ok && !g.tasks.length);
+    const groups = filled
       .map(
-        (g) => `<article class="rock">
-          <h3>${esc(g.area)} <a href="${esc(planHref({ woche: w.id, bereich: g.areaId }))}" class="hint">alle offenen</a></h3>
-          ${!g.ok ? problem(g) : g.tasks.length ? `<ul class="plan-list">${g.tasks.map((t) => candidate(t, model, ctx, { area: false })).join('')}</ul>${g.more ? `<p class="meta">und ${g.more} weitere</p>` : ''}` : '<p class="empty">Nichts offen ohne Termin.</p>'}
+        (g) => `<article class="plan-group">
+          <h3>${esc(g.area)} <a href="${esc(all(g))}" class="hint">alle offenen</a></h3>
+          ${!g.ok ? problem(g) : `<ul class="plan-list">${g.tasks.map((t) => candidate(t, model, ctx, { area: false })).join('')}</ul>${g.more ? `<p class="meta">und ${g.more} weitere</p>` : ''}`}
         </article>`,
       )
-      .join('')}</div>`;
+      .join('');
+    const rest = empty.length
+      ? `<p class="meta plan-none">${filled.length ? 'Nichts offen ohne Termin in' : 'Nichts offen ohne Termin. Alle offenen Aufgaben in'}: ${empty
+          .map((g) => `<a href="${esc(all(g))}" title="${esc(`Alle offenen Aufgaben in ${g.area}`)}">${esc(g.area)}</a>`)
+          .join(', ')}</p>`
+      : '';
+    body = `${groups ? `<div class="plan-groups">${groups}</div>` : ''}${rest}`;
   }
-  return `<section><h2>Aus den Bereichen <span class="hint">offen und ohne Termin, je Big Rock</span></h2>${body}</section>`;
+  return `<section class="plan-suggest"><h2>Aus den Bereichen <span class="hint">offen und ohne Termin, je Big Rock</span></h2>${body}</section>`;
 }
 
 /** Flamme einplanen: Titel, Tag, optional Uhrzeit und Bereich, oder aus einer bestehenden Aufgabe. */
@@ -111,17 +127,21 @@ function flameSection(model, ctx) {
     <h2>Flamme einplanen <span class="hint">Deep-Work-Block für ${esc(kw(w.id))}</span></h2>
     ${actForm(fctx, '/aktion/woche/flamme', { woche: w.id, aus: from?.id ?? null }, 'plan-flame-form')}
       ${from ? `<p class="meta">Als Unteraufgabe von <a href="${esc(from.url)}">${esc(taskName(from))}</a> · <a href="${esc(fctx.back)}#flamme">ohne</a></p>` : ''}
-      <div class="grid">
+      <div class="grid plan-flame-fields">
         <label class="wide">Titel<input name="titel" required maxlength="500" value="${esc(from?.title ?? '')}" placeholder="z. B. Folien für den Workshop" autocomplete="off"></label>
         <label>Tag<select name="tag">${days}</select></label>
         <label><span>Uhrzeit <span class="hint">optional</span></span><input type="time" name="zeit" step="300"></label>
         ${from ? '' : `<label>Bereich<select name="ort"><option value="loose">Ohne Bereich</option>${places}</select></label>`}
       </div>
-      <p><button type="submit" class="primary">Flamme einplanen</button></p>
+      <p class="plan-flame-go"><button type="submit" class="primary">Flamme einplanen</button></p>
     </form>
   </section>`;
 }
 
+/**
+ * Was schon in der Woche steht: die Flammen und darunter die Big Rocks je
+ * Bereich, einzeilig und in zwei Spalten (schmal untereinander).
+ */
 function weekSection(model, ctx) {
   const p = model.planned;
   const tz = model.tz;
@@ -135,14 +155,20 @@ function weekSection(model, ctx) {
       <span class="plan-side">${side}</span>
     </li>`;
   };
-  const flames = p.flames.length ? `<ul class="plan-list">${p.flames.map((t) => row(t, { area: true })).join('')}</ul>` : '<p class="empty">Keine Flammen geplant.</p>';
-  const rocks = p.rocks.length
-    ? p.rocks.map((g) => `<h3>${esc(g.area)} <span class="count-badge">${g.tasks.length}</span></h3><ul class="plan-list">${g.tasks.map((t) => row(t)).join('')}</ul>`).join('')
-    : '<p class="empty">Nichts fällig und kein Phönix-Schritt markiert.</p>';
+  const group = (name, tasks, opts, none = '') => `<div class="plan-group">
+      <h3>${esc(name)}${tasks.length ? ` <span class="count-badge">${tasks.length}</span>` : ''}</h3>
+      ${tasks.length ? `<ul class="plan-list">${tasks.map((t) => row(t, opts)).join('')}</ul>` : none}
+    </div>`;
+  const groups = [
+    { html: group('Flammen', p.flames, { area: true }, '<p class="empty">Keine Flammen geplant.</p>'), rows: p.flames.length + 1.5 },
+    ...p.rocks.map((g) => ({ html: group(g.area, g.tasks), rows: g.tasks.length + 1.5 })),
+  ];
   return `<section class="plan-week">
-    <h2>In ${esc(kw(model.week.id))} <a href="/?woche=${esc(model.week.id)}" class="hint">zur Woche</a></h2>
-    <h3>Flammen</h3>${flames}
-    <h3>Big Rocks</h3>${rocks}
+    <h2>In ${esc(kw(model.week.id))} <span class="hint">Flammen und Big Rocks</span> <a href="/?woche=${esc(model.week.id)}" class="hint">zur Woche</a></h2>
+    <div class="plan-cols">${inColumns(groups, (g) => g.rows)
+      .map((col) => `<div class="plan-col">${col.map((g) => g.html).join('')}</div>`)
+      .join('')}</div>
+    ${p.rocks.length ? '' : '<p class="empty">Nichts fällig und kein Phönix-Schritt markiert.</p>'}
     ${p.partial ? `<p class="problem">Nicht alle Zunder-Abfragen haben geantwortet; die Liste ist unvollständig.${p.error ? ` ${esc(p.error)}` : ''}</p>` : ''}
   </section>`;
 }
@@ -162,10 +188,8 @@ export function renderPlan(model, { user = null, write = null, back = '/planen',
   else {
     body = `${findSection(model, ctx)}
 ${suggestSection(model, ctx)}
-<div class="columns">
 ${flameSection(model, ctx)}
-${weekSection(model, ctx)}
-</div>`;
+${weekSection(model, ctx)}`;
   }
   return `<!doctype html>
 <html lang="de">
@@ -176,11 +200,7 @@ ${appHeader({ current: 'woche', user })}
   <h1>Woche planen <span class="range">${esc(kw(w.id))} · ${esc(range)}</span></h1>
   <div class="page-tools">
   ${weekSwitch(w.id, 'planen', { thisWeek: w.current })}
-  <nav class="pager" aria-label="Wochen">
-    <a href="${esc(planHref({ woche: w.prev }))}" rel="prev" class="pager-step" aria-label="Vorige Woche planen, ${esc(kw(w.prev))}"><span aria-hidden="true">‹</span> ${esc(kw(w.prev))}</a>
-    ${w.current ? '<span class="pager-now" aria-current="date">Diese Woche</span>' : '<a href="/planen" class="pager-now">Diese Woche</a>'}
-    <a href="${esc(planHref({ woche: w.next }))}" rel="next" class="pager-step" aria-label="Nächste Woche planen, ${esc(kw(w.next))}">${esc(kw(w.next))} <span aria-hidden="true">›</span></a>
-  </nav>
+  ${weekPager(w, (id) => (id ? planHref({ woche: id }) : '/planen'), { verb: ' planen' })}
   </div>
 </div>
 <main class="plan-page">
@@ -249,7 +269,7 @@ export const PLAN_CSS = `
 .plan-search .plan-area { flex: 0 1 220px; display: flex; min-width: 0; }
 .plan-search .plan-area select { flex: 1; min-width: 0; }
 .plan-list > li + li { border-top: 1px solid var(--line); }
-.plan-item { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px var(--s-3); padding: 8px 0; }
+.plan-item { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px var(--s-3); padding: 6px 0; }
 .plan-item .body { flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; }
 .plan-item .body > a { text-decoration-color: transparent; }
 .plan-item .body > a:hover { text-decoration-color: var(--accent); }
@@ -260,19 +280,48 @@ export const PLAN_CSS = `
 .plan-side form { margin: 0; display: flex; gap: 6px; align-items: center; }
 .plan-side select { font-size: 14px; padding: 4px 8px; min-height: 32px; background: var(--surface-2); max-width: 190px; }
 .plan-side a.chip { text-decoration: none; display: inline-flex; align-items: center; }
-.plan-page .rock h3 a { font-size: var(--t-xs); }
 .plan-page h2 a.hint { margin-left: auto; color: var(--accent); }
-.plan-flame .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--s-3); }
-.plan-flame .grid .wide { grid-column: 1 / -1; }
+/* Gruppen je Bereich: Name mit Haarlinie, darunter die Zeilen; keine Kacheln (wie die Big Rocks der Woche) */
+.plan-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: var(--s-4) var(--s-7); align-items: start; }
+.plan-group h3 { margin: 0; padding-bottom: 4px; display: flex; gap: var(--s-2); align-items: baseline; border-bottom: 2px solid var(--line); }
+.plan-group h3 a { margin-left: auto; font-size: var(--t-xs); }
+.plan-group > .empty { padding: var(--s-2) 0; }
+.plan-none { margin: 0; }
+.plan-groups + .plan-none { margin-top: var(--s-4); }
+.plan-none a { color: var(--text); }
+/* Flamme einplanen: breit eine Zeile, der Knopf daneben; schmal brechen die Felder um */
+.plan-flame form { margin: 0; display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--s-3) var(--s-4); }
+.plan-flame .plan-flame-fields { flex: 1 1 560px; display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--s-3); }
+.plan-flame .plan-flame-fields .wide { grid-column: span 2; }
 .plan-flame label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 500; }
 .plan-flame input, .plan-flame select { width: 100%; }
-.plan-flame form { margin: 0; }
-.plan-flame form > p { margin: var(--s-3) 0 0; }
-.plan-flame .meta { margin: 0 0 var(--s-3); }
-.plan-week h3 { display: flex; gap: 6px; align-items: baseline; }
-.plan-week h3:first-of-type { margin-top: 0; }
+.plan-flame form > p { margin: 0; }
+.plan-flame form > .meta { flex-basis: 100%; }
+/* In der Woche: zwei Spalten, jede Aufgabe eine Zeile, der Ort steht hinter dem Titel */
+.plan-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s-4) var(--s-7); align-items: start; }
+.plan-col { display: grid; gap: var(--s-4); align-content: start; min-width: 0; }
+.plan-week .plan-item { padding: 4px 0; min-height: 34px; flex-wrap: nowrap; }
+.plan-week .plan-item .body { flex: 1 1 auto; }
+.plan-week .plan-side { flex: none; }
+.plan-week .plan-side .chip { white-space: nowrap; }
+.plan-week .plan-item .meta { display: inline; margin-left: var(--s-2); }
+.plan-week .plan-list > li + li { border-top: 0; }
+.plan-week .plan-side .hint { font-size: var(--t-xs); color: var(--text-3); }
+.plan-week .plan-side .chip { min-height: 26px; padding: 2px 10px; font-size: var(--t-xs); }
+.plan-week > .empty { margin-top: var(--s-3); }
 h2 .h2-link { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--accent); font-size: var(--t-sm); }
+@media (max-width: 900px) {
+  .plan-cols { grid-template-columns: minmax(0, 1fr); }
+}
 @media (max-width: 700px) {
+  .plan-flame .plan-flame-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); flex-basis: 100%; }
+  .plan-flame form > p { flex-basis: 100%; }
+  /* Schmal steht der Ort wieder unter dem Titel, eingerückt bis hinter das Zeichen. */
+  .plan-week .plan-item { min-height: 40px; padding: 6px 0; }
+  .plan-week .plan-item .body { overflow-wrap: break-word; }
+  .plan-week .plan-item .meta { display: block; margin-left: 24px; }
+  .plan-week .plan-side { flex-basis: auto; flex: none; }
+  .plan-week .plan-side .chip { min-height: 40px; font-size: var(--t-sm); }
   .plan-search .plan-area { flex-basis: 100%; }
   .plan-search .btn { flex: 1; min-height: 44px; }
   .plan-side { flex-basis: 100%; }

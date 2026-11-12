@@ -59,8 +59,30 @@ const EMPTY = {
   jev: { key: null, model: null },
   calendars: [],
   hiddenEvents: null,
+  areaOrder: [],
   session: { idleDays: null, maxDays: null, generation: 0 },
 };
+
+/** Schlüssel eines Bereichsnamens für Vergleiche: ohne Leerzeichen am Rand, Groß-/Kleinschreibung egal. */
+export const areaKey = (name) => String(name ?? '').trim().toLocaleLowerCase('de');
+
+/**
+ * Vergleich für Bereichsnamen nach der Einstellung „Reihenfolge der Bereiche“
+ * (`areaOrder`): Genannte Bereiche stehen in dieser Reihenfolge vorn, alle
+ * übrigen alphabetisch dahinter. Ohne Liste bleibt es beim Alphabet.
+ */
+export function areaSorter(order = []) {
+  const rank = new Map();
+  for (const name of order ?? []) {
+    const key = areaKey(name);
+    if (key && !rank.has(key)) rank.set(key, rank.size);
+  }
+  return (a, b) => {
+    const ra = rank.get(areaKey(a)) ?? Infinity;
+    const rb = rank.get(areaKey(b)) ?? Infinity;
+    return ra < rb ? -1 : ra > rb ? 1 : String(a).localeCompare(String(b), 'de');
+  };
+}
 
 const SENDER = /^(?:[^@\s]+@|@)[^@\s]+\.[^@\s]+$/;
 const TAG = /^[\p{L}\p{N}_/-]{1,50}$/u;
@@ -222,7 +244,15 @@ export function validateSettings(input) {
     ? [...new Set(input.hiddenEvents.map((t) => text(t, 200, 'Ausgeblendeter Termin', 'hiddenEvents')).filter(Boolean))].slice(0, 50)
     : null;
 
-  return { tz, vaultName: text(input.vaultName, 200, 'Vault-Name', 'vaultName'), inboxFolder, zunder: { url: zunderUrl, token: zunderToken }, bridge, flameNote, readingNotes: { folder: readingFolder, trashDays }, sync: { adapter: syncAdapter, shadow: syncShadow }, mail, embed, tts, episodes, ingest, jev, calendars, hiddenEvents, session: validateSession(input.session) };
+  // Rangfolge der Lebensbereiche für Big Rocks und Planung; leer = alphabetisch. Doppelte (auch in
+  // anderer Schreibweise) fallen weg, der erste Platz zählt.
+  const seenAreas = new Set();
+  const areaOrder = (Array.isArray(input.areaOrder) ? input.areaOrder : [])
+    .map((name) => text(name, 100, 'Bereich in der Reihenfolge', 'areaOrder'))
+    .filter((name) => name && !seenAreas.has(areaKey(name)) && seenAreas.add(areaKey(name)))
+    .slice(0, 100);
+
+  return { tz, vaultName: text(input.vaultName, 200, 'Vault-Name', 'vaultName'), inboxFolder, zunder: { url: zunderUrl, token: zunderToken }, bridge, flameNote, readingNotes: { folder: readingFolder, trashDays }, sync: { adapter: syncAdapter, shadow: syncShadow }, mail, embed, tts, episodes, ingest, jev, calendars, hiddenEvents, areaOrder, session: validateSession(input.session) };
 }
 
 const days = (v, what, field) => {
@@ -366,6 +396,7 @@ export function createSettingsStore({ file = null, defaults = {}, logger = conso
         jev: stored.jev?.key ? { key: stored.jev.key, model: stored.jev.model ?? d.jevModel, source: 'einstellungen' } : null,
         calendars: stored.calendars,
         hiddenEvents: stored.hiddenEvents ?? DEFAULT_HIDDEN_EVENTS,
+        areaOrder: stored.areaOrder ?? [],
         // Ohne Nutzung nie länger als die Obergrenze.
         session: {
           idleDays: Math.min(stored.session.idleDays ?? d.sessionIdleDays, stored.session.maxDays ?? d.sessionMaxDays),

@@ -243,7 +243,7 @@ section > .empty { padding: var(--s-3) 0; }
 span.empty { display: inline; }
 span.empty::before { display: none; }
 
-/* Liste von Aufgaben */
+/* Liste von Aufgaben (Woche, Suche). Die einzeilige Form der Wochenansicht steht in „5. Woche“. */
 .task { display: flex; gap: var(--s-2); align-items: flex-start; padding: 6px 0; position: relative; }
 .task .mark { width: 20px; flex: none; text-align: center; color: var(--text-3); }
 .task .body { flex: 1; min-width: 0; overflow-wrap: anywhere; }
@@ -258,6 +258,10 @@ span.empty::before { display: none; }
 .due.overdue { background: var(--danger-soft); color: var(--danger); font-weight: 600; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 35%, transparent); }
 .task.status-done .due { background: none; color: var(--text-3); font-weight: 400; box-shadow: none; }
 .task .meta { font-size: var(--t-xs); margin-top: 1px; }
+/* Phönix-Schritt der Woche: bewusst gewählt, dezent gekennzeichnet */
+.step { font-size: var(--t-xs); font-weight: 600; color: var(--accent); white-space: nowrap; }
+.step::before { content: ''; display: inline-block; width: 5px; height: 5px; margin-right: 4px; border-radius: 50%; background: currentColor; vertical-align: 2px; }
+.task.status-done .step { color: var(--text-3); }
 .live { color: var(--accent); font-weight: 600; }
 .live::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-right: 4px; vertical-align: 1px; animation: blink 1.4s ease-in-out infinite; }
 @keyframes blink { 50% { opacity: .3; } }
@@ -270,7 +274,7 @@ span.empty::before { display: none; }
 
 /* Abhaken: runder Knopf */
 .tick { margin: 0; flex: none; display: flex; }
-.check { --size: 20px; width: var(--size); height: var(--size); margin: 1px 0 0; padding: 0; flex: none; cursor: pointer;
+.check { --size: 20px; width: var(--size); height: var(--size); margin: 2px 0 0; padding: 0; flex: none; cursor: pointer;
   display: grid; place-items: center; border-radius: 50%; border: 1.5px solid var(--text-3); background: var(--surface);
   color: #fff; position: relative; transition: background var(--mid), border-color var(--mid), transform var(--fast); }
 .check::before { content: ''; position: absolute; inset: -12px; }
@@ -295,7 +299,7 @@ span.empty::before { display: none; }
 
 /* Menü an Aufgaben */
 .menu { flex: none; }
-.menu-button { list-style: none; cursor: pointer; display: grid; place-items: center; width: 30px; height: 26px;
+.menu-button { list-style: none; cursor: pointer; display: grid; place-items: center; width: 30px; height: 24px;
   border-radius: var(--r-sm); color: var(--text-3); font-size: 18px; line-height: 1; user-select: none; transition: background var(--fast), color var(--fast); }
 .menu-button::-webkit-details-marker { display: none; }
 .task:hover .menu-button { color: var(--text-2); }
@@ -314,6 +318,18 @@ span.empty::before { display: none; }
 .assign-row { display: flex; gap: 6px; align-items: center; }
 .assign-row select, .assign-row input, .date-row input { flex: 1; min-width: 0; font-size: 14px; padding: 4px 8px; min-height: 32px; background: var(--surface-2); }
 form.act.busy { opacity: .6; pointer-events: none; }
+/* Ruhe in den Listen: Flamme und Menü erscheinen mit Maus erst an der Zeile, auf die man zeigt oder
+   in der der Tastaturfokus steht. Sie liegen dann rechts über der Zeile, damit der Text die ganze
+   Breite nutzt und nichts springt. Auf Touch bleiben sie sichtbar neben dem Text. */
+@media (hover: hover) {
+  .task .flame-form, .task .menu { position: absolute; top: 3px; right: 0; opacity: 0; background: var(--surface); border-radius: var(--r-sm);
+    box-shadow: -8px 0 6px var(--surface); transition: opacity var(--fast); }
+  .task .flame-form:has(+ .menu) { right: 30px; z-index: 1; }
+  .task:hover .flame-form, .task:hover .menu, .task:focus-within .flame-form, .task:focus-within .menu,
+  .task .menu[open], .task .flame-form:has(.running) { opacity: 1; }
+  /* Im Feuer liegt die Zeile auf einem Verlauf: dort bleibt der Platz frei, statt ihn zu überdecken. */
+  .feuer .task .flame-form, .feuer .task .menu { position: static; background: none; box-shadow: none; }
+}
 @keyframes pop-in { from { opacity: 0; transform: translateY(-4px) scale(.98); } }
 @keyframes sheet-in { from { opacity: 0; transform: translateY(16px); } }
 
@@ -486,13 +502,32 @@ a:active, a.pressed { opacity: .55; transition-duration: 0s; }
 
 /* Flammen-Knopf an Aufgaben */
 .flame-form { margin: 0; flex: none; display: flex; }
-.flame-btn { width: 30px; height: 26px; display: grid; place-items: center; padding: 0; cursor: pointer; border: 0;
+.flame-btn { width: 30px; height: 24px; display: grid; place-items: center; padding: 0; cursor: pointer; border: 0;
   border-radius: var(--r-sm); background: none; color: var(--text-3); transition: background var(--fast), color var(--fast); }
 .flame-btn svg { width: 15px; height: 15px; fill: currentColor; }
 .flame-btn:hover { background: var(--accent-soft); color: var(--accent); }
 .flame-btn.running { color: var(--accent); }
 .flame-btn.running svg { animation: flicker 1.6s ease-in-out infinite; }
 .flame-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Fokus oben (VCP-145): In der laufenden Woche stehen „Heute“ und das Feuer nebeneinander, alles
+   Weitere trägt die volle Breite. Schmal gilt die Reihenfolge aus „Schmale Bildschirme“ (VCP-54). */
+@media (min-width: 901px) {
+  .week-main { grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: var(--s-5); }
+  .week-main > * { grid-column: 1 / -1; }
+  .week-main > .heute { grid-column: 1; }
+  .week-main > .heute + .feuer { grid-column: 2; grid-template-columns: minmax(0, 1fr); gap: var(--s-4); align-content: start; padding: var(--s-5) var(--s-6); }
+  .week-main > .heute + .feuer > div + div { border-left: 0; padding-left: 0; border-top: 1px solid var(--accent-line); padding-top: var(--s-4); }
+  .week-main > .heute + .feuer .goal { font-size: 18px; margin-bottom: var(--s-2); }
+  .week-main > .heute + .feuer .feuer-meta { margin-top: var(--s-3); }
+}
+
+/* Aufgabenzeile der Woche: eine Zeile je Aufgabe. Titel, Schild „Schritt“, Fälligkeit und Ort stehen
+   nebeneinander; der Titel bricht erst um, wenn er allein nicht in die Zeile passt. */
+.week-main .task { padding: 3px 0; }
+.week-main .task .body { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--s-2); padding: 1px 0; }
+.week-main .task .body > a { min-width: 0; }
+.week-main .task .meta { margin-top: 0; }
 
 /* Feuer: die Karte, die die Woche trägt */
 .feuer { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: var(--s-6); position: relative; overflow: hidden;
@@ -528,63 +563,103 @@ a:active, a.pressed { opacity: .55; transition-duration: 0s; }
 .inline-edit textarea { width: 100%; font-size: 16px; line-height: 1.45; border-color: var(--accent); padding: 8px 10px; resize: vertical; border-radius: var(--r-md); }
 .inline-edit p { margin: 6px 0 0; }
 
-/* Big Rocks */
-.rocks { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--s-4); }
-.rock { border: 1px solid var(--line); border-radius: var(--r-md); padding: var(--s-3) var(--s-4) var(--s-2); background: var(--surface-2);
-  transition: border-color var(--mid), background var(--mid); }
-.rock h3 { margin: 0 0 var(--s-2); display: flex; justify-content: space-between; align-items: baseline; gap: var(--s-2); }
-.count { flex: none; color: var(--text-2); font-weight: 500; font-size: var(--t-sm); font-variant-numeric: tabular-nums; }
-.rock-progress { display: block; width: 100%; height: 4px; margin: 0 0 var(--s-2); border: 0; border-radius: var(--r-full); overflow: hidden;
+/* Big Rocks: je Bereich eine Kopfzeile, der Fortschritt ist die Linie darunter, dann die Aufgaben.
+   Zwei Spalten, keine Kacheln. Jeder Bereich ist ein <details> (render.js `rockGroup`). */
+.rocks { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s-4) var(--s-7); align-items: start; }
+.rocks-col { display: grid; gap: var(--s-3); align-content: start; min-width: 0; }
+.rock > summary { list-style: none; cursor: pointer; border-radius: var(--r-xs); }
+.rock > summary::-webkit-details-marker { display: none; }
+.rock h3 { margin: 0; padding-bottom: 4px; display: flex; align-items: baseline; gap: var(--s-2); font-size: var(--t-base); }
+.rock h3::after { content: '›'; flex: none; width: 10px; text-align: center; color: var(--text-3); font-weight: 400; transition: transform var(--fast); }
+.rock[open] h3::after { transform: rotate(90deg); }
+.count { flex: none; margin-left: auto; color: var(--text-2); font-weight: 500; font-size: var(--t-sm); font-variant-numeric: tabular-nums; }
+.rock-progress { display: block; width: 100%; height: 2px; margin: 0; border: 0; border-radius: var(--r-full); overflow: hidden;
   background: var(--line); -webkit-appearance: none; appearance: none; color: var(--ok); }
 .rock-progress::-webkit-progress-bar { background: var(--line); border-radius: var(--r-full); }
 .rock-progress::-webkit-progress-value { background: var(--ok); border-radius: var(--r-full); transition: width .4s var(--ease); }
 .rock-progress::-moz-progress-bar { background: var(--ok); border-radius: var(--r-full); }
-.rock.all-done { border-color: color-mix(in srgb, var(--ok) 35%, transparent); background: color-mix(in srgb, var(--ok-soft) 60%, var(--surface)); }
+.rock > ul { padding-top: 2px; }
+/* Komplett erledigter Bereich: tritt zurück, eine Zeile, aufklappbar */
+.rock.all-done h3 { color: var(--text-2); font-weight: 500; }
 .rock.all-done .count { color: var(--ok); font-weight: 700; }
 .rock.all-done .count::after { content: ' ✓'; }
-/* Komplett erledigter Bereich: eine Zeile, aufklappbar */
-details.rock { padding-bottom: var(--s-3); align-self: start; }
-details.rock > summary { list-style: none; cursor: pointer; }
-details.rock > summary::-webkit-details-marker { display: none; }
-details.rock > summary h3 { margin: 0; justify-content: flex-start; }
-details.rock > summary h3::before { content: '›'; flex: none; width: 10px; color: var(--text-3); transition: transform var(--fast); }
-details.rock[open] > summary h3::before { transform: rotate(90deg); }
-details.rock > summary h3 .count { margin-left: auto; }
-details.rock[open] > summary { margin-bottom: var(--s-2); }
 
-/* Heute: nur auf schmalen Bildschirmen (siehe unten), Termine wie in der Woche, Aufgaben wie überall */
-.heute { display: none; border-color: var(--accent-line); box-shadow: inset 3px 0 0 var(--accent), var(--shadow-1); }
+/* Heute: Termine kompakt, darunter was heute fällig oder seit Montag überfällig ist */
 .heute h2 { color: var(--accent); }
-.heute ul + ul { margin-top: var(--s-2); padding-top: var(--s-1); border-top: 1px solid var(--line); }
-.heute-events .event { display: grid; grid-template-columns: 64px minmax(0, 1fr); column-gap: var(--s-2); padding: 4px 0; }
-.heute-events .event .meta { grid-column: 2; }
-.heute-events .time { color: var(--text-2); font-variant-numeric: tabular-nums; font-size: var(--t-sm); }
-.heute-tasks > li + li { border-top: 1px solid var(--line); }
+.heute ul + ul { margin-top: var(--s-2); padding-top: var(--s-2); border-top: 1px solid var(--line); }
+/* Ab sieben Terminen zwei Spalten, damit die Karte nicht länger wird als das Feuer daneben */
+.heute-events:has(> li:nth-child(7)) { columns: 2 200px; column-gap: var(--s-5); }
+.heute-events .event { position: relative; padding: 2px 0 2px 58px; break-inside: avoid; }
+.heute-events .time { position: absolute; left: 0; top: 3px; margin: 0; }
 
-/* Termine */
-.week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: var(--s-2); }
-.day { border: 1px solid var(--line); border-radius: var(--r-md); padding: var(--s-2) var(--s-3); min-height: 96px; background: var(--surface-2); }
-.day:nth-child(n+6) { background: var(--bg); }
-.day.today { background: var(--accent-soft); border-color: var(--accent-line); box-shadow: inset 0 3px 0 var(--accent); }
-.day h3 { margin: 0 0 6px; font-size: var(--t-sm); color: var(--text-2); }
+/* Termine: Spalten ohne Kacheln, eine Haarlinie dazwischen, heute hervorgehoben */
+.week { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
+.day { min-width: 0; padding: var(--s-2) var(--s-3); border-left: 1px solid var(--line); }
+.day:first-child { border-left-color: transparent; }
+.day.today { background: var(--accent-soft); border-left-color: transparent; border-radius: var(--r-md); box-shadow: inset 0 2px 0 var(--accent); }
+.day.today + .day { border-left-color: transparent; }
+.day h3 { margin: 0 0 4px; font-size: var(--t-sm); color: var(--text-2); }
 .day.today h3 { color: var(--accent); }
-.day.past { opacity: .62; }
-.day-count { display: none; font-weight: 400; color: var(--text-3); }
+.day.past { opacity: .75; }
+/* Zahl statt Liste: nur schmal und nur heute, wenn „Heute“ dieselben Termine schon oben zeigt */
+.day-count { display: none; font-weight: 400; color: var(--text-2); }
+/* Ein voller Tag heute bekommt am Desktop zwei Spalten Platz statt doppelter Höhe. */
+@media (min-width: 901px) {
+  .day.today:has(li:nth-child(4)) { grid-column: span 2; }
+  .day.today:has(li:nth-child(4)) ul { columns: 2; column-gap: var(--s-4); }
+  .day.today .event { break-inside: avoid; }
+}
 .count-badge { font-size: var(--t-xs); font-weight: 700; letter-spacing: 0; padding: 1px 7px; border-radius: var(--r-full); background: var(--bg-sunk); color: var(--text-2); }
 .day .empty { font-size: var(--t-sm); color: var(--text-3); }
 .day .empty::before { display: none; }
-.event { padding: 4px 0; font-size: 14px; line-height: 1.35; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
-.event:first-child { border-top: 0; }
+/* Lange Wörter („Bereitschaftsabend“) trennt die Silbentrennung, nicht der Zeilenrand mitten im Wort. */
+.event { padding: 2px 0; font-size: 14px; line-height: 1.35; overflow-wrap: break-word; hyphens: auto; -webkit-hyphens: auto; }
 .event .time { color: var(--text-2); font-variant-numeric: tabular-nums; margin-right: 4px; font-size: var(--t-sm); }
-.event.all-day { border-top: 0; margin-bottom: 4px; padding: 2px 8px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-sm); }
 .event.all-day .title { font-weight: 600; }
-.event .meta { font-size: var(--t-xs); }
+.event .meta { display: inline; font-size: var(--t-xs); }
+.event .meta::before { content: '· '; }
+/* Vergangene Tage der laufenden Woche: eine Zeile mit der Zahl, aufgeklappt die Tage wie sonst */
+.days-past { margin: calc(-1 * var(--s-1)) 0 var(--s-2); }
+.week-past { margin-bottom: var(--s-2); }
 
-/* Aufgaben und Inbox */
+/* „N weitere“ und „vorbei“: eine leise Zeile zum Aufklappen. `data-keep` am <details>: cockpit.js hält
+   Aufgeklapptes offen, wenn es nach einer Aktion `main` tauscht. */
+.more-items > summary { list-style: none; cursor: pointer; display: flex; align-items: baseline; gap: 6px; width: fit-content; padding: 5px 0;
+  font-size: var(--t-sm); color: var(--text-2); border-radius: var(--r-xs); transition: color var(--fast); }
+.more-items > summary::-webkit-details-marker { display: none; }
+.more-items > summary::before { content: '›'; flex: none; width: 10px; text-align: center; color: var(--text-3); transition: transform var(--fast); }
+.more-items[open] > summary::before { transform: rotate(90deg); }
+.more-items > summary:hover { color: var(--text); }
+
+/* Aufgaben und Inbox: unten, je Liste die ersten Einträge; die Inbox zeigt Vault und Zunder nebeneinander */
 .columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s-6); align-items: start; }
-.columns section h3 { font-size: var(--t-sm); color: var(--text-2); display: flex; gap: 6px; align-items: baseline; margin-top: var(--s-5); }
-.columns section h2 + h3 { margin-top: 0; }
-.columns ul > li + li { border-top: 1px solid var(--line); }
+.week-main > .columns { grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); }
+.columns section h3 { font-size: var(--t-sm); color: var(--text-2); display: flex; gap: 6px; align-items: baseline; margin-top: 0; }
+.columns ul > li + li, .columns .more-items, .columns .more-items[open] > ul > li:first-child { border-top: 1px solid var(--line); }
+.inbox-lists { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s-4) var(--s-6); align-items: start; }
+/* `.inbox` heißt auch der Eingang unter Lesen (Raster mit Abstand); die Inbox der Woche ist ein gewöhnlicher Abschnitt. */
+.week-main .inbox { display: block; }
+
+/* Einstellungen → Anzeige: Reihenfolge der Bereiche, ein Name pro Zeile */
+.area-order textarea { width: 100%; max-width: 420px; resize: vertical; line-height: 1.5; }
+.settings .area-order-hint { margin: var(--s-2) 0 0; max-width: 68ch; }
+
+/* Blättern: schmal nur die Pfeile und „Heute“ (render.js `weekPager`, Regeln dazu in „Schmale Bildschirme“) */
+.pager .pager-step > span, .pager a.pager-now > span { padding: 0; }
+.pager .pager-short { display: none; }
+
+@media (max-width: 900px) {
+  .rocks { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .rocks-col { gap: 0; }
+  .rock[open] { padding-bottom: var(--s-2); }
+  /* Heute steht hier ganz oben mit denselben Terminen: in der Wochenliste reicht die Zahl. */
+  .today-first .day.today:has(.day-count) { grid-template-columns: minmax(0, 1fr); }
+  .today-first .day.today:has(.day-count) ul { display: none; }
+  .today-first .day.today .day-count { display: inline; margin-left: var(--s-2); }
+}
+@media (max-width: 600px) {
+  .inbox-lists { grid-template-columns: minmax(0, 1fr); }
+}
 
 /* Schild für Zustände (Einstellungen, Tokens) */
 .pill { display: inline-flex; align-items: center; gap: 4px; font-size: var(--t-xs); font-weight: 600; line-height: 1.3; text-transform: none; letter-spacing: 0;
@@ -1724,22 +1799,19 @@ a.ingest-item-open:hover, a.ingest-item-open:focus-visible { color: var(--accent
 
 /* --- Schmale Bildschirme ------------------------------------------------- */
 @media (max-width: 900px) {
-  .feuer, .columns, .settings { grid-template-columns: minmax(0, 1fr); }
+  .feuer, .columns, .week-main > .columns, .settings { grid-template-columns: minmax(0, 1fr); }
   .settings-nav { position: static; display: flex; gap: 6px; overflow-x: auto; margin: 0 calc(-1 * var(--gutter)); padding: 0 var(--gutter) 2px; scrollbar-width: none; }
   .settings-nav::-webkit-scrollbar { display: none; }
   .settings-nav a { flex: none; padding: 6px 12px; border: 1px solid var(--line); background: var(--surface); border-radius: var(--r-full); gap: 8px; }
   .feuer > div + div { border-left: 0; padding-left: 0; border-top: 1px solid var(--accent-line); padding-top: var(--s-5); }
-  .week { grid-template-columns: minmax(0, 1fr); gap: 0; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
-  .day { min-height: 0; border: 0; border-radius: 0; border-top: 1px solid var(--line); display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: var(--s-3); align-items: baseline; }
-  .day:first-child { border-top: 0; }
-  .day.today { box-shadow: inset 3px 0 0 var(--accent); }
+  /* Termine als Liste: je Tag eine Zeile, links der Tag, rechts die Termine */
+  .week { grid-auto-flow: row; }
+  .day { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: var(--s-3); align-items: baseline; padding: var(--s-2) 0; border-left: 0; border-top: 1px solid var(--line); }
+  .day:first-child { border-top-color: transparent; }
+  .day.today { margin: 0 calc(-1 * var(--s-3)); padding: var(--s-2) var(--s-3); border-top-color: transparent; box-shadow: inset 3px 0 0 var(--accent); }
+  .day.today + .day { border-top-color: transparent; }
   .day h3 { margin: 0; }
-  /* Vergangene Tage: eine Zeile mit der Zahl statt der Termine */
-  .day.past { grid-template-columns: minmax(0, 1fr); padding-top: 6px; padding-bottom: 6px; }
-  .day.past ul, .day.past .empty { display: none; }
-  .day.past .day-count { display: inline; margin-left: var(--s-2); }
   /* Laufende Woche auf dem iPhone: erst Heute und Aufgaben, dann Feuer, Big Rocks, die Woche, Inbox (VCP-54) */
-  .heute { display: block; }
   .today-first > .columns { display: contents; }
   .today-first > .heute { order: 1; }
   .today-first > .columns > .tasks { order: 2; }
@@ -1772,12 +1844,20 @@ a.ingest-item-open:hover, a.ingest-item-open:focus-visible { color: var(--accent
 
   .page-head { padding-top: var(--s-4); }
   /* Umschalter und Blättern in einer Zeile: „Diese Woche“ steht schon in der Überschrift. */
-  .page-tools { width: 100%; justify-content: space-between; }
-  .segments a { padding: 5px 10px; }
-  .page-tools .pager a { padding: 5px 9px; }
-  .page-tools .pager span.pager-now { display: none; }
+  .page-tools { width: 100%; justify-content: space-between; gap: var(--s-2); }
+  .segments a { display: inline-flex; align-items: center; min-height: 40px; padding: 5px 10px; }
+  /* Blättern: nur die Pfeile (die KW steht im aria-label), in anderen Wochen dazu „Heute“ */
+  .page-tools .pager a { min-width: 40px; min-height: 40px; justify-content: center; padding: 5px 8px; }
+  .page-tools .pager span.pager-now, .page-tools .pager-kw { display: none; }
+  .page-tools .pager-short { display: inline; }
+  .page-tools .pager-step { font-size: var(--t-md); }
+  /* In anderen Wochen kommt „Heute“ dazu: etwas enger, damit es bei 390 px bei einer Zeile bleibt (sonst bricht das Blättern um). */
+  .page-tools:has(a.pager-now) .segments a { padding: 5px 8px; font-size: var(--t-sm); }
+  .page-tools:has(a.pager-now) .pager-now { font-size: var(--t-sm); }
   h1 { font-size: 24px; }
   h1 .range { display: block; margin: 2px 0 0; font-size: var(--t-base); }
+  /* Woche: KW und Zeitraum passen in eine Zeile */
+  .page-week h1 .range { display: inline; margin-left: var(--s-2); }
   section { padding: var(--s-4); border-radius: var(--r-lg); }
   main { gap: var(--s-4); padding-bottom: var(--s-7); }
   .feuer { padding: var(--s-5) var(--s-4); }
@@ -1801,8 +1881,13 @@ a.ingest-item-open:hover, a.ingest-item-open:focus-visible { color: var(--accent
   .menu[open] > .menu-button::before { content: ''; position: fixed; inset: 0; z-index: 39; background: rgb(0 0 0 / .4); cursor: default; }
   .chip { min-height: 40px; padding: 6px 14px; font-size: var(--t-base); }
   .date-row input, .assign-row select, .assign-row input { min-height: 40px; font-size: 16px; }
-  .menu-button { width: 36px; height: 32px; color: var(--text-2); }
-  .check { --size: 24px; }
+  /* Aufgabenzeile: mindestens 40 px hoch, Flamme und Menü als Tippziele direkt nebeneinander am Rand */
+  .menu-button, .flame-btn { width: 40px; height: 40px; }
+  .menu-button { color: var(--text-2); }
+  .task .menu { margin: 0 -8px; }
+  .check { --size: 24px; margin-top: 8px; }
+  .more-items > summary { min-height: 40px; align-items: center; }
+  .rock h3 { padding: 8px 0 7px; }
   .cal-row { grid-template-columns: minmax(0, 1fr) auto; }
   .cal-row .pill { grid-column: 1; justify-self: start; }
   .cal-row .cal-meta { grid-column: 1; }
@@ -1812,6 +1897,10 @@ a.ingest-item-open:hover, a.ingest-item-open:focus-visible { color: var(--accent
   .save-bar { justify-content: flex-end; }
   .task { padding: 9px 0; gap: 10px; }
   .task .meta { font-size: var(--t-sm); }
+  /* Woche: Titel, Fälligkeit und Ort fließen als ein Text, so braucht eine lange Aufgabe zwei Zeilen statt drei. */
+  .week-main .task { padding: 0; gap: var(--s-2); min-height: 40px; }
+  .week-main .task .body { display: block; padding: 9px 0; line-height: 1.45; }
+  .week-main .task .meta { display: inline; }
   input:not([type=checkbox], [type=radio], [type=hidden]), select, textarea { font-size: 16px; }
 }
 

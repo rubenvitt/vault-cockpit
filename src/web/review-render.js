@@ -1,4 +1,4 @@
-import { esc, dueLabel } from './render.js';
+import { esc, dueLabel, weekPager } from './render.js';
 import { head, appHeader, weekSwitch } from './layout.js';
 
 /** Balken als SVG (die CSP erlaubt keine Inline-Styles); `v` in Prozent. */
@@ -58,11 +58,7 @@ ${appHeader({ current: 'woche', user })}
   <h1>Rückblick KW ${w.week} <span class="range">${esc(w.monday.split('-').reverse().join('.'))} – ${esc(w.sunday.split('-').reverse().join('.'))}</span></h1>
   <div class="page-tools">
   ${weekSwitch(w.id, 'rueckblick', { plan, thisWeek: Boolean(w.current) })}
-  <nav class="pager" aria-label="Wochen">
-    <a href="/rueckblick?woche=${esc(w.prev)}" rel="prev" class="pager-step" aria-label="Vorige Woche, KW ${Number(w.prev.slice(6))}"><span aria-hidden="true">‹</span> KW ${Number(w.prev.slice(6))}</a>
-    ${w.current ? '<span class="pager-now" aria-current="date">Diese Woche</span>' : '<a href="/rueckblick" class="pager-now">Diese Woche</a>'}
-    <a href="/rueckblick?woche=${esc(w.next)}" rel="next" class="pager-step" aria-label="Nächste Woche, KW ${Number(w.next.slice(6))}">KW ${Number(w.next.slice(6))} <span aria-hidden="true">›</span></a>
-  </nav>
+  ${weekPager(w, (id) => (id ? `/rueckblick?woche=${id}` : '/rueckblick'))}
   </div>
 </div>
 <main class="review-page">

@@ -1,6 +1,7 @@
 import { describeWeek, weekOf, parseWeekId, localDate, zonedToUtc } from './week.js';
 import { areaOf } from './data.js';
 import { ActionError } from './actions.js';
+import { areaSorter } from './settings.js';
 
 /**
  * Wochenplanung im Cockpit (VCP-47): Zunder-Aufgaben suchen und in die
@@ -136,7 +137,7 @@ export function createWeekPlanner({ settings, zunder, now = () => new Date(), lo
      * Ungültige Woche → null.
      */
     async view(id, { q = '', area = '', from = '' } = {}) {
-      const { tz } = settings.get();
+      const { tz, areaOrder } = settings.get();
       const week = weekFrom(id);
       if (!week) return null;
       const today = localDate(now(), tz);
@@ -205,7 +206,9 @@ export function createWeekPlanner({ settings, zunder, now = () => new Date(), lo
         if (!groups.has(name)) groups.set(name, { area: name, areaId: areaIdOf(t, s), tasks: [] });
         groups.get(name).tasks.push(task(t));
       }
-      const rocks = [...groups.values()].map((g) => ({ ...g, tasks: g.tasks.sort(byDue) })).sort((a, b) => a.area.localeCompare(b.area, 'de'));
+      // Gruppen und Vorschläge in der eigenen Rangfolge der Bereiche (Einstellung `areaOrder`), wie die Wochenansicht.
+      const byArea = areaSorter(areaOrder);
+      const rocks = [...groups.values()].map((g) => ({ ...g, tasks: g.tasks.sort(byDue) })).sort((a, b) => byArea(a.area, b.area));
 
       // Je Bereich der Big Rocks: offene Aufgaben ohne Termin, die noch nicht in der Woche stehen.
       const rockAreas = [...new Set(rocks.map((g) => g.areaId).filter(Boolean))];
@@ -217,7 +220,7 @@ export function createWeekPlanner({ settings, zunder, now = () => new Date(), lo
           return { area: nameOf(aid), areaId: aid, ok: r.ok, error: r.error ?? null, tasks: open.slice(0, SUGGEST).map(task), more: Math.max(0, open.length - SUGGEST) };
         }),
       );
-      suggestions.sort((a, b) => a.area.localeCompare(b.area, 'de'));
+      suggestions.sort((a, b) => byArea(a.area, b.area));
 
       return {
         ...head,

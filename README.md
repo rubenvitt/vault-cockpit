@@ -394,23 +394,35 @@ sieht (etwa nach dem Update), gelten nicht als Wechsel.
 
 ### Web-Cockpit
 
-Unter `<PUBLIC_URL>/` liegt die Wochenansicht, gebaut um die Woche statt um
-„Heute“. Oben das **Feuer-Ziel** aus der Feuer-Notiz der Woche (Frontmatter
-`type: 1-wochen-feuer`, `zeitraum` ab Montag, Abschnitt „## Feuer-Ziel“) und die
-**Flammen** der Woche aus Zunder, mit den dort gemessenen Zeiten. Darunter die
-**Big Rocks** je Lebensbereich: Zunder-Aufgaben, die in der Woche fällig oder als
-Phönix-Schritt der Woche markiert sind, gruppiert nach Zunder-Bereich. Es folgen
-die **Termine** der Woche aus allen eingestellten Kalendern, **Aufgaben** in
-Arbeit oder überfällig und die **Inbox** (Ordner im Vault und Zunder-Inbox). Mit
-`?woche=2026-W43` blättert man; dieselben Daten gibt es als JSON unter `/api/woche`.
+Unter `<PUBLIC_URL>/` liegt die Wochenansicht. Sie beantwortet zuerst „Was zählt
+heute, was diese Woche?“: In der laufenden Woche stehen oben **Heute** (Termine
+von heute und die Big Rocks, die heute fällig oder seit Wochenbeginn überfällig
+sind) und daneben das **Feuer-Ziel** aus der Feuer-Notiz der Woche (Frontmatter
+`type: 1-wochen-feuer`, `zeitraum` ab Montag, Abschnitt „## Feuer-Ziel“) mit den
+**Flammen** der Woche aus Zunder und den dort gemessenen Zeiten; in anderen
+Wochen steht das Feuer allein. Darunter die **Big Rocks** je Lebensbereich:
+Zunder-Aufgaben, die in der Woche fällig oder als Phönix-Schritt der Woche
+markiert sind. Je Bereich eine Kopfzeile (Name, erledigt/gesamt, Fortschritt als
+Linie) und darunter die Aufgaben als Zeilen, bewusst gewählte Phönix-Schritte
+zuerst und mit dem Schild „Schritt“; komplett erledigte Bereiche sind auf eine
+Zeile eingeklappt. Die Bereiche stehen in der eigenen Rangfolge aus den
+Einstellungen (Anzeige → **Reihenfolge der Bereiche**, ein Name pro Zeile; was
+dort fehlt, folgt alphabetisch). Es folgen die **Termine** der Woche aus allen
+eingestellten Kalendern (heute hervorgehoben, vergangene Tage der laufenden Woche
+eingeklappt in einer Zeile mit der Zahl), **Aufgaben** in Arbeit oder überfällig
+und die **Inbox** (Ordner im Vault und Zunder-Inbox). Aufgaben und die beiden
+Inbox-Listen zeigen die ersten fünf Einträge, der Rest steckt hinter „N weitere“
+und bleibt beim Abarbeiten aufgeklappt. Mit `?woche=2026-W43` blättert man;
+dieselben Daten gibt es als JSON unter `/api/woche`.
 
 Auf dem iPhone (Web bis 900 px Breite und native App) beginnt die laufende Woche
-mit **Heute**: Termine von heute und die Big Rocks, die heute fällig oder seit
-Wochenbeginn überfällig sind; danach Aufgaben, Feuer, Big Rocks, Termine und Inbox.
+mit **Heute**, danach Aufgaben, Feuer, Big Rocks, Termine und Inbox. Im Web sind
+dort Bereiche ohne offenen Phönix-Schritt zunächst zugeklappt (Name und Stand,
+ein Tipp öffnet sie), und der heutige Tag zeigt in den Terminen nur die Zahl,
+weil „Heute“ ihn schon oben ausführt.
 Fälligkeiten stehen als kleines Schild hinter dem Titel („Heute“, „Morgen“,
-überfällig rot), komplett erledigte Bereiche der Big Rocks klappen auf eine Zeile
-zusammen. „← Zurück“ auf einer Notizseite führt dorthin, woher man kam (Inbox,
-Graph, Wissen …).
+überfällig rot). „← Zurück“ auf einer Notizseite führt dorthin, woher man kam
+(Inbox, Graph, Wissen …).
 
 Einrichtung:
 
@@ -424,7 +436,8 @@ Einrichtung:
    Kalenders, `webcal://` geht auch; Serientermine löst das Cockpit selbst auf)
    oder als **CalDAV** (Kalender-Home oder einzelner Kalender, mit Benutzer und
    App-Passwort; optional nur bestimmte Kalender). Daneben Zeitzone, Vault-Name
-   für „In Obsidian öffnen“ und der Inbox-Ordner.
+   für „In Obsidian öffnen“, der Inbox-Ordner und die Reihenfolge der Bereiche
+   (nur auf der Web-Seite; die App zeigt und ändert sie nicht).
 
    Außerdem: Zunder-Zugang, Zunder-Brücke (an/aus, Tag), Flammen in der Feuer-Notiz
    (an/aus), Mail-Abruf (Fastmail-Token, freigegebene Absender, Ordner, Abstand),
@@ -448,6 +461,8 @@ Wie man diese Dateien sichert und wiederherstellt: [Sicherung von `/data`](#sich
 **Handeln statt nur schauen:** Aufgaben in Flammen, Big Rocks, Aufgaben und
 Zunder-Inbox hakt man direkt ab (Zunder-Status `done`, ein zweiter Klick öffnet
 sie wieder, die Meldung bietet „Rückgängig“). Das Menü `⋯` an jeder Aufgabe
+(mit Maus erscheint es wie der Flammen-Knopf erst an der Zeile, auf die man zeigt
+oder in der der Tastaturfokus steht; auf Touch ist beides immer sichtbar)
 setzt den Status (in Arbeit, blockiert, offen) und verschiebt die Fälligkeit
 (heute, morgen, nächste Woche = Montag, ein Datum oder ohne); die Ansicht ordnet
 die Aufgabe danach neu ein. Dort markiert man auch einen Phönix-Schritt der
@@ -561,7 +576,10 @@ Kennung (`VCP-47`) suchen, nach Bereich filtern oder alle offenen eines Bereichs
 auflisten, Dev-Projekte bleiben außen vor. **Holen** macht eine Aufgabe zum
 Phönix-Schritt der Woche oder setzt ihre Fälligkeit auf einen Tag der Woche;
 danach steht sie unter ihrem Bereich in den Big Rocks. Je Bereich der Big Rocks
-zeigt die Seite bis zu fünf offene Aufgaben ohne Termin zum Übernehmen.
+zeigt die Seite bis zu fünf offene Aufgaben ohne Termin zum Übernehmen; Bereiche
+ohne solche Aufgaben stehen zusammen in einer Zeile, jeder Name führt zu allen
+offenen des Bereichs. Unten steht, was schon in der Woche liegt: die Flammen und
+die Big Rocks je Bereich, in derselben Rangfolge wie in der Wochenansicht.
 **Flamme einplanen** legt eine Zunder-Aufgabe mit Rolle `flamme` für die Woche
 an, fällig am gewählten Tag (optional mit Uhrzeit), in einem Bereich oder über
 „Als Flamme“ als Unteraufgabe einer bestehenden Aufgabe. **Aus der Woche**

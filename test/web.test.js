@@ -481,6 +481,43 @@ test('Einstellungen: nur angemeldet, Kalender anlegen, Geheimnisse bleiben verbo
   );
 });
 
+test('Einstellungen: Reihenfolge der Bereiche, ein Name pro Zeile; Teilformular und „Überall abmelden“ lassen sie stehen', async () => {
+  await withServer(async ({ call, login, settings }) => {
+    await login();
+    const html = await (await call('/einstellungen')).text();
+    const csrf = csrfFrom(html);
+    // Im Abschnitt „Anzeige“, leer = alphabetisch.
+    const anzeige = html.slice(html.indexOf('<section id="anzeige">'));
+    assert.match(anzeige, /Reihenfolge der Bereiche <span class="hint">ein Name pro Zeile, wie in Zunder; leer = alphabetisch<\/span>/);
+    assert.match(anzeige, /<textarea name="areaOrder" rows="4"[^>]*><\/textarea>/);
+    assert.deepEqual(settings.get().areaOrder, []);
+
+    // Ein Name pro Zeile (Kommas gehören zum Namen); Leerzeilen und Doppelte in anderer Schreibweise fallen weg.
+    const saved = await call('/einstellungen', { method: 'POST', form: { areaOrder: 'Selbstverwirklichung\r\n  Meine Liebste \r\n\r\nselbstverwirklichung\r\nArbeitnehmer, Büro', csrf } });
+    assert.equal(saved.status, 303);
+    const order = ['Selbstverwirklichung', 'Meine Liebste', 'Arbeitnehmer, Büro'];
+    assert.deepEqual(settings.stored().areaOrder, order);
+    assert.deepEqual(settings.get().areaOrder, order);
+    assert.match(await (await call('/einstellungen')).text(), /<textarea name="areaOrder" rows="4"[^>]*>Selbstverwirklichung\nMeine Liebste\nArbeitnehmer, Büro<\/textarea>/);
+
+    // Ein Formular ohne das Feld (anderer Abschnitt, älterer Stand der Seite) setzt die Rangfolge nicht zurück.
+    assert.equal((await call('/einstellungen', { method: 'POST', form: { tz: 'UTC', hiddenEvents: 'Fokus', csrf } })).status, 303);
+    assert.equal(settings.stored().tz, 'UTC');
+    assert.deepEqual(settings.stored().areaOrder, order);
+
+    // „Überall abmelden“ speichert nur die Generation.
+    assert.equal((await call('/einstellungen/abmelden', { method: 'POST', form: { csrf }, origin: 'https://vault.test' })).status, 200);
+    assert.equal(settings.stored().session.generation, 1);
+    assert.deepEqual(settings.stored().areaOrder, order);
+
+    // Das leere Feld stellt wieder auf alphabetisch.
+    await login();
+    const fresh = csrfFrom(await (await call('/einstellungen')).text());
+    await call('/einstellungen', { method: 'POST', form: { areaOrder: '', csrf: fresh } });
+    assert.deepEqual(settings.stored().areaOrder, []);
+  });
+});
+
 test('Einstellungen: Kalender als kompakte Liste, Felder je Art, Entfernen als Knopf', async () => {
   const calendars = { check: async () => ({}) };
   await withServer(

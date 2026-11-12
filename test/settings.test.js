@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createSettingsStore, validateSettings, loadOrCreateSecret, SettingsError } from '../src/cockpit/settings.js';
+import { createSettingsStore, validateSettings, loadOrCreateSecret, SettingsError, areaSorter } from '../src/cockpit/settings.js';
 import { createIcsClient, createCalendarSources, calendarForGraph } from '../src/cockpit/calendars.js';
 import { describeWeek } from '../src/cockpit/week.js';
 
@@ -252,6 +252,34 @@ test('Ausgeblendete Termine: „Blockiert“ fehlt standardmäßig, eigene Liste
 
   settings.save({ calendars: cal, hiddenEvents: [] });
   assert.equal((await titles()).length, 2);
+});
+
+test('Einstellungen: Reihenfolge der Bereiche, leer = alphabetisch, Doppelte fallen weg, übersteht Neustart und fremdes Speichern', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'settings-areas-'));
+  try {
+    const file = join(dir, 'cockpit-settings.json');
+    const s = createSettingsStore({ file, logger: quiet });
+    assert.deepEqual(s.get().areaOrder, []);
+    s.save({ calendars: [], areaOrder: [' Selbstverwirklichung ', '', 'Meine Liebste', 'SELBSTVERWIRKLICHUNG', 'Arbeitnehmer'] });
+    assert.deepEqual(s.stored().areaOrder, ['Selbstverwirklichung', 'Meine Liebste', 'Arbeitnehmer']);
+    // Aus der Datei gelesen steht sie wieder da.
+    assert.deepEqual(createSettingsStore({ file, logger: quiet }).get().areaOrder, ['Selbstverwirklichung', 'Meine Liebste', 'Arbeitnehmer']);
+    // Wer den gespeicherten Stand weiterreicht (wie „Überall abmelden“), behält sie; ein Stand ohne das Feld heißt alphabetisch.
+    s.save({ ...s.stored(), tz: 'UTC' });
+    assert.deepEqual(s.stored().areaOrder, ['Selbstverwirklichung', 'Meine Liebste', 'Arbeitnehmer']);
+    assert.deepEqual(validateSettings({}).areaOrder, []);
+    assert.throws(() => validateSettings({ areaOrder: ['x'.repeat(101)] }), (e) => e instanceof SettingsError && e.field === 'areaOrder');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('areaSorter: genannte Bereiche in ihrer Reihenfolge vorn, der Rest alphabetisch, Schreibweise egal', () => {
+  const areas = ['Programmieren', 'Arbeitnehmer', 'Ärzte', 'Meine Liebste', 'Zuhause', 'Selbstverwirklichung'];
+  assert.deepEqual([...areas].sort(areaSorter([])), ['Arbeitnehmer', 'Ärzte', 'Meine Liebste', 'Programmieren', 'Selbstverwirklichung', 'Zuhause']);
+  assert.deepEqual([...areas].sort(areaSorter()), [...areas].sort(areaSorter([])));
+  // Selbstverwirklichung zuerst, Arbeit zuletzt genannt: was fehlt, folgt alphabetisch dahinter.
+  assert.deepEqual([...areas].sort(areaSorter(['selbstverwirklichung', ' MEINE LIEBSTE ', 'Gibt es nicht', 'Arbeitnehmer'])), ['Selbstverwirklichung', 'Meine Liebste', 'Arbeitnehmer', 'Ärzte', 'Programmieren', 'Zuhause']);
 });
 
 test('Einstellungen: Verworfenes im Lesestapel aufräumen, leer = 30 Tage, 0 = nie, Prüfung', () => {
