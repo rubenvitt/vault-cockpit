@@ -111,7 +111,7 @@ test('Weiter: Modell sortiert nach Stufen, zählt Ungelesenes und nennt den näc
   assert.equal(weiterModel({ store, ingest: null, episodes }).next.href, '#entscheiden', 'ohne Ingest: zur Liste, nicht zum Entwerfen');
 });
 
-test('Weiter: Seite mit „Als Nächstes“, Stufen, Spur und Knöpfen, alles ohne Inline-Skripte', async () => {
+test('Weiter: Seite mit „Als Nächstes“, Stufen als Zeilen und Knöpfen, alles ohne Inline-Skripte', async () => {
   const { store, add } = setup();
   const ingest = fakeIngest(store);
   const gehoert = add('Gehört <b>fett</b>');
@@ -129,17 +129,67 @@ test('Weiter: Seite mit „Als Nächstes“, Stufen, Spur und Knöpfen, alles oh
   assert.match(html, /action="\/aktion\/lesen\/ingest\/entwerfen"[^]*Ins Wiki: entwerfen/);
   assert.match(html, /action="\/aktion\/lesen\/doc\/vault"[^]*name="volltext" value="1"[^]*Nur in den Vault/);
   assert.match(html, /action="\/aktion\/lesen\/doc\/fertig"[^]*Fertig, weg/);
-  assert.match(html, /<li class="is-done"><span aria-hidden="true">✓<\/span> Gehört/);
-  assert.match(html, /href="\/lesen\/doc\?id=[^"]+#weiter" class="btn primary">Weiterlesen/);
-  // Läuft: das Ingest-Skript beobachtet den Stand.
+  // Keine Reihe aus Status-Chips mehr: Der Abschnitt sagt, wo der Text steht, der Rest steht in der Metazeile.
+  assert.ok(!html.includes('weiter-spur'));
+  const item = (id) => html.match(new RegExp(`<li class="weiter-item[^"]*" data-weiter-doc="${id}"[^]*?\\n  </li>`))[0];
+  assert.match(item(gehoert), /^<li class="weiter-item is-entscheiden"[^]*<span class="meta">10 Min\. · gehört am 24\. Okt\. in „Podcast: Gehört“<\/span>/);
+  assert.match(item(gehoert), /<div class="weiter-acts">(<form [^]*?<\/form>){3}<\/div>/, 'drei Wege, zum Text führt der Titel');
+  assert.match(html, /href="\/lesen\/doc\?id=[^"]+#weiter" class="btn">Weiterlesen/);
+  assert.equal(html.match(/class="btn primary"/g).length, 1, 'der eine Hauptknopf steht unter „Als Nächstes“');
+  // Läuft: das Ingest-Skript beobachtet den Stand; was läuft, steht in der Metazeile.
   assert.match(html, new RegExp(`data-ingest-watch="${busy}" data-ingest-status="entwirft"`));
+  assert.match(item(busy), /<span class="meta">10 Min\. · Claude entwirft<\/span>/);
+  assert.ok(!item(busy).includes('weiter-acts'));
   assert.match(html, /\/static\/lesen-ingest\.js/);
   assert.ok(!html.includes('<b>fett</b>'), 'Titel maskiert');
+  // Hinweise nur, wo sie eine Regel erklären.
+  assert.match(html, /<p class="meta">Gelesen oder gehört\. Ins Wiki/);
+  assert.ok(!html.includes('Die Seite aktualisiert sich von selbst'));
 
   // Ohne Lesestapel-Notizen kein „Nur in den Vault“; ohne Claude kein Entwerfen.
   const plain = (await weiterRoutes({ store, ingest: fakeIngest(store, { available: { ok: false } }) }).pages['/lesen/weiter'](ctx())).html;
   assert.ok(!plain.includes('Nur in den Vault'));
   assert.ok(!plain.includes('Ins Wiki: entwerfen'));
+});
+
+test('Weiter: „Prüfen“ zeigt die Entwürfe wie die Ingest-Übersicht, Fehler mit Meldung, Verworfenes als Wort', async () => {
+  const { store, add } = setup();
+  const ingest = fakeIngest(store);
+  const halb = add('Halb gelesen <i>x</i>', { minutes: 8, progress: 0.4 });
+  const neu = add('Ungelesen');
+  const fertig = add('Zu Ende', { progress: 1 });
+  const kaputt = add('Kaputt');
+  const verworfen = add('Verworfen', { progress: 1 });
+  add('Liegt nur da', { minutes: 6 });
+  const draft = { source: { title: 'Halb gelesen <i>x</i>', tldr: 'Worum es **geht**.' }, digest: { kernaussagen: ['Erste'] }, items: [{ id: 'v1', action: 'verknuepfen', default: true }, { id: 's1', kind: 'synthesis', action: 'neu', default: false }] };
+  ingest.put(halb, 'bereit', { draft, origin: 'nacht' });
+  ingest.put(neu, 'bereit');
+  ingest.put(fertig, 'bereit');
+  ingest.put(kaputt, 'fehler', { error: 'Claude antwortete <b>nicht</b>' });
+  ingest.put(verworfen, 'verworfen');
+  const { html } = await weiterRoutes({ store, ingest, vault: true }).pages['/lesen/weiter'](ctx());
+  noInline(html);
+  // Dieselbe Zeile wie in der Übersicht, mit Link dorthin.
+  const section = html.match(/<section class="weiter-stufe" id="pruefen"[^]*?<\/section>/)[0];
+  assert.match(section, /<div class="weiter-stufe-kopf"><h2 id="weiter-pruefen">Prüfen <span class="hint">3<\/span><\/h2><a href="\/lesen\/ingest" class="weiter-alle">Alle Entwürfe<\/a><\/div>/);
+  assert.equal(section.match(/<li class="ingest-zeile"/g).length, 3);
+  const row = (id) => section.match(new RegExp(`<li class="ingest-zeile" data-ingest-doc="${id}">[^]*?</li>`))[0];
+  assert.match(row(halb), new RegExp(`<a href="/lesen/ingest/doc\\?id=${halb}" class="lesen-title ingest-zeile-titel" title="1 Verknüpfung · 1 Synthese">Halb gelesen &lt;i&gt;x&lt;/i&gt;</a>`));
+  // Was vom üblichen Weg abweicht, steht als Wort in der Metazeile.
+  assert.match(row(halb), /<span class="meta">8 Min\. · noch nicht zu Ende gelesen<span class="ingest-zeile-wann"> · nachts entworfen · 25\. Okt\., 0[34]:00<\/span><\/span>/);
+  assert.match(row(halb), /<span class="ingest-zeile-inhalt">Worum es <strong>geht<\/strong>\.<\/span>/);
+  assert.match(row(halb), />2 Vorschläge · 1 zu entscheiden<\/span>/);
+  assert.match(row(neu), /10 Min\. · noch ungelesen</);
+  assert.ok(!/ungelesen|zu Ende gelesen/.test(row(fertig)), 'gelesen ist der übliche Weg');
+  assert.match(row(neu), />nur die Source-Page<\/span>/, 'Zeile auch ohne Entwurfstext');
+  // Fehler: Meldung in der Zeile, der Titel führt zur Prüfansicht.
+  const failed = html.match(/<li class="weiter-item is-fehler"[^]*?\n {2}<\/li>/)[0];
+  assert.match(failed, new RegExp(`<a href="/lesen/ingest/doc\\?id=${kaputt}" class="lesen-title">Kaputt</a>`));
+  assert.match(failed, /<p class="problem">Entwurf fehlgeschlagen: Claude antwortete &lt;b&gt;nicht&lt;\/b&gt;<\/p>/);
+  assert.match(failed, /name="force" value="1"><button type="submit" class="btn">Erneut entwerfen/);
+  assert.match(html, /<span class="meta">10 Min\. · zu Ende gelesen · Entwurf verworfen<\/span>/);
+  // Ungelesenes nur als Zahl mit Weg dorthin.
+  assert.match(html, /<ul class="weiter-unread"><li><a href="\/lesen\/stapel" class="lesen-title">Stapel<\/a><span class="meta">1 Text, etwa 6 Min\.<\/span><a href="\/lesen\/hoeren\?zeit=15" class="btn quiet">Unterwegs hören<\/a><\/li><\/ul>/);
 });
 
 test('Weiter: leer heißt erledigt', async () => {

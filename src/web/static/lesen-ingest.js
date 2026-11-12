@@ -9,7 +9,9 @@
 // (`[data-ingest-plant]`, Stand `plant` statt `status`). Der Worklog
 // (`[data-ingest-worklog]`) läuft bei jeder Abfrage mit.
 //
-// Prüfansicht: „alle/keine“ je Gruppe, die Zahl am Knopf „Ins Wiki übernehmen“,
+// Prüfansicht: „alle/keine“ je Gruppe (auch „Zu entscheiden“), die Zahl am Knopf
+// „Ins Wiki übernehmen“, an „Wird übernommen“ der Hinweis, wenn dort etwas
+// abgewählt ist, die Zeile der Source-Page mit Titel und Slug aus den Feldern,
 // der Zähler der Summary (bis 80) und Nachfragen vor „Neu entwerfen“ und
 // „Entwurf verwerfen“. Tasten: J/K nächster/voriger Entwurf, Enter zweimal =
 // übernehmen (das erste macht den Knopf scharf), E = ohne Wiki erledigen,
@@ -121,12 +123,32 @@
   const sum = form.querySelector('[data-ingest-sum]');
   const boxes = () => [...form.querySelectorAll('input[name=item]')];
 
+  // „Wird übernommen“ ist meist zugeklappt: Die Zeile sagt, wenn dort etwas abgewählt ist.
+  const routine = form.querySelector('[data-ingest-routine]');
+  const picked = routine?.querySelector('[data-ingest-picked]');
+
   function update() {
     const n = boxes().filter((b) => b.checked).length;
     count.textContent = String(n + 1);
     sum.textContent = n ? `Source-Page und ${n} ${n === 1 ? 'Vorschlag' : 'Vorschläge'}` : 'Nur die Source-Page';
+    if (picked) {
+      const all = [...routine.querySelectorAll('input[name=item]')];
+      const on = all.filter((b) => b.checked).length;
+      picked.hidden = on === all.length;
+      picked.textContent = `${on} von ${all.length} angehakt`;
+    }
   }
   form.addEventListener('change', update);
+
+  // Die Zeile der Source-Page zeigt Titel und Slug, wie sie gerade im Feld stehen.
+  for (const echo of form.querySelectorAll('[data-ingest-echo]')) {
+    const field = form.querySelector(`[name=${echo.dataset.ingestEcho}]`);
+    field?.addEventListener('input', () => {
+      echo.textContent = field.value.trim();
+    });
+  }
+  // Ein ungültiges Feld in einem zugeklappten Teil kann der Browser nicht zeigen: vorher aufklappen.
+  form.addEventListener('invalid', (e) => e.target.closest('details:not([open])')?.setAttribute('open', ''), true);
 
   for (const all of form.querySelectorAll('[data-ingest-all]')) {
     all.hidden = false;

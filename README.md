@@ -747,16 +747,20 @@ aus Status, Lesedatum, `heard_at`, Fortschritt und Ingest.
 
 Oben steht **Als Nächstes**, der eine Schritt mit dem meisten Wert: fertige
 Entwürfe prüfen, Folgen anhören, Gelesenes entscheiden, Fehler beheben, Angefangenes weiterlesen,
-den Eingang sichten, dann vom Stapel lesen oder hören. Darunter die
-Texte je Stufe, jeder in genau einer: **Prüfen** (Entwurf bereit), **Anhören**
+den Eingang sichten, dann vom Stapel lesen oder hören. Darunter als ruhige
+Zeilen (Titel, eine Metazeile, rechts die passende Aktion) die
+Texte je Stufe, jeder in genau einer: **Prüfen** (Entwurf bereit; dieselben
+Zeilen wie in der Ingest-Übersicht, mit Link „Alle Entwürfe“), **Anhören**
 (fertige Folgen, noch nicht gehört, mit ihren Texten, „Anhören“ bzw. „Weiterhören“ und
 „Als gehört markieren“; Texte, die nur über so eine Folge als gehört gelten, warten
 hier statt unter „Entscheiden“), **Entscheiden** (gelesen oder gehört, mit „gehört am … in ‹Folge›“; Knöpfe
 „Ins Wiki: entwerfen“, „Nur in den Vault“ mit Volltext, „Fertig, weg“; dazu „Alle
 n entwerfen lassen“, `POST /aktion/lesen/weiter/entwerfen`, auch für verworfene
 Entwürfe), **Fehler** (Entwurf oder Einpflanzen, mit „Erneut …“), **Weiterlesen**
-(angefangen) und **Läuft** (live über das Ingest-Skript). Je Text eine Spur
-Gelesen/Gehört · Entwurf · Im Wiki · Eingepflanzt. Ungelesenes in Eingang und
+(angefangen) und **Läuft** (live über das Ingest-Skript). Der Abschnitt sagt, wo
+ein Text steht; nur was davon abweicht, steht als Wort in der Metazeile („noch
+nicht zu Ende gelesen“, „Entwurf verworfen“). Die Spur Gelesen/Gehört · Entwurf ·
+Im Wiki · Eingepflanzt bekommt nur noch die App (`track`). Ungelesenes in Eingang und
 Stapel steht nur als Zahl mit Link da. Für die App: `/api/lesen/weiter` (`next`,
 `counts`, `stages` mit `items`, je Eintrag `stage`, `read`, `ingest`, `track`);
 `/api/lesen/stapel` nennt unter `decide`, wie viele gelesene Texte dort warten,
@@ -1101,30 +1105,41 @@ dem iPhone ist die [iOS-App](ios/README.md) der verlässliche Weg.
 **Ingest-Oberfläche** (`src/lesen/ingest-page.js`, nur mit Ingest-Dienst, siehe
 [Ingest](#ingest)): In der Unternavigation steht **Ingest** zwischen Stapel und
 Folgen, mit der Zahl der bereiten Entwürfe. Die Übersicht `/lesen/ingest` zeigt
-bereite Entwürfe als Karten (Quelle, zwei bis drei Kernaussagen, „3
-Verknüpfungen · 1 Synthese · 1 Synthese-Ergänzung · 2 neue Seiten“), darunter **In Arbeit** und
-**Fehler** (mit „Erneut entwerfen“) und oben **Ganzen Stapel entwerfen** (für
+bereite Entwürfe als flache Zeilen (Titel, Quelle und Lesezeit, eine Zeile Inhalt
+aus der TL;DR, rechts „9 Vorschläge · 4 zu entscheiden“ und „Prüfen“; die ganze
+Zeile ist der Link, was genau angeboten wird, steht im Tooltip), darunter **In Arbeit** und
+**Fehler** (mit „Erneut entwerfen“) und im Kopf **Ganzen Stapel entwerfen** (für
 Texte ohne Entwurf und fehlgeschlagene, wie der Dienst; verworfene nicht). Die
-Prüfansicht `/lesen/ingest/doc?id=…` ist zum Lesen in ein, zwei Minuten gedacht:
-**Das Wichtigste** (Kernaussagen, Neu für dich, Bestätigt, Widerspricht mit dem
-Hinweis auf `/wiki-lint`, Dockt an), die Source-Page mit änderbarem Titel,
-Summary (Zähler bis 80), Slug und Tags samt Vorschau, dann die Vorschläge zum
-Abhaken, gruppiert: Verknüpfen, Bestätigungen, **Synthesen & Fragen** (als
-Karten, Text zum Aufklappen, standardmäßig aus; dazu „Synthese ergänzen“ mit dem
-Titel der bestehenden Synthese, Öffnen-Symbol und „Was ergänzt wird“), neue Seiten
-und Relationen. Der
-Titel einer bestehenden Seite ist selbst der Link auf sie; Wikilinks in Claudes
+Prüfansicht `/lesen/ingest/doc?id=…` ist zum Bewerten in ein, zwei Minuten gedacht
+und hat ab etwa 1000 px zwei Spalten. Links **Verstehen**:
+**Das Wichtigste** (Kernaussagen, Neu für dich, Widerspricht mit dem
+Hinweis auf `/wiki-lint`, Hinweise; Bestätigt und Dockt an nur für Seiten, zu
+denen es keinen Vorschlag zum Abhaken gibt, sonst zählt sie ein Satz), darunter
+zum Aufklappen der Text der Source-Page, der Worklog und die Tastenkürzel. Rechts
+**Entscheiden**, die Spalte bleibt beim Scrollen stehen: **Zu entscheiden** (alles,
+was der Entwurf nicht vorausgewählt hat, meist Synthesen, Fragen und neue Seiten,
+als kompakte Karten mit Kennzeichen, Summary, „Warum“ und Text zum Aufklappen;
+dazu „Synthese ergänzen“ mit dem Titel der bestehenden Synthese, Öffnen-Symbol und
+„Was ergänzt wird“), **Wird übernommen** (das Vorausgewählte, zugeklappt mit
+Zählung „5 vorausgewählt: 2 Verknüpfungen · 1 Bestätigung …“, aufgeklappt
+gruppiert zum Abwählen: Verknüpfen, Bestätigungen, neue Seiten, Relationen) und die
+**Source-Page** als Zeile (Titel, Pfad, Konfidenz); „Bearbeiten“ klappt Titel,
+Summary (Zähler bis 80), TL;DR, Slug und Tags auf, zugeklappt werden sie
+unverändert mitgesendet. Schmal steht dasselbe in einer Spalte: Digest, Zu
+entscheiden, Wird übernommen, Source-Page. Eine
+bestehende Seite öffnet das Symbol „↗“ neben dem Häkchen; Wikilinks in Claudes
 Text erscheinen mit dem Titel der Seite (aus `links` des Dienstes, sonst aus
 Digest und Vorschlägen), unbekannte als lesbarer Text.
-**Ins Wiki übernehmen** (Leiste unten, mit der Zahl der gewählten Elemente; auf
+**Ins Wiki übernehmen** (am Fuß der rechten Spalte, immer sichtbar, mit der Zahl
+der gewählten Elemente; schmal als Leiste unten, auf
 dem Handy nur der Knopf) führt zum nächsten bereiten Entwurf, die Meldung
 verlinkt die neue Source-Page und nennt Verknüpfungen, Bestätigungen und ergänzte
 Synthesen getrennt.
-Daneben **Neu entwerfen**, **Ohne Wiki erledigen** (gelesen, weg, mit
+Darunter leise **Neu entwerfen**, **Ohne Wiki erledigen** (gelesen, weg, mit
 Rückgängig) und **Entwurf verwerfen** (der Text bleibt auf dem Stapel). Ohne
 JavaScript ist alles ein Formular; mit `/static/lesen-ingest.js` gibt es
-„alle/keine“ je Gruppe, Tasten (J/K nächster/voriger Entwurf, Enter zweimal =
-übernehmen, E = ohne Wiki erledigen) und den Live-Stand über
+„alle/keine“ je Gruppe, Tasten (J/K nächster/voriger Entwurf, Leertaste = Häkchen,
+Enter zweimal = übernehmen, E = ohne Wiki erledigen) und den Live-Stand über
 `/lesen/ingest/stand`. Im Stapel trägt jeder Text ein Abzeichen („Ingest
 bereit“, „wird entworfen…“, „Ingest-Fehler“) oder den Knopf **Ingest
 entwerfen**, die Leseansicht hat **Ingest prüfen** bzw. **Ingest entwerfen**.
