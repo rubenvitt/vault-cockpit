@@ -5,15 +5,17 @@
 // Befüllen sie abruft (VCP-130).
 //
 // Gespeichert werden nur die App-Hülle, die Wochenansicht der laufenden
-// Woche und Lesestoff für unterwegs (VCP-80: Artikel vom Stapel, Synthesen,
-// die Listen dazu), nie andere Notizen, Suche, Einstellungen oder `/api/…`.
+// Woche, Lesestoff für unterwegs (VCP-80: Artikel vom Stapel, Synthesen,
+// die Listen dazu) und was sich ohne Netz einsortieren lässt (VCP-144: der
+// Eingang des Lesestapels, die Notizen der Vault-Inbox), nie andere Notizen,
+// Suche, Einstellungen oder `/api/…`.
 // Den Lesestoff nennt `/api/lesen/offline`; die Seite schickt dazu die
 // Nachricht `lesen-offline`. Abmelden und jeder neue Login löschen alles
 // außer der App-Hülle. Eine neue Version holt die gespeicherten Leseansichten
 // sofort neu (VCP-98): Die alten trügen sonst Formulare und Skripte von vorher.
 'use strict';
 
-const { version, shell, mark, fill: FILL_HEADER, synthesis } = self.CONFIG;
+const { version, shell, mark, fill: FILL_HEADER } = self.CONFIG;
 const SHELL = `cockpit-shell-${version}`;
 const PAGES = 'cockpit-seiten';
 const WEEK = '/';
@@ -31,7 +33,11 @@ const outdated = (key, res) => key.startsWith('/lesen/doc?') && res.headers.get(
 
 /**
  * Schlüssel einer Leseseite, die offline liegen darf, sonst `null`: Leseansicht,
- * Synthese unter `synthesis/`, `/lesen/stapel` und `/wissen` ohne Filter.
+ * Notizseite, `/lesen/stapel`, `/lesen/eingang` und `/wissen` ohne Filter.
+ * Welche Notizen (Synthesen, Inbox), bestimmt allein der Server: `fill` holt nur,
+ * was `/api/lesen/offline` nennt, und legt nur ab, was er mit `mark` freigibt;
+ * Öffnen frischt nur auf, was schon liegt. Der Ordner der Inbox ist eine
+ * Einstellung und steht deshalb nicht hier.
  * Einheitlich kodiert, damit derselbe Artikel über jeden Link derselbe Eintrag ist.
  */
 function readingKey(url) {
@@ -42,9 +48,9 @@ function readingKey(url) {
   }
   if (p === '/notiz') {
     const path = url.searchParams.get('pfad') ?? '';
-    return path.startsWith(`${synthesis}/`) && !path.split('/').includes('..') ? `/notiz?pfad=${encodeURIComponent(path)}` : null;
+    return path && !path.split('/').includes('..') ? `/notiz?pfad=${encodeURIComponent(path)}` : null;
   }
-  return (p === '/lesen/stapel' || p === '/wissen') && !url.search ? p : null;
+  return (p === '/lesen/stapel' || p === '/lesen/eingang' || p === '/wissen') && !url.search ? p : null;
 }
 
 self.addEventListener('install', (event) => {
@@ -80,6 +86,9 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(navigate(event, req, url));
   }
   else if (SHELL_PATHS.has(url.pathname)) event.respondWith(shellFile(req));
+  // Nach einer Aktion holt cockpit.js die Seite neu (`refresh`): Das frischt auch die gespeicherte Fassung auf,
+  // sonst zeigte der Eingang ohne Netz Karten, die längst entschieden sind (VCP-144).
+  else if (req.headers.get('accept') === 'text/html' && (url.pathname === '/' ? !url.search : readingKey(url))) event.respondWith(refreshed(event, req, url));
 });
 
 self.addEventListener('message', (event) => {
@@ -104,6 +113,14 @@ async function navigate(event, req, url) {
     // Dienst gerade weg (Deploy, Proxy meldet 502–504): lieber den letzten Stand zeigen.
     else if (res.status >= 502 && res.status <= 504) return (await saved(key)) || res;
   }
+  return res;
+}
+
+/** Seite mit Netz holen und eine schon gespeicherte Fassung ersetzen; nie etwas Neues ablegen. */
+async function refreshed(event, req, url) {
+  const res = await fetch(req);
+  const key = url.pathname === '/' ? WEEK : readingKey(url);
+  if (res.ok && res.headers.get(mark) === (key === WEEK ? 'woche' : 'lesen')) event.waitUntil(remember(key, res.clone(), true));
   return res;
 }
 

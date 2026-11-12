@@ -83,9 +83,13 @@ test('Eingang: Karte mit Quelle, Art, Lesezeit, Themen und Herkunft; ohne JavaSc
     let html = await page();
     assert.ok(!/style=|<script>/.test(html), 'keine Inline-Styles oder -Skripte');
     assert.match(html, /<script src="\/static\/lesen-eingang\.js\?v=[\w-]+" defer><\/script>/);
-    // Nur die oberste (neueste) Karte, mit angedeutetem Stapel darunter.
-    assert.equal(html.match(/<article class="inbox-card/g).length, 1);
-    assert.match(html, /<article class="inbox-card more" data-id="[^"]+">/);
+    // Sichtbar nur die oberste (neueste) Karte, mit angedeutetem Stapel darunter.
+    assert.match(html, /<div class="inbox"><div class="inbox-progress">[^]*?<article class="inbox-card more" data-id="[^"]+">/);
+    // Die nächste liegt unsichtbar für ohne Netz bereit (VCP-144).
+    const [, later] = /<template class="inbox-next">([^]*?)<\/template>/.exec(html);
+    assert.equal(html.replace(later, '').match(/<article class="inbox-card/g).length, 1);
+    assert.match(later, /^<article class="inbox-card" data-id="[^"]+">[^]*<h2 class="inbox-title">Älterer Text<\/h2>/);
+    assert.ok(!later.includes('<form'), 'die Karten im Vorrat tragen keine Formulare');
     assert.match(html, /Blatt<\/a> · Artikel · 7 min/);
     assert.match(html, /<h2 class="inbox-title">Vom Lesen<\/h2>/);
     assert.match(html, /<p class="inbox-excerpt">Kurz gesagt\.<\/p>/);

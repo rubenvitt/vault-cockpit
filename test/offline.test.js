@@ -300,7 +300,7 @@ async function loadWorker(swBody, network) {
     await Promise.all(waits);
     return res;
   };
-  const request = (path, { method = 'GET', mode = 'navigate' } = {}) => ({ url: `https://vault.test${path}`, method, mode });
+  const request = (path, { method = 'GET', mode = 'navigate', headers = {} } = {}) => ({ url: `https://vault.test${path}`, method, mode, headers: new Headers(headers) });
   return { dispatch, request, caches };
 }
 
@@ -369,7 +369,7 @@ test('Service Worker: speichert nur die freigegebene Woche, zeigt sie offline mi
 test('Service Worker: Lesestoff nur nach Liste und Freigabe, offline mit Stand, weg beim Abmelden (VCP-80)', async () => {
   await withCockpit(async ({ call }) => {
     const body = await (await call('/sw.js', { anon: true })).text();
-    assert.equal(swConfig(body).synthesis, 'wiki/synthesis');
+    assert.equal(swConfig(body).synthesis, undefined, 'welche Notizen, entscheidet der Server');
     assert.equal(swConfig(body).fill, FILL_HEADER);
     let online = true;
     let listStatus = 200;
@@ -380,12 +380,15 @@ test('Service Worker: Lesestoff nur nach Liste und Freigabe, offline mit Stand, 
     const page = (text, mark = 'lesen') => new Response(`<!doctype html>\n<html lang="de"><body>${text}</body></html>`, { headers: { 'content-type': 'text/html; charset=utf-8', ...(mark ? { [OFFLINE_MARK]: mark } : {}) } });
     const urls = [
       '/lesen/stapel',
+      '/lesen/eingang',
       '/lesen/doc?id=a',
       '/lesen/doc?id=ohne-freigabe',
       '/wissen',
       '/notiz?pfad=wiki%2Fsynthesis%2FA.md',
-      // Schummelt sich etwas in die Liste, bleibt es trotzdem draußen.
+      // Inbox-Notizen zum Einsortieren (VCP-144); ob eine Notiz offline liegt, sagt die Freigabe des Servers.
       '/notiz?pfad=inbox%2Fa.md',
+      '/notiz?pfad=inbox%2Fnicht-freigegeben.md',
+      // Schummelt sich etwas in die Liste, bleibt es trotzdem draußen.
       '/notiz?pfad=wiki%2Fsynthesis%2F..%2F..%2Fprivat%2Fx.md',
       '/einstellungen',
     ];
@@ -399,6 +402,7 @@ test('Service Worker: Lesestoff nur nach Liste und Freigabe, offline mit Stand, 
       if (gate && u.pathname !== '/logout') await gate;
       if (path === '/') return page('KW 42', 'woche');
       if (path === '/lesen/doc?id=ohne-freigabe') return page('Artikel ohne Freigabe', null);
+      if (path === '/notiz?pfad=inbox%2Fnicht-freigegeben.md') return page('Notiz ohne Freigabe', null);
       return page(`Seite ${path}`);
     });
     const stored = () => [...(sw.caches.stores.get('cockpit-seiten')?.keys() ?? [])].map((k) => k.replace('https://vault.test', '')).sort();
@@ -408,8 +412,8 @@ test('Service Worker: Lesestoff nur nach Liste und Freigabe, offline mit Stand, 
     await sw.dispatch('fetch', { request: sw.request('/') });
     await (await sw.caches.open('cockpit-seiten')).put('/lesen/doc?id=archiviert', page('alt'));
     await fill();
-    assert.deepEqual(stored(), ['/', '/lesen/doc?id=a', '/lesen/stapel', '/notiz?pfad=wiki%2Fsynthesis%2FA.md', '/wissen']);
-    assert.ok(!fetched.some((p) => p.includes('inbox') || p.includes('privat') || p === '/einstellungen'), 'nicht freigegebene Seiten werden nicht einmal geholt');
+    assert.deepEqual(stored(), ['/', '/lesen/doc?id=a', '/lesen/eingang', '/lesen/stapel', '/notiz?pfad=inbox%2Fa.md', '/notiz?pfad=wiki%2Fsynthesis%2FA.md', '/wissen']);
+    assert.ok(!fetched.some((p) => p.includes('privat') || p === '/einstellungen'), 'nicht freigegebene Seiten werden nicht einmal geholt');
     // Jede Seite des Befüllens trägt den Header, damit der Server keinen Entwurf und keine Meldung einlöst; Öffnen nicht.
     assert.deepEqual(asFill.sort(), fetched.filter((p) => p !== '/' && p !== '/api/lesen/offline').sort());
     assert.ok(!asFill.includes('/'));
@@ -417,18 +421,31 @@ test('Service Worker: Lesestoff nur nach Liste und Freigabe, offline mit Stand, 
     // Noch frisch: Ein zweites Befüllen holt nur die Liste und, was noch fehlt.
     fetched.length = 0;
     await fill();
-    assert.deepEqual(fetched, ['/api/lesen/offline', '/lesen/doc?id=ohne-freigabe']);
+    assert.deepEqual(fetched, ['/api/lesen/offline', '/lesen/doc?id=ohne-freigabe', '/notiz?pfad=inbox%2Fnicht-freigegeben.md']);
 
     // Mit Netz frischt Öffnen nur Gespeichertes auf; ein Artikel außerhalb der Liste kommt nicht dazu.
     await sw.dispatch('fetch', { request: sw.request('/lesen/doc?id=neu') });
     assert.ok(!stored().includes('/lesen/doc?id=neu'));
+
+    // Das Neuladen nach einer Aktion (cockpit.js `refresh`, kein Seitenaufruf) frischt Gespeichertes auf, legt aber nichts Neues ab (VCP-144).
+    const html = { mode: 'cors', headers: { accept: 'text/html' } };
+    const before = await (await sw.caches.open('cockpit-seiten')).match('/lesen/eingang');
+    await sw.dispatch('fetch', { request: sw.request('/lesen/eingang', html) });
+    const after = await (await sw.caches.open('cockpit-seiten')).match('/lesen/eingang');
+    assert.ok(Date.parse(after.headers.get('x-cockpit-stand')) >= Date.parse(before.headers.get('x-cockpit-stand')));
+    assert.equal(fetched.at(-1), '/lesen/eingang');
+    await sw.dispatch('fetch', { request: sw.request('/lesen/eingang?gruppe=x', html) });
+    await sw.dispatch('fetch', { request: sw.request('/lesen/doc?id=neu2', html) });
+    assert.ok(!stored().some((k) => k.includes('gruppe') || k.includes('neu2')));
 
     // Ohne Netz: gespeicherte Leseseite mit Stand (gleich wie verlinkt), andere Notizen zeigen die Hülle.
     online = false;
     const offline = await (await sw.dispatch('fetch', { request: sw.request('/lesen/doc?id=a') })).text();
     assert.match(offline, /<html data-offline-stand="\d{4}-\d{2}-\d{2}T[\d:.]+Z" lang="de"><body>Seite \/lesen\/doc\?id=a/);
     assert.match(await (await sw.dispatch('fetch', { request: sw.request('/notiz?pfad=wiki/synthesis/A.md') })).text(), /Seite \/notiz/);
-    assert.equal(await (await sw.dispatch('fetch', { request: sw.request('/notiz?pfad=inbox%2Fa.md') })).text(), 'Hülle /offline');
+    assert.match(await (await sw.dispatch('fetch', { request: sw.request('/notiz?pfad=inbox/a.md') })).text(), /Seite \/notiz\?pfad=inbox%2Fa\.md/);
+    assert.match(await (await sw.dispatch('fetch', { request: sw.request('/lesen/eingang') })).text(), /Seite \/lesen\/eingang/);
+    assert.equal(await (await sw.dispatch('fetch', { request: sw.request('/notiz?pfad=inbox%2Fnicht-freigegeben.md') })).text(), 'Hülle /offline');
 
     // Abmelden löscht Woche und Lesestoff.
     await sw.dispatch('fetch', { request: sw.request('/logout', { method: 'POST' }) });

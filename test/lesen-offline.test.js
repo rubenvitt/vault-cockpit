@@ -23,7 +23,7 @@ import { OFFLINE_MARK, OFFLINE_DOCS } from '../src/web/offline.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
 const SECRET = 'x'.repeat(40);
-const policy = compilePolicy({ sensitive: { 'wiki/synthesis/privat': 'privat', privat: 'privat' }, exclude: ['^wiki/synthesis/entwurf/'] });
+const policy = compilePolicy({ sensitive: { 'wiki/synthesis/privat': 'privat', privat: 'privat', 'inbox/geheim': 'privat' }, exclude: ['^wiki/synthesis/entwurf/', '^inbox/raus/'] });
 
 async function withReading(run) {
   const root = mkdtempSync(join(tmpdir(), 'lesen-offline-'));
@@ -39,6 +39,8 @@ async function withReading(run) {
   put('privat/Synthese.md', synth('Vertraulich draußen'));
   put('wiki/concepts/Auch Synthese.md', synth('Falscher Ordner'));
   put('inbox/Notiz.md', '# Notiz\n\nGewöhnliche Notiz.\n');
+  put('inbox/geheim/Tagebuch.md', '# Tagebuch\n\nVertraulich.\n');
+  put('inbox/raus/Weg.md', '# Weg\n\nAusgeschlossen.\n');
   let index;
   buildIndex({ vaultPath: root, dbPath: ':memory:', policy, logger: quiet, persist: (db, vp) => (index = openIndex(db, { vaultPath: vp, policy })) });
   const settings = createSettingsStore({ defaults: { tz: 'Europe/Berlin', inboxFolder: 'inbox' }, logger: quiet });
@@ -80,7 +82,7 @@ async function withReading(run) {
 
 const add = (store, n, status = 'stapel') => store.addDocument({ url: `https://example.org/${status}/${n}`, title: `Artikel ${n}`, status, content_html: '<p>Ein Satz zum Markieren.</p>', reading_minutes: 3 }).doc;
 
-test('/api/lesen/offline: Stapel bis 30, nur Synthesen aus wiki/synthesis, nie vertraulich oder ausgeschlossen', async () => {
+test('/api/lesen/offline: Stapel bis 30, Eingang, Synthesen aus wiki/synthesis und die Vault-Inbox, nie vertraulich oder ausgeschlossen', async () => {
   await withReading(async ({ call, store }) => {
     const anon = await call('/api/lesen/offline', { anon: true });
     assert.equal(anon.status, 401);
@@ -100,20 +102,20 @@ test('/api/lesen/offline: Stapel bis 30, nur Synthesen aus wiki/synthesis, nie v
     assert.equal(docUrls[0], `/lesen/doc?id=${docs[0].id}`);
     assert.ok(!urls.some((u) => u.includes(archived.id) || u.includes(inbox.id)));
     const notes = urls.filter((u) => u.startsWith('/notiz'));
-    assert.deepEqual(notes, ['/notiz?pfad=wiki%2Fsynthesis%2FNeu.md', '/notiz?pfad=wiki%2Fsynthesis%2FAlt.md']);
-    assert.ok(urls.includes('/lesen/stapel') && urls.includes('/wissen'));
-    assert.deepEqual(urls.filter((u) => !/^\/(lesen\/doc|notiz)\?/.test(u)), ['/lesen/stapel', '/wissen']);
+    // Synthesen, dann die Inbox zum Einsortieren ohne Netz (VCP-144), ohne Vertrauliches und Ausgeschlossenes.
+    assert.deepEqual(notes, ['/notiz?pfad=wiki%2Fsynthesis%2FNeu.md', '/notiz?pfad=wiki%2Fsynthesis%2FAlt.md', '/notiz?pfad=inbox%2FNotiz.md']);
+    assert.deepEqual(urls.filter((u) => !/^\/(lesen\/doc|notiz)\?/.test(u)), ['/lesen/stapel', '/lesen/eingang', '/wissen']);
 
     // Jede genannte Seite gibt der Server auch zum Speichern frei.
     for (const u of urls) assert.equal((await call(u)).headers.get(OFFLINE_MARK), 'lesen', u);
   });
 });
 
-test('Freigabe zum Speichern: nur Leseansicht, Stapel, Wissen und Synthesen, nichts sonst', async () => {
+test('Freigabe zum Speichern: nur Leseansicht, Stapel, Eingang, Wissen, Synthesen und Inbox-Notizen, nichts sonst', async () => {
   await withReading(async ({ call, store }) => {
     const doc = add(store, 1);
-    assert.equal((await call(`/lesen/doc?id=${doc.id}`)).headers.get(OFFLINE_MARK), 'lesen');
-    for (const path of ['/lesen/doc?id=gibt-es-nicht', '/lesen/stapel?zeit=15', '/lesen/eingang', '/lesen/markiert', '/wissen?q=Text', '/notiz?pfad=inbox%2FNotiz.md', '/notiz?pfad=wiki%2Fconcepts%2FAuch%20Synthese.md', '/notiz?pfad=wiki%2Fsynthesis%2Fprivat%2FGeheim.md', '/notiz?pfad=privat%2FSynthese.md', '/api/lesen/offline']) {
+    for (const path of [`/lesen/doc?id=${doc.id}`, '/lesen/eingang', '/notiz?pfad=inbox%2FNotiz.md']) assert.equal((await call(path)).headers.get(OFFLINE_MARK), 'lesen', path);
+    for (const path of ['/lesen/doc?id=gibt-es-nicht', '/lesen/stapel?zeit=15', '/lesen/eingang?gruppe=x', '/lesen/markiert', '/wissen?q=Text', '/notiz?pfad=inbox%2Fgeheim%2FTagebuch.md', '/notiz?pfad=inbox%2Fraus%2FWeg.md', '/notiz?pfad=wiki%2Fconcepts%2FAuch%20Synthese.md', '/notiz?pfad=wiki%2Fsynthesis%2Fprivat%2FGeheim.md', '/notiz?pfad=privat%2FSynthese.md', '/api/lesen/offline']) {
       const res = await call(path);
       assert.equal(res.headers.get(OFFLINE_MARK), null, `${path}: ${res.status}`);
     }

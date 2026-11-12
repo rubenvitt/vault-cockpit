@@ -17,6 +17,14 @@
 // Abmelden leert den Puffer (VCP-87): Zitate und Notizen bleiben nicht auf
 // einem Gerät liegen, das jemand bewusst verlässt. Vorher geht raus, was mit
 // Netz noch rausgeht; wartet danach noch etwas, fragt die Seite nach.
+//
+// Einsortieren ohne Netz (VCP-144): Die Formulare in `ACTS` (Abhaken, Status,
+// Fälligkeit, Zuordnen, Phönix, Ablegen, Tags, Checkbox, Eingang sortieren)
+// bleiben ohne Netz bedienbar. cockpit.js gibt sie über `cockpitPuffer.act`
+// in denselben Puffer, Schlüssel `akt:<Aktion>:<Aufgabe oder Notiz>`: Eine
+// zweite Änderung derselben Sache ersetzt die erste. Relative Fälligkeiten
+// gelten ab dem Tag des Erfassens. Die Ansicht zeigt wartende Aktionen sofort
+// (`apply`), auch auf einer gespeicherten Seite, bis sie raus sind.
 (() => {
   'use strict';
 
@@ -32,6 +40,20 @@
 
   // Muss zum Namen in sw.js passen.
   const PAGES = 'cockpit-seiten';
+  /** Formulare, die ohne Netz in den Puffer dürfen (VCP-144): Aktion → Art in der Liste. Alle senden einen festen Zielzustand. */
+  const ACTS = {
+    '/aktion/status': 'Status',
+    '/aktion/faellig': 'Fälligkeit',
+    '/aktion/zuordnen': 'Zuordnen',
+    '/aktion/phoenix': 'Phönix',
+    '/aktion/notiz/ablegen': 'Ablegen',
+    '/aktion/notiz/tags': 'Tags',
+    '/aktion/notiz/checkbox': 'Checkbox',
+    '/aktion/lesen/sortieren': 'Eingang',
+  };
+  const SORT = '/aktion/lesen/sortieren';
+  const pathOf = (form) => new URL(form.getAttribute('action') ?? '', location.href).pathname;
+  const accepts = (form) => form instanceof HTMLFormElement && Object.hasOwn(ACTS, pathOf(form));
   // So lange darf Nachsenden das Abmelden aufhalten.
   const LEAVE_WAIT = 4000;
   // Wann zuletzt Lesestoff angefordert wurde; Abmelden setzt es zurück.
@@ -53,8 +75,8 @@
   const CID = /^[A-Za-z0-9_.:-]{1,128}$/;
   // Wie articleUrl in src/capture/syntax.js: `> https://…` allein wird ein Artikel.
   const kindOf = (text) => (text.trimStart().startsWith('!') ? 'Aufgabe' : /^\s*>\s*https?:\/\/\S+\s*$/i.test(text) ? 'Artikel' : 'Notiz');
-  // Einträge der Leseansicht tragen ihre Beschriftung selbst.
-  const kind = (e) => (e.action ? 'Lesen' : kindOf(e.text));
+  // Einträge der Leseansicht und zum Einsortieren tragen ihre Beschriftung selbst.
+  const kind = (e) => (e.action ? (ACTS[e.action] ?? 'Lesen') : kindOf(e.text));
   const textOf = (e) => e.text ?? e.label ?? '';
   const when = (t) => {
     const d = new Date(t);
@@ -346,7 +368,7 @@
     let text = null;
     let hint = document.querySelector('.lesen-reader')
       ? ' Markieren, Notizen, Fortschritt, Entfernen, In Inbox und die Entscheidungen warten auf dem Gerät und gehen raus, sobald wieder Netz da ist.'
-      : ' Nur die Schnelleingabe geht; sie sendet nach, sobald wieder Netz da ist.';
+      : ' Schnelleingabe und Einsortieren (Abhaken, Status, Fälligkeit, Zuordnen, Ablegen, Eingang) warten auf dem Gerät und gehen raus, sobald wieder Netz da ist.';
     if (stale && net) {
       text = 'Wieder online.';
       hint = ' Neu laden zeigt den aktuellen Stand.';
@@ -431,10 +453,10 @@
 
   // --- Offline sperren -------------------------------------------------------
 
-  /** Ohne Netz (oder auf einer gespeicherten Seite) gehen nur Schnelleingabe, die Entscheidungen in der Leseansicht (puffert lesen-doc.js) und Abmelden. */
+  /** Ohne Netz (oder auf einer gespeicherten Seite) gehen nur Schnelleingabe, die Entscheidungen in der Leseansicht (puffert lesen-doc.js), Einsortieren (`ACTS`) und Abmelden. */
   function lock(blocked) {
     for (const form of document.forms) {
-      if (form.method !== 'post' || form.matches('.capture, .logout, [data-decide]')) continue;
+      if (form.method !== 'post' || form.matches('.capture, .logout, [data-decide]') || accepts(form)) continue;
       form.classList.toggle('offline-off', blocked);
       for (const field of form.elements) {
         if (blocked && !field.disabled) {
@@ -495,6 +517,157 @@
     if (document.visibilityState === 'visible' && (!net || entries.some((e) => !e.error))) flush();
   }, 30_000);
 
+  // --- Einsortieren ohne Netz (VCP-144) --------------------------------------
+
+  const STATUS_LABELS = { open: 'Offen', in_progress: 'In Arbeit', blocked: 'Blockiert', done: 'Erledigt', dropped: 'Verworfen' };
+  const SORT_LABELS = { weg: 'Weg', stapel: 'Auf den Stapel', lesen: 'Auf den Stapel', eingang: 'Zurück in den Eingang' };
+  const pad = (n) => String(n).padStart(2, '0');
+  const isoDay = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+  /** `heute`, `morgen`, `naechste-woche` (Montag) als Datum ab heute, wie `resolveDue` auf dem Server. */
+  function fixedDue(value, today = new Date()) {
+    const d = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    if (value === 'heute') return isoDay(d);
+    if (value === 'morgen') return isoDay(new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1));
+    if (value === 'naechste-woche') return isoDay(new Date(d.getFullYear(), d.getMonth(), d.getDate() + 7 - ((d.getDay() + 6) % 7)));
+    return null;
+  }
+
+  /** Felder eines Formulars ohne CSRF-Token (das holt jeder Lauf frisch), dazu der gedrückte Knopf. */
+  function fieldsOf(form, extra) {
+    const fields = {};
+    for (const [k, v] of new FormData(form)) if (k !== 'csrf' && typeof v === 'string') fields[k] = v;
+    Object.assign(fields, extra);
+    const day = fixedDue(fields.due);
+    if (day) Object.assign(fields, { due: 'datum', date: day });
+    return fields;
+  }
+
+  /** Worum es geht: Aufgabe, Karte im Eingang oder Notiz. */
+  function subjectOf(form, path) {
+    if (path === SORT) return document.querySelector(`.inbox-card[data-id="${CSS.escape(form.elements.id?.value ?? '')}"] .inbox-title`)?.textContent ?? '';
+    return form.closest('li[data-title]')?.dataset.title ?? form.closest('.menu-panel')?.querySelector('.menu-title')?.textContent ?? document.querySelector('main h1')?.textContent ?? '';
+  }
+
+  function describe(path, fields, form) {
+    if (path === '/aktion/status') return STATUS_LABELS[fields.status] ?? 'Status';
+    if (path === '/aktion/faellig') return fields.due === 'datum' ? `Fällig ${new Date(`${fields.date}T12:00`).toLocaleDateString('de-DE', { weekday: 'short', day: 'numeric', month: 'numeric' })}` : 'Ohne Fälligkeit';
+    if (path === '/aktion/zuordnen') return `Nach ${form.querySelector(`option[value="${CSS.escape(fields.ziel ?? '')}"]`)?.textContent ?? fields.ziel}`;
+    if (path === '/aktion/phoenix') return fields.fire ? 'Phönix-Schritt' : 'Kein Phönix-Schritt';
+    if (path === '/aktion/notiz/ablegen') return `Ablegen in ${fields.ordner}/${fields.name ? ` als ${fields.name}` : ''}`;
+    if (path === '/aktion/notiz/tags') return fields.tags ? `Tags ${fields.tags}` : 'Tags entfernen';
+    if (path === '/aktion/notiz/checkbox') return fields.erledigt === '1' ? 'Abgehakt' : 'Wieder offen';
+    if (path === SORT) return SORT_LABELS[fields.ziel] ?? 'Eingang';
+    return ACTS[path];
+  }
+
+  /**
+   * Formular zum Einsortieren in den Puffer; `extra` ist der gedrückte Knopf.
+   * `false`, wenn das Formular nicht dazugehört oder das Gerät nichts speichern kann.
+   */
+  async function act(form, extra = {}) {
+    if (!accepts(form)) return false;
+    const path = pathOf(form);
+    const fields = fieldsOf(form, extra);
+    const what = describe(path, fields, form);
+    const subject = subjectOf(form, path).trim();
+    const key = fields.id ?? fields.pfad ?? '';
+    const id = `akt:${path}:${key}${path === '/aktion/notiz/checkbox' ? `:${fields.n}` : ''}`;
+    if (!(await queue({ id, action: path, fields, label: subject ? `${what}: ${subject}` : what }))) return false;
+    apply({ action: path, fields }, form);
+    toast(`${what} wartet auf Netz und geht automatisch raus.`);
+    // Die abgelegte Notiz ist nicht mehr in der Inbox: zurück dorthin, woher sie kam (die gespeicherte Woche).
+    if (path === '/aktion/notiz/ablegen' && document.body.classList.contains('page-note')) {
+      const back = new URL(location.href).searchParams.get('zurueck');
+      location.assign(back && back.startsWith('/') && !back.startsWith('//') ? back : '/');
+    }
+    return true;
+  }
+
+  const tasksOf = (id) => document.querySelectorAll(`li.task[data-id="${CSS.escape(id ?? '')}"]`);
+  const inboxCount = () => {
+    const badge = document.querySelector('[data-inbox-count]');
+    if (badge) badge.textContent = String(document.querySelectorAll('#inbox li:not([hidden])').length);
+  };
+
+  /** Zeigt eine wartende Aktion in der Ansicht. Mehrfach aufgerufen ändert sich nichts mehr. `form`: gerade abgeschickt. */
+  function apply({ action, fields }, form = null) {
+    if (action === '/aktion/status') {
+      for (const li of tasksOf(fields.id)) {
+        li.className = li.className.replace(/\bstatus-\S+/, `status-${fields.status}`);
+        li.dataset.status = fields.status;
+        const tick = li.querySelector('form.tick');
+        if (tick) {
+          const done = fields.status === 'done';
+          tick.elements.status.value = done ? 'open' : 'done';
+          tick.elements.prev.value = fields.status;
+          tick.querySelector('button')?.setAttribute('aria-pressed', String(done));
+        }
+        // Erledigt oder verworfen ist nicht mehr in der Inbox.
+        if (li.closest('[data-list="zunder-inbox"]') && (fields.status === 'done' || fields.status === 'dropped')) li.hidden = true;
+      }
+    } else if (action === '/aktion/zuordnen') {
+      for (const li of tasksOf(fields.id)) if (li.closest('[data-list="zunder-inbox"]') && fields.ziel !== 'inbox') li.hidden = true;
+    } else if (action === '/aktion/notiz/ablegen') {
+      for (const a of document.querySelectorAll('[data-list="vault-inbox"] li.note a[href^="/notiz?"]')) {
+        if (new URL(a.getAttribute('href'), location.href).searchParams.get('pfad') === fields.pfad) a.closest('li').hidden = true;
+      }
+    } else if (action === '/aktion/notiz/checkbox' && form) {
+      const button = form.querySelector('button.box');
+      button?.classList.toggle('on', fields.erledigt === '1');
+      button?.setAttribute('aria-pressed', String(fields.erledigt === '1'));
+      if (form.elements.erledigt) form.elements.erledigt.value = fields.erledigt === '1' ? '0' : '1';
+    } else if (action === SORT && fields.ziel !== 'eingang') {
+      advance(fields.id);
+    }
+    for (const li of document.querySelectorAll('details.menu[open]')) li.open = false;
+    inboxCount();
+  }
+
+  /**
+   * Eingang: Die entschiedene Karte geht, die nächste noch nicht entschiedene aus
+   * `template.inbox-next` kommt (src/lesen/inbox.js). Rückgängig und Ablegen
+   * gehören zur Karte von vorher bzw. brauchen Netz und verschwinden.
+   */
+  function advance(id) {
+    const card = document.querySelector(`.inbox-card[data-id="${CSS.escape(id ?? '')}"]`);
+    const form = document.querySelector('form.inbox-decide');
+    if (!card || !form) return;
+    const decided = new Set(entries.filter((e) => e.action === SORT && e.fields?.ziel !== 'eingang').map((e) => e.fields.id));
+    decided.add(id);
+    let next = null;
+    for (const c of document.querySelector('template.inbox-next')?.content.querySelectorAll('.inbox-card') ?? []) {
+      c.remove();
+      if (!decided.has(c.dataset.id)) {
+        next = c;
+        break;
+      }
+    }
+    const bar = document.querySelector('.inbox-progress progress');
+    if (bar) {
+      const max = Number(bar.getAttribute('max'));
+      const seen = Math.min(max, Number(bar.getAttribute('value')) + 1);
+      bar.setAttribute('value', String(seen));
+      bar.textContent = `${seen} von ${max}`;
+      const meta = bar.parentElement.querySelector('.meta');
+      if (meta) meta.textContent = `Heute ${seen} von ${max} gesichtet`;
+    }
+    document.querySelector('.inbox-row')?.remove();
+    if (next) {
+      card.replaceWith(document.importNode(next, true));
+      form.elements.id.value = next.dataset.id;
+    } else {
+      const empty = el('div', { className: 'inbox-empty' }, el('p', { className: 'inbox-empty-title', textContent: 'Eingang leer' }), el('p', { className: 'meta', textContent: 'Für mehr Karten braucht es wieder Netz.' }));
+      card.replaceWith(empty);
+      form.remove();
+    }
+  }
+
+  /** Wartende Aktionen in die gerade geladene Seite übernehmen (etwa die gespeicherte Woche). */
+  function applyPending() {
+    for (const e of entries) if (!e.error && Object.hasOwn(ACTS, e.action ?? '')) apply(e);
+  }
+
   // --- Gespeicherte Leseseite -------------------------------------------------
 
   /**
@@ -531,10 +704,12 @@
   onlySaved();
   reload().then(() => {
     render();
+    applyPending();
     if (stale || entries.some((e) => !e.error)) flush();
   });
 
   // Für cockpit.js: Schnelleingabe bei Verbindungsfehler in den Puffer.
   // Für lesen-doc.js: Aktionen puffern, wartende ansehen, offline (oder gespeicherte Seite)?
-  window.cockpitPuffer = { take, flush, queue, pending: () => reload().then(() => entries), offline: () => stale || !net };
+  // Für cockpit.js: Einsortieren (`accepts`, `act`) ohne Netz in den Puffer (VCP-144).
+  window.cockpitPuffer = { take, flush, queue, act, accepts, pending: () => reload().then(() => entries), offline: () => stale || !net };
 })();

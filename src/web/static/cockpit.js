@@ -182,13 +182,18 @@
     for (const c of copies) c.classList.add('busy');
     show(li, status);
     if (status === 'done') li.classList.add('just-done');
+    const puffer = window.cockpitPuffer;
     try {
       if (status === 'done') haptik('erfolg');
+      // Ohne Netz gleich in den Offline-Puffer (VCP-144); die Aufgabe zeigt den neuen Stand schon.
+      if (puffer?.offline() && (await puffer.act(form, { status, prev: before }))) return;
       const data = await post(form, { status, prev: before });
       show(li, data.task.status);
       const undo = data.undo;
       toast(data.message, undo ? { action: { label: 'Rückgängig', run: () => (li.isConnected ? setStatus(li, undo.fields.status) : replay(undo)) } } : {});
     } catch (err) {
+      // Funkloch: Der Puffer sendet später; die Aufgabe behält den neuen Stand.
+      if (err.offline && (await puffer?.act(form, { status, prev: before }))) return;
       show(li, before);
       haptik('fehler');
       toast(err.message, { kind: 'error' });
@@ -271,7 +276,13 @@
     if (form.dataset.confirm && !window.confirm(form.dataset.confirm)) return;
     form.classList.add('busy');
     const fromToast = form.closest('.toast');
+    const puffer = window.cockpitPuffer;
     try {
+      // Einsortieren ohne Netz (VCP-144): Der Offline-Puffer merkt sich die Aktion und zeigt sie gleich an.
+      if (puffer?.offline() && puffer.accepts(form)) {
+        if (!(await puffer.act(form, extra))) toast('Dieses Gerät kann gerade nichts zwischenspeichern. Nichts gespeichert.', { kind: 'error' });
+        return;
+      }
       const data = await post(form, extra);
       // Die Notiz liegt jetzt woanders: dorthin, die Meldung kommt vom Server mit.
       if (data.redirect) {
@@ -286,8 +297,8 @@
       tick();
     } catch (err) {
       if (fallBack(form, err)) return;
-      // Funkloch in der Leseansicht: Die Entscheidung geht in den Offline-Puffer (lesen-doc.js), statt verloren.
-      if (!(err.offline && (await window.cockpitLesen?.decision(form)))) toast(err.message, { kind: 'error' });
+      // Funkloch: Entscheidungen der Leseansicht (lesen-doc.js) und Einsortieren (offline.js) gehen in den Offline-Puffer, statt verloren.
+      if (!(err.offline && ((await window.cockpitLesen?.decision(form)) || (await puffer?.act(form, extra))))) toast(err.message, { kind: 'error' });
     } finally {
       form.classList.remove('busy');
     }

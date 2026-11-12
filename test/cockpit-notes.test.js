@@ -111,6 +111,16 @@ test('move: ablegen, aber nie in vertrauliche oder ausgeschlossene Ordner', () =
   assert.equal(desk.get('40-archiv/Idee.md').inInbox, false);
 });
 
+test('move: ein zweites Ablegen derselben Notiz (Nachsenden aus dem Offline-Puffer) meldet „schon dort“ statt Fehler (VCP-144)', () => {
+  assert.equal(desk.move('00-inbox/Idee.md', '40-archiv').changed, true);
+  assert.deepEqual(desk.move('00-inbox/Idee.md', '40-archiv'), { path: '40-archiv/Idee.md', from: '00-inbox/Idee.md', changed: false, updated: [], left: [], hidden: 0 });
+  assert.equal(desk.move('40-archiv/Idee.md', '10-projekte', 'Preise').path, '10-projekte/Preise.md');
+  assert.equal(desk.move('40-archiv/Idee.md', '10-projekte', 'Preise').changed, false);
+  // Anderswo hin oder in einen gesperrten Ordner: weiterhin Fehler.
+  assert.throws(() => desk.move('00-inbox/Idee.md', '10-projekte/Hund'), (e) => e.status === 404);
+  assert.throws(() => desk.move('00-inbox/Idee.md', 'privat'), (e) => e.status === 403);
+});
+
 test('move: nennt vorher betroffene Links, passt sie beim Ablegen an und kann umbenennen (VCP-58)', () => {
   put('10-projekte/Hund/Plan.md', '# Plan\n\n[[00-inbox/Idee]] und [[Idee]]\n');
   put('20-bereiche/Gesundheit/Werte.md', '# Werte\n\n[[00-inbox/Idee]]\n');
