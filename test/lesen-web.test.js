@@ -98,7 +98,7 @@ test('Lesen: nur angemeldet, /lesen führt zu „Weiter“, Navigation mit Lesen
     assert.deepEqual([...nav.matchAll(/class="subnav-link subnav-weit"[^>]*>([^<]+)/g)].map((m) => m[1]), ['Markiert', 'Wiedersehen', 'Feeds']);
     // Auf einer Seite aus „Mehr“ trägt der Knopf ihren Namen, der breite Reiter ist markiert.
     const markiert = await (await call('/lesen/markiert')).text();
-    assert.match(markiert, /<summary class="subnav-link" aria-current="page">Markiert<svg/);
+    assert.match(markiert, /<summary class="subnav-link" aria-current="page"><span class="mehr-hier">Markiert<\/span><span class="mehr-kurz">Mehr<\/span><svg/);
     assert.match(markiert, /<a href="\/lesen\/markiert" class="subnav-link subnav-weit" aria-current="page">Markiert<\/a>/);
     assert.match(html, /<form method="post" action="\/aktion\/lesen\/speichern"/);
     assert.match(html, /Eingang leer/);
