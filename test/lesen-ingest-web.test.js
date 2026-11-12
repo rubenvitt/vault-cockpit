@@ -261,7 +261,7 @@ test('Ingest: Unternavigation mit Zahl der bereiten Entwürfe zwischen Stapel un
     assert.match(await html('/lesen/stapel'), /Ingest<span class="subnav-count" data-ingest-count hidden>0<\/span>/);
     const ingestPage = await html('/lesen/ingest');
     assert.match(ingestPage, /<a href="\/lesen\/ingest" class="subnav-item" aria-current="page">/);
-    assert.match(ingestPage, /<summary class="subnav-link" aria-current="page">Ingest<svg/);
+    assert.match(ingestPage, /<summary class="subnav-link" aria-current="page"><span class="mehr-hier">Ingest<\/span><span class="mehr-kurz">Mehr<\/span><svg/);
   });
 });
 

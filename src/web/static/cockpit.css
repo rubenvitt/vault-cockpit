@@ -634,6 +634,12 @@ details.rock[open] > summary { margin-bottom: var(--s-2); }
 .lesen-tabs > .subnav-link, .lesen-tabs .subnav-mehr { flex: 1 1 0; min-width: 0; }
 .lesen-tabs .subnav-link { padding-left: 6px; padding-right: 6px; }
 .lesen-tabs > .subnav-weit { display: none; }
+/* Auf einer Seite aus „Mehr“ trägt der Knopf ihren Namen; ganz schmal reicht der Platz dafür nicht, dort bleibt „Mehr“ (hervorgehoben). */
+.lesen-tabs .mehr-kurz { display: none; }
+@media (max-width: 700px) {
+  .lesen-tabs .mehr-hier { display: none; }
+  .lesen-tabs .mehr-kurz { display: inline; }
+}
 /* Breit genug für alle Reiter: „Mehr“ fällt weg, seine Einträge stehen daneben, in Gruppen mit Trennstrich; „Feeds“ rückt nach rechts (readingNav). */
 @media (min-width: 1100px) {
   .lesen-tabs > .subnav-link { flex: none; padding-left: 14px; padding-right: 14px; }
