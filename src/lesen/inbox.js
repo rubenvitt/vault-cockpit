@@ -27,6 +27,11 @@ import { TRIAGE_LABELS } from './jev.js';
  */
 
 const SORT = '/aktion/lesen/sortieren';
+/**
+ * So viele Karten nach der obersten liegen unsichtbar in der Seite (`template.inbox-next`):
+ * Ohne Netz zeigt `/static/offline.js` nach einer Entscheidung die nächste (VCP-144).
+ */
+export const OFFLINE_CARDS = 30;
 /** `ziel` aus dem Formular → neuer Status. `eingang` ist das Rückgängig. */
 const TARGETS = { weg: 'weg', stapel: 'stapel', lesen: 'stapel', eingang: 'eingang' };
 
@@ -94,7 +99,7 @@ const arrow = (a) => `<span aria-hidden="true">${a}</span>`;
 const choice = (ziel, label, key, keys, cls = '') =>
   `<button type="submit" name="ziel" value="${ziel}" class="btn${cls}" aria-keyshortcuts="${keys}">${label} <kbd aria-hidden="true">${key}</kbd></button>`;
 
-export function renderInboxPage({ doc, left, today, filter, triage = null }, ctx, { getFeed, vault = false }) {
+export function renderInboxPage({ doc, left, today, filter, triage = null, next = [] }, ctx, { getFeed, vault = false }) {
   const write = { csrf: ctx.write.csrf, back: ctx.write.back };
   const total = today.count + left;
   const progress = total
@@ -119,7 +124,9 @@ export function renderInboxPage({ doc, left, today, filter, triage = null }, ctx
     : '';
   const row = undo || file ? `<div class="inbox-row">${undo}${file}</div>` : '';
   const actions = row || decide ? `<div class="inbox-actions">${row}${decide}</div>` : '';
-  const body = `${groupChips('/lesen/eingang', filter)}<div class="inbox">${progress}${stack}${actions}</div>
+  // Die nächsten Karten für ohne Netz (VCP-144); „Im Vault ablegen“ braucht Netz und fehlt dort.
+  const later = next.length ? `<template class="inbox-next">${next.map((n, i) => card(n.doc, ctx, { getFeed, more: left - i > 2, triage: n.triage })).join('')}</template>` : '';
+  const body = `${groupChips('/lesen/eingang', filter)}<div class="inbox">${progress}${stack}${actions}${later}</div>
 <details class="more inbox-save"${doc && !keptUrl(ctx) ? '' : ' open'}><summary>Adresse speichern</summary>${saveForm(ctx)}</details>`;
   return readingPage(ctx, { key: 'eingang', title: 'Eingang', body, scripts: [assets.inbox] });
 }
@@ -164,12 +171,14 @@ export function inboxRoutes({ store, vault = false, triage = () => false, now = 
     const filter = groupFilter(store, ctx.url);
     const { group } = filter;
     const sorted = Boolean(triage());
-    const [doc = null] = store.list({ status: 'eingang', group, limit: 1, triage: sorted });
-    return { doc, left: store.counts({ group }).eingang, today: store.leftInboxSince(dayStart(now(), ctx.tz), { group }), filter, triage: doc ? store.getTriage(doc.id) : null };
+    const [doc = null, ...rest] = store.list({ status: 'eingang', group, limit: 1 + (ctx.offline ? OFFLINE_CARDS : 0), triage: sorted });
+    const next = rest.map((d) => ({ doc: d, triage: store.getTriage(d.id) }));
+    return { doc, next, left: store.counts({ group }).eingang, today: store.leftInboxSince(dayStart(now(), ctx.tz), { group }), filter, triage: doc ? store.getTriage(doc.id) : null };
   };
   return {
     pages: {
-      '/lesen/eingang': async (ctx) => ({ html: renderInboxPage(model(ctx), ctx, { getFeed: store.getFeed, vault }) }),
+      // Die Seite trägt die nächsten Karten mit, damit sie ohne Netz weiter sortiert (VCP-144); die App braucht das nicht.
+      '/lesen/eingang': async (ctx) => ({ html: renderInboxPage(model({ ...ctx, offline: true }), ctx, { getFeed: store.getFeed, vault }) }),
       '/api/lesen/eingang': async (ctx) => jsonReply(200, inboxJson(model(ctx), { store, tz: ctx.tz, vault })),
     },
     actions: {

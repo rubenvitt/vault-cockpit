@@ -84,8 +84,8 @@ async function until(check, what, ms = 1000) {
  * Lädt offline.js in eine Seite. `server(path, fields)` antwortet auf jede
  * Anfrage ({ status, body }) oder wirft für „kein Netz“.
  */
-async function loadPage({ html = '<main></main>', stand = null, onLine = true, server, pages = [], confirm = () => true, before = [], cockpit = {} } = {}) {
-  const page = parseHTML(`<!doctype html><html lang="de"${stand ? ` data-offline-stand="${stand}"` : ''}><body>${html}<div class="toasts"></div></body></html>`);
+async function loadPage({ html = '<main></main>', stand = null, onLine = true, server, pages = [], confirm = () => true, before = [], cockpit = {}, idb = fakeIndexedDB(), href = 'https://vault.test/', bodyClass = '' } = {}) {
+  const page = parseHTML(`<!doctype html><html lang="de"${stand ? ` data-offline-stand="${stand}"` : ''}><body${bodyClass ? ` class="${bodyClass}"` : ''}>${html}<div class="toasts"></div></body></html>`);
   const { document } = page;
   // linkedom kennt keine Formular-Sammlungen: so viel nachbauen, wie offline.js braucht.
   const proto = Object.getPrototypeOf(document.createElement('form'));
@@ -107,8 +107,8 @@ async function loadPage({ html = '<main></main>', stand = null, onLine = true, s
     submitted.push(this.getAttribute('action'));
   };
 
-  const idb = fakeIndexedDB();
   const caches = fakeCaches(pages);
+  const assigned = [];
   const toasts = [];
   const requests = [];
   const confirms = [];
@@ -121,7 +121,7 @@ async function loadPage({ html = '<main></main>', stand = null, onLine = true, s
   const ctx = vm.createContext({
     document,
     navigator: { onLine },
-    location: { href: 'https://vault.test/', reload() {} },
+    location: { href, reload() {}, assign: (url) => assigned.push(url) },
     indexedDB: idb,
     caches,
     fetch,
@@ -141,8 +141,9 @@ async function loadPage({ html = '<main></main>', stand = null, onLine = true, s
     CSS: { escape: (v) => v },
     FormData: class {
       constructor(form) {
-        const named = [...form.querySelectorAll('input[name], textarea[name]')].filter((f) => f.getAttribute('type') !== 'checkbox' || f.hasAttribute('checked'));
-        this.list = named.map((f) => [f.getAttribute('name'), f.getAttribute('value') ?? f.textContent]);
+        const named = [...form.querySelectorAll('input[name], textarea[name], select[name]')].filter((f) => f.getAttribute('type') !== 'checkbox' || f.hasAttribute('checked'));
+        const valueOf = (f) => (f.localName === 'select' ? ((f.querySelector('option[selected]') ?? f.querySelector('option'))?.getAttribute('value') ?? '') : (f.getAttribute('value') ?? f.textContent));
+        this.list = named.map((f) => [f.getAttribute('name'), valueOf(f)]);
       }
       [Symbol.iterator]() {
         return this.list[Symbol.iterator]();
@@ -158,7 +159,7 @@ async function loadPage({ html = '<main></main>', stand = null, onLine = true, s
   vm.runInContext(SOURCE, ctx);
   await settle();
   const logout = () => document.querySelector('form.logout').dispatchEvent(new page.Event('submit', { cancelable: true }));
-  return { ctx, document, puffer: ctx.cockpitPuffer, idb, caches, toasts, requests, confirms, submitted, logout };
+  return { ctx, document, puffer: ctx.cockpitPuffer, idb, caches, toasts, requests, confirms, submitted, logout, assigned };
 }
 
 /** Cockpit mit gültiger Sitzung: Token `t1`, jede Aktion klappt. */
@@ -428,4 +429,145 @@ test('Leseansicht: Entfernen und In Inbox ohne Netz in den Puffer, Entscheidunge
   assert.equal(await live.ctx.cockpitLesen.decision(live.document.querySelector('form[data-decide]')), true);
   assert.deepEqual(live.idb.data.get('/aktion/lesen/doc/fertig:d1').fields, { id: 'd1' });
   assert.ok(live.toasts.includes('Fertig, weg wartet auf Netz und geht automatisch raus.'));
+});
+
+// --- Einsortieren ohne Netz (VCP-144) ---------------------------------------
+
+/** Gespeicherte Woche: eine Aufgabe in der Zunder-Inbox mit Menü, eine Notiz in der Vault-Inbox, dazu ein Formular, das Netz braucht. */
+const WEEK = `<main><section id="inbox" class="inbox"><h2>Inbox <span class="count-badge" data-inbox-count>2</span></h2>
+  <ul data-list="vault-inbox"><li class="note"><a href="/notiz?pfad=inbox%2FIdee.md">Idee</a></li></ul>
+  <ul data-list="zunder-inbox"><li class="task status-open" data-id="t1" data-status="open" data-title="Steuer abgeben">
+    <form method="post" action="/aktion/status" class="tick"><input type="hidden" name="csrf" value="alt"><input type="hidden" name="id" value="t1"><input type="hidden" name="status" value="done"><input type="hidden" name="prev" value="open"><button type="submit">✓</button></form>
+    <details class="menu"><summary class="menu-button">⋯</summary><div class="menu-panel"><p class="menu-title">Steuer abgeben</p>
+      <form method="post" action="/aktion/zuordnen" class="act zuordnen"><input type="hidden" name="csrf" value="alt"><input type="hidden" name="back" value="/"><input type="hidden" name="id" value="t1"><input type="hidden" name="prev" value="inbox"><select name="ziel"><option value="">…</option><option value="project:p1" selected>Finanzen / Steuer</option></select><button type="submit">Zuordnen</button></form>
+      <form method="post" action="/aktion/faellig" class="act faellig"><input type="hidden" name="csrf" value="alt"><input type="hidden" name="id" value="t1"><button type="submit" name="due" value="morgen">Morgen</button></form>
+      <form method="post" action="/aktion/woche/raus" class="act raus"><input type="hidden" name="id" value="t1"><button type="submit">Raus</button></form>
+    </div></details></li></ul></section></main>`;
+
+const zuordnen = (doc) => doc.querySelector('form.zuordnen');
+const entriesOf = (idb) => [...idb.data.values()].sort((a, b) => a.created - b.created);
+
+test('Gespeicherte Woche ohne Netz: Zuordnen, Fälligkeit und Abhaken warten im Puffer, die Ansicht zeigt sie, mit Netz gehen sie genau einmal raus', async () => {
+  const page = await loadPage({ html: WEEK, stand: '2026-11-12T08:00:00.000Z', onLine: false, server: happy });
+  const { document, puffer, idb, requests, toasts } = page;
+  assert.equal(puffer.offline(), true);
+  // Formulare zum Einsortieren bleiben bedienbar, alles andere ist gesperrt.
+  assert.equal(zuordnen(document).classList.contains('offline-off'), false);
+  assert.equal(document.querySelector('form.tick').classList.contains('offline-off'), false);
+  assert.equal(document.querySelector('form.raus').classList.contains('offline-off'), true);
+
+  assert.equal(await puffer.act(document.querySelector('form.faellig'), { due: 'morgen' }), true);
+  assert.equal(await puffer.act(zuordnen(document)), true);
+  assert.equal(requests.length, 0, 'ohne Netz geht nichts raus');
+
+  const [due, assign] = entriesOf(idb);
+  assert.equal(assign.id, 'akt:/aktion/zuordnen:t1');
+  assert.deepEqual(assign.fields, { back: '/', id: 't1', prev: 'inbox', ziel: 'project:p1' }, 'ohne CSRF-Token, das kommt frisch');
+  assert.equal(assign.label, 'Nach Finanzen / Steuer: Steuer abgeben');
+  // „Morgen“ gilt ab heute, nicht ab dem Tag des Nachsendens.
+  const d = new Date();
+  const tomorrow = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+  const iso = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`;
+  assert.deepEqual({ due: due.fields.due, date: due.fields.date }, { due: 'datum', date: iso });
+  assert.equal(document.querySelector('li.task[data-id="t1"]').hidden, true, 'zugeordnet: nicht mehr in der Inbox');
+  assert.equal(document.querySelector('[data-inbox-count]').textContent, '1');
+  assert.ok(toasts.some((t) => t.startsWith('Nach Finanzen / Steuer wartet auf Netz')));
+  assert.match(document.querySelector('.puffer summary').textContent, /2 Einträge warten/);
+
+  // Eine zweite Änderung derselben Sache ersetzt die erste.
+  assert.equal(await puffer.act(document.querySelector('form.tick'), { status: 'done', prev: 'open' }), true);
+  assert.equal(await puffer.act(document.querySelector('form.tick'), { status: 'in_progress', prev: 'done' }), true);
+  assert.deepEqual(entriesOf(idb).map((e) => e.id), ['akt:/aktion/faellig:t1', 'akt:/aktion/zuordnen:t1', 'akt:/aktion/status:t1']);
+  assert.equal(entriesOf(idb)[2].fields.status, 'in_progress');
+  assert.equal(document.querySelector('li.task').dataset.status, 'in_progress');
+
+  page.ctx.navigator.onLine = true;
+  await puffer.flush();
+  assert.deepEqual(
+    requests.filter((r) => r.path !== '/api/sitzung').map((r) => [r.path, r.fields.csrf]),
+    [['/aktion/faellig', 't1'], ['/aktion/zuordnen', 't1'], ['/aktion/status', 't1']],
+  );
+  assert.equal(idb.data.size, 0);
+});
+
+test('Wartende Aktionen erscheinen auch in einer frisch geladenen (gespeicherten) Woche', async () => {
+  const idb = fakeIndexedDB();
+  const first = await loadPage({ html: WEEK, stand: '2026-11-12T08:00:00.000Z', onLine: false, server: happy, idb });
+  await first.puffer.act(zuordnen(first.document));
+  // Ablegen auf der Notizseite: danach zurück zur Woche.
+  const note = await loadPage({
+    html: '<main><h1>Idee</h1><form method="post" action="/aktion/notiz/ablegen" class="act"><input type="hidden" name="csrf" value="alt"><input type="hidden" name="pfad" value="inbox/Idee.md"><input name="ordner" value="projekte"><button type="submit">Ablegen</button></form><form method="post" action="/aktion/notiz/anhaengen" class="act anhaengen"><textarea name="text"></textarea></form></main>',
+    stand: '2026-11-12T08:00:00.000Z',
+    onLine: false,
+    server: happy,
+    idb,
+    bodyClass: 'page-note',
+    href: 'https://vault.test/notiz?pfad=inbox%2FIdee.md&zurueck=%2F',
+  });
+  assert.equal(note.document.querySelector('form.anhaengen').classList.contains('offline-off'), true, 'Anhängen braucht Netz');
+  assert.equal(await note.puffer.act(note.document.querySelector('form[action="/aktion/notiz/ablegen"]')), true);
+  assert.deepEqual(note.assigned, ['/']);
+  assert.equal(entriesOf(idb).at(-1).label, 'Ablegen in projekte/: Idee');
+
+  const again = await loadPage({ html: WEEK, stand: '2026-11-12T08:00:00.000Z', onLine: false, server: happy, idb });
+  assert.equal(again.document.querySelector('li.task[data-id="t1"]').hidden, true);
+  assert.equal(again.document.querySelector('[data-list="vault-inbox"] li').hidden, true);
+  assert.equal(again.document.querySelector('[data-inbox-count]').textContent, '0');
+});
+
+test('Eingang ohne Netz: jede Entscheidung zeigt die nächste Karte aus dem Vorrat, bis er leer ist; mit Netz in derselben Reihenfolge', async () => {
+  const card = (id, more = '') => `<article class="inbox-card${more}" data-id="${id}"><h2 class="inbox-title">Text ${id}</h2></article>`;
+  const html = `<main><div class="inbox"><div class="inbox-progress"><progress max="5" value="2">2 von 5</progress><span class="meta">Heute 2 von 5 gesichtet</span></div>
+    ${card('a', ' more')}
+    <div class="inbox-actions"><div class="inbox-row"><form method="post" action="/aktion/lesen/sortieren" class="act inbox-undo"><input type="hidden" name="id" value="vorher"><input type="hidden" name="ziel" value="eingang"></form></div>
+    <form method="post" action="/aktion/lesen/sortieren" class="act inbox-decide wisch"><input type="hidden" name="csrf" value="alt"><input type="hidden" name="back" value="/lesen/eingang"><input type="hidden" name="id" value="a"><button name="ziel" value="weg">Weg</button></form></div>
+    <template class="inbox-next">${card('b', ' more')}${card('c')}</template></div></main>`;
+  const page = await loadPage({ html, stand: '2026-11-12T08:00:00.000Z', onLine: false, server: happy, href: 'https://vault.test/lesen/eingang' });
+  const { document, puffer, idb, requests } = page;
+  const decide = () => document.querySelector('form.inbox-decide');
+
+  assert.equal(await puffer.act(decide(), { ziel: 'weg' }), true);
+  assert.equal(document.querySelector('.inbox-card').dataset.id, 'b');
+  assert.equal(decide().elements.id.value, 'b');
+  assert.equal(document.querySelector('.inbox-row'), null, 'Rückgängig gehört zur Karte von vorher');
+  assert.equal(document.querySelector('.inbox-progress .meta').textContent, 'Heute 3 von 5 gesichtet');
+
+  assert.equal(await puffer.act(decide(), { ziel: 'stapel' }), true);
+  assert.equal(await puffer.act(decide(), { ziel: 'lesen' }), true);
+  assert.equal(document.querySelector('.inbox-card'), null);
+  assert.equal(decide(), null);
+  assert.match(document.querySelector('.inbox-empty').textContent, /Eingang leer/);
+  assert.deepEqual(entriesOf(idb).map((e) => e.label), ['Weg: Text a', 'Auf den Stapel: Text b', 'Auf den Stapel: Text c']);
+
+  page.ctx.navigator.onLine = true;
+  await puffer.flush();
+  assert.deepEqual(
+    requests.filter((r) => r.path !== '/api/sitzung').map((r) => `${r.fields.id}:${r.fields.ziel}`),
+    ['a:weg', 'b:stapel', 'c:lesen'],
+  );
+});
+
+test('Gespeicherter Eingang: schon entschiedene Karten werden beim Öffnen übersprungen', async () => {
+  const idb = fakeIndexedDB();
+  idb.data.set('akt:/aktion/lesen/sortieren:a', { id: 'akt:/aktion/lesen/sortieren:a', action: '/aktion/lesen/sortieren', fields: { id: 'a', ziel: 'weg' }, label: 'Weg: Text a', created: 1, rev: 'r1', error: null });
+  idb.data.set('akt:/aktion/lesen/sortieren:b', { id: 'akt:/aktion/lesen/sortieren:b', action: '/aktion/lesen/sortieren', fields: { id: 'b', ziel: 'stapel' }, label: 'Auf den Stapel: Text b', created: 2, rev: 'r2', error: null });
+  const card = (id) => `<article class="inbox-card" data-id="${id}"><h2 class="inbox-title">Text ${id}</h2></article>`;
+  const html = `<main><div class="inbox">${card('a')}<form method="post" action="/aktion/lesen/sortieren" class="act inbox-decide"><input type="hidden" name="id" value="a"></form><template class="inbox-next">${card('b')}${card('c')}</template></div></main>`;
+  const { document } = await loadPage({ html, stand: '2026-11-12T08:00:00.000Z', onLine: false, server: happy, idb });
+  await until(() => document.querySelector('.inbox-card')?.dataset.id === 'c', 'Karte c oben');
+  assert.equal(document.querySelector('form.inbox-decide').elements.id.value, 'c');
+});
+
+test('Funkloch: Was der Server abgelehnt hat (etwa schon entschieden), bleibt mit Grund im Puffer', async () => {
+  const page = await loadPage({
+    html: WEEK,
+    onLine: true,
+    server: (path) => (path === '/api/sitzung' ? { body: { csrf: 't1' } } : { status: 409, body: { ok: false, message: 'Liegt nicht mehr in der Inbox' } }),
+  });
+  assert.equal(page.puffer.offline(), false);
+  assert.equal(page.puffer.accepts(zuordnen(page.document)), true);
+  assert.equal(page.puffer.accepts(page.document.querySelector('form.raus')), false);
+  await page.puffer.act(zuordnen(page.document));
+  await until(() => entriesOf(page.idb)[0]?.error, 'Fehler vermerkt');
+  assert.equal(entriesOf(page.idb)[0].error, 'Liegt nicht mehr in der Inbox');
 });

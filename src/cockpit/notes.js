@@ -6,6 +6,7 @@ import { createAttachments, createLinkResolver } from './note-links.js';
 import { createRelated } from './related.js';
 import { suggestFiling } from './suggest.js';
 import { moveNote, linkImpact } from '../mcp/move.js';
+import { noteFileName } from '../vault/edit.js';
 
 /** Abschnitte der Feuer-Notiz, die das Cockpit bearbeitet. */
 export const FEUER_FIELDS = { ziel: 'Feuer-Ziel', zug: 'Erster Zug' };
@@ -124,6 +125,16 @@ export function createNoteDesk({ index, editor, policy, settings, vaultPath = nu
       return suggestFiling({ index, policy, inboxFolder, bridgeTag: bridge?.tag ?? null }, note, similar);
     },
 
+    /**
+     * Pfade der Notizen in der Vault-Inbox, die das Cockpit zeigen darf, höchstens
+     * `limit`, wie die Liste der Woche (nach Pfad). Für den Offline-Cache (VCP-144).
+     */
+    inboxPaths(limit = 50) {
+      const { inboxFolder } = settings.get();
+      if (!inboxFolder) return [];
+      return index.listFolder(inboxFolder, { limit }).map((r) => r.path).filter((p) => visible(p));
+    },
+
     /** Sichtbare Notizen mit diesem Frontmatter-`type` samt Frontmatter und `updated` (z. B. Synthesen für `/wissen`). */
     ofType: (type) => index.notesOfType(type).filter((r) => listed(r.path)),
 
@@ -165,9 +176,20 @@ export function createNoteDesk({ index, editor, policy, settings, vaultPath = nu
      * angepasste Notizen, nicht anpassbare und vertrauliche (nur gezählt).
      */
     move(path, folder, name = null) {
-      mustSee(path);
       const target = allowedFolder(folder);
       const rename = String(name ?? '').trim() || null;
+      // Schon dort (etwa ein zweites Nachsenden aus dem Offline-Puffer, VCP-144): melden statt Fehler.
+      if (!visible(path)) {
+        let file = null;
+        try {
+          file = rename ? noteFileName(rename) : String(path ?? '').split('/').pop();
+        } catch {
+          /* ungültiger Name: unten die übliche Meldung */
+        }
+        const there = file ? visible(`${target}/${file}`) : null;
+        if (there) return { path: there.path, from: String(path), changed: false, updated: [], left: [], hidden: 0 };
+      }
+      mustSee(path);
       const r = edit(() => moveNote({ index, editor, policy }, { path, folder: target, name: rename, update_links: true }));
       return { path: r.new_path, from: r.old_path, changed: r.changed, updated: r.links_updated ?? [], left: r.links_to_update ?? [], hidden: r.links_hidden ?? 0 };
     },

@@ -452,8 +452,9 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       draft: draft ?? kept?.text ?? null,
       ...(await noteExtras(note)),
     });
-    // Synthesen darf der Service Worker für offline behalten (VCP-80), aber nie mit einem Entwurf im Feld.
-    const offline = status === 200 && !kept && !draft && note.path.startsWith(`${SYNTHESIS_FOLDER}/`) ? { [OFFLINE_MARK]: 'lesen' } : {};
+    // Synthesen (VCP-80) und Inbox-Notizen zum Einsortieren (VCP-144) darf der Service Worker für offline
+    // behalten, aber nie mit einem Entwurf im Feld.
+    const offline = status === 200 && !kept && !draft && (note.path.startsWith(`${SYNTHESIS_FOLDER}/`) || note.inInbox) ? { [OFFLINE_MARK]: 'lesen' } : {};
     return send(res, status, html, offline);
   }
 
@@ -1184,12 +1185,13 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     return json(res, 200, graphJson(g, { vaultName: settings.get().vaultName, link: Boolean(actions && notes), notes: Boolean(notes) }));
   }
 
+  const OFFLINE_LISTS = new Set(['/lesen/stapel', '/lesen/eingang']);
   /** Seite aus dem Bereich Lesen (src/lesen/http.js). */
   async function readingPage(req, res, url, session) {
     const r = await READING_PAGES[url.pathname]({ url, range: req.headers.range ?? null, user: session.name ?? session.sub, tz: settings.get().tz, write: { csrf: csrfOf(req), back: url.pathname + url.search }, flash: takeFlash(req, res), nav: reading.nav ?? null });
     if (r.redirect) return redirect(res, r.redirect);
-    // Leseansicht und Stapel darf der Service Worker für offline behalten (VCP-80); welche Artikel, sagt `/api/lesen/offline`.
-    const offline = r.html && (r.status ?? 200) === 200 && (url.pathname === '/lesen/doc' || (url.pathname === '/lesen/stapel' && !url.search)) ? { [OFFLINE_MARK]: 'lesen' } : {};
+    // Leseansicht, Stapel (VCP-80) und Eingang (VCP-144) darf der Service Worker für offline behalten; welche Artikel, sagt `/api/lesen/offline`.
+    const offline = r.html && (r.status ?? 200) === 200 && (url.pathname === '/lesen/doc' || (OFFLINE_LISTS.has(url.pathname) && !url.search)) ? { [OFFLINE_MARK]: 'lesen' } : {};
     return send(res, r.status ?? 200, r.html ?? r.body, { ...r.headers, ...offline });
   }
 

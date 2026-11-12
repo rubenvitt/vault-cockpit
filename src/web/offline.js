@@ -25,9 +25,14 @@ import { SYNTHESIS } from './synthesis-render.js';
  *   `/api/lesen/offline` (`readingOfflineUrls`); der Service Worker speichert
  *   davon nur, was der Server mit `OFFLINE_MARK: lesen` ausliefert. Vertrauliche
  *   und ausgeschlossene Notizen kommen nie in die Liste (`notes.ofType`).
+ * - Einsortieren ohne Netz (VCP-144): der Eingang des Lesestapels (mit den
+ *   nächsten Karten in der Seite) und die Notizen der Vault-Inbox
+ *   (höchstens `OFFLINE_INBOX`, wie die Woche sie zeigt).
  * - Ohne Netz zeigt er die gespeicherte Woche bzw. Leseseite mit „offline,
- *   Stand von …“, sonst die App-Hülle. Die Schnelleingabe und die Aktionen der
- *   Leseansicht puffern dann in IndexedDB (`/static/offline.js`) und senden nach.
+ *   Stand von …“, sonst die App-Hülle. Schnelleingabe, Aktionen der
+ *   Leseansicht und die Aktionen zum Einsortieren (Status, Fälligkeit,
+ *   Zuordnen, Ablegen, Tags, Eingang sortieren) puffern dann in IndexedDB
+ *   (`/static/offline.js`) und senden nach.
  */
 
 /** Antwort-Header, mit dem der Server eine Seite für den Offline-Cache freigibt. */
@@ -43,21 +48,28 @@ export const FILL_HEADER = 'x-cockpit-befuellen';
 export const SYNTHESIS_FOLDER = 'wiki/synthesis';
 export const OFFLINE_DOCS = 30;
 export const OFFLINE_SYNTHESES = 200;
+/** So viele Notizen der Vault-Inbox liegen offline, so viele wie die Woche zeigt (VCP-144). */
+export const OFFLINE_INBOX = 50;
 
 /**
  * Was offline liegen darf, als Liste von Seiten für `/api/lesen/offline`.
  * `reading` sind die Routen aus src/lesen/http.js, `notes` der Schreibtisch
  * (src/cockpit/notes.js); fehlt eins, fehlt sein Teil. Synthesen: nur
  * `type: synthesis` in `SYNTHESIS_FOLDER`, zuletzt bewegte zuerst.
+ * Dazu (VCP-144) der Eingang des Lesestapels und die Notizen der Vault-Inbox,
+ * damit sich beides ohne Netz einsortieren lässt (`inboxPaths` zeigt nur, was
+ * das Cockpit zeigen darf, nie Vertrauliches).
  */
 export function readingOfflineUrls({ reading = null, notes = null }) {
   const syntheses = (notes?.ofType(SYNTHESIS) ?? [])
     .filter((n) => n.path.startsWith(`${SYNTHESIS_FOLDER}/`))
     .sort((a, b) => String(b.updated ?? '').localeCompare(String(a.updated ?? '')))
     .slice(0, OFFLINE_SYNTHESES);
+  const note = (path) => `/notiz?pfad=${encodeURIComponent(path)}`;
   return [
-    ...(reading ? ['/lesen/stapel', ...reading.offlineDocs(OFFLINE_DOCS)] : []),
-    ...(notes ? ['/wissen', ...syntheses.map((n) => `/notiz?pfad=${encodeURIComponent(n.path)}`)] : []),
+    ...(reading ? ['/lesen/stapel', '/lesen/eingang', ...reading.offlineDocs(OFFLINE_DOCS)] : []),
+    ...(notes ? ['/wissen', ...syntheses.map((n) => note(n.path))] : []),
+    ...(notes?.inboxPaths?.(OFFLINE_INBOX) ?? []).map(note),
   ];
 }
 
@@ -87,8 +99,8 @@ ${appHeader({ current: 'woche' })}
   <h2>Offline</h2>
   <p>Das Cockpit ist gerade nicht erreichbar, und diese Seite liegt nicht auf dem Gerät.</p>
   <p>Die Schnelleingabe geht trotzdem: Notizen und Aufgaben mit <code>!</code> warten auf dem Gerät und gehen raus, sobald wieder Netz da ist.</p>
-  <p>Artikel vom Stapel und Synthesen liegen auch auf dem Gerät, sofern sie schon geladen wurden.</p>
-  <p><a href="/" class="btn">Zur gespeicherten Woche</a> <a href="/lesen/stapel" class="btn quiet">Zum Stapel</a> <a href="/wissen" class="btn quiet">Zu den Synthesen</a></p>
+  <p>Die Woche, der Eingang, Inbox-Notizen, Artikel vom Stapel und Synthesen liegen auch auf dem Gerät, sofern sie schon geladen wurden. Was du dort einsortierst, wartet ebenfalls und geht später raus.</p>
+  <p><a href="/" class="btn">Zur gespeicherten Woche</a> <a href="/lesen/eingang" class="btn quiet">Zum Eingang</a> <a href="/lesen/stapel" class="btn quiet">Zum Stapel</a> <a href="/wissen" class="btn quiet">Zu den Synthesen</a></p>
 </section>
 </main>
 <div class="toasts" aria-live="polite"></div>
@@ -113,7 +125,7 @@ export function offlineFiles(files, { html }) {
   const h = createHash('sha256').update(SW_SOURCE);
   for (const [path, body] of shell) h.update(`\0${path}\0`).update(body);
   const version = h.digest('base64url').slice(0, 10);
-  const config = { version, shell: shell.map(([path]) => path), mark: OFFLINE_MARK, fill: FILL_HEADER, synthesis: SYNTHESIS_FOLDER };
+  const config = { version, shell: shell.map(([path]) => path), mark: OFFLINE_MARK, fill: FILL_HEADER };
   return {
     version,
     entries: [
@@ -149,6 +161,6 @@ export const OFFLINE_CSS = `
 .puffer li .meta { grid-column: 1 / -1; font-size: var(--t-xs); }
 .puffer li.failed .meta { color: var(--danger); }
 .puffer-actions { display: flex; gap: 6px; margin-top: var(--s-2); }
-html.is-offline form.offline-off, html.is-offline .menu-button { opacity: .4; pointer-events: none; }
+html.is-offline form.offline-off { opacity: .4; pointer-events: none; }
 .offline-shell p { margin: 0 0 var(--s-3); max-width: 60ch; }
 `;

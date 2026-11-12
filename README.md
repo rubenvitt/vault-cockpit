@@ -594,10 +594,10 @@ ausgeliefert (`cockpit.css?v=…`), nach einem Deploy lädt der Browser es neu.
 Worker (`/sw.js`) hält die App-Hülle (Stylesheet, Skripte, Manifest, Icons und
 die Seite `/offline`) und die zuletzt geladene Wochenansicht der laufenden Woche
 auf dem Gerät. Ohne Netz zeigt das Cockpit diese Woche mit dem Hinweis „Offline,
-Stand von …“, andere Seiten zeigen die App-Hülle. Abhaken, Menüs und alle
-anderen Formulare sind dann gesperrt, nur die **Schnelleingabe** geht: Notizen
-und `!`-Aufgaben landen in einem Puffer im Browser (IndexedDB), darunter steht
-„n Einträge warten auf Netz“. Sobald das Cockpit wieder erreichbar ist (beim
+Stand von …“, andere Seiten zeigen die App-Hülle. Die **Schnelleingabe** geht
+weiter: Notizen und `!`-Aufgaben landen in einem Puffer im Browser (IndexedDB),
+darunter steht „n Einträge warten auf Netz“. Ebenso das **Einsortieren** (siehe
+unten); alle anderen Formulare sind ohne Netz gesperrt. Sobald das Cockpit wieder erreichbar ist (beim
 Öffnen, beim Zurückholen der App, sonst alle 30 Sekunden), sendet die Seite den
 Puffer über `/aktion/erfassen` nach, mit der ID des Eintrags als Erfassungs-ID:
 Kommt eine Antwort nicht an, legt das erneute Senden nichts doppelt an. Ist die
@@ -605,8 +605,8 @@ Anmeldung inzwischen abgelaufen, bleiben die Einträge stehen und gehen nach dem
 nächsten Login raus. Was der Server ablehnt (z. B. Zunder antwortet nicht),
 bleibt mit Fehler in der Liste, bis man es erneut sendet, ins Feld zurückholt
 oder verwirft. Notizvorschau, Suche, Einstellungen und die JSON-Schnittstellen
-speichert der Service Worker nie; Abmelden und jeder neue Login löschen die
-gespeicherte Woche. Abmelden leert auch den Puffer (VCP-87): Vorher geht mit Netz
+(außer Inbox-Notizen und Synthesen, siehe unten) speichert der Service Worker
+nie; Abmelden und jeder neue Login löschen die gespeicherte Woche. Abmelden leert auch den Puffer (VCP-87): Vorher geht mit Netz
 noch raus, was geht (höchstens vier Sekunden); wartet danach noch etwas, fragt
 die Seite, ob es wirklich vom Gerät gelöscht werden soll. Wer abbricht, bleibt
 angemeldet, Puffer und gespeicherte Seiten bleiben. Wer bestätigt, dessen noch
@@ -641,6 +641,24 @@ Fortschritt, Status und Notiz gelten mit dem letzten Stand. Das CSRF-Token holt
 sich das Nachsenden wie bei der Schnelleingabe frisch von `/api/sitzung`, und nur
 mit Netz. Abmelden, jeder neue Login und eine abgelaufene Sitzung löschen den
 Lesestoff zusammen mit der Woche (beide liegen im selben Cache).
+
+**Offline einsortieren** (VCP-144): Zusätzlich liegen der Eingang des
+Lesestapels (`/lesen/eingang` ohne Gruppenfilter, mit den nächsten 30 Karten
+unsichtbar in der Seite) und die Notizseiten der Vault-Inbox (höchstens 50, wie
+die Woche sie zeigt, nie vertraulich oder ausgeschlossen) auf dem Gerät; auch
+sie nennt `/api/lesen/offline`. Ohne Netz und im Funkloch gehen **Abhaken,
+Status, Fälligkeit, Zuordnen, Phönix-Schritt, Ablegen, Tags, Checkboxen und die
+Entscheidungen im Eingang** (Weg, Stapel, Jetzt lesen) in den Puffer. Die
+Ansicht zeigt sie gleich: Eine zugeordnete oder abgelegte Sache verschwindet aus
+der Inbox, im Eingang kommt die nächste Karte, auch nach dem Neuladen einer
+gespeicherten Seite. Je Sache und Aktion gilt der letzte Stand (zweimal den
+Status ändern schickt nur den zweiten). „Heute“, „Morgen“ und „Nächste Woche“
+gelten ab dem Tag des Erfassens, nicht ab dem Nachsenden. Alle diese Aktionen
+senden einen festen Zielzustand, ein doppeltes Senden ändert nichts; ein
+zweites Ablegen derselben Notiz meldet „liegt schon in …“. Was sich inzwischen
+geändert hat (etwa schon anderswo entschieden), lehnt der Server ab, und der
+Eintrag bleibt mit Grund in der Liste. Text anhängen, Flammen und „Im Vault
+ablegen“ brauchen weiter Netz.
 
 Nach einem Deploy bringt `/sw.js` eine neue Cache-Version mit (Inhalts-Hash der
 App-Hülle) und räumt die alte weg. Gespeicherte Leseansichten (`/lesen/doc`)
