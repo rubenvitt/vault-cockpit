@@ -728,11 +728,14 @@ steht nur auf `/zustand`.
 Der Lesestapel ist ein Bereich im Cockpit (VCP-77): **Lesen** in der Kopfzeile
 und in der Leiste unten, darunter vier Reiter für den Ablauf eines Textes,
 **Weiter · Eingang · Stapel · Folgen**, und das Menü **Mehr** mit Ingest, Markiert,
-Wiedersehen, Wissen und Feeds (ein `<details>`, geht ohne JavaScript; steht man auf
-einer dieser Seiten, trägt der Knopf ihren Namen). Die Zahl bereiter Ingest-Entwürfe
-steht an „Weiter“ und an „Ingest“. `/lesen` führt zu „Weiter“. In der
-Leiste unten nimmt „Lesen“ den Platz der Suche ein; die Suche erreicht man dort
-über Lesen → Wissen → „Ganzen Vault durchsuchen“, im Kopf steht sie weiter.
+Wiedersehen und Feeds (ein `<details>`, geht ohne JavaScript; steht man auf
+einer dieser Seiten, trägt der Knopf ihren Namen, auf dem iPhone bleibt es bei
+„Mehr“, hervorgehoben). Ab 1100 px Breite stehen die Einträge aus „Mehr“ als
+Reiter daneben, in Gruppen mit Trennstrich: Ingest · Markiert, Wiedersehen ·
+rechts Feeds (VCP-145). Die Zahl bereiter Ingest-Entwürfe steht an „Weiter“ und
+an „Ingest“, breit nur an „Ingest“. `/lesen` führt zu „Weiter“. Wissen und Fragen
+stehen unter **Suche** (Reiter Vault · Wissen · Fragen), die Suche hat auch in
+der Leiste unten ihren Platz.
 
 **Weiter** (`/lesen/weiter`, `src/lesen/weiter.js`) zeigt, wo jeder Text im Ablauf
 steht und was als Nächstes geht. Der Ablauf: gespeichert → gelesen oder gehört →
@@ -1247,7 +1250,7 @@ verschwinden, Bilder von fremden Servern werden Links, Abfrage-Blöcke laufen ni
 ```markdown
 ### Fragen an den Vault
 
-**Fragen** (`/fragen`, in der Unternavigation von Lesen neben Wissen): ein Gespräch
+**Fragen** (`/fragen`, unter „Suche“ neben Vault und Wissen): ein Gespräch
 mit Claude über den ganzen Vault. Claude sucht wie bei den
 [Folgen zu einem Thema](#lesen) über den nur lesenden Vault-Zugang
 (`src/lesen/research-mcp.js`, vertrauliche Ordner bleiben zu), auf Wunsch je
