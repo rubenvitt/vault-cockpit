@@ -1045,7 +1045,7 @@ export function ingestRoutes({ store, ingest = null, planter = null, logger = co
       ...api,
       async [INGEST](ctx) {
         // Ohne eigenen Seitenkopf: Die Überschrift steht mit „Ganzen Stapel entwerfen“ in `main` (siehe `overview`).
-        return { html: readingPage(ctx, { key: 'ingest', title: 'Ingest', heading: '', bodyClass: 'page-ingest-liste', body: overview({ store, ingest, planter, now }, ctx), scripts: [assets.lesenIngest] }) };
+        return { html: readingPage(ctx, { key: 'ingest', title: 'Ingest', heading: '', bodyClass: 'page-ingest-liste lesen-spalte', body: overview({ store, ingest, planter, now }, ctx), scripts: [assets.lesenIngest] }) };
       },
       async '/lesen/ingest/doc'(ctx) {
         const id = ctx.url.searchParams.get('id') ?? '';

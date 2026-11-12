@@ -395,7 +395,7 @@ export function weiterRoutes({ store, ingest = null, planter = null, episodes = 
           ...STAGES.map((k) => section(k, m.stages[k], ctx, opts, tools[k] ?? '')),
           unreadSection(m, Boolean(episodes)),
         ].join('');
-        return { html: readingPage(ctx, { key: 'weiter', title: 'Wie weiter?', bodyClass: 'page-weiter', body, scripts: ingest ? [assets.lesenIngest] : [] }) };
+        return { html: readingPage(ctx, { key: 'weiter', title: 'Wie weiter?', bodyClass: 'page-weiter lesen-spalte', body, scripts: ingest ? [assets.lesenIngest] : [] }) };
       },
       async '/api/lesen/weiter'() {
         const m = model();

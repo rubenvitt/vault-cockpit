@@ -744,7 +744,7 @@ details.rock[open] > summary { margin-bottom: var(--s-2); }
 .lesen-quote { margin: 0; padding-left: var(--s-3); border-left: 3px solid var(--accent-line); font: var(--t-md)/1.5 var(--font-read); }
 
 /* --- Lesen: Stapel (src/lesen/stack.js): Zeitfenster, Füllbalken, Sortierung --- */
-/* Ruhige Spalte statt der vollen Seitenbreite (Eingang, Stapel, Markiert, Wiedersehen, Feeds; `bodyClass: 'lesen-spalte'`):
+/* Ruhige Spalte statt der vollen Seitenbreite (Weiter, Eingang, Stapel, Ingest-Übersicht, Markiert, Wiedersehen, Feeds; `bodyClass: 'lesen-spalte'`):
    Zeilen bleiben lesbar, Titel links und Abzeichen rechts liegen in einem Blick. Die Reiter darüber bleiben, wo sie sind. */
 .lesen-spalte main.lesen > * { width: 100%; max-width: 880px; }
 .stapel { display: grid; gap: var(--s-3); }
