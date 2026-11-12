@@ -580,6 +580,18 @@ hinein, Enter legt an, Shift+Enter macht eine neue Zeile. Beides läuft ohne
 Seitenwechsel; ohne JavaScript funktionieren dieselben Formulare mit
 Weiterleitung. Schlägt etwas fehl, bleibt die Meldung stehen und der Text im Feld.
 
+**Befehlspalette:** ⌘K (Mac) bzw. Strg+K öffnet auf jeder Seite eine Palette, ebenso
+das Feld „Suchen“ in der Kopfzeile (auf dem iPhone die Lupe; ohne JavaScript ein
+Link zur Suche). Tippen filtert die **Ziele** (Woche, Planen, Rückblick, die Seiten
+unter Lesen, Suche, Wissen, Fragen, Einstellungen, Zustand; Wortanfänge zählen
+mehr, „rueck“ findet den Rückblick), ab zwei Zeichen kommen **Notizen** aus dem
+Vault dazu (`/api/suche`), darunter stehen immer „Im ganzen Vault suchen“ und
+„Als Notiz festhalten“. Mit `!` oder `>` vorn ist die Eingabe ein Text für die
+Schnelleingabe: Die Palette speichert nicht selbst, sie stellt ihn dort ins Feld
+(von anderen Seiten aus über `/?erfassen=1`), Enter legt an. Pfeiltasten wählen,
+Enter öffnet, Esc schließt. Welche Ziele es in der Installation gibt, sagt
+`GET /api/palette` (nur angemeldet); ohne Netz bleiben die, die es immer gibt.
+
 **Auf dem iPhone als App:** In Safari „Teilen → Zum Home-Bildschirm“. Das Cockpit
 startet dann ohne Browserleiste, mit eigenem Icon und der Navigation als Leiste
 unten (Manifest unter `/manifest.webmanifest`, Icons unter `/static/icons/`).

@@ -5,7 +5,7 @@
  * 2. Grundlagen: Seite, Typografie, Links, Fokus
  * 3. Rahmen: Kopfzeile, Navigation, Leiste unten (iPhone), Seitenkopf
  * 4. Bausteine: Karte, Knopf, Chip, Feld, Liste, Hinweise, leerer Zustand,
- *    Ladezustand, Meldung, Menü
+ *    Ladezustand, Meldung, Menü; danach die Befehlspalette (⌘K, ui.js)
  * 5. Seiten: Woche, Einstellungen, Meldungsseite, Lesen
  *
  * Kein Build-Schritt. Graph, Notiz und Rückblick hängen ihre eigenen Regeln
@@ -369,6 +369,72 @@ a:active, a.pressed { opacity: .55; transition-duration: 0s; }
 ::view-transition-new(root) { animation: vt-in .26s var(--ease) both; }
 @keyframes vt-out { to { opacity: 0; } }
 @keyframes vt-in { from { opacity: 0; transform: translateY(8px); } }
+
+/* --- Befehlspalette (/static/ui.js) ----------------------------------------- */
+
+/* Auslöser in der Kopfzeile (`appHeader`): sieht aus wie ein leises Suchfeld. Das Kürzel im <kbd>
+   trägt das Script ein; ohne JavaScript bleibt es weg und der Link führt zur Suche. */
+.palette-open { flex: 0 1 210px; min-width: 0; display: inline-flex; align-items: center; gap: var(--s-2); margin-left: var(--s-2); padding: 5px 6px 5px 12px;
+  border: 1px solid transparent; border-radius: var(--r-full); background: var(--bg-sunk); color: var(--text-2); font-size: 14px; text-decoration: none;
+  white-space: nowrap; overflow: hidden; transition: border-color var(--fast), color var(--fast), opacity var(--mid); }
+.palette-open:hover { border-color: var(--line-strong); color: var(--text); }
+.palette-open .icon { width: 16px; height: 16px; }
+.palette-open kbd { margin-left: auto; padding: 4px 7px; border-radius: var(--r-full); background: var(--surface); color: var(--text-3); box-shadow: var(--shadow-1); }
+.palette-open kbd[hidden] { display: none; }
+
+/* Dialog: oben in der Mitte, im Stil der Menüs. Die Liste rollt, Kopf und Fuß bleiben stehen. */
+.palette { position: fixed; z-index: 60; inset: 0; margin: 12vh auto auto; width: min(640px, calc(100% - 32px)); max-width: none; max-height: calc(100dvh - 12vh - 24px);
+  padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); color: var(--text); box-shadow: var(--shadow-pop); }
+.palette[open] { display: flex; flex-direction: column; animation: pop-in .14s var(--ease); }
+.palette::backdrop { background: rgb(0 0 0 / .4); }
+.palette-head { flex: none; display: flex; align-items: center; gap: var(--s-3); padding: var(--s-2) var(--s-3) var(--s-2) var(--s-4); border-bottom: 1px solid var(--line); }
+.palette-head .icon { color: var(--text-3); }
+.palette .palette-input { flex: 1; min-width: 0; padding: var(--s-2) 0; border: 0; border-radius: 0; background: none; font-size: var(--t-md); }
+.palette .palette-input:focus-visible { box-shadow: none; }
+.palette-close { flex: none; display: grid; place-items: center; min-width: 32px; height: 32px; padding: 0 6px; border: 0; border-radius: var(--r-sm); background: none;
+  color: var(--text-3); font: inherit; cursor: pointer; transition: background var(--fast), color var(--fast); }
+.palette-close:hover { background: var(--bg-sunk); color: var(--text); }
+.palette-close span { display: none; font-size: 24px; line-height: 1; }
+.palette kbd { display: inline-block; min-width: 20px; padding: 4px 5px; border-radius: var(--r-xs); background: var(--bg-sunk); color: var(--text-2); text-align: center; }
+.palette-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--s-1) var(--s-2) var(--s-2); }
+.palette-label { padding: var(--s-3) var(--s-3) var(--s-1); font-size: var(--t-xs); font-weight: 650; color: var(--text-2); text-transform: uppercase; letter-spacing: .05em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Zeile: Name links, Hinweis rechts. Passt beides nicht nebeneinander, rutscht der Hinweis darunter, statt den Namen zu kürzen. */
+.palette-item { display: flex; flex-wrap: wrap; align-items: baseline; align-content: center; justify-content: space-between; gap: 0 var(--s-4);
+  padding: 7px var(--s-3); border-radius: var(--r-md); text-decoration: none; scroll-margin: var(--s-2); }
+.palette-item[aria-selected=true] { background: var(--accent-soft); }
+.palette-item[aria-selected=true] .palette-title { color: var(--accent); }
+.palette-item.stale { opacity: .5; }
+.palette-main { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.palette-area { color: var(--text-3); }
+.palette-area::after { content: '›'; margin: 0 6px; }
+.palette-title { font-weight: 550; }
+.palette-hint { flex: 0 1 auto; min-width: 0; color: var(--text-2); font-size: var(--t-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.palette-foot { flex: none; display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-4); margin: 0; padding: var(--s-2) var(--s-4); border-top: 1px solid var(--line);
+  background: var(--surface-2); color: var(--text-2); font-size: var(--t-xs); }
+.palette-foot [hidden] { display: none; }
+
+/* Zwischen Tablet und Desktop wird die Kopfzeile eng: Der Auslöser schrumpft auf die Lupe. */
+@media (max-width: 960px) {
+  .palette-open { flex: none; width: 36px; height: 33px; margin-left: 0; padding: 0; justify-content: center; background: none; }
+  .palette-open:hover { background: var(--bg-sunk); border-color: transparent; }
+  .palette-open .icon { width: 20px; height: 20px; }
+  .palette-open span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .palette-open kbd { display: none; }
+}
+/* iPhone: Lupe rechts neben dem Abmelden, die Palette als Blatt über die Breite. Sie bleibt oben, darunter liegt die Tastatur. */
+@media (max-width: 700px) {
+  .palette-open { width: 40px; height: 40px; margin-left: auto; }
+  .palette-open ~ .health-alert, .palette-open ~ .logout { margin-left: 0; }
+  .palette { margin: max(var(--s-2), env(safe-area-inset-top)) var(--s-2) auto; width: auto; max-height: none; border-radius: var(--r-xl); animation-name: sheet-in; }
+  .palette-head { padding: var(--s-2) var(--s-2) var(--s-2) var(--s-4); }
+  .palette-close { min-width: 40px; height: 40px; color: var(--text-2); }
+  .palette-close kbd { display: none; }
+  .palette-close span { display: block; }
+  .palette-list { max-height: 46dvh; }
+  .palette-item { min-height: 44px; }
+  .palette-foot { display: none; }
+}
 
 /* --- 5. Woche --------------------------------------------------------------- */
 
