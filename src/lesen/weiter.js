@@ -4,7 +4,7 @@ import { hidden } from '../web/render.js';
 import { readingPage } from './pages.js';
 import { docJson, jsonReply } from './json.js';
 import { isRead, remainingMinutes } from './stack.js';
-import { ENTWERFEN, EINPFLANZEN, ingestLink } from './ingest-page.js';
+import { ENTWERFEN, EINPFLANZEN, INGEST, draftRow, ingestLink } from './ingest-page.js';
 import { BYTES_PER_SECOND, KINDS } from './folgen.js';
 import { clock, unheard } from './folgen-page.js';
 
@@ -28,6 +28,13 @@ import { clock, unheard } from './folgen-page.js';
  * (angefangen), `laeuft` (Claude entwirft oder pflanzt ein). Eingang und
  * ungelesener Stapel stehen nur als Zahl da, mit Link. Oben steht „Als
  * Nächstes“: der eine Schritt, mit dem es am meisten weitergeht.
+ *
+ * Die Seite ist der Einstieg in „Lesen“: „Als Nächstes“ groß, darunter die
+ * Stufen als ruhige Zeilen (Titel, eine Metazeile, rechts die passende Aktion).
+ * Der Abschnitt sagt, wo ein Text steht; nur was davon abweicht, steht als Wort
+ * in der Metazeile (`deviation`). „Prüfen“ zeigt die Entwürfe in derselben Zeile
+ * wie die Ingest-Übersicht (`draftRow` in src/lesen/ingest-page.js). Die Spur
+ * (`trackOf`) bekommt nur noch die App.
  *
  * `/api/lesen/weiter` liefert dasselbe als JSON für die App; Aktionen sind die
  * bestehenden (Ingest entwerfen, In den Vault, Fertig, weg, Einpflanzen), dazu
@@ -222,35 +229,27 @@ function stateLabel(x) {
   return null;
 }
 
-const STEP_MARK = { done: '✓', busy: '…', failed: '!', todo: '' };
-const track = (steps) => `<ol class="weiter-spur" aria-label="Stand">${steps
-  .map((s) => `<li class="is-${s.state}">${STEP_MARK[s.state] ? `<span aria-hidden="true">${STEP_MARK[s.state]}</span> ` : ''}${esc(s.label)}<span class="sr-only">: ${{ done: 'erledigt', busy: 'läuft', failed: 'fehlgeschlagen', todo: 'offen' }[s.state]}</span></li>`)
-  .join('')}</ol>`;
-
-/** Knöpfe der nächsten Schritte eines Textes. */
+/**
+ * Knöpfe eines Textes: die eine Aktion, die zur Stufe passt (unter „Entscheiden“
+ * die drei Wege). Zum Text selbst führt der Titel der Zeile.
+ */
 function actions(x, ctx, { available, planting, vault }) {
   const id = x.doc.id;
   const sr = `<span class="sr-only">: ${esc(name(x.doc))}</span>`;
   const form = (action, fields, label, cls = 'btn quiet') => `<form method="post" action="${action}" class="act">${hidden({ csrf: ctx.write.csrf, back: ctx.write.back, id, ...fields })}<button type="submit" class="${cls}">${label}${sr}</button></form>`;
-  const open = (label = 'Öffnen', cls = 'btn quiet', weiter = false) => `<a href="${esc(docLink(id, weiter))}" class="${cls}">${label}${sr}</a>`;
   switch (x.stage) {
-    case 'pruefen':
-      return [`<a href="${esc(ingestLink(id))}" class="btn primary">Prüfen${sr}</a>`, open('Text')];
     case 'entscheiden':
       // Aus einem Feed „nur lesen“: nur noch „Fertig, weg“.
-      if (x.doc.no_ingest) return [form(FERTIG, {}, 'Fertig, weg', 'btn primary'), open()];
+      if (x.doc.no_ingest) return [form(FERTIG, {}, 'Fertig, weg', 'btn')];
       return [
-        available && x.ingest?.status !== 'uebernommen' ? form(ENTWERFEN, {}, 'Ins Wiki: entwerfen', 'btn primary') : '',
+        available && x.ingest?.status !== 'uebernommen' ? form(ENTWERFEN, {}, 'Ins Wiki: entwerfen', 'btn') : '',
         vault ? form(VAULT, { volltext: '1' }, 'Nur in den Vault') : '',
         form(FERTIG, {}, 'Fertig, weg'),
-        open(),
       ];
     case 'fehler':
-      return x.plant?.status === 'fehler'
-        ? [planting ? form(EINPFLANZEN, {}, 'Erneut einpflanzen', 'btn') : '', `<a href="${esc(ingestLink(id))}" class="btn quiet">Ansehen${sr}</a>`]
-        : [available ? form(ENTWERFEN, { force: '1' }, 'Erneut entwerfen', 'btn') : '', `<a href="${esc(ingestLink(id))}" class="btn quiet">Ansehen${sr}</a>`];
+      return x.plant?.status === 'fehler' ? [planting ? form(EINPFLANZEN, {}, 'Erneut einpflanzen', 'btn') : ''] : [available ? form(ENTWERFEN, { force: '1' }, 'Erneut entwerfen', 'btn') : ''];
     case 'weiterlesen':
-      return [open('Weiterlesen', 'btn primary', true)];
+      return [`<a href="${esc(docLink(id, true))}" class="btn">Weiterlesen${sr}</a>`];
     default:
       return [];
   }
@@ -264,31 +263,50 @@ function episodeRow(x, ctx) {
   const texts = x.docs.length ? `<p class="meta weiter-folge-texte">${x.docs.length === 1 ? 'Text' : `${x.docs.length} Texte`}: ${x.docs.map((d) => `<a href="${esc(docLink(d.id))}">${esc(name(d))}</a>`).join(', ')}</p>` : '';
   const mark = `<form method="post" action="/aktion/lesen/folge/gehoert" class="act">${hidden({ csrf: ctx.write.csrf, back: ctx.write.back, id: ep.id, gehoert: '1' })}<button type="submit" class="btn quiet">Als gehört markieren<span class="sr-only">: ${esc(ep.title)}</span></button></form>`;
   return `<li class="weiter-item is-anhoeren" data-weiter-folge="${esc(ep.id)}">
-    <div class="weiter-item-head"><a href="/lesen/folgen#hoeren" class="lesen-title">${esc(ep.title)}</a></div>
-    <span class="meta">${esc(meta)}</span>
-    ${texts}
-    <div class="weiter-acts"><a href="/lesen/folgen#hoeren" class="btn primary">${ep.position > 0 ? 'Weiterhören' : 'Anhören'}<span class="sr-only">: ${esc(ep.title)}</span></a>${mark}</div>
+    <div class="weiter-item-text">
+      <div class="weiter-item-head"><a href="/lesen/folgen#hoeren" class="lesen-title">${esc(ep.title)}</a></div>
+      <span class="meta">${esc(meta)}</span>
+      ${texts}
+    </div>
+    <div class="weiter-acts"><a href="/lesen/folgen#hoeren" class="btn">${ep.position > 0 ? 'Weiterhören' : 'Anhören'}<span class="sr-only">: ${esc(ep.title)}</span></a>${mark}</div>
   </li>`;
 }
 
+/**
+ * Was vom üblichen Weg abweicht, als Wort für die Metazeile: Der Abschnitt sagt
+ * schon, wo der Text steht (früher eine Reihe aus vier Status-Chips je Text).
+ */
+function deviation(x) {
+  if (x.stage === 'pruefen' && ON_DESK.includes(x.doc.status) && !isRead(x.doc)) return x.doc.progress > 0 ? 'noch nicht zu Ende gelesen' : 'noch ungelesen';
+  if (x.stage === 'entscheiden' && x.ingest?.status === 'verworfen') return 'Entwurf verworfen';
+  return null;
+}
+
+/**
+ * Eine Zeile: Titel, eine Metazeile, rechts die passende Aktion. „Prüfen“ zeigt
+ * die Entwürfe in derselben Zeile wie die Ingest-Übersicht (`draftRow`).
+ */
 function row(x, ctx, opts) {
   if (x.stage === 'anhoeren') return episodeRow(x, ctx);
   const d = x.doc;
-  const minutes = x.stage === 'weiterlesen' ? `noch ${remainingMinutes(d)} Min.` : d.reading_minutes ? `${d.reading_minutes} Min.` : null;
-  const meta = [d.site, minutes, readLabel(x.read, ctx.tz)].filter(Boolean).join(' · ');
+  if (x.stage === 'pruefen') return draftRow({ ...x.ingest, doc: x.ingest.doc ?? d }, ctx, { note: deviation(x) });
+  const failed = x.stage === 'fehler';
   const state = stateLabel(x);
+  const minutes = x.stage === 'weiterlesen' ? `noch ${remainingMinutes(d)} Min.` : d.reading_minutes ? `${d.reading_minutes} Min.` : null;
+  const meta = [d.site, minutes, readLabel(x.read, ctx.tz), deviation(x), failed ? null : state].filter(Boolean).join(' · ');
   // Läuft etwas, beobachtet das Ingest-Skript den Stand und baut `main` neu, sobald er sich ändert.
   const plantBusy = PLANT_BUSY.includes(x.plant?.status);
   const watch = x.stage === 'laeuft' ? ` data-ingest-watch="${esc(d.id)}"${plantBusy ? ` data-ingest-plant data-ingest-status="${esc(x.plant.status)}"` : ` data-ingest-status="${esc(x.ingest?.status ?? '')}"`}` : '';
   const acts = actions(x, ctx, opts).filter(Boolean).join('');
   return `<li class="weiter-item is-${x.stage}" data-weiter-doc="${esc(d.id)}"${watch}>
-    <div class="weiter-item-head">
-      ${x.stage === 'laeuft' ? '<span class="folge-spinner" aria-hidden="true"></span>' : ''}
-      <a href="${esc(x.stage === 'pruefen' || x.stage === 'fehler' ? ingestLink(d.id) : docLink(d.id, x.stage === 'weiterlesen'))}" class="lesen-title">${esc(name(d))}</a>
+    <div class="weiter-item-text">
+      <div class="weiter-item-head">
+        ${x.stage === 'laeuft' ? '<span class="folge-spinner" aria-hidden="true"></span>' : ''}
+        <a href="${esc(failed ? ingestLink(d.id) : docLink(d.id, x.stage === 'weiterlesen'))}" class="lesen-title">${esc(name(d))}</a>
+      </div>
+      ${meta ? `<span class="meta">${esc(meta)}</span>` : ''}
+      ${failed && state ? `<p class="problem">${esc(state)}</p>` : ''}
     </div>
-    ${meta ? `<span class="meta">${esc(meta)}</span>` : ''}
-    ${state ? `<p class="${x.stage === 'fehler' ? 'problem' : 'meta'}">${esc(state)}</p>` : ''}
-    ${track(x.track)}
     ${acts ? `<div class="weiter-acts">${acts}</div>` : ''}
   </li>`;
 }
@@ -303,25 +321,33 @@ function hero(model, ctx) {
   return `<section class="weiter-next${n.stage ? '' : ' is-clear'}" aria-labelledby="weiter-next"><h2 id="weiter-next">Als Nächstes</h2><p>${esc(n.text)}</p>${button}</section>`;
 }
 
-function section(key, items, ctx, opts, extra = '') {
+/**
+ * Ein Abschnitt: Überschrift mit Zahl, rechts daneben `tool` (Link oder Knopf
+ * für den ganzen Abschnitt), darunter die Zeilen. Den Hinweis aus `STAGE_HINTS`
+ * zeigt die Seite nur, wo er eine Regel erklärt (`PAGE_HINTS`); die App bekommt
+ * weiter alle.
+ */
+const PAGE_HINTS = ['anhoeren', 'entscheiden'];
+function section(key, items, ctx, opts, tool = '') {
   if (!items.length) return '';
   return `<section class="weiter-stufe" id="${key}" aria-labelledby="weiter-${key}">
-    <h2 id="weiter-${key}">${STAGE_LABELS[key]} <span class="hint">${items.length}</span></h2>
-    <p class="meta">${esc(STAGE_HINTS[key])}</p>${extra}
-    <ul class="weiter-list">${items.map((x) => row(x, ctx, opts)).join('')}</ul>
+    <div class="weiter-stufe-kopf"><h2 id="weiter-${key}">${STAGE_LABELS[key]} <span class="hint">${items.length}</span></h2>${tool}</div>
+    ${PAGE_HINTS.includes(key) ? `<p class="meta">${esc(STAGE_HINTS[key])}</p>` : ''}
+    <ul class="${key === 'pruefen' ? 'ingest-zeilen' : 'weiter-list'}">${items.map((x) => row(x, ctx, opts)).join('')}</ul>
   </section>`;
 }
 
 /** Ungelesenes: nur Zahl und Weg dorthin, gelesen wird im Stapel. */
 function unreadSection({ counts }, folgen) {
   if (!counts.eingang && !counts.stapel) return '';
+  const line = (href, label, meta, acts = '') => `<li><a href="${href}" class="lesen-title">${label}</a><span class="meta">${meta}</span>${acts}</li>`;
   const parts = [
-    counts.eingang ? `<li><a href="/lesen/eingang">Eingang</a><span class="meta"> · ${plural(counts.eingang, 'Text', 'Texte')} zu sichten</span></li>` : '',
+    counts.eingang ? line('/lesen/eingang', 'Eingang', `${plural(counts.eingang, 'Text', 'Texte')} zu sichten`) : '',
     counts.stapel
-      ? `<li><a href="/lesen/stapel">Stapel</a><span class="meta"> · ${plural(counts.stapel, 'Text', 'Texte')}, etwa ${counts.stapelMinutes} Min.</span> <a href="/lesen/hoeren?zeit=15" class="btn quiet">Unterwegs hören</a>${folgen ? ' <a href="/lesen/folgen/neu?zeit=30" class="btn quiet">Folge erzeugen</a>' : ''}</li>`
+      ? line('/lesen/stapel', 'Stapel', `${plural(counts.stapel, 'Text', 'Texte')}, etwa ${counts.stapelMinutes} Min.`, `<a href="/lesen/hoeren?zeit=15" class="btn quiet">Unterwegs hören</a>${folgen ? '<a href="/lesen/folgen/neu?zeit=30" class="btn quiet">Folge erzeugen</a>' : ''}`)
       : '',
   ];
-  return `<section class="weiter-stufe weiter-ungelesen" aria-labelledby="weiter-ungelesen"><h2 id="weiter-ungelesen">Noch ungelesen</h2><p class="meta">Was du hörst oder zu Ende liest, landet von selbst oben unter „Entscheiden“.</p><ul class="weiter-unread">${parts.join('')}</ul></section>`;
+  return `<section class="weiter-stufe weiter-ungelesen" aria-labelledby="weiter-ungelesen"><div class="weiter-stufe-kopf"><h2 id="weiter-ungelesen">Noch ungelesen</h2><span class="meta">Was du hörst oder zu Ende liest, landet von selbst oben unter „Entscheiden“.</span></div><ul class="weiter-unread">${parts.join('')}</ul></section>`;
 }
 
 // --- JSON --------------------------------------------------------------------
@@ -357,15 +383,19 @@ export function weiterRoutes({ store, ingest = null, planter = null, episodes = 
       async [WEITER](ctx) {
         const m = model();
         const opts = { available: m.available, planting: Boolean(planter?.available?.()?.ok), vault };
-        const bulk = m.draftable.length > 1
-          ? `<form method="post" action="${ALLE_ENTWERFEN}" class="act weiter-bulk">${hidden({ csrf: ctx.write.csrf, back: ctx.write.back })}<button type="submit" class="btn">Alle ${m.draftable.length} entwerfen lassen</button><span class="meta">Claude entwirft einen nach dem anderen; ins Wiki kommt nur, was du danach abhakst.</span></form>`
-          : '';
+        // Rechts in der Überschrift: unter „Prüfen“ der Weg zur Ingest-Übersicht, unter „Entscheiden“ alle auf einmal.
+        const tools = {
+          pruefen: `<a href="${INGEST}" class="weiter-alle">Alle Entwürfe</a>`,
+          entscheiden: m.draftable.length > 1
+            ? `<form method="post" action="${ALLE_ENTWERFEN}" class="act weiter-bulk">${hidden({ csrf: ctx.write.csrf, back: ctx.write.back })}<button type="submit" class="btn" title="Claude entwirft einen nach dem anderen; ins Wiki kommt nur, was du danach abhakst.">Alle ${m.draftable.length} entwerfen lassen</button></form>`
+            : '',
+        };
         const body = [
           hero(m, ctx),
-          ...STAGES.map((k) => section(k, m.stages[k], ctx, opts, k === 'entscheiden' ? bulk : '')),
+          ...STAGES.map((k) => section(k, m.stages[k], ctx, opts, tools[k] ?? '')),
           unreadSection(m, Boolean(episodes)),
         ].join('');
-        return { html: readingPage(ctx, { key: 'weiter', title: 'Wie weiter?', body, scripts: ingest ? [assets.lesenIngest] : [] }) };
+        return { html: readingPage(ctx, { key: 'weiter', title: 'Wie weiter?', bodyClass: 'page-weiter', body, scripts: ingest ? [assets.lesenIngest] : [] }) };
       },
       async '/api/lesen/weiter'() {
         const m = model();

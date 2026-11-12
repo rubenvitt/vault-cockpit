@@ -12,16 +12,20 @@ import { worklogHtml, worklogJson } from './worklog.js';
  * einem Text des Stapels entwirft Claude Seiten für das Mycel-Wiki, und hier
  * wird abgehakt, was davon hinein soll. Ohne JavaScript ist alles ein Formular.
  *
- * - `/lesen/ingest`: Übersicht. Bereite Entwürfe als Karten (Kernaussagen und
- *   was angeboten wird), darunter „In Arbeit“, „Einpflanzen“ (der Agent nach dem
- *   Übernehmen, src/lesen/einpflanzen.js) und „Fehler“, oben „Ganzen Stapel
- *   entwerfen“.
- * - `/lesen/ingest/doc?id=`: Prüfansicht. Digest (Kernaussagen, Neu für dich,
- *   Bestätigt, Widerspricht, Dockt an), die Source-Page mit änderbaren Feldern
- *   und die Vorschläge zum Abhaken, gruppiert (unter „Synthesen & Fragen“ auch
- *   „Synthese ergänzen“: ein Abschnitt für eine bestehende Synthese, aufklappbar
- *   unter „Was ergänzt wird“). „Ins Wiki übernehmen“ führt zum nächsten bereiten
- *   Entwurf.
+ * - `/lesen/ingest`: Übersicht. Bereite Entwürfe als flache Zeilen (`draftRow`:
+ *   Titel, Meta, eine Zeile Inhalt, „n Vorschläge · m zu entscheiden“; dieselbe
+ *   Zeile zeigt „Weiter“ unter „Prüfen“), darunter „In Arbeit“, „Einpflanzen“
+ *   (der Agent nach dem Übernehmen, src/lesen/einpflanzen.js) und „Fehler“, im
+ *   Kopf „Ganzen Stapel entwerfen“.
+ * - `/lesen/ingest/doc?id=`: Prüfansicht, breit in zwei Spalten. Links Verstehen:
+ *   der Digest (Kernaussagen, Neu für dich, Widerspricht, Hinweise; Bestätigt und
+ *   Dockt an nur, soweit es dazu keinen Vorschlag gibt), darunter zum Aufklappen
+ *   der Text der Source-Page, der Worklog und die Tastenkürzel. Rechts
+ *   Entscheiden: „Zu entscheiden“ (alles, was der Entwurf nicht vorausgewählt
+ *   hat, auch „Synthese ergänzen“ mit „Was ergänzt wird“), „Wird übernommen“
+ *   (das Vorausgewählte, zugeklappt, gruppiert), die Source-Page als Zeile mit
+ *   aufklappbaren Feldern und am Fuß „Ins Wiki übernehmen“; das führt zum
+ *   nächsten bereiten Entwurf. Schmal dasselbe in einer Spalte.
  * - `/lesen/ingest/stand?ids=a,b`: Stand als JSON für die Live-Aktualisierung
  *   (/static/lesen-ingest.js): Zähler, je Dokument Status, Stand des
  *   Einpflanzens (`plant`) und Abzeichen.
@@ -289,23 +293,40 @@ function openOnStack(store, ingest) {
   return docs.filter((d) => [null, 'fehler'].includes(statusIn(st, d.id))).length;
 }
 
-function readyCard(e, ctx) {
-  const view = pageView(e);
-  const t = tally(e.draft);
-  const kern = list(e.draft?.digest?.kernaussagen).slice(0, 3);
-  const offer = offerLabel(t);
-  const meta = [e.doc?.site, e.doc?.reading_minutes ? `${e.doc.reading_minutes} Min.` : null, e.origin === 'nacht' ? 'nachts entworfen' : null, when(e.drafted_at, ctx.tz)].filter(Boolean);
-  return `<li class="ingest-card" data-ingest-doc="${esc(e.doc_id)}">
-    <div class="ingest-card-head">
-      <span class="meta">${esc(meta.join(' · '))}</span>
-      <a href="${esc(ingestLink(e.doc_id))}" class="ingest-card-title">${esc(titleOf(e))}</a>
-    </div>
-    ${kern.length ? `<ul class="ingest-kern is-short">${kern.map((k) => `<li>${view.inline(k)}</li>`).join('')}</ul>` : ''}
-    <div class="ingest-card-foot">
-      <span class="ingest-tally">${esc(tallyLabel(t))}</span>
-      ${offer ? `<span class="ingest-pill is-offer">${esc(offer)}</span>` : ''}
-      <a href="${esc(ingestLink(e.doc_id))}" class="btn primary">Prüfen<span class="sr-only">: ${esc(titleOf(e))}</span></a>
-    </div>
+/** Vorschläge mit Kennung; alles andere im Entwurf lässt sich nicht abhaken. */
+const itemsOf = (draft) => list(draft?.items).filter((i) => i && typeof i.id === 'string');
+/** Was der Entwurf nicht vorausgewählt hat: Darüber entscheidet der Mensch. */
+const pendingOf = (draft) => itemsOf(draft).filter((i) => i.default !== true);
+
+/** „9 Vorschläge · 4 zu entscheiden“; ohne Vorschläge „nur die Source-Page“. */
+export function countLabel(draft) {
+  const n = itemsOf(draft).length;
+  if (!n) return 'nur die Source-Page';
+  const open = pendingOf(draft).length;
+  return `${plural(n, 'Vorschlag', 'Vorschläge')}${open ? ` · ${open} zu entscheiden` : ''}`;
+}
+
+/**
+ * Ein bereiter Entwurf als Zeile, in der Übersicht und unter „Weiter“ → Prüfen:
+ * Titel, Meta, eine Zeile Inhalt (TL;DR der Source-Page, sonst die erste
+ * Kernaussage), rechts die Zählung und „Prüfen“. Der Titel ist der Link und
+ * deckt die ganze Zeile ab (CSS); deshalb steht im Inhalt kein weiterer Link,
+ * „Prüfen“ ist nur Beschriftung, und was genau angeboten wird, sagt der Tooltip
+ * des Links. `note`: Zusatz in der Metazeile.
+ */
+export function draftRow(e, ctx, { note = null } = {}) {
+  const meta = [e.doc?.site, e.doc?.reading_minutes ? `${e.doc.reading_minutes} Min.` : null, note].filter(Boolean);
+  // Wann und wie entworfen: zweitrangig, schmal ausgeblendet (CSS), damit die Metazeile eine Zeile bleibt.
+  const drafted = [e.origin === 'nacht' ? 'nachts entworfen' : null, when(e.drafted_at, ctx.tz)].filter(Boolean);
+  const text = String(e.draft?.source?.tldr ?? '').trim() || list(e.draft?.digest?.kernaussagen)[0] || '';
+  return `<li class="ingest-zeile" data-ingest-doc="${esc(e.doc_id)}">
+    <span class="ingest-zeile-text">
+      <a href="${esc(ingestLink(e.doc_id))}" class="lesen-title ingest-zeile-titel" title="${esc(tallyLabel(tally(e.draft)))}">${esc(titleOf(e))}</a>
+      ${meta.length || drafted.length ? `<span class="meta">${esc(meta.join(' · '))}${drafted.length ? `<span class="ingest-zeile-wann">${meta.length ? ' · ' : ''}${esc(drafted.join(' · '))}</span>` : ''}</span>` : ''}
+      ${text ? `<span class="ingest-zeile-inhalt">${plainView(e)(text)}</span>` : ''}
+    </span>
+    <span class="ingest-zeile-zahl">${esc(countLabel(e.draft))}</span>
+    <span class="btn ingest-zeile-los" aria-hidden="true">Prüfen</span>
   </li>`;
 }
 
@@ -339,10 +360,11 @@ function overview({ store, ingest, planter, now = Date.now }, ctx) {
   const planting = planter ? plantingNow(all, at) : [];
   const open = openOnStack(store, ingest);
 
+  // Die Überschrift steht in `main`: `.act`-Formulare (cockpit.js) bauen nur `main` neu, und die Zahl am Knopf soll mitgehen.
   const stackForm = av.ok && open
-    ? `<form method="post" action="${ENTWERFEN}" class="act ingest-stapel">${hidden({ csrf: ctx.write.csrf, back: INGEST, stapel: '1' })}<button type="submit" class="btn">Ganzen Stapel entwerfen</button><span class="meta">${esc(open === 1 ? 'Ein Text auf dem Stapel hat noch keinen fertigen Entwurf.' : `${open} Texte auf dem Stapel haben noch keinen fertigen Entwurf.`)} Claude entwirft einen nach dem anderen.</span></form>`
+    ? `<form method="post" action="${ENTWERFEN}" class="act ingest-stapel">${hidden({ csrf: ctx.write.csrf, back: INGEST, stapel: '1' })}<span class="meta">${esc(open === 1 ? 'Ein Text auf dem Stapel hat noch keinen fertigen Entwurf.' : `${open} Texte auf dem Stapel haben noch keinen fertigen Entwurf.`)}</span><button type="submit" class="btn" title="Claude entwirft einen nach dem anderen.">Ganzen Stapel entwerfen</button></form>`
     : '';
-  const intro = `<div class="ingest-intro">${av.ok ? '' : unavailable(av)}${stackForm}</div>`;
+  const intro = `<div class="ingest-head"><h1>Ingest</h1>${stackForm}</div>${av.ok ? '' : unavailable(av)}`;
 
   if (!ready.length && !busy.length && !failed.length && !planting.length) {
     const empty = `<div class="ingest-empty">
@@ -355,7 +377,7 @@ function overview({ store, ingest, planter, now = Date.now }, ctx) {
 
   const sections = [
     `<section class="ingest-ready" aria-labelledby="ingest-bereit"><h2 id="ingest-bereit">Bereit zum Abhaken <span class="hint">${ready.length}</span></h2>${
-      ready.length ? `<ul class="ingest-cards">${ready.map((e) => readyCard(e, ctx)).join('')}</ul>` : '<p class="empty">Gerade keiner. Was in Arbeit ist, erscheint hier, sobald Claude fertig ist.</p>'
+      ready.length ? `<ul class="ingest-zeilen">${ready.map((e) => draftRow(e, ctx)).join('')}</ul>` :'<p class="empty">Gerade keiner. Was in Arbeit ist, erscheint hier, sobald Claude fertig ist.</p>'
     }</section>`,
     busy.length ? `<section class="ingest-busy" aria-labelledby="ingest-arbeit"><h2 id="ingest-arbeit">In Arbeit <span class="hint">${busy.length}</span></h2><ul class="ingest-rows">${busy.map((e) => busyRow(e, at, ingest.worklog?.(e.doc_id), ctx.tz)).join('')}</ul><noscript><p class="meta"><a href="${INGEST}">Stand aktualisieren</a></p></noscript></section>` : '',
     planting.length ? `<section class="ingest-planting" aria-labelledby="ingest-einpflanzen"><h2 id="ingest-einpflanzen">Einpflanzen <span class="hint">${planting.length}</span></h2><ul class="ingest-rows">${planting.map((e) => plantRow(e, ctx, planter)).join('')}</ul></section>` : '',
@@ -454,6 +476,17 @@ function pageView(e) {
   };
 }
 
+/**
+ * Wie `pageView(e).inline`, aber ohne Links: für Zeilen, die als Ganzes ein Link
+ * sind. Wikilinks werden zum Titel der Seite; von Links nach außen bleibt der
+ * Text (`inlineMd` maskiert allen Text, ein `<a>` stammt also nur von ihm selbst).
+ */
+function plainView(e) {
+  const known = new Map([...knownPages(e)].map(([slug, p]) => [slug, { ...p, path: null }]));
+  const none = { wikilink: () => null, markdownLink: () => null, image: () => null };
+  return (s) => inlineMd(rewriteLinks(String(s ?? ''), known), none).replace(/<\/?a\b[^>]*>/g, '');
+}
+
 /** Bekannte Seiten eines Entwurfs und der Auflöser dazu: nur bestehende Wiki-Seiten werden Links. */
 function linksOf(e) {
   const known = knownPages(e);
@@ -480,44 +513,66 @@ function treeView(e) {
   };
 }
 
+/**
+ * Der Digest, die Spalte zum Verstehen. „Bestätigt“ und „Dockt an“ stehen hier
+ * nur mit den Einträgen, zu denen es keinen Vorschlag gibt: Was als Bestätigung
+ * oder Verknüpfung zum Abhaken dasteht, stünde sonst zweimal auf der Seite und
+ * wird nur noch in einem Satz gezählt.
+ */
 function digestBlock(draft, view) {
   const text = view.inline;
   const d = draft?.digest ?? {};
   const kern = list(d.kernaussagen);
   const neu = list(d.neu);
-  const ok = list(d.bestaetigt);
   const contra = list(d.widerspricht);
-  const dock = list(d.dockt_an);
   const hints = list(draft?.hinweise);
+  const items = itemsOf(draft);
+  const confirmed = new Set(items.filter((i) => i.kind === 'bestaetigung').map((i) => i.path));
+  const linked = new Set(items.filter((i) => i.action === 'verknuepfen').map((i) => i.path));
+  const ok = list(d.bestaetigt).filter((b) => !confirmed.has(b?.path));
+  const dock = list(d.dockt_an).filter((x) => !linked.has(x?.path));
+  const covered = [
+    list(d.bestaetigt).length - ok.length ? `stützt ${plural(list(d.bestaetigt).length - ok.length, 'Seite', 'Seiten')}` : null,
+    list(d.dockt_an).length - dock.length ? `dockt an ${plural(list(d.dockt_an).length - dock.length, 'Seite', 'Seiten')} an` : null,
+  ].filter(Boolean);
   const block = (cls, title, body) => `<div class="ingest-d ${cls}"><h3>${title}</h3>${body}</div>`;
   const parts = [
     kern.length ? `<ul class="ingest-kern">${kern.map((k) => `<li>${text(k)}</li>`).join('')}</ul>` : '<p class="empty">Claude hat keine Kernaussagen notiert.</p>',
     neu.length ? block('is-neu', 'Neu für dich', `<ul>${neu.map((n) => `<li>${text(n)}</li>`).join('')}</ul>`) : '',
-    ok.length ? block('is-ok', 'Bestätigt', `<ul>${ok.map((b) => `<li>${pageRef(b.path, b.title)}<span>${text(b.claim)}</span></li>`).join('')}</ul>`) : '',
     contra.length
       ? block('is-contra', 'Widerspricht', contra.map((c) => `<div class="problem"><p>${pageRef(c.path, c.title)}: ${text(c.claim)}</p>${c.vorschlag ? `<p class="meta">Vorschlag: ${text(c.vorschlag)}</p>` : ''}<p class="meta">Das Cockpit ändert die Seite nicht. Auflösung per <code>/wiki-lint</code>.</p></div>`).join(''))
       : '',
+    ok.length ? block('is-ok', 'Bestätigt', `<ul>${ok.map((b) => `<li>${pageRef(b.path, b.title)}<span>${text(b.claim)}</span></li>`).join('')}</ul>`) : '',
     dock.length ? block('is-dock', 'Dockt an', `<ul>${dock.map((x) => `<li>${pageRef(x.path, x.title)}${x.warum ? `<span>${text(x.warum)}</span>` : ''}</li>`).join('')}</ul>`) : '',
+    covered.length ? `<p class="meta ingest-d-kurz">Der Text ${covered.join(' und ')}; das steht bei den Vorschlägen zum Abhaken.</p>` : '',
     hints.length ? `<ul class="ingest-hinweise">${hints.map((h) => `<li>${text(h)}</li>`).join('')}</ul>` : '',
   ];
   return `<section class="ingest-digest" aria-labelledby="ingest-digest"><h2 id="ingest-digest">Das Wichtigste</h2>${parts.join('')}</section>`;
 }
 
+/** Wie das `pattern` am Feld „Slug“. */
+const SLUG = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
 /**
  * `applied`: Stand eines unterbrochenen Übernehmens (src/lesen/ingest.js). Steht
  * die Source-Page schon im Wiki, wirken Änderungen an ihren Feldern nicht mehr,
  * der Slug ist ab dem ersten Schreiben fest; dann sind die Felder schreibgeschützt.
+ *
+ * Zugeklappt eine Zeile (Titel, Pfad, Konfidenz), die Felder dahinter: Meist
+ * stimmt, was Claude vorschlägt. Sie bleiben im Formular und werden auch
+ * zugeklappt mitgesendet. Offen ist die Zeile von Anfang an nur, wenn ein Feld
+ * nicht stimmt: Der Browser könnte es sonst beim Absenden nicht zeigen.
  */
-function sourceBlock(draft, applied, view) {
+function sourceBlock(draft, applied) {
   const s = { ...(draft?.source ?? {}), ...(applied?.slug ? { slug: applied.slug } : {}) };
   const written = list(applied?.steps).includes('source');
   const lock = (on) => (on ? ' readonly' : '');
   const summary = String(s.summary ?? '');
   const tldr = String(s.tldr ?? '');
   const tags = list(s.tags).join(', ');
-  const meta = [s.confidence ? `Konfidenz: ${CONFIDENCE[s.confidence] ?? s.confidence}` : null, s.slug ? `wiki/sources/${s.slug}.md` : null].filter(Boolean);
-  return `<section class="ingest-source" aria-labelledby="ingest-source">
-    <h2 id="ingest-source">Source-Page <span class="hint">${esc(meta.join(' · '))}</span></h2>
+  const open = !written && (!String(s.title ?? '').trim() || (s.slug && !SLUG.test(String(s.slug))) || summary.length > SUMMARY_MAX);
+  return `<details class="ingest-source"${open ? ' open' : ''}>
+    <summary><span class="ingest-source-kopf"><b>Source-Page</b><span class="ingest-source-titel" data-ingest-echo="title">${esc(s.title ?? '')}</span></span><span class="ingest-source-edit">${written ? 'Ansehen' : 'Bearbeiten'}</span><span class="ingest-source-meta">${s.slug ? `<span class="ingest-path">wiki/sources/<span data-ingest-echo="slug">${esc(s.slug)}</span>.md</span>` : ''}${s.confidence ? `<span>Konfidenz: ${esc(CONFIDENCE[s.confidence] ?? s.confidence)}</span>` : ''}</span></summary>
     <div class="ingest-fields">
       <label class="ingest-field is-wide"><span>Titel</span><input type="text" name="title" value="${esc(s.title ?? '')}" required${lock(written)}></label>
       <label class="ingest-field is-wide"><span class="ingest-field-row">Summary <span class="ingest-count${summary.length > SUMMARY_MAX ? ' is-over' : ''}" data-ingest-count-for="summary">${summary.length}/${SUMMARY_MAX}</span></span><input type="text" name="summary" value="${esc(summary)}" maxlength="${SUMMARY_MAX}" data-ingest-summary${lock(written)}></label>
@@ -525,20 +580,20 @@ function sourceBlock(draft, applied, view) {
       <label class="ingest-field"><span>Slug</span><input type="text" name="slug" value="${esc(s.slug ?? '')}" pattern="[a-z0-9]+(-[a-z0-9]+)*" spellcheck="false" autocapitalize="off" autocomplete="off" title="Kleinbuchstaben, Ziffern und Bindestriche"${lock(Boolean(applied?.slug))}></label>
       <label class="ingest-field"><span>Tags</span><input type="text" name="tags" value="${esc(tags)}" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="englisch, mit Komma"${lock(written)}></label>
     </div>
-    ${s.body ? `<details class="ingest-body"><summary>Text der Source-Page ansehen</summary><div class="md ingest-md">${view.block(s.body)}</div></details>` : ''}
-  </section>`;
+  </details>`;
 }
 
 /** Beschriftung des aufklappbaren Texts eines Vorschlags. */
 export const bodyLabel = (item, featured) => (item.action === 'ergaenzen' ? 'Was ergänzt wird' : featured ? 'Ganzen Text lesen' : 'Text der Seite ansehen');
 
 /**
- * Ein Vorschlag zum Abhaken. Der Titel einer bestehenden Seite ist selbst der
- * eigenes Symbol „↗“ zum Öffnen neben dem `<label>` (nicht der Titel: ein Tipp
- * darauf soll das Häkchen umschalten); Aufklappbares steht ebenfalls daneben,
- * sonst schaltete jeder Tipp darauf das Häkchen um.
+ * Ein Vorschlag zum Abhaken. Eine bestehende Seite öffnet ein eigenes Symbol
+ * „↗“ neben dem `<label>` (nicht der Titel: ein Tipp darauf soll das Häkchen
+ * umschalten); Aufklappbares steht ebenfalls daneben, sonst schaltete jeder
+ * Tipp darauf das Häkchen um. `tagged`: Kennzeichen auch für Relationen und
+ * Bestätigungen, die unter „Zu entscheiden“ ohne ihre Gruppe dastehen.
  */
-function itemRow(item, featured, view) {
+function itemRow(item, featured, view, { tagged = false } = {}) {
   const id = esc(item.id);
   const box = `<input type="checkbox" name="item" value="${id}"${item.default === true ? ' checked' : ''}>`;
   const pill = `<span class="ingest-pill${featured ? ' is-offer' : ''}">${esc(kindLabel(item))}</span>`;
@@ -559,7 +614,7 @@ function itemRow(item, featured, view) {
   } else {
     main = `<span class="ingest-item-title">${name(item.title || item.slug || readable(slugOf(item.path)))}</span>${item.summary ? `<span class="ingest-summary">${view.inline(item.summary)}</span>` : ''}`;
   }
-  const head = item.kind === 'relation' || item.kind === 'bestaetigung' ? '' : pill;
+  const head = !tagged && (item.kind === 'relation' || item.kind === 'bestaetigung') ? '' : pill;
   const involved = list(item.beteiligte).filter(Boolean);
   const extra = [
     involved.length ? `<p class="ingest-involved"><span class="meta">Beteiligt:</span> ${involved.map((p) => pageRef(p, view.title(p))).join(', ')}</p>` : '',
@@ -572,21 +627,54 @@ function itemRow(item, featured, view) {
   </li>`;
 }
 
-function itemGroups(draft, view) {
-  const groups = groupItems(draft?.items);
-  if (!groups.length) return '<section class="ingest-group"><p class="empty">Claude schlägt nichts über die Source-Page hinaus vor.</p></section>';
-  return groups
-    .map(
-      (g) => `<section class="ingest-group${g.featured ? ' is-featured' : ''}" data-ingest-group="${g.key}" aria-labelledby="ingest-g-${g.key}">
+/** „alle/keine“ einer Gruppe; erst /static/lesen-ingest.js zeigt die Knöpfe. */
+const SELECT_ALL = '<span class="ingest-all" data-ingest-all hidden><button type="button" class="chip quiet" data-select="all">alle</button><button type="button" class="chip quiet" data-select="none">keine</button></span>';
+
+/**
+ * „Zu entscheiden“: was der Entwurf nicht vorausgewählt hat (meist Synthesen,
+ * Fragen, neue Seiten), in der Reihenfolge der Gruppen. Das ist die eigentliche
+ * Arbeit an einem Entwurf und steht deshalb vor allem Vorausgewählten.
+ */
+function decideBlock(draft, view) {
+  const groups = groupItems(pendingOf(draft));
+  const n = groups.reduce((sum, g) => sum + g.items.length, 0);
+  if (!n) {
+    const none = itemsOf(draft).length ? 'Nichts zu entscheiden, alles Routine.' : 'Claude schlägt nichts über die Source-Page hinaus vor.';
+    return `<section class="ingest-offen is-leer" aria-labelledby="ingest-offen"><h2 id="ingest-offen">Zu entscheiden</h2><p class="meta">${none}</p></section>`;
+  }
+  return `<section class="ingest-offen" data-ingest-group="offen" aria-labelledby="ingest-offen">
     <div class="ingest-group-head">
-      <h2 id="ingest-g-${g.key}">${esc(g.label)} <span class="hint">${g.items.length}</span></h2>
-      <span class="ingest-all" data-ingest-all hidden><button type="button" class="chip quiet" data-select="all">alle</button><button type="button" class="chip quiet" data-select="none">keine</button></span>
+      <h2 id="ingest-offen">Zu entscheiden <span class="hint">${n}</span></h2>
+      ${SELECT_ALL}
     </div>
-    ${g.hint ? `<p class="meta ingest-group-hint">${esc(g.hint)}</p>` : ''}
-    <ul class="ingest-items">${g.items.map((i) => itemRow(i, g.featured, view)).join('')}</ul>
-  </section>`,
-    )
-    .join('');
+    <ul class="ingest-items">${groups.map((g) => g.items.map((i) => itemRow(i, g.featured, view, { tagged: true })).join('')).join('')}</ul>
+  </section>`;
+}
+
+/**
+ * „Wird übernommen“: das Vorausgewählte (Verknüpfungen, Bestätigungen,
+ * Relationen, vorausgewählte neue Seiten), zugeklappt mit Zählung, darin
+ * gruppiert zum Abwählen. Die Häkchen werden auch zugeklappt mitgesendet.
+ */
+function routineBlock(draft, view) {
+  const routine = itemsOf(draft).filter((i) => i.default === true);
+  if (!routine.length) return '';
+  const groups = groupItems(routine);
+  return `<details class="ingest-routine" data-ingest-routine>
+    <summary><b>Wird übernommen</b><span class="ingest-routine-stand" data-ingest-picked hidden></span><span class="ingest-routine-zahl">${routine.length} vorausgewählt: ${esc(tallyLabel(tally({ items: routine })))}</span></summary>
+    ${groups
+      .map(
+        (g) => `<div class="ingest-group" role="group" data-ingest-group="${g.key}" aria-labelledby="ingest-g-${g.key}">
+      <div class="ingest-group-head">
+        <h3 id="ingest-g-${g.key}">${esc(g.label)} <span class="hint">${g.items.length}</span></h3>
+        ${SELECT_ALL}
+      </div>
+      ${g.hint ? `<p class="meta ingest-group-hint">${esc(g.hint)}</p>` : ''}
+      <ul class="ingest-items">${g.items.map((i) => itemRow(i, g.featured, view)).join('')}</ul>
+    </div>`,
+      )
+      .join('')}
+  </details>`;
 }
 
 /** Satz am Knopf: was übernommen wird. Dieselbe Rechnung macht /static/lesen-ingest.js beim Abhaken. */
@@ -615,6 +703,11 @@ const KEYS = [
   ['E', 'ohne Wiki erledigen'],
 ];
 
+/**
+ * Schlanker Kopf der Prüfansicht: zurück zur Übersicht und die Stelle unter den
+ * bereiten Entwürfen in einer Zeile, darunter Titel, Quelle und die Links zum
+ * Text. Die Fläche gehört dem Entwurf.
+ */
 function reviewHead(e, doc, nav) {
   const original = httpUrl(doc?.url);
   const meta = [doc?.site, doc?.reading_minutes ? `${doc.reading_minutes} Min. Lesezeit` : null].filter(Boolean);
@@ -622,10 +715,10 @@ function reviewHead(e, doc, nav) {
     ? `<nav class="pager ingest-pager" aria-label="Entwürfe">${nav.prev ? `<a href="${esc(ingestLink(nav.prev))}" rel="prev" data-ingest-prev aria-label="Voriger Entwurf">‹</a>` : '<span aria-hidden="true">‹</span>'}<span class="pager-now">${nav.position} von ${nav.total}</span>${nav.next ? `<a href="${esc(ingestLink(nav.next))}" rel="next" data-ingest-next aria-label="Nächster Entwurf">›</a>` : '<span aria-hidden="true">›</span>'}</nav>`
     : '';
   return `<div class="ingest-kopf">
-    <p class="meta">${esc(meta.join(' · ') || 'Ingest-Entwurf')}</p>
+    <a href="${INGEST}" class="ingest-zurueck"><span aria-hidden="true">←</span> Alle Entwürfe</a>${pager}
     <h1 class="ingest-h1">${esc(docTitle(e ?? { doc }))}</h1>
-    <p class="ingest-links"><a href="${esc(docLink(doc?.id ?? e?.doc_id))}">Text lesen</a>${original ? `<a href="${esc(original)}" rel="noopener noreferrer" target="_blank">Original</a>` : ''}<a href="${INGEST}">Alle Entwürfe</a></p>
-  </div>${pager}`;
+    <p class="ingest-links">${meta.length ? `<span>${esc(meta.join(' · '))}</span>` : ''}<a href="${esc(docLink(doc?.id ?? e?.doc_id))}">Text lesen</a>${original ? `<a href="${esc(original)}" rel="noopener noreferrer" target="_blank">Original</a>` : ''}</p>
+  </div>`;
 }
 
 /**
@@ -642,29 +735,51 @@ function haltedBlock(e) {
   } „Ins Wiki übernehmen“ setzt dort fort, ohne etwas doppelt zu schreiben.</p></section>`;
 }
 
-/** Prüfansicht eines bereiten Entwurfs: ein Formular, die Nebenaktionen per `formaction`. */
-function reviewForm(e, ctx, nav) {
+/**
+ * Prüfansicht eines bereiten Entwurfs: ein Formular, die Nebenaktionen per
+ * `formaction`. Breit zwei Spalten: links Verstehen (`ingest-lesen`, darunter
+ * `ingest-mehr` mit dem, was man selten aufklappt), rechts Entscheiden
+ * (`ingest-wahl`, bleibt beim Scrollen stehen, der Knopf am Fuß immer sichtbar).
+ * Schmal lösen sich die Spalten auf (CSS `display: contents`) und die Teile
+ * stehen in dieser Reihenfolge untereinander, der Knopf als Leiste unten.
+ * `worklog`: fertiges HTML, was Claude beim Entwerfen getan hat.
+ */
+function reviewForm(e, ctx, worklog = '') {
   const draft = e.draft ?? {};
-  const chosen = list(draft.items).filter((i) => i?.default === true).length;
+  const chosen = itemsOf(draft).filter((i) => i.default === true).length;
   const back = ingestLink(e.doc_id);
   const view = pageView(e);
+  const body = draft.source?.body;
   return `<form method="post" action="${UEBERNEHMEN}" class="ingest-form" data-ingest-form>
     ${hidden({ csrf: ctx.write.csrf, back, id: e.doc_id })}
     <button type="submit" class="ingest-guard" disabled hidden aria-hidden="true" tabindex="-1"></button>
-    ${haltedBlock(e)}
-    ${digestBlock(draft, view)}
-    ${sourceBlock(draft, e.applied, view)}
-    ${itemGroups(draft, view)}
-    <div class="ingest-weitere">
-      <button type="submit" class="btn quiet" formaction="${ENTWERFEN}" formnovalidate name="force" value="1" data-confirm="Claude entwirft neu, der jetzige Entwurf geht verloren.">Neu entwerfen</button>
-      <button type="submit" class="btn quiet" formaction="${VERWERFEN}" formnovalidate name="done" value="1" data-ingest-done>Ohne Wiki erledigen <kbd>E</kbd></button>
-      <button type="submit" class="btn quiet danger" formaction="${VERWERFEN}" formnovalidate data-confirm="Entwurf verwerfen? Der Text bleibt auf dem Stapel.">Entwurf verwerfen</button>
+    <div class="ingest-lesen">
+      ${haltedBlock(e)}
+      ${digestBlock(draft, view)}
     </div>
-    <div class="ingest-los">
-      <p class="ingest-summe" aria-live="polite"><b data-ingest-sum>${esc(applySummary(chosen))}</b><span class="meta">Der Text kommt mit nach <code>raw/</code> und gilt danach als gelesen.</span></p>
-      <button type="submit" class="btn primary" data-ingest-apply>Ins Wiki übernehmen <span class="ingest-n" data-ingest-n>${chosen + 1}</span></button>
+    <div class="ingest-wahl">
+      <div class="ingest-wahl-liste">
+        ${decideBlock(draft, view)}
+        ${routineBlock(draft, view)}
+        ${sourceBlock(draft, e.applied)}
+      </div>
+      <div class="ingest-fuss">
+        <div class="ingest-los">
+          <p class="ingest-summe" aria-live="polite"><b data-ingest-sum>${esc(applySummary(chosen))}</b><span class="meta">Der Text kommt mit nach <code>raw/</code> und gilt danach als gelesen.</span></p>
+          <button type="submit" class="btn primary" data-ingest-apply>Ins Wiki übernehmen <span class="ingest-n" data-ingest-n>${chosen + 1}</span></button>
+        </div>
+        <div class="ingest-weitere">
+          <button type="submit" class="btn quiet" formaction="${ENTWERFEN}" formnovalidate name="force" value="1" data-confirm="Claude entwirft neu, der jetzige Entwurf geht verloren.">Neu entwerfen</button>
+          <button type="submit" class="btn quiet" formaction="${VERWERFEN}" formnovalidate name="done" value="1" data-ingest-done>Ohne Wiki erledigen <kbd>E</kbd></button>
+          <button type="submit" class="btn quiet danger" formaction="${VERWERFEN}" formnovalidate data-confirm="Entwurf verwerfen? Der Text bleibt auf dem Stapel.">Entwurf verwerfen</button>
+        </div>
+      </div>
     </div>
-    <section class="lesen-keys ingest-keys"><h2>Tastenkürzel</h2><dl>${KEYS.map(([k, label]) => `<div><dt><kbd>${k}</kbd></dt><dd>${label}</dd></div>`).join('')}</dl></section>
+    <div class="ingest-mehr">
+      ${body ? `<details class="ingest-body ingest-quelle"><summary>Text der Source-Page ansehen</summary><div class="md ingest-md">${view.block(body)}</div></details>` : ''}
+      ${worklog}
+      <details class="ingest-keys"><summary>Tastenkürzel</summary><dl>${KEYS.map(([k, label]) => `<div><dt><kbd>${k}</kbd></dt><dd>${label}</dd></div>`).join('')}</dl></details>
+    </div>
   </form>`;
 }
 
@@ -929,7 +1044,8 @@ export function ingestRoutes({ store, ingest = null, planter = null, logger = co
     pages: {
       ...api,
       async [INGEST](ctx) {
-        return { html: readingPage(ctx, { key: 'ingest', title: 'Ingest', body: overview({ store, ingest, planter, now }, ctx), scripts: [assets.lesenIngest] }) };
+        // Ohne eigenen Seitenkopf: Die Überschrift steht mit „Ganzen Stapel entwerfen“ in `main` (siehe `overview`).
+        return { html: readingPage(ctx, { key: 'ingest', title: 'Ingest', heading: '', bodyClass: 'page-ingest-liste', body: overview({ store, ingest, planter, now }, ctx), scripts: [assets.lesenIngest] }) };
       },
       async '/lesen/ingest/doc'(ctx) {
         const id = ctx.url.searchParams.get('id') ?? '';
@@ -939,7 +1055,7 @@ export function ingestRoutes({ store, ingest = null, planter = null, logger = co
         const av = ingest.available() ?? { ok: false };
         const nav = e?.status === 'bereit' ? neighbours(ingest, id) : null;
         const log = ingest.worklog?.(id) ?? null;
-        const body = e?.status === 'bereit' && e.draft ? `${reviewForm(e, ctx, nav)}${worklogHtml(log, { tz: ctx.tz })}` : `${av.ok ? '' : unavailable(av)}${reviewState(e, { ...doc, id }, ctx, av.ok, planter, log)}`;
+        const body = e?.status === 'bereit' && e.draft ? reviewForm(e, ctx, worklogHtml(log, { tz: ctx.tz })) :`${av.ok ? '' : unavailable(av)}${reviewState(e, { ...doc, id }, ctx, av.ok, planter, log)}`;
         return {
           html: readingPage(ctx, { key: 'ingest', title: `Ingest: ${docTitle(e ?? { doc })}`, heading: reviewHead(e, { ...doc, id }, nav), bodyClass: 'page-ingest', body, scripts: [assets.lesenIngest] }),
         };

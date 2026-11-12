@@ -8,7 +8,7 @@ import { createReadingStore } from '../src/lesen/store.js';
 import { readingRoutes } from '../src/lesen/http.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { appliedMessage, groupItems, kindLabel, offerLabel, standBack, tally, tallyLabel } from '../src/lesen/ingest-page.js';
+import { appliedMessage, countLabel, groupItems, kindLabel, offerLabel, standBack, tally, tallyLabel } from '../src/lesen/ingest-page.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
 
@@ -265,7 +265,7 @@ test('Ingest: Unternavigation mit Zahl der bereiten Entwürfe zwischen Stapel un
   });
 });
 
-test('Ingest: Übersicht mit Karten, In Arbeit, Fehler und „Ganzen Stapel entwerfen“', async () => {
+test('Ingest: Übersicht mit Zeilen je Entwurf, In Arbeit, Fehler und „Ganzen Stapel entwerfen“', async () => {
   await withIngest(async ({ html, add, ingest }) => {
     // Leer: freundlich, mit Knopf, weil ein Text ohne Entwurf auf dem Stapel liegt.
     add('Erst einer');
@@ -273,6 +273,8 @@ test('Ingest: Übersicht mit Karten, In Arbeit, Fehler und „Ganzen Stapel entw
     assert.match(page, /Nichts zum Abhaken/);
     assert.match(page, /<form method="post" action="\/aktion\/lesen\/ingest\/entwerfen" class="act ingest-stapel">[^]*name="stapel" value="1"[^]*Ganzen Stapel entwerfen/);
     assert.match(page, /Ein Text auf dem Stapel hat noch keinen fertigen Entwurf/);
+    // Überschrift und Knopf stehen in `main`, damit beides nach einer Aktion neu gebaut wird; der Seitenkopf bleibt leer.
+    assert.match(page, /<div class="page-head"><\/div>\s*<main class="lesen">\s*<div class="ingest-head"><h1>Ingest<\/h1><form /);
     noInline(page);
 
     const r = add('Bereit');
@@ -282,13 +284,17 @@ test('Ingest: Übersicht mit Karten, In Arbeit, Fehler und „Ganzen Stapel entw
     ingest.put(b.id, 'entwirft', { origin: 'knopf' });
     ingest.put(f.id, 'fehler', { error: 'Claude hat nicht geantwortet <b>!</b>' });
     page = await html('/lesen/ingest');
-    const card = page.match(/<li class="ingest-card"[^]*?Prüfen/)[0];
-    assert.match(card, /Blatt · 7 Min\. · nachts entworfen · 25\. Okt\., 03:10/);
-    assert.match(card, /<a href="\/lesen\/ingest\/doc\?id=[^"]+" class="ingest-card-title">Bereit<\/a>/);
-    assert.match(card, /<li>Erste Aussage über <strong>Bereit<\/strong><\/li><li>Zweite Aussage<\/li><li>Dritte Aussage<\/li><\/ul>/);
-    assert.ok(!card.includes('Vierte Aussage'), 'nur drei Kernaussagen auf der Karte');
-    assert.match(card, /1 Verknüpfung · 1 Bestätigung · 1 Synthese · 1 Synthese-Ergänzung · 1 Frage · 1 neue Seite · 1 Relation/);
-    assert.match(card, /Synthese angeboten/);
+    // Eine Zeile je Entwurf: Titel als Link über die ganze Zeile, Meta, eine Zeile Inhalt (TL;DR), Zählung, „Prüfen“.
+    const row = page.match(/<li class="ingest-zeile"[^]*?<\/li>/)[0];
+    assert.match(row, new RegExp(`^<li class="ingest-zeile" data-ingest-doc="${r.id}">`));
+    assert.match(row, /<span class="meta">Blatt · 7 Min\.<span class="ingest-zeile-wann"> · nachts entworfen · 25\. Okt\., 03:10<\/span><\/span>/);
+    // Der Link deckt die Zeile ab; sein Tooltip sagt, was genau angeboten wird.
+    assert.match(row, new RegExp(`<a href="/lesen/ingest/doc\\?id=${r.id}" class="lesen-title ingest-zeile-titel" title="1 Verknüpfung · 1 Bestätigung · 1 Synthese · 1 Synthese-Ergänzung · 1 Frage · 1 neue Seite · 1 Relation">Bereit</a>`));
+    assert.match(row, /<span class="ingest-zeile-inhalt">Agenten merken sich Wichtiges außerhalb des Kontexts\.<\/span>/);
+    assert.ok(!row.includes('Zweite Aussage'), 'keine Liste der Kernaussagen mehr');
+    assert.equal(row.match(/<a /g).length, 1, 'ein Link je Zeile, „Prüfen“ ist nur Beschriftung');
+    assert.match(row, /<span class="ingest-zeile-zahl">7 Vorschläge · 4 zu entscheiden<\/span>/);
+    assert.match(row, /<span class="btn ingest-zeile-los" aria-hidden="true">Prüfen<\/span>/);
     assert.match(page, /<h2 id="ingest-bereit">Bereit zum Abhaken <span class="hint">1<\/span>/);
     assert.match(page, new RegExp(`<li class="ingest-row is-busy" data-ingest-doc="${b.id}" data-ingest-watch="${b.id}" data-ingest-status="entwirft">[^]*Claude entwirft`));
     assert.match(page, /<h2 id="ingest-fehler">Fehler/);
@@ -297,6 +303,20 @@ test('Ingest: Übersicht mit Karten, In Arbeit, Fehler und „Ganzen Stapel entw
     assert.match(page, /2 Texte auf dem Stapel haben noch keinen fertigen Entwurf/, '„Erst einer“ und der fehlgeschlagene');
     assert.match(page, /<script src="\/static\/lesen-ingest\.js\?v=[^"]+" defer><\/script>/);
     noInline(page);
+
+    // Ohne TL;DR die erste Kernaussage; Wikilinks darin nur als Titel, weil die Zeile selbst der Link ist.
+    const draft = draftFor('Bereit');
+    draft.source.tldr = '';
+    draft.digest.kernaussagen = ['Baut auf [[context-engineering]] auf, siehe [Quelle](https://blatt.test/x)', 'Zweite'];
+    draft.items = draft.items.filter((i) => i.default === true);
+    ingest.put(r.id, 'bereit', { draft });
+    const plain = (await html('/lesen/ingest')).match(/<li class="ingest-zeile"[^]*?<\/li>/)[0];
+    assert.match(plain, /<span class="ingest-zeile-inhalt">Baut auf Context Engineering auf, siehe Quelle<\/span>/);
+    assert.equal(plain.match(/<a /g).length, 1);
+    assert.match(plain, />3 Vorschläge<\/span>/, 'nichts zu entscheiden: nur die Zahl');
+    assert.equal(countLabel({ items: [] }), 'nur die Source-Page');
+    assert.equal(countLabel(null), 'nur die Source-Page');
+    assert.equal(countLabel({ items: [{ id: 'a', default: false }] }), '1 Vorschlag · 1 zu entscheiden');
   });
 });
 
@@ -318,7 +338,7 @@ test('Ingest: ohne Claude ein Hinweis und keine Entwerfen-Knöpfe, Abhaken geht 
   );
 });
 
-test('Ingest: Prüfansicht mit Digest, Source-Page, gruppierten Vorschlägen und Aktionen', async () => {
+test('Ingest: Prüfansicht mit Digest, „Zu entscheiden“, „Wird übernommen“, Source-Page und Aktionen', async () => {
   await withIngest(async ({ html, add, ingest }) => {
     const d = add('Agenten mit Gedächtnis');
     const other = add('Noch einer');
@@ -326,28 +346,40 @@ test('Ingest: Prüfansicht mit Digest, Source-Page, gruppierten Vorschlägen und
     ingest.put(d.id, 'bereit', { draft: draftFor('Agenten mit Gedächtnis') });
     const page = await html(`/lesen/ingest/doc?id=${d.id}`);
     noInline(page);
-    // Kopf: Titel in Leseschrift, Text lesen, Original, Stelle unter den bereiten.
+    // Kopf: zurück zur Übersicht und Stelle unter den bereiten, Titel in Leseschrift, Quelle, Text lesen, Original.
+    assert.match(page, /<div class="ingest-kopf">\s*<a href="\/lesen\/ingest" class="ingest-zurueck"><span aria-hidden="true">←<\/span> Alle Entwürfe<\/a><nav class="pager ingest-pager"/);
     assert.match(page, /<h1 class="ingest-h1">Agenten mit Gedächtnis<\/h1>/);
-    assert.match(page, new RegExp(`<a href="/lesen/doc\\?id=${d.id}">Text lesen</a><a href="https://blatt\\.test/[^"]+" rel="noopener noreferrer" target="_blank">Original</a>`));
+    assert.match(page, new RegExp(`<p class="ingest-links"><span>Blatt · 7 Min\\. Lesezeit</span><a href="/lesen/doc\\?id=${d.id}">Text lesen</a><a href="https://blatt\\.test/[^"]+" rel="noopener noreferrer" target="_blank">Original</a>`));
     assert.match(page, new RegExp(`<span class="pager-now">1 von 2</span><a href="/lesen/ingest/doc\\?id=${other.id}" rel="next" data-ingest-next`));
+    // Zwei Spalten: links Verstehen, rechts Entscheiden, darunter das selten Gebrauchte.
+    assert.deepEqual([...page.matchAll(/<div class="(ingest-(?:lesen|wahl|wahl-liste|fuss|mehr))">/g)].map((m) => m[1]), ['ingest-lesen', 'ingest-wahl', 'ingest-wahl-liste', 'ingest-fuss', 'ingest-mehr']);
     // Digest
     assert.match(page, /<ul class="ingest-kern"><li>Erste Aussage über <strong>Agenten mit Gedächtnis<\/strong><\/li>[^]*Vierte Aussage/);
     assert.match(page, /<h3>Neu für dich<\/h3><ul><li>Agenten brauchen ein Gedächtnis/);
-    assert.match(page, /<h3>Bestätigt<\/h3><ul><li><a href="\/notiz\?pfad=wiki%2Fconcepts%2Fcontext-engineering\.md" class="ingest-ref">Context Engineering<\/a><span>Kontext ist knapp<\/span>/);
     assert.match(page, /<h3>Widerspricht<\/h3><div class="problem"><p><a href="\/notiz\?pfad=wiki%2Fconcepts%2Frag\.md" class="ingest-ref">RAG<\/a>: RAG sei überholt<\/p><p class="meta">Vorschlag: Als Gegenposition aufnehmen<\/p><p class="meta">Das Cockpit ändert die Seite nicht\. Auflösung per <code>\/wiki-lint<\/code>/);
+    // „Bestätigt“ steht als Bestätigung zum Abhaken da (b1): im Digest nur noch gezählt. „Dockt an“ bleibt, weil es dazu keine Verknüpfung gibt.
+    assert.ok(!page.includes('<h3>Bestätigt</h3>'), 'kein eigener Block, wenn es den Vorschlag gibt');
+    assert.match(page, /<p class="meta ingest-d-kurz">Der Text stützt 1 Seite; das steht bei den Vorschlägen zum Abhaken\.<\/p>/);
     assert.match(page, /<h3>Dockt an<\/h3><ul><li><a href="\/notiz\?pfad=wiki%2Fentities%2Fclaude-code\.md" class="ingest-ref">Claude Code<\/a><span>Beispiel im Text<\/span>/);
-    // Source-Page: Felder mit den Werten des Entwurfs, Zähler bis 80, Text als Markdown.
+    // Source-Page: zugeklappt eine Zeile mit Titel, Pfad und Konfidenz; dahinter die Felder mit den Werten des Entwurfs, Zähler bis 80.
+    assert.match(page, /<details class="ingest-source">\s*<summary><span class="ingest-source-kopf"><b>Source-Page<\/b><span class="ingest-source-titel" data-ingest-echo="title">Agenten mit Gedächtnis<\/span><\/span><span class="ingest-source-edit">Bearbeiten<\/span><span class="ingest-source-meta"><span class="ingest-path">wiki\/sources\/<span data-ingest-echo="slug">glaser-agenten-gedaechtnis<\/span>\.md<\/span><span>Konfidenz: mittel<\/span><\/span><\/summary>/);
     assert.match(page, /<input type="text" name="title" value="Agenten mit Gedächtnis" required>/);
     assert.match(page, /<span class="ingest-count" data-ingest-count-for="summary">53\/80<\/span><\/span><input type="text" name="summary" value="Wie Agenten sich erinnern, ohne den Kontext zu füllen" maxlength="80" data-ingest-summary>/);
     assert.match(page, /data-ingest-count-for="tldr">\d+\/400<\/span><\/span><textarea name="tldr" rows="3" maxlength="400" data-ingest-tldr>Agenten merken sich Wichtiges außerhalb des Kontexts\.<\/textarea>/);
     assert.match(page, /<input type="text" name="slug" value="glaser-agenten-gedaechtnis" pattern=/);
     assert.match(page, /<input type="text" name="tags" value="agents, memory"/);
-    assert.match(page, /<div class="md ingest-md"><h3 id="h-kern">Kern<\/h3>/);
-    // Gruppen in Vertragsreihenfolge, Häkchen nach `default`.
-    assert.deepEqual([...page.matchAll(/data-ingest-group="(\w+)"/g)].map((m) => m[1]), ['verknuepfen', 'bestaetigung', 'synthese', 'neu', 'relation']);
-    const boxes = Object.fromEntries([...page.matchAll(/<input type="checkbox" name="item" value="(\w+)"( checked)?>/g)].map((m) => [m[1], Boolean(m[2])]));
-    assert.deepEqual(boxes, { v1: true, b1: true, s1: false, q1: false, n1: false, r1: true, e1: false });
-    assert.match(page, /<section class="ingest-group is-featured" data-ingest-group="synthese"/);
+    assert.match(page, /<details class="ingest-body ingest-quelle"><summary>Text der Source-Page ansehen<\/summary><div class="md ingest-md"><h3 id="h-kern">Kern<\/h3>/);
+    // Erst „Zu entscheiden“ (nicht vorausgewählt), dann das Vorausgewählte in Gruppen in Vertragsreihenfolge; Häkchen nach `default`.
+    assert.deepEqual([...page.matchAll(/data-ingest-group="(\w+)"/g)].map((m) => m[1]), ['offen', 'verknuepfen', 'bestaetigung', 'relation']);
+    const boxes = [...page.matchAll(/<input type="checkbox" name="item" value="(\w+)"( checked)?>/g)].map((m) => [m[1], Boolean(m[2])]);
+    assert.deepEqual(boxes, [['s1', false], ['q1', false], ['e1', false], ['n1', false], ['v1', true], ['b1', true], ['r1', true]]);
+    const offen = page.match(/<section class="ingest-offen"[^]*?<\/section>/)[0];
+    assert.match(offen, /<h2 id="ingest-offen">Zu entscheiden <span class="hint">4<\/span><\/h2>/);
+    assert.deepEqual([...offen.matchAll(/data-item="(\w+)"/g)].map((m) => m[1]), ['s1', 'q1', 'e1', 'n1']);
+    const routine = page.match(/<details class="ingest-routine" data-ingest-routine>[^]*?<\/details>\s*<details class="ingest-source"/)[0];
+    assert.match(routine, /<summary><b>Wird übernommen<\/b><span class="ingest-routine-stand" data-ingest-picked hidden><\/span><span class="ingest-routine-zahl">3 vorausgewählt: 1 Verknüpfung · 1 Bestätigung · 1 Relation<\/span><\/summary>/);
+    assert.deepEqual([...routine.matchAll(/data-item="(\w+)"/g)].map((m) => m[1]), ['v1', 'b1', 'r1']);
+    assert.match(routine, /<div class="ingest-group" role="group" data-ingest-group="verknuepfen" aria-labelledby="ingest-g-verknuepfen">\s*<div class="ingest-group-head">\s*<h3 id="ingest-g-verknuepfen">Mit bestehenden Seiten verknüpfen <span class="hint">1<\/span><\/h3>/);
     assert.match(page, /<span class="ingest-pill is-offer">Synthese · Vergleich<\/span><span class="ingest-item-title">Gedächtnis statt RAG\?<\/span>/);
     assert.match(page, /<span class="ingest-pill is-offer">Frage<\/span>/);
     assert.match(page, /<details class="ingest-body"><summary>Ganzen Text lesen<\/summary><div class="md ingest-md"><p>Ein <strong>Vergleich<\/strong>\.<\/p>/);
@@ -365,6 +397,50 @@ test('Ingest: Prüfansicht mit Digest, Source-Page, gruppierten Vorschlägen und
     assert.match(page, /formaction="\/aktion\/lesen\/ingest\/entwerfen" formnovalidate name="force" value="1"[^>]*>Neu entwerfen/);
     assert.match(page, /formaction="\/aktion\/lesen\/ingest\/verwerfen" formnovalidate name="done" value="1" data-ingest-done>Ohne Wiki erledigen/);
     assert.match(page, /formaction="\/aktion\/lesen\/ingest\/verwerfen" formnovalidate data-confirm="[^"]+">Entwurf verwerfen/);
+    // Tastenkürzel unauffällig zum Aufklappen, am Ende.
+    assert.match(page, /<details class="ingest-keys"><summary>Tastenkürzel<\/summary><dl><div><dt><kbd>J \/ K<\/kbd><\/dt><dd>nächster \/ voriger Entwurf<\/dd><\/div>/);
+    // Alles steht in dem einen Formular, auch was zugeklappt ist.
+    const form = page.match(/<form method="post" action="\/aktion\/lesen\/ingest\/uebernehmen"[^]*?<\/form>/)[0];
+    for (const part of ['class="ingest-routine"', 'class="ingest-source"', 'name="slug"', 'data-ingest-apply', 'class="ingest-keys"']) assert.ok(form.includes(part), part);
+  });
+});
+
+test('Ingest: Prüfansicht ohne offene Entscheidung und ohne Vorschläge; im Digest bleibt, wozu es keinen Vorschlag gibt', async () => {
+  await withIngest(async ({ html, add, ingest }) => {
+    const d = add('Nur Routine');
+    const draft = draftFor('Nur Routine');
+    // Alles vorausgewählt, auch eine neue Seite; „Dockt an“ jetzt mit Verknüpfung, „Bestätigt“ ohne Bestätigung.
+    draft.items = [
+      { ...draft.items[0], path: 'wiki/entities/claude-code.md', title: 'Claude Code' },
+      { ...draft.items[4], default: true },
+      draft.items[5],
+    ];
+    ingest.put(d.id, 'bereit', { draft });
+    let page = await html(`/lesen/ingest/doc?id=${d.id}`);
+    assert.match(page, /<section class="ingest-offen is-leer" aria-labelledby="ingest-offen"><h2 id="ingest-offen">Zu entscheiden<\/h2><p class="meta">Nichts zu entscheiden, alles Routine\.<\/p><\/section>/);
+    assert.match(page, /3 vorausgewählt: 1 Verknüpfung · 1 neue Seite · 1 Relation/);
+    assert.deepEqual([...page.matchAll(/data-ingest-group="(\w+)"/g)].map((m) => m[1]), ['verknuepfen', 'neu', 'relation']);
+    assert.match(page, /<h3>Bestätigt<\/h3><ul><li><a href="\/notiz\?pfad=wiki%2Fconcepts%2Fcontext-engineering\.md" class="ingest-ref">Context Engineering<\/a><span>Kontext ist knapp<\/span>/);
+    assert.ok(!page.includes('<h3>Dockt an</h3>'));
+    assert.match(page, /Der Text dockt an 1 Seite an; das steht bei den Vorschlägen zum Abhaken\./);
+    assert.match(page, /data-ingest-n>4<\/span>/);
+
+    // Unter „Zu entscheiden“ tragen auch Relationen und Bestätigungen ihr Kennzeichen: Die Gruppe nennt es dort nicht.
+    draft.items = [{ ...draft.items[2], default: false }, { id: 'b9', kind: 'bestaetigung', path: 'wiki/concepts/rag.md', title: 'RAG', claim: 'Stimmt', default: false }];
+    page = await html(`/lesen/ingest/doc?id=${d.id}`);
+    assert.match(page, /<span class="ingest-item-head"><span class="ingest-pill">Bestätigung<\/span><span class="ingest-item-title">RAG<\/span><span class="ingest-claim">Stimmt<\/span><\/span>/);
+    assert.match(page, /<span class="ingest-item-head"><span class="ingest-pill">Relation<\/span><span class="ingest-item-title"><span class="ingest-rel" title="authored-by">verfasst von<\/span> Robert Glaser<\/span><\/span>/);
+    assert.ok(!page.includes('ingest-routine'), 'nichts vorausgewählt: kein „Wird übernommen“');
+
+    // Gar keine Vorschläge: nur die Source-Page.
+    draft.items = [];
+    page = await html(`/lesen/ingest/doc?id=${d.id}`);
+    assert.match(page, /<p class="meta">Claude schlägt nichts über die Source-Page hinaus vor\.<\/p>/);
+    assert.match(page, /<b data-ingest-sum>Nur die Source-Page<\/b>/);
+
+    // Ein Feld, das der Browser beanstanden würde, steht von Anfang an offen da.
+    draft.source.slug = 'Nicht Gültig';
+    assert.match(await html(`/lesen/ingest/doc?id=${d.id}`), /<details class="ingest-source" open>/);
   });
 });
 
@@ -426,7 +502,7 @@ test('Ingest: unterbrochenes Übernehmen steht in der Prüfansicht, die Felder d
     assert.match(page, /Die Source-Page <a href="\/notiz\?pfad=wiki%2Fsources%2Fhalb-1234\.md">halb-1234<\/a> ist schon geschrieben/);
     for (const name of ['title', 'summary', 'tldr', 'tags', 'slug']) assert.match(page, new RegExp(`name="${name}"[^>]*readonly>`), `${name} schreibgeschützt`);
     assert.match(page, /<input type="text" name="slug" value="halb-1234"/, 'der Slug, den der Dienst festgelegt hat');
-    assert.match(page, /wiki\/sources\/halb-1234\.md<\/span><\/h2>/);
+    assert.match(page, /<span class="ingest-source-edit">Ansehen<\/span><span class="ingest-source-meta"><span class="ingest-path">wiki\/sources\/<span data-ingest-echo="slug">halb-1234<\/span>\.md<\/span>/);
 
     // Nur die Rohquelle geschrieben: Hinweis ja, Felder noch frei.
     ingest.rows.get(a.id).applied = { steps: ['raw'], items: {}, written: [], linked: [], raw: 'raw/halb.md' };
@@ -798,7 +874,7 @@ test('Ingest: App-JSON trägt Claudes Texte als Baum, den Abbruch, die Verfügba
   await withIngest(async ({ call }) => keep('lesen-ingest-aus', await (await call('/api/lesen/ingest')).json()), { ingest: false });
 });
 
-test('Ingest: „Synthese ergänzen“ steht bei den Synthesen, mit Öffnen-Symbol, Ziel und aufklappbarem Text; Karte und Meldung zählen es', async () => {
+test('Ingest: „Synthese ergänzen“ steht bei den Synthesen, mit Öffnen-Symbol, Ziel und aufklappbarem Text; Zeile und Meldung zählen es', async () => {
   assert.equal(kindLabel({ kind: 'synthesis', action: 'ergaenzen', art: 'vergleich' }), 'Synthese ergänzen');
   assert.deepEqual(groupItems([{ id: 'e1', kind: 'synthesis', action: 'ergaenzen' }]).map((g) => g.key), ['synthese']);
   const only = tally({ items: [{ id: 'e1', kind: 'synthesis', action: 'ergaenzen' }, { id: 'e2', kind: 'synthesis', action: 'ergaenzen' }] });
@@ -822,11 +898,11 @@ test('Ingest: „Synthese ergänzen“ steht bei den Synthesen, mit Öffnen-Symb
     assert.ok(!item.match(/<label[^]*<\/label>/)[0].includes('<a '), 'Link außerhalb des Labels');
     assert.match(item, /<details class="ingest-body"><summary>Was ergänzt wird<\/summary><div class="md ingest-md"><p>Der Text <strong>stützt<\/strong> die These mit <a href="\/notiz\?pfad=wiki%2Fconcepts%2Fcontext-engineering\.md" class="wikilink"/);
 
-    // Karte: nur eine Ergänzung angeboten.
+    // Zeile der Übersicht: die Ergänzung zählt als Vorschlag, über den zu entscheiden ist; was genau, steht im Tooltip.
     draft.items = draft.items.filter((i) => ['v1', 'e1'].includes(i.id));
-    const card = (await html('/lesen/ingest')).match(/<li class="ingest-card"[^]*?Prüfen/)[0];
-    assert.match(card, /1 Verknüpfung · 1 Synthese-Ergänzung/);
-    assert.match(card, /<span class="ingest-pill is-offer">Ergänzung angeboten<\/span>/);
+    const row = (await html('/lesen/ingest')).match(/<li class="ingest-zeile"[^]*?<\/li>/)[0];
+    assert.match(row, /title="1 Verknüpfung · 1 Synthese-Ergänzung">Ergänzt<\/a>/);
+    assert.match(row, />2 Vorschläge · 1 zu entscheiden</);
   });
 });
 

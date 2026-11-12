@@ -656,7 +656,8 @@ test('Nur lesen: am Feed oder an der Gruppe einstellen; Einträge ohne Ingest un
     store.setProgress(own.id, 1);
     const weiter = await (await call('/lesen/weiter')).text();
     const item = (title) => weiter.slice(weiter.indexOf(`>${title}</a>`), weiter.indexOf('\n  </li>', weiter.indexOf(`>${title}</a>`)));
-    assert.match(item('Gelesene Meldung'), /class="btn primary">Fertig, weg/);
+    // In den Zeilen von „Weiter“ ist kein Knopf der Hauptknopf: Den hat „Als Nächstes“.
+    assert.match(item('Gelesene Meldung'), /class="btn">Fertig, weg/);
     assert.ok(!item('Gelesene Meldung').includes('Nur in den Vault'));
     assert.ok(!item('Gelesene Meldung').includes('Entwurf'), 'Spur nur „Gelesen“');
     assert.match(item('Eigener Text'), /Nur in den Vault/);
