@@ -85,6 +85,7 @@ test('Eingang: Karte mit Quelle, Art, Lesezeit, Themen und Herkunft; ohne JavaSc
     assert.match(html, /<script src="\/static\/lesen-eingang\.js\?v=[\w-]+" defer><\/script>/);
     // Sichtbar nur die oberste (neueste) Karte, mit angedeutetem Stapel darunter.
     assert.match(html, /<div class="inbox"><div class="inbox-progress">[^]*?<article class="inbox-card more" data-id="[^"]+">/);
+    assert.match(html, /<body class="page-lesen lesen-spalte">/, 'ruhige Spalte statt voller Seitenbreite');
     // Die nächste liegt unsichtbar für ohne Netz bereit (VCP-144).
     const [, later] = /<template class="inbox-next">([^]*?)<\/template>/.exec(html);
     assert.equal(html.replace(later, '').match(/<article class="inbox-card/g).length, 1);

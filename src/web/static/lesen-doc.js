@@ -1,5 +1,5 @@
 // Leseansicht (VCP-71, src/lesen/doc.js): Markieren per Textauswahl oder ganzer
-// Absatz, Notizen, Fortschritt speichern, Schriftgröße und Tastenkürzel. Braucht /static/cockpit.js
+// Absatz, Notizen, Fortschritt speichern, Schriftgröße, Fokus (nur der Text) und Tastenkürzel. Braucht /static/cockpit.js
 // (window.cockpit) davor. Ohne Script bleibt der Text lesbar, jede Entscheidung
 // (Fertig, weg · In den Vault) ist ein Formular.
 //
@@ -338,8 +338,11 @@
 
   // --- Darstellung --------------------------------------------------------------
 
+  // Schriftgröße, Schriftart und „Fokus“ (nur der Text: `data-read-nur-text` am <html>, cockpit.css
+  // blendet dann Unternavigation und Seitenspalten aus). Am <html> wie die Schrift, weil
+  // /static/cockpit.js nach einem Formular `main` austauscht und der Stand das überstehen soll.
   const PREFS = 'lesen-darstellung';
-  let prefs = { size: 3, sans: false };
+  let prefs = { size: 3, sans: false, nurText: false };
   try {
     prefs = { ...prefs, ...JSON.parse(localStorage.getItem(PREFS) ?? '{}') };
   } catch {
@@ -348,7 +351,9 @@
   function applyPrefs() {
     html.dataset.readSize = String(prefs.size);
     html.toggleAttribute('data-read-sans', prefs.sans);
+    html.toggleAttribute('data-read-nur-text', Boolean(prefs.nurText));
     for (const b of document.querySelectorAll('[data-font]')) b.setAttribute('aria-pressed', String(prefs.sans));
+    for (const b of document.querySelectorAll('[data-nur-text]')) b.setAttribute('aria-pressed', String(Boolean(prefs.nurText)));
     try {
       localStorage.setItem(PREFS, JSON.stringify(prefs));
     } catch {
@@ -360,7 +365,9 @@
     const b = e.target instanceof Element ? e.target.closest('.lesen-view button') : null;
     if (!b) return;
     if (b.dataset.size) prefs.size = Math.min(5, Math.max(1, prefs.size + Number(b.dataset.size)));
-    else prefs.sans = !prefs.sans;
+    else if (b.hasAttribute('data-font')) prefs.sans = !prefs.sans;
+    else if (b.hasAttribute('data-nur-text')) prefs.nurText = !prefs.nurText;
+    else return;
     applyPrefs();
   });
 
@@ -490,6 +497,11 @@
     } else if (key === 'j' || key === 'k') {
       e.preventDefault();
       step(key === 'j' ? 1 : -1);
+    } else if (key === 'f') {
+      // F: Fokus an oder aus. Auf schmalen Bildschirmen gibt es keine Seitenspalten, dort ändert es nichts.
+      e.preventDefault();
+      prefs.nurText = !prefs.nurText;
+      applyPrefs();
     }
   });
 })();

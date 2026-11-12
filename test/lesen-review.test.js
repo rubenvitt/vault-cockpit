@@ -239,6 +239,7 @@ test('Wiedersehen (VCP-85): dauerhaftes Rückgängig der letzten Entscheidung, a
   assert.doesNotMatch(html, /inbox-undo/, 'heute noch nichts entschieden');
   assert.match(html, /<script src="\/static\/lesen-eingang\.js\?v=[\w-]+" defer><\/script>/);
   assert.match(html, /class="act wiedersehen-decide wisch" data-links="loslassen" data-rechts="behalten"/);
+  assert.match(html, /<body class="page-lesen lesen-spalte">/);
   assert.match(html, /aria-keyshortcuts="ArrowLeft l"/);
   assert.match(html, /<summary aria-keyshortcuts="w">In eigenen Worten/);
 

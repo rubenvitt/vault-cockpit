@@ -672,18 +672,84 @@ details.rock[open] > summary { margin-bottom: var(--s-2); }
 .lesen-quote { margin: 0; padding-left: var(--s-3); border-left: 3px solid var(--accent-line); font: var(--t-md)/1.5 var(--font-read); }
 
 /* --- Lesen: Stapel (src/lesen/stack.js): Zeitfenster, Füllbalken, Sortierung --- */
-.stapel-zeit a.chip, .stapel-sort a.chip, .lesen-gruppe a.chip { display: inline-flex; align-items: center; text-decoration: none; }
-.stapel-zeit, .stapel-sort, .lesen-gruppe { margin-bottom: var(--s-4); }
-.stapel-fill { display: flex; align-items: center; gap: var(--s-3); margin-bottom: var(--s-4); }
+/* Ruhige Spalte statt der vollen Seitenbreite (Eingang, Stapel, Markiert, Wiedersehen, Feeds; `bodyClass: 'lesen-spalte'`):
+   Zeilen bleiben lesbar, Titel links und Abzeichen rechts liegen in einem Blick. Die Reiter darüber bleiben, wo sie sind. */
+.lesen-spalte main.lesen > * { width: 100%; max-width: 880px; }
+.stapel { display: grid; gap: var(--s-3); }
+.stapel-kopfzeile { flex: 0 1 880px; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); }
+/* Die leisen Knöpfe schließen mit ihrem Text bündig am rechten Rand ab. */
+.stapel-kopf { display: flex; gap: var(--s-1); margin: 0 calc(-1 * var(--s-4)) 0 0; }
+.stapel-zeit a.chip, .stapel-sort a.chip, .lesen-gruppe a.chip { display: inline-flex; align-items: center; text-decoration: none; white-space: nowrap; }
+.stapel-zeit, .lesen-gruppe { margin-bottom: var(--s-4); }
+/* Im Stapel regelt das Raster die Abstände (die Chips von „Unterwegs hören“ behalten ihren). */
+.stapel .lesen-gruppe, .stapel-werkzeug .stapel-zeit, .stapel > .stapel-weiter { margin-bottom: 0; }
+/* Eine Werkzeugzeile: Zeitfenster links, rechts die Sortierung oder der Füllbalken des Fensters */
+.stapel-werkzeug { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s-2) var(--s-5); min-width: 0; }
+.stapel-zeit, .stapel-sort { flex-wrap: nowrap; }
+/* Sortierung: leise Auswahl, Text statt Pille */
+.stapel-sort { gap: 0; }
+.stapel-sort a.chip { min-height: 32px; padding: 4px 10px; border-color: transparent; background: none; color: var(--text-2); }
+.stapel-sort a.chip:hover { background: var(--bg-sunk); color: var(--text); }
+.stapel-sort a.chip[aria-current=true] { background: none; border-color: transparent; color: var(--text); font-weight: 650; text-decoration: underline; text-decoration-color: var(--accent); text-decoration-thickness: 2px; text-underline-offset: 5px; }
+.stapel-fill { flex: 1 1 200px; max-width: 340px; display: flex; align-items: center; gap: var(--s-3); }
 .stapel-fill .meta { flex: none; font-variant-numeric: tabular-nums; }
-.stapel-bar { flex: 1; height: 6px; border: 0; border-radius: var(--r-full); overflow: hidden; background: var(--line); -webkit-appearance: none; appearance: none; color: var(--accent); }
+.stapel-bar { flex: 1; min-width: 0; height: 6px; border: 0; border-radius: var(--r-full); overflow: hidden; background: var(--line); -webkit-appearance: none; appearance: none; color: var(--accent); }
 .stapel-bar::-webkit-progress-bar { background: var(--line); border-radius: var(--r-full); }
 .stapel-bar::-webkit-progress-value { background: var(--accent); border-radius: var(--r-full); }
 .stapel-bar::-moz-progress-bar { background: var(--accent); border-radius: var(--r-full); }
-.stapel-rest { margin: var(--s-4) 0 0; color: var(--text-3); }
+.stapel-rest { margin: var(--s-3) 0 var(--s-2); color: var(--text-3); }
+/* Liste: je Eintrag Titel und eine Metazeile, rechts Abzeichen und Menü; die ganze Zeile führt zum Text. */
+.stapel-karte { padding: var(--s-2) var(--s-5); }
+.stapel-karte > .empty { padding: var(--s-3) 0; }
+.stapel-list .lesen-item { position: relative; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px var(--s-4);
+  margin: 0 calc(-1 * var(--s-3)); padding: 11px var(--s-3); transition: background var(--fast); }
+.stapel-list .lesen-item:first-child { padding-top: 11px; }
+.stapel-list .lesen-item:last-child { padding-bottom: 11px; }
+.stapel-list .lesen-item:hover { background: var(--surface-2); }
+.stapel-list .lesen-item:has(.lesen-title:focus-visible) { box-shadow: var(--ring); }
+.stapel-list .lesen-title { grid-column: 1; }
+.stapel-list .lesen-title:focus-visible { outline: none; }
+.stapel-list .lesen-title::after { content: ''; position: absolute; inset: 0; }
+.stapel-list .lesen-item > .meta { grid-column: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* Angefangen: dünner Balken und Prozent vor der Restzeit */
+.stapel-stand { color: var(--accent); font-weight: 600; font-variant-numeric: tabular-nums; }
+.stapel-stand progress { display: inline-block; vertical-align: middle; width: 44px; height: 4px; margin: -2px 6px 0 0; border: 0; border-radius: var(--r-full); overflow: hidden; background: var(--line); -webkit-appearance: none; appearance: none; color: var(--accent); }
+.stapel-stand progress::-webkit-progress-bar { background: var(--line); }
+.stapel-stand progress::-webkit-progress-value { background: var(--accent); }
+.stapel-stand progress::-moz-progress-bar { background: var(--accent); }
+/* Abzeichen (src/lesen/ingest-page.js) und Menü „⋯“ rechts neben beiden Zeilen. Kein z-index am Rahmen:
+   Sonst läge das Abzeichen der nächsten Zeile über dem offenen Menü. */
+.stapel-list .lesen-item-acts { grid-column: 2; grid-row: 1 / span 2; flex-wrap: nowrap; margin: 0; }
+.stapel-list .lesen-item-acts :is(a, button, summary) { position: relative; z-index: 1; }
+.stapel-mehr .menu-panel { gap: var(--s-2); }
+.stapel-mehr .menu-panel .meta { margin: 0; }
 @media (max-width: 700px) {
+  /* Tippziele auf den Seiten der Spalte: Knöpfe und Auswahlen mindestens 40 px (`:where` hält die Regel schwach,
+     größere Knöpfe wie die Entscheidung im Eingang bleiben). */
+  :where(.lesen-spalte main.lesen) :is(.btn, select) { min-height: 40px; }
   /* Unterwegs zählt das Zeitfenster; umsortieren nur am Desktop */
   .stapel-sort { display: none; }
+  /* Chips bleiben in einer Zeile; reicht die Breite nicht, lässt sich die Zeile seitlich schieben. */
+  .stapel-zeit, .lesen-gruppe { flex-wrap: nowrap; gap: 4px; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .stapel-zeit::-webkit-scrollbar, .lesen-gruppe::-webkit-scrollbar { display: none; }
+  .stapel-zeit a.chip, .lesen-gruppe a.chip { flex: none; padding: 6px 11px; font-size: 14px; }
+  .stapel-fill { flex-basis: 100%; max-width: none; }
+  .stapel-kopf { margin-right: -10px; }
+  .stapel-kopf .btn { min-height: 40px; padding: 8px 10px; }
+  .stapel-karte { padding: var(--s-1) var(--s-4); }
+  /* Titel über die ganze Breite, darunter Metazeile und am Ende Abzeichen und Menü */
+  .stapel-list .lesen-item { gap: 0 var(--s-2); padding: 10px var(--s-3) 6px; }
+  .stapel-list .lesen-item:first-child { padding-top: 10px; }
+  .stapel-list .lesen-item:last-child { padding-bottom: 6px; }
+  .stapel-list .lesen-title { grid-column: 1 / -1; }
+  .stapel-list .lesen-item > .meta { min-height: 36px; line-height: 36px; }
+  .stapel-list .lesen-item-acts { grid-row: 2; }
+  /* Tippziele 40 px, ohne dass das Abzeichen größer aussieht */
+  .stapel-list .lesen-item-acts :is(a, button)::after { content: ''; position: absolute; inset: -6px -2px; }
+  /* Das Menü rückt neben den Titel, damit die Metazeile Platz für Quelle und Abzeichen hat. */
+  .stapel-list .lesen-item:has(.stapel-mehr) .lesen-title { padding-right: 36px; }
+  .stapel-mehr { position: absolute; top: 2px; right: 0; }
+  .stapel-mehr .menu-button { width: 40px; height: 40px; }
 }
 
 /* --- Lesen: Eingang --- */
@@ -732,6 +798,8 @@ details.rock[open] > summary { margin-bottom: var(--s-2); }
 .inbox-weg { color: var(--danger); }
 .inbox-actions kbd { display: none; padding: 2px 5px; border: 1px solid currentColor; border-radius: var(--r-xs); opacity: .6; }
 .inbox-save > summary { padding: var(--s-1) 0; }
+/* Gruppen-Chips direkt über der Karte: der Abstand des Rasters reicht. */
+main.lesen > .lesen-gruppe { margin-bottom: calc(-1 * var(--s-2)); }
 @media (hover: hover) and (pointer: fine) {
   .inbox-actions kbd { display: inline; }
 }
@@ -742,8 +810,13 @@ details.rock[open] > summary { margin-bottom: var(--s-2); }
 @media (max-width: 700px) {
   .inbox-actions { position: fixed; z-index: 10; left: var(--gutter); right: var(--gutter); bottom: calc(var(--unten) + env(safe-area-inset-bottom) + var(--s-3)); }
   .inbox-row .btn { background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
-  .inbox-decide .btn { min-height: 60px; font-size: var(--t-base); box-shadow: var(--shadow-2); }
+  /* Drei Knöpfe nebeneinander: „Jetzt lesen“ bekommt mehr Platz, sonst läuft die Beschriftung über den Rand. */
+  .inbox-decide { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.35fr); }
+  .inbox-decide .btn { min-height: 60px; padding-inline: var(--s-2); font-size: var(--t-base); box-shadow: var(--shadow-2); }
   main.lesen:has(.inbox-actions) { padding-bottom: 150px; }
+  /* Tippziel 40 px, ohne die Seite länger zu machen (sie passt sonst genau auf den Bildschirm) */
+  .inbox-save > summary { position: relative; }
+  .inbox-save > summary::before { content: ''; position: absolute; inset: -6px 0; }
   body:has(.inbox-actions) .toasts { bottom: calc(var(--unten) + env(safe-area-inset-bottom) + 136px); }
 }
 
@@ -761,6 +834,19 @@ details.rock[open] > summary { margin-bottom: var(--s-2); }
 .feed-auth { display: grid; gap: var(--s-2); margin: 0; padding: 0; border: 0; min-width: 0; }
 .feed-auth legend { padding: 0; margin-bottom: var(--s-1); }
 .feed-actions { margin: 0; }
+/* Ein Feed: Titel, darunter eine Metazeile (Quelle, Abstand, Stand); „Einstellungen“ steht rechts neben dem Titel
+   und klappt das Formular darunter über die ganze Breite auf. */
+.feed.lesen-item, .feed.lesen-item:first-child, .feed.lesen-item:last-child { position: relative; grid-template-columns: auto minmax(0, 1fr); gap: 2px 0; padding: 10px 0; }
+.feed > .feed-head { grid-column: 1 / -1; padding-right: 110px; }
+.feed > .meta { padding-left: 56px; }
+.feed > .feed-status { padding-left: 0; }
+.feed > .feed-status::before { content: '·'; margin: 0 .3em; }
+.feed > .feed-edit { grid-column: 1 / -1; margin: 0; }
+.feed > .feed-edit > summary { position: absolute; top: 10px; right: 0; }
+.feed > .feed-edit[open] { margin-top: var(--s-2); padding-left: 56px; }
+.feed-edit > summary:hover { color: var(--text); }
+.feed-lists .lesen-list { margin-bottom: var(--s-2); }
+.feed-group > .meta { margin: 0 0 var(--s-2); }
 .feed-group + .feed-group { margin-top: var(--s-5); }
 .feed-group > summary { cursor: pointer; font-weight: 600; margin-bottom: var(--s-2); }
 .feed-opml h2 { margin-top: 0; }
@@ -788,6 +874,18 @@ details.rock[open] > summary { margin-bottom: var(--s-2); }
 .feed-bulk:has(select[name=tun] option[value=abstand]:checked) .feed-bulk-abstand { display: flex !important; }
 .feed-bulk:has(select[name=tun] option[value=entfernen]:checked) .btn.primary { background: var(--danger); border-color: var(--danger); }
 .feed-remove .feed-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-4); }
+@media (max-width: 700px) {
+  /* Abonnieren mit Gruppen: Adresse über die ganze Breite, darunter Gruppe und Knopf */
+  .feed-abo { flex-wrap: wrap; }
+  .feed-abo .lesen-url { flex: 1 1 100%; }
+  .feed-abo .feed-field { flex: 1; }
+  /* Metazeile und Stand untereinander, eingerückt unter dem Titel */
+  .feed.lesen-item, .feed.lesen-item:first-child, .feed.lesen-item:last-child { grid-template-columns: minmax(0, 1fr); }
+  .feed > .feed-status { padding-left: 56px; }
+  .feed > .feed-status::before { content: none; }
+  .feed > .feed-edit > summary { top: 2px; line-height: 40px; }
+  .feed > .feed-edit[open] { padding-left: 0; }
+}
 @media (max-width: 520px) {
   .feed-bulk-fields > * { flex: 1 1 100%; }
   .feed-bulk-fields select, .feed-bulk-fields input:not([type=checkbox]) { flex: 1; min-width: 0; }
@@ -795,24 +893,34 @@ details.rock[open] > summary { margin-bottom: var(--s-2); }
 }
 
 /* --- Lesen: Leseansicht --- */
-/* /lesen/doc (src/lesen/doc.js): Bereiche · Stapel · Lesetext · Seitenleiste, schmaler werdend bis eine Spalte */
-.page-lesen-doc .subnav, main.lesen-doc { max-width: 1480px; }
-main.lesen-doc { grid-template-columns: 160px 220px minmax(0, 1fr) 280px; align-items: start; gap: var(--s-6); }
+/* /lesen/doc (src/lesen/doc.js): Stapel (schmal, leise) · Lesetext · Seitenleiste, schmaler werdend bis eine Spalte.
+   Gleiche Breite wie die anderen Lesen-Seiten, damit die Reiter beim Öffnen eines Textes nicht springen. */
+main.lesen-doc { grid-template-columns: 190px minmax(0, 1fr) 270px; align-items: start; gap: var(--s-7); }
 .lesen-col, .lesen-side { position: sticky; top: var(--s-4); max-height: calc(100vh - 2 * var(--s-4)); overflow-y: auto; scrollbar-width: thin; display: grid; gap: var(--s-4); align-content: start; }
 .lesen-col h2 { margin-bottom: var(--s-2); }
+.lesen-col h2 a { color: inherit; text-decoration: none; }
+.lesen-col h2 a:hover { color: var(--text); }
 .lesen-col ol { list-style: none; margin: 0; padding: 0; }
 .lesen-col a { display: block; padding: 6px 10px; border-radius: var(--r-sm); text-decoration: none; font-size: 14px; color: var(--text-2); }
-.lesen-col a:hover { background: var(--bg-sunk); color: var(--text); }
+.lesen-col ol a:hover { background: var(--bg-sunk); color: var(--text); }
 .lesen-col a[aria-current=page] { background: var(--accent-soft); color: var(--accent); }
 .lesen-col a .meta { display: inline; font-size: var(--t-xs); }
-.lesen-stack a { font-family: var(--font-read); color: var(--text); }
-.lesen-stack a .meta { display: block; font-family: var(--font); }
+/* Der Stapel tritt neben dem Text zurück: kleine Schrift, Titel auf zwei Zeilen gekürzt, kein Rand an der Überschrift. */
+.lesen-stack h2 a { display: inline; padding: 0; font-size: inherit; }
+.lesen-stack ol { margin: 0 -10px; }
+.lesen-stack ol a { font-size: var(--t-sm); line-height: 1.35; }
+.lesen-stack-title { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.lesen-stack a .meta { display: block; margin-top: 1px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lesen-stack a[aria-current=page] .meta { color: inherit; opacity: .8; }
 
 .lesen-reader { position: relative; width: 100%; max-width: 72ch; justify-self: center; min-width: 0; }
 /* Aktiver Absatz (lesen-doc.js): Strich am linken Rand, außerhalb des Lesetexts, damit die Anker stimmen. */
 .lesen-fokus { position: absolute; left: -14px; width: 3px; border-radius: var(--r-full); background: var(--accent); pointer-events: none; transition: top var(--fast) ease, height var(--fast) ease; }
 .lesen-fokus[hidden] { display: none; }
-.lesen-doc-head { display: grid; gap: var(--s-2); margin-bottom: var(--s-2); }
+.lesen-doc-head { display: grid; gap: var(--s-2); margin-bottom: var(--s-1); }
+/* Unter dem Titel: Quelle links, rechts leise „Fokus“ und das Menü „Aa“ für die Schrift */
+.lesen-doc-meta { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); min-height: 32px; }
+.lesen-doc-meta > .meta { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .lesen-doc-head h1 { font: 700 var(--t-2xl)/1.2 var(--font-read); letter-spacing: -.01em; overflow-wrap: anywhere; }
 .lesen-progress { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; display: flex; align-items: center; gap: var(--s-3); padding: var(--s-2) 0; background: var(--bg); }
 .lesen-progress .meta { white-space: nowrap; }
@@ -820,12 +928,40 @@ main.lesen-doc { grid-template-columns: 160px 220px minmax(0, 1fr) 280px; align-
 .lesen-progress progress::-webkit-progress-bar { background: var(--line); }
 .lesen-progress progress::-webkit-progress-value { background: var(--accent); }
 .lesen-progress progress::-moz-progress-bar { background: var(--accent); }
-.lesen-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s-2); margin-bottom: var(--s-5); }
-.lesen-tools form { margin: 0; }
-/* Schriftgröße und Schriftart stellt erst das Script ein (lesen-doc.js setzt .lesen-js). */
-.lesen-view { display: none; gap: 2px; }
+.lesen-tools { margin: var(--s-1) 0 var(--s-5); }
+.lesen-tools form, .lesen-ende form { margin: 0; }
+/* Am Ende des Textes steht die Entscheidung noch einmal, damit man nicht zurückblättern muss. */
+.lesen-ende { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-4); margin-top: var(--s-7); padding-top: var(--s-4); border-top: 1px solid var(--line); }
+.lesen-ende > .meta { margin: 0; }
+/* Schrift und Fokus stellt erst das Script ein (lesen-doc.js setzt .lesen-js). */
+.lesen-view { display: none; flex: none; align-items: center; gap: 2px; margin-right: -8px; }
 .lesen-js .lesen-view { display: flex; }
+.lesen-view > .btn, .lesen-ansicht > summary { width: auto; height: auto; min-height: 32px; padding: 4px 8px; font: 500 var(--t-sm)/1 var(--font); color: var(--text-2); }
+.lesen-ansicht { position: relative; }
+.lesen-ansicht > summary { font-weight: 650; letter-spacing: .01em; }
+.lesen-ansicht .menu-panel { width: max-content; max-width: calc(100vw - 32px); top: calc(100% + 4px); gap: var(--s-2); padding: var(--s-3); }
+.lesen-ansicht .menu-label { margin: 0; }
+.lesen-schrift { display: flex; gap: 6px; }
+.lesen-schrift [aria-pressed=true] { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent); }
+/* Fokus (Taste F): nur der Text. Unternavigation, Stapel und Seitenleiste treten weg; „Verbinden“ zeigt
+   seine Treffer dann als Blatt unten rechts, wie auf schmalen Bildschirmen. */
+html[data-read-nur-text] .lesen-nur-text { background: var(--accent-soft); color: var(--accent); }
+@media (min-width: 901px) {
+  html[data-read-nur-text] .page-lesen-doc .subnav, html[data-read-nur-text] .lesen-stack { display: none; }
+  html[data-read-nur-text] main.lesen-doc { grid-template-columns: minmax(0, 1fr); padding-top: var(--s-7); }
+  html[data-read-nur-text] .lesen-side { display: contents; }
+  html[data-read-nur-text] .lesen-side > * { display: none; }
+  html[data-read-nur-text] .lesen-side > .lesen-links.is-open { display: grid; position: fixed; z-index: 26; right: var(--gutter); bottom: calc(var(--unten) + var(--s-4)); width: 340px;
+    max-height: 70vh; overflow-y: auto; overscroll-behavior: contain; border-radius: var(--r-xl); box-shadow: var(--shadow-pop); animation: sheet-in .2s var(--ease); }
+  html[data-read-nur-text] .lesen-links.is-open .lesen-links-close { display: inline-flex; }
+}
+@media (max-width: 900px) {
+  /* Eine Spalte: Es gibt nichts auszublenden. */
+  .lesen-nur-text { display: none; }
+}
 .lesen-doc kbd, .lesen-selbar kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-radius: var(--r-xs); color: var(--text-2); font-weight: 400; }
+/* Auf dem Hauptknopf bliebe die Taste sonst unsichtbar (grau auf Akzent). */
+.lesen-doc .btn.primary kbd { color: inherit; border-color: currentColor; opacity: .75; }
 
 .lesen-text { --read-size: 19px; font: var(--read-size)/1.65 var(--font-read); overflow-wrap: break-word; }
 html[data-read-size="1"] .lesen-text { --read-size: 15px; }
@@ -858,6 +994,8 @@ html[data-read-sans] .lesen-text :is(h1, h2, h3, h4, h5, h6) { font-family: var(
 .lesen-note { margin: 0; font-size: var(--t-sm); white-space: pre-wrap; }
 .lesen-notes form { margin: 0; }
 .lesen-notes .btn { min-height: 28px; padding: 2px 8px; font-size: var(--t-xs); justify-self: start; }
+/* Tastenkürzel: zugeklappt am Ende der Seitenleiste (die Prüfansicht des Ingests zeigt sie als Karte) */
+details.lesen-keys { margin: 0; padding: 0 var(--s-4); }
 .lesen-keys dl { margin: 0; display: grid; gap: 6px; font-size: var(--t-sm); }
 .lesen-keys dl div { display: flex; gap: var(--s-2); align-items: baseline; }
 .lesen-keys dt { min-width: 52px; }
@@ -869,16 +1007,15 @@ html[data-read-sans] .lesen-text :is(h1, h2, h3, h4, h5, h6) { font-family: var(
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-xl); box-shadow: var(--shadow-pop); }
 .lesen-selbar[hidden], .lesen-selbar [hidden] { display: none; }
 
-/* Markiert: Filter nach Quelle und Thema */
-.lesen-filter { display: flex; flex-wrap: wrap; align-items: end; gap: var(--s-3); margin: 0; }
-.lesen-filter-field { display: grid; gap: 4px; font-size: var(--t-sm); color: var(--text-2); }
+/* Markiert: Filter nach Quelle und Thema als Werkzeugzeile über der Liste */
+.lesen-filter { display: flex; flex-wrap: wrap; align-items: end; gap: var(--s-2) var(--s-3); margin: 0 0 calc(-1 * var(--s-2)); }
+.lesen-filter-field { display: grid; gap: 4px; min-width: 0; font-size: var(--t-sm); color: var(--text-2); }
+.lesen-filter-field select { min-width: 0; max-width: 100%; }
+.markiert { padding-block: var(--s-4); }
+.markiert .lesen-item { gap: var(--s-1); }
 
-@media (max-width: 1280px) {
-  main.lesen-doc { grid-template-columns: 220px minmax(0, 1fr) 260px; }
-  .lesen-areas { display: none; }
-}
-@media (max-width: 1080px) {
-  main.lesen-doc { grid-template-columns: minmax(0, 1fr) 260px; }
+@media (max-width: 1180px) {
+  main.lesen-doc { grid-template-columns: minmax(0, 1fr) 260px; gap: var(--s-6); }
   .lesen-stack { display: none; }
 }
 @media (max-width: 900px) {
@@ -886,7 +1023,18 @@ html[data-read-sans] .lesen-text :is(h1, h2, h3, h4, h5, h6) { font-family: var(
   .lesen-side { position: static; max-height: none; overflow: visible; }
 }
 @media (max-width: 700px) {
-  .lesen-doc-head h1 { font-size: var(--t-xl); }
+  /* Markiert: beide Auswahlen und „Filtern“ in einer Zeile */
+  .lesen-filter { flex-wrap: nowrap; margin-bottom: 0; }
+  .lesen-filter-field { flex: 1 1 0; }
+  .lesen-filter .btn { flex: none; min-height: 40px; padding-inline: var(--s-3); }
+  main.lesen-doc { padding-top: var(--s-4); }
+  .lesen-doc-head h1 { font-size: 24px; }
+  .lesen-doc-meta { align-items: flex-start; }
+  .lesen-ansicht > summary { min-width: 40px; min-height: 40px; margin-top: -10px; }
+  /* Das Menü „Aa“ ist hier ein Blatt von unten (.menu-panel): Knöpfe über die Breite */
+  .lesen-ansicht .menu-panel { width: auto; max-width: none; top: auto; padding: var(--s-4); }
+  .lesen-schrift .btn { flex: 1; min-height: 44px; }
+  .lesen-tools { margin-bottom: var(--s-4); }
   .lesen-text { --read-size: 18px; }
   .lesen-selbar { left: 8px; right: 8px; transform: none; justify-content: center; }
   .lesen-selbar .btn { flex: 1; padding: 8px 10px; }
@@ -930,6 +1078,9 @@ html[data-read-sans] .lesen-text :is(h1, h2, h3, h4, h5, h6) { font-family: var(
 .wiedersehen-link ul { display: grid; gap: var(--s-3); }
 .wiedersehen-link li { display: grid; gap: 2px; }
 .wiedersehen-link form { margin: 0; }
+@media (max-width: 700px) {
+  .wiedersehen-worte summary { padding: 10px 0; }
+}
 
 /* --- Lesen: Hören --- */
 /* /lesen/hoeren (src/lesen/listen.js, /static/lesen-hoeren.js): Wiedergabe über der Liste, große Knöpfe für unterwegs */
@@ -1366,11 +1517,18 @@ a.ingest-item-open:hover, a.ingest-item-open:focus-visible { color: var(--accent
 
 /* --- Lesen: Entscheiden nach dem Lesen und Ablegen (VCP-96) --- */
 /* Leseansicht: Fertig, weg · In den Vault (mit Volltext) · Zurück; Eingang und Stapel: Im Vault ablegen */
-.lesen-decide { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--s-2); margin-left: auto; }
+/* Über dem Text: links das Ingest-Abzeichen (Stand), rechts die Entscheidung, deutlich als Knöpfe */
+.lesen-decide { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--s-2); }
+.lesen-decide > :is(.ingest-badge, .ingest-badge-form) { margin-right: auto; }
+.lesen-ende .lesen-decide { margin-left: auto; }
 .lesen-decide form[data-decide=vault] { display: flex; align-items: center; gap: var(--s-2); }
 .lesen-volltext { display: inline-flex; align-items: center; gap: var(--s-1); min-height: 34px; font-size: var(--t-sm); color: var(--text-2); cursor: pointer; }
 .inbox-ablegen { margin-left: auto; }
-.lesen-ablegen { margin: var(--s-1) 0 0; justify-self: start; }
+.lesen-ablegen { margin: 0; }
+@media (max-width: 700px) {
+  /* Tippziele: Knöpfe, Abzeichen und die Wahl „mit Volltext“ */
+  .lesen-decide .btn, .lesen-decide .ingest-badge, .lesen-decide .ingest-badge-form .btn, .lesen-decide .lesen-volltext { min-height: 40px; }
+}
 
 /* --- Player: Leiste unten und Hülle beim Seitenwechsel (/static/player.js) --- */
 .player-bar { position: fixed; z-index: 16; left: 50%; transform: translateX(-50%); bottom: calc(var(--tabbar) + env(safe-area-inset-bottom) + var(--s-2));
