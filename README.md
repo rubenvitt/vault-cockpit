@@ -511,13 +511,15 @@ einer Woche, legt **Feuer anlegen** sie mit Feuer-Ziel und (optional) Erstem Zug
 an: im Ordner und Feuersturm der letzten Feuer-Notiz, Wochennummer und Dateiname
 weitergezählt, mit leeren Tabellen für Schritte und Flammen. Nach W12 legt das
 Cockpit keine an, dann gehört ein neuer Feuersturm in Obsidian geplant. Der **Wochenrückblick**
-unter `/rueckblick` (in der Navigation, `?woche=` für frühere Wochen) zeigt je
+unter `/rueckblick` (Umschalter **Planen · Woche · Rückblick** im Seitenkopf der
+Woche, `?woche=` für frühere Wochen; in Kopfzeile und Leiste unten stehen nur
+Woche, Lesen, Suche und Einstellungen, VCP-145) zeigt je
 Bereich, was erledigt war und was geplant war (Phönix-Schritte und in der Woche
 Fälliges), was außerdem erledigt wurde, die Flammen-Zeit der Woche und was offen
 blieb. Die Flammen-Zeit zählt auch Blöcke an Aufgaben, die ungeplant gebrannt
 haben, mit denselben Minuten wie die Tabelle in der Feuer-Notiz.
 
-**Wissen:** `/wissen` sucht mit einer Frage in den Synthesen (Frontmatter
+**Wissen** (unter „Suche“, Reiter Vault · Wissen · Fragen): `/wissen` sucht mit einer Frage in den Synthesen (Frontmatter
 `type: synthesis`, Hybrid-Suche mit Typfilter; `/api/suche` kennt `type` auch),
 filtert nach Querverbindung (`art`) und Status (z. B. Entwurf) und listet die
 zuletzt bewegten nach `updated`; alles über ein GET-Formular ohne JavaScript.
