@@ -207,6 +207,8 @@ for (const [path, file] of offlineFiles(PUBLIC, { html: HTML_HEADERS }).entries)
  *   dem der Offline-Puffer die Schnelleingabe nachsendet (401 ohne Sitzung).
  *   `GET /api/lesen/offline` nennt die Seiten, die der Service Worker als
  *   Lesestoff für unterwegs speichern darf (src/web/offline.js).
+ * - `GET /api/palette` nennt der Befehlspalette (⌘K, `/static/ui.js`) die Ziele, die es in
+ *   dieser Installation gibt (`urls`), und ob die Woche eine Schnelleingabe hat (`capture`).
  * - JSON für die native App (auch mit Sitzung): `GET /api/notiz?pfad=…` (Notizseite,
  *   Text als Baum, src/web/note-json.js), `GET /api/wissen?q=…&art=…&status=…&lesen=1`,
  *   `GET /api/suche?q=…&alle=1` (alle Treffer statt der besten acht), `GET /api/zustand`;
@@ -1215,6 +1217,14 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   for (const p of appAccess ? [...appAccess.paths, SITE_ASSOCIATION_PATH, APP_CALLBACK_PATH] : []) ROUTES.add(p);
   if (reading?.shared) ROUTES.add(reading.shared.path);
 
+  /**
+   * Befehlspalette (`/static/ui.js`): Namen und Suchwörter der Ziele kennt das Script, hier
+   * steht nur, welche davon es in dieser Installation gibt. Planen (ohne Zunder), Folgen,
+   * Ingest, Fragen und Zustand sind eigene Routen und fehlen sonst.
+   */
+  const PALETTE_PAGES = ['/', '/planen', '/rueckblick', '/lesen/weiter', '/lesen/eingang', '/lesen/stapel', '/lesen/folgen', '/lesen/ingest', '/lesen/markiert', '/lesen/wiedersehen', '/lesen/feeds', '/graph', '/wissen', '/fragen', '/einstellungen', '/zustand'];
+  ROUTES.add('/api/palette');
+
   return {
     matches: (path) => ROUTES.has(path),
 
@@ -1358,6 +1368,8 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       if (path === '/api/notiz') return noteApi(req, res, url);
       if (path === '/api/wissen') return json(res, 200, await wissenView({ notes, search, evidence }, wissenQuery(url)));
       if (path === '/api/zustand') return json(res, 200, await healthApi());
+      // `capture`: Die Woche hat eine Schnelleingabe, die Palette darf Text dorthin geben.
+      if (path === '/api/palette') return json(res, 200, { ok: true, urls: PALETTE_PAGES.filter((p) => ROUTES.has(p)), capture: Boolean(actions) });
       if (!session) return redirect(res, `/login?next=${encodeURIComponent(url.pathname + url.search)}`);
       if (path === '/graph') return graphPage(req, res, url, session);
       if (path === '/graph/alles' && wholeGraph) return send(res, 200, renderWholeGraph({ user: session.name ?? session.sub, notes: Boolean(notes), focus: url.searchParams.get('pfad') || null }));

@@ -96,10 +96,14 @@ export function searchNav(current, { fragen = false } = {}) {
 }
 
 /**
- * Kopfzeile mit Marke und Hauptnavigation, darunter (in `body`) dieselbe
+ * Kopfzeile mit Marke, Auslöser der Befehlspalette und Hauptnavigation, darunter (in `body`) dieselbe
  * Navigation als Leiste für schmale Bildschirme. `links` überschreibt Ziele,
  * z. B. die angezeigte Woche. `alert` (fertiges HTML, siehe
  * health-render.js) steht vor dem Abmelden, etwa der Hinweis auf gestörte Dienste.
+ *
+ * Zwischen Marke und Navigation steht der Auslöser der Befehlspalette
+ * (`data-palette`, /static/ui.js): mit JavaScript öffnet er sie wie ⌘K bzw.
+ * Strg+K und zeigt das Kürzel im `<kbd>`, ohne ist er ein Link zur Suche.
  */
 export function appHeader({ current = null, user = null, links = {}, alert = '' } = {}) {
   const items = NAV.map(([key, href, label, ic]) => ({ key, href: links[key] ?? href, label, ic }));
@@ -107,6 +111,7 @@ export function appHeader({ current = null, user = null, links = {}, alert = '' 
     `<a href="${esc(i.href)}" class="${cls}"${i.key === current ? ' aria-current="page"' : ''}>${icon(i.ic)}<span>${i.label}</span></a>`;
   return `<header class="app-header">
   <a href="/" class="brand" aria-label="Cockpit, zur Woche">${icon('flame', 'brand-mark')}<span class="brand-name">Cockpit</span></a>
+  <a href="/graph" class="palette-open" data-palette>${icon('search')}<span>Suchen</span><kbd hidden></kbd></a>
   <nav class="app-nav" aria-label="Hauptnavigation">${items.map((i) => link(i, 'nav-link')).join('')}</nav>${alert}
   <form method="post" action="/logout" class="logout"><button type="submit" class="nav-link quiet" title="${esc(user ? `Abmelden (${user})` : 'Abmelden')}">${icon('logout')}<span>Abmelden</span></button></form>
 </header>

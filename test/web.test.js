@@ -251,6 +251,39 @@ test('Login: PKCE, nonce, Sitzungs-Cookie, Rücksprung und Wochenseite', async (
   });
 });
 
+test('Befehlspalette: Auslöser in der Kopfzeile ohne Inline-Skript, /api/palette nur angemeldet', async () => {
+  await withServer(async ({ call, login }) => {
+    const anon = await call('/api/palette');
+    assert.equal(anon.status, 401);
+    assert.equal((await anon.json()).error, 'unauthorized');
+    await login();
+    // Ohne JavaScript ist der Auslöser ein Link zur Suche; das Kürzel trägt erst /static/ui.js ein.
+    const html = await (await call('/?woche=2026-W42')).text();
+    assert.match(html, /<a href="\/graph" class="palette-open" data-palette><svg[^>]*>.*?<\/svg><span>Suchen<\/span><kbd hidden><\/kbd><\/a>\s*<nav class="app-nav"/);
+    assert.ok(!/<script(?![^>]*\ssrc=)/.test(html), 'kein Inline-Skript');
+    assert.ok(!/\sstyle="/.test(html), 'kein Inline-Style');
+    assert.match(await (await call('/static/ui.js', { cookies: false })).text(), /cockpitPalette/);
+    assert.match(await (await call('/static/cockpit.css', { cookies: false })).text(), /\.palette-open \{/);
+    // Ohne Zunder-Planung, Lesen, Notizen und Zustand bleibt der Kern; ohne Aktionen gibt es keine Schnelleingabe.
+    const res = await call('/api/palette');
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(await res.json(), { ok: true, urls: ['/', '/rueckblick', '/graph', '/einstellungen'], capture: false });
+    // `/api/sitzung` behält seine Form.
+    assert.deepEqual(Object.keys(await (await call('/api/sitzung')).json()), ['ok', 'csrf']);
+  });
+  await withServer(
+    async ({ call, login }) => {
+      await login();
+      const body = await (await call('/api/palette')).json();
+      assert.equal(body.capture, true, 'mit Aktionen hat die Woche eine Schnelleingabe');
+      assert.deepEqual(body.urls, ['/', '/rueckblick', '/graph', '/wissen', '/einstellungen'], 'mit Notizen kommt Wissen dazu');
+    },
+    {},
+    { actions: fakeActions(), notes: fakeNotes() },
+  );
+});
+
 test('Login: Client Secret geht per Basic-Auth an den Token-Endpunkt', async () => {
   await withServer(
     async ({ login, idp }) => {
