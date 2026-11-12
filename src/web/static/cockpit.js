@@ -138,6 +138,24 @@
     rock.classList.toggle('all-done', items.length > 0 && done === items.length);
   }
 
+  // --- Aufklappbares ---------------------------------------------------------
+
+  // Bereiche der Big Rocks, „N weitere“ und die vergangenen Tage sind `<details data-keep="…">`.
+  // Ihr Stand überlebt den Tausch von `main` nach einer Aktion (refresh), sonst klappte die
+  // Inbox beim Abarbeiten nach jedem Schritt wieder zu. Auf schmalen Bildschirmen klappen
+  // Bereiche ohne offenen Phönix-Schritt (`data-fold`) zu, solange niemand sie angefasst hat:
+  // Heute steht dort oben, die übrige Woche ist einen Tipp entfernt.
+  const narrow = window.matchMedia('(max-width: 900px)');
+  const keptOpen = () => new Map([...document.querySelectorAll('details[data-keep]')].map((d) => [d.dataset.keep, d.open]));
+  function restoreOpen(states) {
+    for (const d of document.querySelectorAll('details[data-keep]')) {
+      const was = states.get(d.dataset.keep);
+      if (was !== undefined) d.open = was;
+      else if (narrow.matches && d.hasAttribute('data-fold')) d.open = false;
+    }
+  }
+  restoreOpen(new Map());
+
   // Dieselbe Aufgabe kann zweimal auf der Seite stehen (Heute und Big Rocks): beide folgen.
   function copiesOf(li) {
     const id = li.dataset.id;
@@ -245,7 +263,10 @@
       if (!res.ok) return;
       const fresh = new DOMParser().parseFromString(await res.text(), 'text/html').querySelector('main');
       const current = document.querySelector('main');
-      if (fresh && current) current.replaceWith(document.adoptNode(fresh));
+      if (!fresh || !current) return;
+      const open = keptOpen();
+      current.replaceWith(document.adoptNode(fresh));
+      restoreOpen(open);
     } catch {
       /* Die Meldung ist schon da; die Ansicht holt beim nächsten Laden auf. */
     }

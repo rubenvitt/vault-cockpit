@@ -312,6 +312,23 @@ test('Einstellungen speichern: einzelne Felder, Geheimnisse bleiben, löschen nu
   });
 });
 
+test('Einstellungen speichern: die Reihenfolge der Bereiche pflegt nur die Web-Seite, die App lässt sie stehen', async () => {
+  await withSettingsApp(async ({ get, post, settings }) => {
+    const order = ['Selbstverwirklichung', 'Meine Liebste', 'Arbeitnehmer'];
+    settings.save({ ...FULL, areaOrder: order });
+    // Die App kennt das Feld nicht (ihre JSON bleibt, wie sie ist) …
+    const anzeige = (await get('/api/einstellungen')).body.sections.find((s) => s.id === 'anzeige');
+    assert.deepEqual(anzeige.fields.map((f) => f.name), ['tz', 'vaultName', 'inboxFolder']);
+    // … und was sie speichert, setzt die Rangfolge nicht zurück: ohne Felder, mit einzelnen, mit Kalendern.
+    await post('/api/einstellungen', {});
+    await post('/api/einstellungen', { tz: 'UTC', hiddenEvents: 'Fokus', inboxFolder: 'eingang' });
+    await post('/api/einstellungen', { 'cal.0.remove': '1' });
+    assert.equal(settings.stored().tz, 'UTC');
+    assert.deepEqual(settings.stored().areaOrder, order);
+    assert.deepEqual(settings.get().areaOrder, order);
+  });
+});
+
 test('Einstellungen speichern: Fehler mit Feld, nichts gespeichert; mit Sitzung nur mit CSRF und von dieser Seite', async () => {
   await withSettingsApp(async ({ call, get, post, settings }) => {
     settings.save(FULL);

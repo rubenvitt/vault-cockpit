@@ -385,7 +385,7 @@ test('Web: geholte Aufgabe steht sofort unter ihrem Bereich in den Big Rocks, R�
     assert.match(page, /<span class="pill ok">Phönix-Schritt KW 42<\/span>/);
 
     const week = await (await call('/?woche=2026-W42')).text();
-    const finanzen = week.match(/<article class="rock[^"]*">\s*<h3>Finanzen[^]*?<\/article>/)[0];
+    const finanzen = week.match(/<details class="rock[^"]*" data-keep="rock:Finanzen"[^>]*>\s*<summary><h3>Finanzen[^]*?<\/details>/)[0];
     assert.match(finanzen, /Belege sortieren/);
 
     // Mit JavaScript: JSON mit Rückgängig; Rückgängig nimmt die Markierung wieder weg.
@@ -452,7 +452,38 @@ test('renderPlan: Vorschläge, Woche mit „Aus der Woche“, ohne Schreibrecht 
   assert.equal((weekPart.match(/action="\/aktion\/woche\/raus"/g) ?? []).length, 2);
   assert.match(weekPart, /Steuererklärung abgeben[^]*?<span class="hint">fällig<\/span>/);
 
+  // Die Woche steht kompakt in Gruppen: erst die Flammen, dann die Bereiche der Big Rocks.
+  assert.deepEqual([...weekPart.matchAll(/<div class="plan-group">\s*<h3>([^<]+?)(?: <span class="count-badge">(\d+)<\/span>)?<\/h3>/g)].map((x) => [x[1], x[2]]), [['Flammen', '1'], ['Finanzen', '1'], ['Gesundheit', '1']]);
+
   const readOnly = renderPlan(m, {});
   assert.ok(!readOnly.includes('/aktion/'));
   assert.ok(!readOnly.includes('cockpit.js'));
+});
+
+test('Planen: Gruppen und Vorschläge in der eigenen Rangfolge der Bereiche (areaOrder)', async () => {
+  const settings = settingsWith();
+  settings.save({ ...settings.stored(), areaOrder: ['gesundheit'] });
+  const m = await createWeekPlanner({ settings, zunder: () => fakeZunder(), now: fixedNow, logger: quiet }).view('2026-W42');
+  assert.deepEqual(m.planned.rocks.map((g) => g.area), ['Gesundheit', 'Finanzen']);
+  assert.deepEqual(m.suggestions.map((g) => g.area), ['Gesundheit', 'Finanzen']);
+  // Die Auswahl der Bereiche (Suche, Ort einer Flamme) bleibt alphabetisch: dort sucht man nach dem Namen.
+  assert.deepEqual(m.areas.map((a) => a.name), ['Finanzen', 'Gesundheit', 'Programmieren']);
+});
+
+test('renderPlan: nur Bereiche mit Vorschlägen als Gruppe, leere in einer Zeile mit Link zu „alle offenen“', async () => {
+  // Gesundheit hat einen Big Rock (t6), aber nichts Offenes ohne Termin mehr.
+  const tasks = seed().filter((t) => t.id !== 't5');
+  const m = await planner(fakeZunder(tasks)).view('2026-W42');
+  const html = renderPlan(m, { write: { csrf: 'c', captureId: 'x', notes: false, plan: true } });
+  const part = html.match(/<section class="plan-suggest">[\s\S]*?<\/section>/)[0];
+  assert.equal((part.match(/<article class="plan-group">/g) ?? []).length, 1);
+  assert.match(part, /<h3>Finanzen <a href="\/planen\?woche=2026-W42&amp;bereich=a1" class="hint">alle offenen<\/a><\/h3>/);
+  assert.match(part, /<p class="meta plan-none">Nichts offen ohne Termin in: <a href="\/planen\?woche=2026-W42&amp;bereich=a2" title="Alle offenen Aufgaben in Gesundheit">Gesundheit<\/a><\/p>/);
+  assert.doesNotMatch(part, /Nichts offen ohne Termin\.<\/p>/);
+
+  // Kein Bereich hat Vorschläge: keine Gruppe, nur die Zeile.
+  const none = await planner(fakeZunder(tasks.filter((t) => t.id !== 't1'))).view('2026-W42');
+  const empty = renderPlan(none, { write: { csrf: 'c', captureId: 'x', notes: false, plan: true } }).match(/<section class="plan-suggest">[\s\S]*?<\/section>/)[0];
+  assert.doesNotMatch(empty, /plan-group/);
+  assert.match(empty, /Nichts offen ohne Termin\. Alle offenen Aufgaben in: <a [^>]+>Finanzen<\/a>, <a [^>]+>Gesundheit<\/a>/);
 });

@@ -383,21 +383,43 @@ test('renderWeek: escaped Inhalte, Feuer-Ziel mit Markdown, Navigation', async (
   assert.match(html, /90 min/);
 });
 
-test('renderWeek: vergangene Tage treten zurück, heute steht im Kopf der Termine', async () => {
+test('renderWeek: vergangene Tage eingeklappt in einer Zeile, heute steht im Kopf der Termine', async () => {
   const cockpit = createCockpit({ index: fakeIndex([feuerNote()]), settings: settingsWith(), zunderFor: () => fakeZunder(TASKS), now: fixedNow, logger: quiet });
   const m = await cockpit.week();
   m.calendar = {
     ok: true,
     data: [
       { label: 'Mo 12.10.', today: false, events: [{ title: 'A', start: new Date('2026-10-12T08:00:00Z'), allDay: false }] },
-      { label: 'Di 13.10.', today: true, events: [] },
-      { label: 'Mi 14.10.', today: false, events: [] },
+      { label: 'Di 13.10.', today: false, events: [] },
+      { label: 'Mi 14.10.', today: true, events: [] },
+      { label: 'Do 15.10.', today: false, events: [] },
     ],
   };
   const html = renderWeek(m);
-  assert.match(html, /<div class="day past">\s*<h3>Mo 12\.10\. <span class="day-count">1 Termin<\/span><\/h3>/);
-  assert.match(html, /<div class="day today">/);
+  // Mo und Di sind vorbei: eine Zeile mit der Zahl, aufgeklappt stehen die Tage mit ihren Terminen da.
+  const past = html.match(/<details class="days-past more-items" data-keep="tage-vorbei">[\s\S]*?<\/details>/)[0];
+  assert.match(past, /<summary>Mo–Di <span class="hint">vorbei · 1 Termin<\/span><\/summary>/);
+  assert.match(past, /<div class="day past">\s*<h3>Mo 12\.10\.<\/h3>[\s\S]*?<span class="title">A<\/span>/);
+  assert.doesNotMatch(past, /Mi 14\.10\./);
+  // Heute und die kommenden Tage stehen danach als Spalten.
+  const rest = html.slice(html.indexOf('</details>', html.indexOf('data-keep="tage-vorbei"')));
+  assert.match(rest, /<div class="week"><div class="day today">\s*<h3>Mi 14\.10\.<\/h3>/);
+  assert.match(rest, /<div class="day">\s*<h3>Do 15\.10\.<\/h3>/);
   assert.match(html, /<h2>Termine <span class="hint">heute frei<\/span><\/h2>/);
+
+  // Ein einzelner vergangener Tag steht ohne Bereich da; hat heute Termine, bekommt der Tag die Zahl
+  // für schmale Bildschirme mit (dort zeigt „Heute“ die Termine schon oben).
+  m.calendar.data = [
+    { label: 'Mo 12.10.', today: false, events: [] },
+    { label: 'Di 13.10.', today: true, events: [{ title: 'B', start: new Date('2026-10-13T08:00:00Z'), allDay: false }, { title: 'C', start: new Date('2026-10-13T09:00:00Z'), allDay: false }] },
+  ];
+  const tue = renderWeek(m);
+  assert.match(tue, /<summary>Mo <span class="hint">vorbei · keine Termine<\/span><\/summary>/);
+  assert.match(tue, /<h3>Di 13\.10\. <span class="day-count">2 Termine, siehe Heute<\/span><\/h3>/);
+
+  // Eine andere Woche hat keinen heutigen Tag: alle sieben stehen nebeneinander, nichts ist eingeklappt.
+  const other = renderWeek({ ...m, calendar: { ok: true, data: m.calendar.data.map((d) => ({ ...d, today: false })) } });
+  assert.doesNotMatch(other, /days-past|day-count|class="day (past|today)"/);
 });
 
 test('dueTag: Heute und Morgen als Wort, überfällig nur offen, ohne Fälligkeit leer', () => {
@@ -425,11 +447,22 @@ test('renderWeek: Fälligkeit als Schild, erledigte Bereiche eingeklappt, Heute 
   m.calendar = { ok: true, data: [{ label: 'Mi 14.10.', today: true, events: [{ title: 'Workshop', start: new Date('2026-10-14T12:00:00Z'), allDay: false }] }] };
   const html = renderWeek(m);
   // Datum steht nicht mehr in der Meta-Zeile, sondern als Schild hinter dem Titel.
-  assert.match(html, /Helfermappe drucken<\/a> <span class="due" title="Fällig Fr 16\.10\.">Fr 16\.10\.<\/span><span class="meta">Gruppe I&amp;K<\/span>/);
+  assert.match(html, /Helfermappe drucken<\/a> <span class="due" title="Fällig Fr 16\.10\.">Fr 16\.10\.<\/span> <span class="meta">Gruppe I&amp;K<\/span>/);
   assert.match(html, /<li class="task status-open overdue"[^>]*data-title="Seite für Personalentwicklung"/);
-  // Arbeitnehmer ist komplett erledigt: eine Zeile zum Aufklappen.
-  assert.match(html, /<details class="rock all-done">\s*<summary><h3>Arbeitnehmer <span class="count" data-count>1\/1<\/span><\/h3><\/summary>/);
-  assert.match(html, /<article class="rock">\s*<h3>Finanzen/);
+  // Arbeitnehmer ist komplett erledigt: eine Zeile zum Aufklappen (ohne `open`).
+  assert.match(html, /<details class="rock all-done" data-keep="rock:Arbeitnehmer">\s*<summary><h3>Arbeitnehmer <span class="count" data-count>1\/1<\/span><\/h3>\s*<progress class="rock-progress" value="1" max="1" aria-hidden="true"><\/progress><\/summary>/);
+  // Finanzen ist offen und hat einen offenen Phönix-Schritt: bleibt auch schmal aufgeklappt.
+  assert.match(html, /<details class="rock" data-keep="rock:Finanzen" open>\s*<summary><h3>Finanzen <span class="count" data-count>0\/3<\/span><\/h3>/);
+  // Ehrenamt ist nur fällig: offen, aber schmal klappt cockpit.js es zu (`data-fold`).
+  assert.match(html, /<details class="rock" data-keep="rock:Ehrenamt \(DRK Bereitschaft\)" open data-fold>/);
+  // Im Bereich steht der bewusst gewählte Phönix-Schritt vorn und trägt das Schild.
+  const finanzen = html.match(/<details class="rock" data-keep="rock:Finanzen"[\s\S]*?<\/ul>\s*<\/details>/)[0];
+  assert.deepEqual([...finanzen.matchAll(/<li class="task[^>]*data-title="([^"]+)"/g)].map((x) => x[1]), ['Alter Schritt', 'Seit Montag fällig', 'Heute fällig']);
+  assert.match(finanzen, /Alter Schritt<\/a> <span class="step" title="Phönix-Schritt KW 42">Schritt<\/span> <span class="due overdue"/);
+  assert.equal((finanzen.match(/class="step"/g) ?? []).length, 1);
+  // Zwei Spalten, die Reihenfolge der Bereiche bleibt: erst links, dann rechts.
+  assert.equal((html.match(/<div class="rocks-col">/g) ?? []).length, 2);
+  assert.deepEqual([...html.matchAll(/data-keep="rock:([^"]+)"/g)].map((x) => x[1]), m.rocks.data.map((g) => g.area.replaceAll('&', '&amp;')));
   // Heute: Termin, heute Fälliges und Überfälliges aus der Woche, nichts Späteres.
   assert.match(html, /<main class="week-main today-first">/);
   const heute = html.match(/<section class="heute"[\s\S]*?<\/section>/)[0];
@@ -444,6 +477,63 @@ test('renderWeek: Fälligkeit als Schild, erledigte Bereiche eingeklappt, Heute 
 
   const other = await cockpit.week('2026-W43');
   assert.doesNotMatch(renderWeek(other), /class="heute"|today-first/);
+});
+
+test('Wochenmodell: Bereiche in der eigenen Rangfolge (areaOrder), der Rest alphabetisch dahinter', async () => {
+  const settings = settingsWith();
+  // Schreibweise und Leerzeichen am Rand zählen nicht; ein unbekannter Name stört nicht.
+  settings.save({ ...settings.stored(), areaOrder: [' ehrenamt (drk bereitschaft) ', 'Gibt es nicht', 'Berufliche Weiterentwicklung'] });
+  const cockpit = createCockpit({ index: fakeIndex([feuerNote()]), settings, zunderFor: () => fakeZunder([...TASKS, { id: 'z1', title: 'Zuletzt', status: 'open', due: '2026-10-15', location: loc('Zuhause') }]), now: fixedNow, logger: quiet });
+  const ranked = (await cockpit.week()).rocks.data.map((g) => g.area);
+  assert.deepEqual(ranked, ['Ehrenamt (DRK Bereitschaft)', 'Berufliche Weiterentwicklung', 'Arbeitnehmer', 'Zuhause']);
+  // Leer: wie bisher alphabetisch.
+  settings.save({ ...settings.stored(), areaOrder: [] });
+  assert.deepEqual((await cockpit.week()).rocks.data.map((g) => g.area), ['Arbeitnehmer', 'Berufliche Weiterentwicklung', 'Ehrenamt (DRK Bereitschaft)', 'Zuhause']);
+});
+
+test('renderWeek: Phönix-Schritt vor früher Fälligem; Aufgaben und Inbox zeigen fünf, der Rest steckt hinter „weitere“', async () => {
+  const tasks = [
+    ...TASKS,
+    { id: 'b1', title: 'Früh fällig', status: 'open', due: '2026-10-12', location: loc('Berufliche Weiterentwicklung') },
+    ...Array.from({ length: 8 }, (_, i) => ({ id: `u${i}`, title: `Überfällig ${i}`, status: 'open', due: `2026-09-0${i + 1}`, location: loc('Sport') })),
+    ...Array.from({ length: 5 }, (_, i) => ({ id: `n${i}`, title: `Inbox ${i}`, status: 'open', due: null, location: { kind: 'inbox' } })),
+  ];
+  const notes = Array.from({ length: 9 }, (_, i) => ({ path: `inbox/Notiz ${i}.md`, title: `Notiz ${i}` }));
+  const cockpit = createCockpit({ index: fakeIndex([feuerNote()], notes), settings: settingsWith(), zunderFor: () => fakeZunder(tasks), now: fixedNow, logger: quiet });
+  const m = await cockpit.week();
+  // Das Modell sortiert nach Fälligkeit (der Schritt ohne Datum zuletzt); nur die Darstellung zieht ihn nach vorn.
+  assert.deepEqual(m.rocks.data.find((g) => g.area === 'Berufliche Weiterentwicklung').tasks.map((t) => t.id), ['b1', 's1']);
+  const html = renderWeek(m);
+  const area = html.match(/data-keep="rock:Berufliche Weiterentwicklung"[\s\S]*?<\/details>/)[0];
+  assert.deepEqual([...area.matchAll(/data-id="([^"]+)"/g)].map((x) => x[1]), ['s1', 'b1']);
+
+  // Aufgaben: 10 (o1 und acht überfällige, p1 in Arbeit), fünf sichtbar, fünf hinter „weitere“; die Zahl bleibt in der Überschrift.
+  const section = html.match(/<section class="tasks">[\s\S]*?<\/section>/)[0];
+  assert.match(section, /<span class="count-badge">10<\/span>/);
+  const [shown, hidden] = section.split('<details class="more-items" data-keep="aufgaben-mehr"><summary>5 weitere</summary>');
+  assert.equal((shown.match(/<li class="task/g) ?? []).length, 5);
+  assert.equal((hidden.match(/<li class="task/g) ?? []).length, 5);
+
+  // Inbox: Vault und Zunder getrennt, beide Teile einer Liste tragen `data-list` (daran hängen cockpit.js und offline.js).
+  const inbox = html.match(/<section id="inbox"[\s\S]*?<\/section>/)[0];
+  assert.match(inbox, /<span class="count-badge" data-inbox-count>15<\/span>/);
+  const vault = inbox.match(/<ul data-list="vault-inbox">([\s\S]*?)<\/ul><details class="more-items" data-keep="vault-inbox-mehr"><summary>4 weitere<\/summary><ul data-list="vault-inbox">([\s\S]*?)<\/ul><\/details>/);
+  assert.equal((vault[1].match(/<li class="note"/g) ?? []).length, 5);
+  assert.equal((vault[2].match(/<li class="note"/g) ?? []).length, 4);
+  // Sechs Einträge bleiben ganz sichtbar: „1 weitere“ wäre so hoch wie der Eintrag selbst.
+  const zunder = inbox.slice(inbox.indexOf('<h3>Zunder</h3>'));
+  assert.equal((zunder.match(/<li class="task/g) ?? []).length, 6);
+  assert.doesNotMatch(zunder, /more-items/);
+});
+
+test('renderWeek: Blättern nennt die KW im aria-label, schmal bleiben die Pfeile und „Heute“', async () => {
+  const cockpit = createCockpit({ index: fakeIndex([]), settings: settingsWith(), zunderFor: () => fakeZunder(TASKS), now: fixedNow, logger: quiet });
+  const now = renderWeek(await cockpit.week());
+  assert.match(now, /<a href="\/\?woche=2026-W41" rel="prev" class="pager-step" aria-label="Vorige Woche, KW 41"><span aria-hidden="true">‹<\/span> <span class="pager-kw">KW 41<\/span><\/a>/);
+  assert.match(now, /<span class="pager-now" aria-current="date">Diese Woche<\/span>/);
+  assert.match(now, /<a href="\/\?woche=2026-W43" rel="next" class="pager-step" aria-label="Nächste Woche, KW 43"><span class="pager-kw">KW 43<\/span> <span aria-hidden="true">›<\/span><\/a>/);
+  const next = renderWeek(await cockpit.week('2026-W43'));
+  assert.match(next, /<a href="\/" class="pager-now" aria-label="Diese Woche"><span class="pager-kw">Diese Woche<\/span><span class="pager-short" aria-hidden="true">Heute<\/span><\/a>/);
 });
 
 test('noteOrigin: Zurück zur Herkunft aus Adresse oder Referer, nie nach außen', () => {

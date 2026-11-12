@@ -2,6 +2,7 @@ import { describeWeek, weekOf, parseWeekId, weekId, localDate, addDays } from '.
 import { findFeuer } from './feuer.js';
 import { flameMinutes, burnedSince, burnedInWeek } from './flammen-notiz.js';
 import { createFlameBlocks } from './flammen-bloecke.js';
+import { areaSorter } from './settings.js';
 
 const OPEN = ['open', 'in_progress', 'blocked'];
 
@@ -21,7 +22,8 @@ const byDue = (a, b) => String(a.due ?? '9999').localeCompare(String(b.due ?? '9
 
 /**
  * Stellt die Wochenansicht zusammen: Feuer-Ziel, Flammen, Big Rocks je
- * Lebensbereich, Termine, offene Aufgaben und Inbox.
+ * Lebensbereich (Reihenfolge: Einstellung `areaOrder`, sonst alphabetisch),
+ * Termine, offene Aufgaben und Inbox.
  *
  * Jede Quelle wird für sich geholt. Fällt eine aus (Zunder nicht erreichbar,
  * CalDAV-Passwort falsch), zeigt ihr Abschnitt den Fehler, der Rest bleibt.
@@ -258,9 +260,11 @@ export function createCockpit({ index, settings, zunderFor, calendars = null, fl
           if (!groups.has(t.area)) groups.set(t.area, []);
           groups.get(t.area).push(t);
         }
+        // Bereiche in der eigenen Rangfolge aus den Einstellungen, der Rest alphabetisch dahinter.
+        const byArea = areaSorter(config.areaOrder);
         rocks = [...groups.entries()]
           .map(([area, tasks]) => ({ area, tasks: tasks.sort(byDue), done: tasks.filter((t) => t.status === 'done').length }))
-          .sort((a, b) => a.area.localeCompare(b.area, 'de'));
+          .sort((a, b) => byArea(a.area, b.area));
       }
 
       const openTasks = open.ok
