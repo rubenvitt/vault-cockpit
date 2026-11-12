@@ -1,7 +1,7 @@
 /**
  * Gemeinsamer Rahmen aller Cockpit-Seiten: `<head>` (Stylesheet mit
- * Versions-Parameter, PWA-Manifest, Icons) und die Kopfzeile mit Navigation,
- * die auf dem iPhone als Leiste unten erscheint.
+ * Versions-Parameter, PWA-Manifest, Icons), die Kopfzeile mit Navigation,
+ * die auf dem iPhone als Leiste unten erscheint, und die Umschalter darunter.
  */
 
 export const esc = (s) =>
@@ -64,25 +64,45 @@ export const ICONS = {
 export const icon = (name, cls) => svg(ICONS[name], cls);
 
 /**
- * Hauptnavigation. `tab: false` fehlt in der Leiste unten, die vier Plätze
- * hat: Dort steht „Lesen“, die Suche erreicht man über Lesen → Wissen.
+ * Hauptnavigation, oben und als Leiste unten (vier Plätze). Rückblick und
+ * Planen sind Ansichten der Woche und stehen als Umschalter im Seitenkopf
+ * (`weekSwitch`), Wissen und Fragen unter „Suche“ (`searchNav`).
  */
 const NAV = [
   ['woche', '/', 'Woche', 'week'],
-  ['rueckblick', '/rueckblick', 'Rückblick', 'review'],
   ['lesen', '/lesen', 'Lesen', 'book'],
-  ['graph', '/graph', 'Suche', 'search', { tab: false }],
+  ['graph', '/graph', 'Suche', 'search'],
   ['einstellungen', '/einstellungen', 'Einstellungen', 'settings'],
 ];
 
 /**
+ * Umschalter im Seitenkopf der Woche: Planen · Woche · Rückblick, alle für
+ * dieselbe Woche. `thisWeek`: Die laufende Woche liegt unter `/` (so kennt sie
+ * auch der Offline-Speicher). `plan: false`, wenn das Cockpit nicht planen kann.
+ */
+export function weekSwitch(weekId, current, { plan = true, thisWeek = false } = {}) {
+  const q = `?woche=${encodeURIComponent(weekId)}`;
+  const items = [...(plan ? [['planen', `/planen${q}`, 'Planen']] : []), ['woche', thisWeek ? '/' : `/${q}`, 'Woche'], ['rueckblick', `/rueckblick${q}`, 'Rückblick']];
+  return `<nav class="segments" aria-label="Ansicht der Woche">${items.map(([key, href, label]) => `<a href="${esc(href)}"${key === current ? ' aria-current="page"' : ''}>${label}</a>`).join('')}</nav>`;
+}
+
+/**
+ * Unternavigation unter „Suche“: der ganze Vault (Suche und Graph), die
+ * Synthesen (`/wissen`) und, mit `fragen`, das Gespräch mit Claude (`/fragen`).
+ */
+export function searchNav(current, { fragen = false } = {}) {
+  const items = [['graph', '/graph', 'Vault'], ['wissen', '/wissen', 'Wissen'], ...(fragen ? [['fragen', '/fragen', 'Fragen']] : [])];
+  return `<nav class="subnav tabs" aria-label="Suche">${items.map(([key, href, label]) => `<a href="${href}" class="subnav-link"${key === current ? ' aria-current="page"' : ''}>${label}</a>`).join('')}</nav>`;
+}
+
+/**
  * Kopfzeile mit Marke und Hauptnavigation, darunter (in `body`) dieselbe
  * Navigation als Leiste für schmale Bildschirme. `links` überschreibt Ziele,
- * z. B. den Rückblick der angezeigten Woche. `alert` (fertiges HTML, siehe
+ * z. B. die angezeigte Woche. `alert` (fertiges HTML, siehe
  * health-render.js) steht vor dem Abmelden, etwa der Hinweis auf gestörte Dienste.
  */
 export function appHeader({ current = null, user = null, links = {}, alert = '' } = {}) {
-  const items = NAV.map(([key, href, label, ic, opts]) => ({ key, href: links[key] ?? href, label, ic, tab: opts?.tab ?? true }));
+  const items = NAV.map(([key, href, label, ic]) => ({ key, href: links[key] ?? href, label, ic }));
   const link = (i, cls) =>
     `<a href="${esc(i.href)}" class="${cls}"${i.key === current ? ' aria-current="page"' : ''}>${icon(i.ic)}<span>${i.label}</span></a>`;
   return `<header class="app-header">
@@ -90,5 +110,5 @@ export function appHeader({ current = null, user = null, links = {}, alert = '' 
   <nav class="app-nav" aria-label="Hauptnavigation">${items.map((i) => link(i, 'nav-link')).join('')}</nav>${alert}
   <form method="post" action="/logout" class="logout"><button type="submit" class="nav-link quiet" title="${esc(user ? `Abmelden (${user})` : 'Abmelden')}">${icon('logout')}<span>Abmelden</span></button></form>
 </header>
-<nav class="tabbar" aria-label="Hauptnavigation unten">${items.filter((i) => i.tab).map((i) => link(i, 'tab')).join('')}</nav>`;
+<nav class="tabbar" aria-label="Hauptnavigation unten">${items.map((i) => link(i, 'tab')).join('')}</nav>`;
 }

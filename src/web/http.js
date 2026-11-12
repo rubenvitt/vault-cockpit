@@ -490,7 +490,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
     const id = url.searchParams.get('woche');
     const model = cockpit.review ? await cockpit.review(id || null) : null;
     if (!model) return send(res, 400, renderMessage('Unbekannte Woche', `„${id}“ ist keine Kalenderwoche wie 2026-W42.`, { link: { href: '/rueckblick', label: 'Zur laufenden Woche' } }));
-    return send(res, 200, renderReview(model, { user: session.name ?? session.sub }));
+    return send(res, 200, renderReview(model, { user: session.name ?? session.sub, plan: Boolean(plan) }));
   }
 
   /** Planungsseite `/planen?woche=…`: Aufgaben in die Woche holen, Flammen einplanen. */
@@ -1123,18 +1123,27 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       : {}),
   };
 
+  /** Ob es „Fragen“ gibt (dann steht es in der Unternavigation der Suche). */
+  const hasFragen = () => {
+    try {
+      return Boolean(reading?.nav?.()?.fragen);
+    } catch {
+      return false;
+    }
+  };
+
   async function graphPage(req, res, url, session) {
     const path = url.searchParams.get('pfad');
     const user = session.name ?? session.sub;
     if (!path) {
       const q = (url.searchParams.get('q') ?? '').trim().slice(0, 500);
       const result = q && search ? await search(q) : { results: [], total: 0 };
-      return send(res, 200, renderSearch(q, result, { user, notes: Boolean(notes), whole: Boolean(wholeGraph) }));
+      return send(res, 200, renderSearch(q, result, { user, notes: Boolean(notes), whole: Boolean(wholeGraph), fragen: hasFragen() }));
     }
     const g = graph ? await graph.around(path) : null;
     if (!g) return send(res, 404, renderMessage('Notiz nicht gefunden', `„${path}“ gibt es nicht im Index.`, { link: { href: '/graph', label: 'Zur Suche' } }));
     const { vaultName, tz } = settings.get();
-    return send(res, 200, renderGraph(g, { vaultName, user, tz, write: writeContext(req), back: url.pathname + url.search, flash: takeFlash(req, res), notes: Boolean(notes), whole: Boolean(wholeGraph) }));
+    return send(res, 200, renderGraph(g, { vaultName, user, tz, write: writeContext(req), back: url.pathname + url.search, flash: takeFlash(req, res), notes: Boolean(notes), whole: Boolean(wholeGraph), fragen: hasFragen() }));
   }
 
   /**

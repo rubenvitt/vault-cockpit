@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { esc, head, appHeader } from '../web/layout.js';
+import { esc, head, appHeader, searchNav } from '../web/layout.js';
 import { hidden, flashToast } from '../web/render.js';
 
 /**
@@ -13,8 +13,9 @@ import { hidden, flashToast } from '../web/render.js';
  * (Weiter · Eingang · Stapel · Folgen), der Rest unter „Mehr“ (ein `<details>`,
  * geht ohne JavaScript). Steht man auf einer Seite aus „Mehr“, trägt der Knopf
  * ihren Namen. Auf breiten Bildschirmen stehen die Einträge aus „Mehr“ als
- * eigene Reiter daneben und das Menü fällt weg (CSS, `.subnav-weit`).
- * `/wissen` ist die Suche im Vault (VCP-76).
+ * eigene Reiter daneben, in Gruppen mit Trennstrich (Verarbeiten · Behalten ·
+ * Feeds), und das Menü fällt weg (CSS, `.subnav-weit`).
+ * Wissen und Fragen stehen unter „Suche“ (`searchNav` in src/web/layout.js).
  */
 const MAIN = [
   ['weiter', '/lesen/weiter', 'Weiter'],
@@ -22,20 +23,19 @@ const MAIN = [
   ['stapel', '/lesen/stapel', 'Stapel'],
   ['folgen', '/lesen/folgen', 'Folgen'],
 ];
+const INGEST = ['ingest', '/lesen/ingest', 'Ingest', 'Entwürfe fürs Wiki abhaken', 'verarbeiten'];
 const MORE = [
-  ['markiert', '/lesen/markiert', 'Markiert', 'Alle Markierungen nach Quelle und Thema'],
-  ['wiedersehen', '/lesen/wiedersehen', 'Wiedersehen', 'Markierungen wiederholen'],
-  ['wissen', '/wissen', 'Wissen', 'Im Vault suchen'],
-  ['fragen', '/fragen', 'Fragen', 'Mit Claude über den ganzen Vault sprechen'],
-  ['feeds', '/lesen/feeds', 'Feeds', 'Abos verwalten'],
+  ['markiert', '/lesen/markiert', 'Markiert', 'Alle Markierungen nach Quelle und Thema', 'behalten'],
+  ['wiedersehen', '/lesen/wiedersehen', 'Wiedersehen', 'Markierungen wiederholen', 'behalten'],
+  ['feeds', '/lesen/feeds', 'Feeds', 'Abos verwalten', 'feeds'],
 ];
 
 /**
  * `nav` (Objekt oder Funktion, die eines liefert, damit nur gezählt wird, was
  * auch gezeigt wird): `{ ingest: n }` nimmt „Ingest“ in „Mehr“ auf und zeigt
  * die Zahl der bereiten Entwürfe an „Weiter“ (dort stehen sie unter „Prüfen“)
- * und an „Ingest“ (src/lesen/ingest-page.js); ohne fehlt der Eintrag.
- * „Fragen“ (src/fragen/page.js) steht nur mit `{ fragen: true }` in „Mehr“.
+ * und an „Ingest“ (src/lesen/ingest-page.js); ohne fehlt der Eintrag. Breit
+ * trägt nur „Ingest“ die Zahl (CSS), damit sie nicht zweimal dasteht.
  */
 export function readingNav(current, nav = null) {
   let extra = null;
@@ -47,27 +47,32 @@ export function readingNav(current, nav = null) {
   const ingest = extra && 'ingest' in extra;
   const n = ingest ? Number(extra.ingest) || 0 : 0;
   const count = ingest ? `<span class="subnav-count" data-ingest-count${n ? '' : ' hidden'}>${n}</span>` : '';
-  const more = [...(ingest ? [['ingest', '/lesen/ingest', 'Ingest', 'Entwürfe fürs Wiki abhaken']] : []), ...MORE.filter(([key]) => key !== 'fragen' || extra?.fragen)];
+  const more = [...(ingest ? [INGEST] : []), ...MORE];
   const tabs = MAIN.map(([key, href, label]) => `<a href="${href}" class="subnav-link"${key === current ? ' aria-current="page"' : ''}>${label}${key === 'weiter' ? count : ''}</a>`).join('');
   const here = more.find(([key]) => key === current);
   const menu = more
     .map(([key, href, label, hint]) => `<a href="${href}" class="subnav-item"${key === current ? ' aria-current="page"' : ''}><span>${label}${key === 'ingest' ? count : ''}</span><span class="meta">${hint}</span></a>`)
     .join('');
-  const wide = more.map(([key, href, label]) => `<a href="${href}" class="subnav-link subnav-weit"${key === current ? ' aria-current="page"' : ''}>${label}${key === 'ingest' ? count : ''}</a>`).join('');
-  return `<nav class="subnav lesen-tabs" aria-label="Lesen">${tabs}<details class="menu subnav-mehr"><summary class="subnav-link"${here ? ' aria-current="page"' : ''}>${here ? here[2] : 'Mehr'}<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5l3 3 3-3"/></svg></summary><div class="subnav-menu">${menu}</div></details>${wide}</nav>`;
+  // Breit: Trennstrich vor jeder neuen Gruppe, „Feeds“ (Verwaltung) rückt nach rechts.
+  const wide = more
+    .map(([key, href, label, , group], i) => `${i === 0 || more[i - 1][4] !== group ? `<span class="subnav-sep subnav-weit${group === 'feeds' ? ' subnav-rechts' : ''}" aria-hidden="true"></span>` : ''}<a href="${href}" class="subnav-link subnav-weit"${key === current ? ' aria-current="page"' : ''}>${label}${key === 'ingest' ? count : ''}</a>`)
+    .join('');
+  return `<nav class="subnav lesen-tabs${ingest ? ' mit-ingest' : ''}" aria-label="Lesen">${tabs}<details class="menu subnav-mehr"><summary class="subnav-link"${here ? ' aria-current="page"' : ''}>${here ? here[2] : 'Mehr'}<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5l3 3 3-3"/></svg></summary><div class="subnav-menu">${menu}</div></details>${wide}</nav>`;
 }
 
 /**
  * Rahmen einer Lesen-Seite: Kopfzeile, Unternavigation, Titel, Inhalt, Meldung.
  * `heading` (fertiges HTML) ersetzt die Überschrift, `bodyClass` kommt zu `page-lesen`.
+ * `area: 'suche'`: dieselbe Seite unter „Suche“ (Fragen), mit deren Unternavigation.
  */
-export function readingPage(ctx, { key, title, body, scripts = [], heading = null, bodyClass = '' }) {
+export function readingPage(ctx, { key, title, body, scripts = [], heading = null, bodyClass = '', area = 'lesen' }) {
+  const search = area === 'suche';
   return `<!doctype html>
 <html lang="de">
 ${head(title, { script: true, scripts })}
 <body class="page-lesen${bodyClass ? ` ${esc(bodyClass)}` : ''}">
-${appHeader({ current: 'lesen', user: ctx.user })}
-${readingNav(key, ctx.nav)}
+${appHeader({ current: search ? 'graph' : 'lesen', user: ctx.user })}
+${search ? searchNav(key, { fragen: true }) : readingNav(key, ctx.nav)}
 <div class="page-head">${heading ?? `<h1>${esc(title)}</h1>`}</div>
 <main class="lesen">
 ${body}

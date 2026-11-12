@@ -1416,7 +1416,12 @@ test('Rückblick: Kennzahlen, Balken als SVG ohne Inline-Styles, Navigation', as
     assert.match(html, /href="\/rueckblick\?woche=2026-W43"/);
     assert.match(html, /1 offen geblieben/);
     assert.equal((await call('/rueckblick?woche=kaputt')).status, 400);
-    assert.match(await (await call('/')).text(), /href="\/rueckblick\?woche=2026-W42" class="nav-link"/);
+    // Rückblick ist eine Ansicht der Woche: Umschalter im Seitenkopf statt eigener Platz in der Navigation.
+    assert.match(html, /<a href="\/" class="nav-link" aria-current="page">/);
+    assert.match(html, /<nav class="segments" aria-label="Ansicht der Woche"><a href="\/\?woche=2026-W42">Woche<\/a><a href="\/rueckblick\?woche=2026-W42" aria-current="page">Rückblick<\/a><\/nav>/);
+    const week = await (await call('/')).text();
+    assert.match(week, /<nav class="segments" aria-label="Ansicht der Woche"><a href="\/" aria-current="page">Woche<\/a><a href="\/rueckblick\?woche=2026-W42">Rückblick<\/a><\/nav>/);
+    assert.ok(!week.includes('<span>Rückblick</span>'), 'kein eigener Platz in Kopf und Leiste unten');
   });
 });
 
@@ -1790,10 +1795,9 @@ test('Wissen: Fragesuche mit Typfilter, Synthese-Kopf und offene Punkte nach Zun
       const html = await page.text();
       assert.match(html, /<h2>Treffer<\/h2><ul class="results"><li><a href="\/notiz\?pfad=wiki%2Fsynthesis%2FA\.md">Architektur statt Disziplin<\/a>/);
       assert.match(html, /<option selected>entwurf<\/option>/);
-      // Wissen gehört zum Bereich Lesen (VCP-77).
-      assert.match(html, /<a href="\/lesen" class="nav-link" aria-current="page">/);
-      assert.match(html, /<a href="\/wissen" class="subnav-item" aria-current="page"><span>Wissen<\/span>/);
-      // Die Suche, die in der Leiste unten Lesen weichen musste, bleibt von hier erreichbar.
+      // Wissen steht unter „Suche“, neben dem ganzen Vault.
+      assert.match(html, /<a href="\/graph" class="nav-link" aria-current="page">/);
+      assert.match(html, /<nav class="subnav tabs" aria-label="Suche"><a href="\/graph" class="subnav-link">Vault<\/a><a href="\/wissen" class="subnav-link" aria-current="page">Wissen<\/a><\/nav>/);
       assert.match(html, /<a href="\/graph\?q=Struktur">Ganzen Vault durchsuchen<\/a>/);
       // Die Suche bekommt nur die Synthesen, die die Filter erfüllen.
       assert.deepEqual(asked[0], ['Struktur', { type: 'synthesis', paths: ['wiki/synthesis/A.md'] }]);

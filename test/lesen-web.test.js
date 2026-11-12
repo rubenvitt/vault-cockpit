@@ -85,17 +85,17 @@ test('Lesen: nur angemeldet, /lesen führt zu „Weiter“, Navigation mit Lesen
 
     const html = await (await call('/lesen/eingang')).text();
     assert.match(html, /<a href="\/lesen" class="nav-link" aria-current="page">/);
-    // Leiste unten: vier Plätze, Lesen statt Suche; im Kopf bleibt die Suche.
+    // Leiste unten und Kopf: dieselben vier Plätze; Rückblick und Planen sind Ansichten der Woche.
     const tabs = html.match(/<nav class="tabbar"[^]*?<\/nav>/)[0];
-    assert.deepEqual([...tabs.matchAll(/<span>([^<]+)<\/span>/g)].map((m) => m[1]), ['Woche', 'Rückblick', 'Lesen', 'Einstellungen']);
+    assert.deepEqual([...tabs.matchAll(/<span>([^<]+)<\/span>/g)].map((m) => m[1]), ['Woche', 'Lesen', 'Suche', 'Einstellungen']);
     assert.match(html, /<a href="\/graph" class="nav-link">/);
     // Vier Reiter für den Ablauf, der Rest unter „Mehr“.
     assert.match(html, /<nav class="subnav lesen-tabs" aria-label="Lesen"><a href="\/lesen\/weiter" class="subnav-link">Weiter<\/a><a href="\/lesen\/eingang" class="subnav-link" aria-current="page">Eingang<\/a><a href="\/lesen\/stapel"[^>]*>Stapel<\/a><a href="\/lesen\/folgen"[^>]*>Folgen<\/a><details class="menu subnav-mehr"><summary class="subnav-link">Mehr<svg/);
     const menu = html.match(/<div class="subnav-menu">[^]*?<\/div><\/details>/)[0];
-    assert.deepEqual([...menu.matchAll(/class="subnav-item"[^>]*><span>([^<]+)/g)].map((m) => m[1]), ['Markiert', 'Wiedersehen', 'Wissen', 'Feeds']);
+    assert.deepEqual([...menu.matchAll(/class="subnav-item"[^>]*><span>([^<]+)/g)].map((m) => m[1]), ['Markiert', 'Wiedersehen', 'Feeds']);
     // Auf dem Desktop stehen dieselben Einträge als Reiter neben den vier (CSS blendet „Mehr“ dort aus).
     const nav = html.match(/<nav class="subnav lesen-tabs"[^]*?<\/nav>/)[0];
-    assert.deepEqual([...nav.matchAll(/class="subnav-link subnav-weit"[^>]*>([^<]+)/g)].map((m) => m[1]), ['Markiert', 'Wiedersehen', 'Wissen', 'Feeds']);
+    assert.deepEqual([...nav.matchAll(/class="subnav-link subnav-weit"[^>]*>([^<]+)/g)].map((m) => m[1]), ['Markiert', 'Wiedersehen', 'Feeds']);
     // Auf einer Seite aus „Mehr“ trägt der Knopf ihren Namen, der breite Reiter ist markiert.
     const markiert = await (await call('/lesen/markiert')).text();
     assert.match(markiert, /<summary class="subnav-link" aria-current="page">Markiert<svg/);

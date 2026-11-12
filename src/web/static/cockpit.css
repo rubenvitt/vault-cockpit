@@ -170,6 +170,14 @@ kbd { font: var(--t-xs)/1 var(--mono); }
 .pager .pager-now { color: var(--text); font-weight: 600; }
 .pager span.pager-now { background: var(--bg-sunk); }
 
+/* Rechts im Seitenkopf der Woche: Umschalter der Ansicht (`weekSwitch` in layout.js) und Blättern */
+.page-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-3); }
+.segments { display: inline-flex; padding: 3px; background: var(--bg-sunk); border-radius: var(--r-full); font-size: 14px; }
+.segments a { padding: 5px 14px; border-radius: var(--r-full); text-decoration: none; color: var(--text-2); font-weight: 500; white-space: nowrap;
+  transition: background var(--fast), color var(--fast); }
+.segments a:hover { color: var(--text); }
+.segments a[aria-current=page] { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: var(--shadow-1); }
+
 main { max-width: var(--page); margin: 0 auto; padding: var(--s-6) var(--gutter) var(--s-8); display: grid; gap: var(--s-6); }
 
 /* --- 4. Bausteine ----------------------------------------------------------- */
@@ -614,19 +622,27 @@ details.rock[open] > summary { margin-bottom: var(--s-2); }
 .subnav-link[aria-current=page] { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent); }
 /* Lesen nutzt auf dem Desktop die volle Seitenbreite wie der Rest des Cockpits; Fließtext bleibt in Lesebreite (.lesen-reader). */
 .page-lesen .subnav, .page-lesen .page-head, main.lesen { max-width: var(--page); }
-/* Lesen: vier Reiter als ein Band, der Rest unter „Mehr“ (src/lesen/pages.js `readingNav`) */
-.lesen-tabs { overflow: visible; gap: 0; }
-.lesen-tabs > .subnav-link, .lesen-tabs .subnav-mehr { flex: 1 1 0; min-width: 0; }
-.lesen-tabs .subnav-link { display: flex; align-items: center; justify-content: center; gap: 4px; padding: 10px 6px 9px; border: 0; border-bottom: 2px solid var(--line);
-  border-radius: 0; background: none; white-space: nowrap; }
-.lesen-tabs .subnav-link:hover { border-bottom-color: var(--line-strong); }
-.lesen-tabs .subnav-link[aria-current=page] { background: none; color: var(--accent); border-bottom-color: var(--accent); font-weight: 650; }
+/* Reiter als Band mit Haarlinie darunter: Lesen (src/lesen/pages.js `readingNav`) und Suche (`searchNav` in src/web/layout.js) */
+.lesen-tabs, .subnav.tabs { position: relative; overflow: visible; gap: 0; }
+.lesen-tabs::after, .subnav.tabs::after { content: ''; position: absolute; left: var(--gutter); right: var(--gutter); bottom: 0; height: 1px; background: var(--line); }
+.lesen-tabs .subnav-link, .subnav.tabs .subnav-link { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; gap: 4px; padding: 10px 14px 9px;
+  border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; white-space: nowrap; }
+.lesen-tabs .subnav-link:hover, .subnav.tabs .subnav-link:hover { border-bottom-color: var(--line-strong); }
+.lesen-tabs .subnav-link[aria-current=page], .subnav.tabs .subnav-link[aria-current=page] { background: none; color: var(--accent); border-bottom-color: var(--accent); font-weight: 650; }
 .lesen-tabs .subnav-count { margin-left: 2px; }
-/* Breit genug für alle Reiter: „Mehr“ fällt weg, seine Einträge stehen als Reiter daneben (readingNav). */
+/* Schmal: vier Reiter und „Mehr“ teilen sich die Breite. */
+.lesen-tabs > .subnav-link, .lesen-tabs .subnav-mehr { flex: 1 1 0; min-width: 0; }
+.lesen-tabs .subnav-link { padding-left: 6px; padding-right: 6px; }
 .lesen-tabs > .subnav-weit { display: none; }
+/* Breit genug für alle Reiter: „Mehr“ fällt weg, seine Einträge stehen daneben, in Gruppen mit Trennstrich; „Feeds“ rückt nach rechts (readingNav). */
 @media (min-width: 1100px) {
-  .lesen-tabs > .subnav-weit { display: flex; }
+  .lesen-tabs > .subnav-link { flex: none; padding-left: 14px; padding-right: 14px; }
+  .lesen-tabs > a.subnav-weit { display: flex; }
   .lesen-tabs > .subnav-mehr { display: none; }
+  .lesen-tabs > .subnav-sep { display: block; flex: none; align-self: center; width: 1px; height: 18px; margin: 0 var(--s-3); background: var(--line-strong); }
+  .lesen-tabs > .subnav-rechts { margin-left: auto; width: 0; background: none; }
+  /* Die Zahl der Entwürfe steht breit nur an „Ingest“. */
+  .lesen-tabs.mit-ingest > .subnav-link:not(.subnav-weit) .subnav-count { display: none; }
 }
 .subnav-mehr { position: relative; }
 .subnav-mehr > summary { list-style: none; cursor: pointer; }
@@ -1448,6 +1464,11 @@ a.ingest-item-open:hover, a.ingest-item-open:focus-visible { color: var(--accent
   .tab.pressed .icon { animation: tab-pop .38s var(--ease); }
 
   .page-head { padding-top: var(--s-4); }
+  /* Umschalter und Blättern in einer Zeile: „Diese Woche“ steht schon in der Überschrift. */
+  .page-tools { width: 100%; justify-content: space-between; }
+  .segments a { padding: 5px 10px; }
+  .page-tools .pager a { padding: 5px 9px; }
+  .page-tools .pager span.pager-now { display: none; }
   h1 { font-size: 24px; }
   h1 .range { display: block; margin: 2px 0 0; font-size: var(--t-base); }
   section { padding: var(--s-4); border-radius: var(--r-lg); }

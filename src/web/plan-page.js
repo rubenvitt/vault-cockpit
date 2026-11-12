@@ -1,5 +1,5 @@
 import { esc, dueLabel, formHead, flashToast } from './render.js';
-import { head, appHeader } from './layout.js';
+import { head, appHeader, weekSwitch } from './layout.js';
 
 /**
  * Planungsseite `/planen?woche=…` (VCP-47): Zunder-Aufgaben suchen und in die
@@ -171,14 +171,17 @@ ${weekSection(model, ctx)}
 <html lang="de">
 ${head(`Planen ${kw(w.id)}`, { script: Boolean(write) })}
 <body class="page-plan">
-${appHeader({ current: 'woche', user, links: { woche: `/?woche=${w.id}`, rueckblick: `/rueckblick?woche=${w.id}` } })}
+${appHeader({ current: 'woche', user })}
 <div class="page-head">
   <h1>Woche planen <span class="range">${esc(kw(w.id))} · ${esc(range)}</span></h1>
+  <div class="page-tools">
+  ${weekSwitch(w.id, 'planen', { thisWeek: w.current })}
   <nav class="pager" aria-label="Wochen">
     <a href="${esc(planHref({ woche: w.prev }))}" rel="prev" class="pager-step" aria-label="Vorige Woche planen, ${esc(kw(w.prev))}"><span aria-hidden="true">‹</span> ${esc(kw(w.prev))}</a>
-    <a href="/?woche=${esc(w.id)}" class="pager-now">Zur Woche</a>
+    ${w.current ? '<span class="pager-now" aria-current="date">Diese Woche</span>' : '<a href="/planen" class="pager-now">Diese Woche</a>'}
     <a href="${esc(planHref({ woche: w.next }))}" rel="next" class="pager-step" aria-label="Nächste Woche planen, ${esc(kw(w.next))}">${esc(kw(w.next))} <span aria-hidden="true">›</span></a>
   </nav>
+  </div>
 </div>
 <main class="plan-page">
 ${body}

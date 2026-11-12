@@ -1,5 +1,5 @@
 import { esc, formHead, flashToast } from './render.js';
-import { head, appHeader, assets } from './layout.js';
+import { head, appHeader, searchNav, assets } from './layout.js';
 
 /**
  * Graph- und Suchseite des Web-Cockpits, serverseitig als SVG gerendert. Ohne
@@ -172,12 +172,13 @@ function linkForm(ctx, center, target) {
 }
 
 /** `notes`: Treffer der Live-Suche öffnen die Notizseite statt des Graphen. */
-function page({ title, query = '', body, user, write = null, graph = false, flash = null, back = '/graph', notes = false, scripts = null, whole = false }) {
+function page({ title, query = '', body, user, write = null, graph = false, flash = null, back = '/graph', notes = false, scripts = null, whole = false, fragen = false }) {
   return `<!doctype html>
 <html lang="de">
 ${head(title, { script: Boolean(write), scripts: scripts ?? [...(graph ? [assets.graphLib] : []), assets.graph] })}
 <body class="page-graph${whole ? ' page-graph-whole' : ''}">
 ${appHeader({ current: 'graph', user })}
+${whole ? '' : searchNav('graph', { fragen })}
 <div class="page-head">
   <h1>${esc(title)}</h1>
   <form method="get" action="/graph" class="search${whole ? ' whole-search' : ''}" role="search"${notes ? ' data-notes="1"' : ''}><input type="search" name="q" value="${esc(query)}" placeholder="${whole ? 'Notiz im Graphen finden' : 'Vault durchsuchen'}" aria-label="${whole ? 'Notiz im Graphen finden' : 'Vault durchsuchen'}" enterkeyhint="search" autocomplete="off" spellcheck="false"><button type="submit" class="btn">Suchen</button></form>
@@ -196,7 +197,7 @@ ${body}
  * @param {object} [opts.flash]  Meldung aus der letzten Aktion
  * @param {boolean} [opts.whole] Link „Im ganzen Vault zeigen“ (`/graph/alles`)
  */
-export function renderGraph(graph, { vaultName = null, user = null, tz = 'Europe/Berlin', write = null, back = '/graph', flash = null, notes = false, whole = false } = {}) {
+export function renderGraph(graph, { vaultName = null, user = null, tz = 'Europe/Berlin', write = null, back = '/graph', flash = null, notes = false, whole = false, fragen = false } = {}) {
   const center = graph.nodes.find((n) => n.id === graph.center);
   const link = obsidianLink(center.path, vaultName);
   const problems = graph.problems.length ? graph.problems.map((p) => `<p class="problem">${esc(p)}</p>`).join('') : '';
@@ -210,6 +211,7 @@ export function renderGraph(graph, { vaultName = null, user = null, tz = 'Europe
     flash,
     back,
     notes,
+    fragen,
     body: `<section class="graph-panel">
       <p class="meta">${esc(center.path)}${write?.notes ? ` · <a href="/notiz?pfad=${esc(encodeURIComponent(center.path))}">Notiz ansehen</a>` : ''}${link ? ` · <a href="${esc(link)}">In Obsidian öffnen</a>` : ''}${whole ? ` · <a href="${esc(wholeHref(center.path))}">Im ganzen Vault zeigen</a>` : ''}</p>
       <div class="graph-stage" ${attrs}>${svg(graph)}</div>
@@ -231,7 +233,7 @@ export function renderGraph(graph, { vaultName = null, user = null, tz = 'Europe
  * sigma zeichnet. Ohne JavaScript (oder WebGL) bleibt ein Hinweis mit dem Weg
  * zur Suche. `focus` ist eine Notiz, auf die der Graph beim Öffnen springt.
  */
-export function renderWholeGraph({ user = null, notes = false, focus = null } = {}) {
+export function renderWholeGraph({ user = null, notes = false, focus = null, fragen = false } = {}) {
   const attrs = ['data-whole="/api/graph/alles"', notes ? 'data-notes="1"' : '', focus ? `data-focus="${esc(focus)}"` : ''].filter(Boolean).join(' ');
   return page({
     title: 'Ganzer Vault',
@@ -252,7 +254,7 @@ export function renderWholeGraph({ user = null, notes = false, focus = null } = 
 const STREAM_LABEL = { text: 'Volltext', semantic: 'Bedeutung', graph: 'Graph' };
 
 /** Mit `notes` öffnet ein Treffer die Notiz, der Graph steht als Link daneben. */
-export function renderSearch(query, result, { user = null, notes = false, whole = false } = {}) {
+export function renderSearch(query, result, { user = null, notes = false, whole = false, fragen = false } = {}) {
   let body;
   if (!query) body = `<section><p class="empty">Suchbegriff oder Frage eingeben. Ein Treffer öffnet ${notes ? 'die Notiz' : 'seinen Graphen'}.</p>${whole ? '<p><a href="/graph/alles" class="chip">Ganzen Vault als Graph zeigen</a></p>' : ''}</section>`;
   else if (!result.results.length) body = `<section><p class="empty">Nichts gefunden für „${esc(query)}“.</p></section>`;
@@ -266,7 +268,7 @@ export function renderSearch(query, result, { user = null, notes = false, whole 
       .join('')}</ul></section>`;
   }
   if (result?.degraded) body = `<p class="problem">${esc(result.degraded)}</p>${body}`;
-  return page({ title: query ? `Suche: ${query}` : 'Suche', query, body, user, notes });
+  return page({ title: query ? `Suche: ${query}` : 'Suche', query, body, user, notes, fragen });
 }
 
 export const GRAPH_CSS = `
