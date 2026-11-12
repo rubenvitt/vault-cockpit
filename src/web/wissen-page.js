@@ -1,6 +1,5 @@
 import { esc } from './render.js';
-import { head, appHeader } from './layout.js';
-import { readingNav } from '../lesen/pages.js';
+import { head, appHeader, searchNav } from './layout.js';
 import { SYNTHESIS, fmValue, synthesisChips } from './synthesis-render.js';
 
 const RECENT = 20;
@@ -49,6 +48,15 @@ const select = (name, label, value, options) =>
 const item = (n) => `<li><a href="${esc(noteHref(n.path))}">${esc(n.title)}</a>${n.updated ? ` <span class="meta">${esc(n.updated)}</span>` : ''}
     ${synthesisChips(n)}${n.summary ? `<p class="snippet">${esc(n.summary)}</p>` : ''}</li>`;
 
+/** `nav` wie bei den Lesen-Seiten (`readingNav`): Mit `{ fragen: true }` steht „Fragen“ in der Unternavigation. */
+function hasFragen(nav) {
+  try {
+    return Boolean((typeof nav === 'function' ? nav() : nav)?.fragen);
+  } catch {
+    return false;
+  }
+}
+
 /** Seite `/wissen`: Fragesuche über die Synthesen, ohne JavaScript über ein GET-Formular. */
 export function renderWissen(m, { user = null, nav = null } = {}) {
   const list = (items, empty) => (items.length ? `<ul class="results">${items.map(item).join('')}</ul>` : `<p class="empty">${empty}</p>`);
@@ -57,8 +65,8 @@ export function renderWissen(m, { user = null, nav = null } = {}) {
 <html lang="de">
 ${head(m.q ? `Wissen: ${m.q}` : 'Wissen')}
 <body class="page-wissen">
-${appHeader({ current: 'lesen', user })}
-${readingNav('wissen', nav)}
+${appHeader({ current: 'graph', user })}
+${searchNav('wissen', { fragen: hasFragen(nav) })}
 <div class="page-head">
   <div><h1>Wissen</h1><p class="meta">${m.total} Synthesen · <a href="${esc(`/graph${m.q ? `?q=${encodeURIComponent(m.q)}` : ''}`)}">Ganzen Vault durchsuchen</a></p></div>
   <form method="get" action="/wissen" class="wissen-form" role="search">

@@ -1,5 +1,5 @@
 import { esc, dueLabel } from './render.js';
-import { head, appHeader } from './layout.js';
+import { head, appHeader, weekSwitch } from './layout.js';
 
 /** Balken als SVG (die CSP erlaubt keine Inline-Styles); `v` in Prozent. */
 const bar = (v, cls = '') => `<svg class="bar ${cls}" viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true"><rect class="track" width="100" height="8"/><rect class="fill" width="${Math.max(0, Math.min(100, v))}" height="8"/></svg>`;
@@ -11,7 +11,7 @@ const hours = (min) => (min >= 60 ? `${Math.floor(min / 60)} h${min % 60 ? ` ${m
  * Balken erledigt/geplant und die Flammen-Zeit, offen Gebliebenes zum
  * Aufklappen. Zahlen stehen immer als Text daneben; die Balken sind nur Form.
  */
-export function renderReview(model, { user = null } = {}) {
+export function renderReview(model, { user = null, plan = false } = {}) {
   const w = model.week;
   let body;
   if (!model.ok) {
@@ -53,14 +53,17 @@ export function renderReview(model, { user = null } = {}) {
 <html lang="de">
 ${head(`Rückblick KW ${w.week}`)}
 <body class="page-review">
-${appHeader({ current: 'rueckblick', user, links: { woche: `/?woche=${w.id}`, rueckblick: `/rueckblick?woche=${w.id}` } })}
+${appHeader({ current: 'woche', user })}
 <div class="page-head">
   <h1>Rückblick KW ${w.week} <span class="range">${esc(w.monday.split('-').reverse().join('.'))} – ${esc(w.sunday.split('-').reverse().join('.'))}</span></h1>
+  <div class="page-tools">
+  ${weekSwitch(w.id, 'rueckblick', { plan, thisWeek: Boolean(w.current) })}
   <nav class="pager" aria-label="Wochen">
     <a href="/rueckblick?woche=${esc(w.prev)}" rel="prev" class="pager-step" aria-label="Vorige Woche, KW ${Number(w.prev.slice(6))}"><span aria-hidden="true">‹</span> KW ${Number(w.prev.slice(6))}</a>
-    <a href="/?woche=${esc(w.id)}" class="pager-now">Zur Woche</a>
+    ${w.current ? '<span class="pager-now" aria-current="date">Diese Woche</span>' : '<a href="/rueckblick" class="pager-now">Diese Woche</a>'}
     <a href="/rueckblick?woche=${esc(w.next)}" rel="next" class="pager-step" aria-label="Nächste Woche, KW ${Number(w.next.slice(6))}">KW ${Number(w.next.slice(6))} <span aria-hidden="true">›</span></a>
   </nav>
+  </div>
 </div>
 <main class="review-page">
 ${body}

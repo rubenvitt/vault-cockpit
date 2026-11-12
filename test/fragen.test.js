@@ -7,6 +7,7 @@ import { normalizeBlocks, renderBlocks, blocksText, normalizeWeb, SCHEMA } from 
 import { createVaultChat } from '../src/fragen/chat.js';
 import { readingRoutes } from '../src/lesen/http.js';
 import { readingNav } from '../src/lesen/pages.js';
+import { searchNav } from '../src/web/layout.js';
 import { createReadingStore } from '../src/lesen/store.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
@@ -269,10 +270,12 @@ test('Fragen: Seiten, Aktionen und Unternavigation', () =>
     const start = (await routes.pages['/fragen'](c('/fragen'))).html;
     assert.match(start, /<form method="post" action="\/aktion\/fragen\/frage"/);
     assert.match(start, /name="internet" value="1">/);
-    assert.match(start, /href="\/fragen" class="subnav-item" aria-current="page"><span>Fragen/);
-    assert.match(start, /<summary class="subnav-link" aria-current="page">Fragen<svg/);
+    // Fragen steht unter „Suche“, neben Vault und Wissen.
+    assert.match(start, /<a href="\/graph" class="nav-link" aria-current="page">/);
+    assert.match(start, /<nav class="subnav tabs" aria-label="Suche"><a href="\/graph" class="subnav-link">Vault<\/a><a href="\/wissen" class="subnav-link">Wissen<\/a><a href="\/fragen" class="subnav-link" aria-current="page">Fragen<\/a><\/nav>/);
     assert.match(start, /fragen\.js/);
-    assert.doesNotMatch(readingNav('wissen', null), /Fragen/, 'ohne Fragen kein Eintrag');
+    assert.doesNotMatch(readingNav('weiter', routes.nav), /Fragen|Wissen/, 'nicht mehr unter Lesen');
+    assert.doesNotMatch(searchNav('wissen'), /Fragen/, 'ohne Fragen kein Eintrag');
 
     const r = await routes.actions['/aktion/fragen/frage'](new URLSearchParams({ frage: 'Wie läuft es?' }), {});
     assert.match(r.redirect, /^\/fragen\?id=[0-9a-f-]{36}#antwort-1$/);

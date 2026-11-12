@@ -146,7 +146,7 @@ export function fragenRoutes({ chat, index, visible }) {
         const t = id ? chat.get(id) : null;
         if (id && !t) return { redirect: '/fragen' };
         const body = t ? threadPage(chat, t, ctx, deps()) : listPage(chat, ctx);
-        return { html: readingPage(ctx, { key: 'fragen', title: t ? t.title : 'Fragen an den Vault', body, scripts: [assets.fragen] }) };
+        return { html: readingPage(ctx, { key: 'fragen', area: 'suche', title: t ? t.title : 'Fragen an den Vault', body, scripts: [assets.fragen] }) };
       },
       async '/fragen/stand'(ctx) {
         const t = chat.get(ctx.url.searchParams.get('id'));

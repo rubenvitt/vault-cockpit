@@ -249,7 +249,10 @@ test('Ingest: Unternavigation mit Zahl der bereiten Entwürfe zwischen Stapel un
     const page = await html('/lesen/eingang');
     const nav = page.match(/<nav class="subnav[^"]*"[^]*?<\/nav>/)[0];
     assert.deepEqual([...nav.matchAll(/class="subnav-link"[^>]*>([^<]+)/g)].map((m) => m[1]), ['Weiter', 'Eingang', 'Stapel', 'Folgen', 'Mehr']);
-    assert.deepEqual([...nav.matchAll(/class="subnav-item"[^>]*><span>([^<]+)/g)].map((m) => m[1]), ['Ingest', 'Markiert', 'Wiedersehen', 'Wissen', 'Feeds']);
+    assert.deepEqual([...nav.matchAll(/class="subnav-item"[^>]*><span>([^<]+)/g)].map((m) => m[1]), ['Ingest', 'Markiert', 'Wiedersehen', 'Feeds']);
+    // Breit: Gruppen mit Trennstrich (Verarbeiten · Behalten · Feeds).
+    assert.deepEqual([...nav.matchAll(/class="subnav-(sep|link) subnav-weit[^"]*"[^>]*>([^<]*)/g)].map((m) => (m[1] === 'sep' ? '|' : m[2])), ['|', 'Ingest', '|', 'Markiert', 'Wiedersehen', '|', 'Feeds']);
+    assert.match(nav, /<nav class="subnav lesen-tabs mit-ingest"/);
     // Die Zahl steht an „Weiter“ (dort unter „Prüfen“) und an „Ingest“.
     assert.match(nav, /<a href="\/lesen\/weiter" class="subnav-link">Weiter<span class="subnav-count" data-ingest-count>1<\/span><\/a>/);
     assert.match(nav, /<a href="\/lesen\/ingest" class="subnav-item"><span>Ingest<span class="subnav-count" data-ingest-count>1<\/span><\/span>/);

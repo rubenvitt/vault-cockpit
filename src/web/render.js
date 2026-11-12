@@ -1,6 +1,6 @@
 import { localTime, zonedParts } from '../cockpit/week.js';
 import { DEFAULT_HIDDEN_EVENTS } from '../cockpit/settings.js';
-import { esc, head, appHeader, icon } from './layout.js';
+import { esc, head, appHeader, weekSwitch, icon } from './layout.js';
 import { backupSection, backupHint } from './backup-render.js';
 import { sessionSection, revokeForm } from './session-render.js';
 import { sectionStates, sectionNav, maskUrl, hostOf, KIND_LABELS as KIND_LABEL, SCOPE_LABELS as SCOPE_LABEL, languageOptions, syncOptions, SYNC_INTRO, SHADOW_HINT, JEV_INTRO } from './settings-json.js';
@@ -495,14 +495,17 @@ export function renderWeek(model, { user = null, write = null, back = '/', flash
 <html lang="de">
 ${head(title.short, { script: Boolean(write) })}
 <body class="page-week">
-${appHeader({ current: 'woche', user, links: { rueckblick: `/rueckblick?woche=${w.id}` }, alert })}
+${appHeader({ current: 'woche', user, alert })}
 <div class="page-head">
   <h1>${esc(title.short)} <span class="range">${esc(title.range)}</span></h1>
+  <div class="page-tools">
+  ${weekSwitch(w.id, 'woche', { plan: Boolean(write?.plan), thisWeek: w.current })}
   <nav class="pager" aria-label="Wochen">
     <a href="/?woche=${esc(w.prev)}" rel="prev" class="pager-step" aria-label="Vorige Woche, KW ${prev}"><span aria-hidden="true">‹</span> KW ${prev}</a>
     ${w.current ? '<span class="pager-now" aria-current="date">Diese Woche</span>' : '<a href="/" class="pager-now">Diese Woche</a>'}
     <a href="/?woche=${esc(w.next)}" rel="next" class="pager-step" aria-label="Nächste Woche, KW ${next}">KW ${next} <span aria-hidden="true">›</span></a>
   </nav>
+  </div>
 </div>
 ${write ? `<div class="capture-wrap">${captureBar(ctx, draft, focus)}</div>` : ''}
 <main class="week-main${w.current ? ' today-first' : ''}">
