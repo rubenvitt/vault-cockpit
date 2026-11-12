@@ -88,7 +88,18 @@ test('Leseansicht: Lesetext, Fortschritt, „Fertig, weg“ als Formular, Spalte
     assert.match(html, /<form method="post" action="\/aktion\/lesen\/doc\/fertig" class="act" data-decide="fertig">[^]*?Fertig, weg <kbd>E<\/kbd>/);
     assert.ok(!html.includes('data-decide="vault"'), 'ohne Lesestapel-Notizen kein „In den Vault“');
     assert.ok(!html.includes('data-decide="zurueck"'), 'noch nicht entschieden');
-    assert.match(html, /aria-label="Bereiche"[^]*aria-label="Stapel"[^]*aria-current="page"/);
+    // Spalten: links nur noch der Stapel (die Bereiche stehen in der Navigation darüber), rechts die Seitenleiste.
+    assert.ok(!html.includes('aria-label="Bereiche"'));
+    assert.match(html, /<main class="lesen-doc">\s*<nav class="lesen-col lesen-stack" aria-label="Stapel"><h2><a href="\/lesen\/stapel">Stapel<\/a><\/h2><ol><li><a href="[^"]+" aria-current="page"><span class="lesen-stack-title">/);
+    // Schrift im Menü „Aa“ und „Fokus“ neben der Quelle, nicht mehr in der Zeile der Entscheidung.
+    assert.match(html, /<div class="lesen-view">\s*<button type="button" class="btn quiet lesen-nur-text" data-nur-text aria-pressed="false"[^>]*>Fokus<\/button>\s*<details class="menu lesen-ansicht">[^]*?data-size="-1"[^]*?data-size="1"[^]*?data-font aria-pressed="false">Ohne Serifen<\/button>/);
+    assert.match(html, /<div class="lesen-tools">\s*<div class="lesen-decide">/);
+    // Am Ende des Textes steht die Entscheidung noch einmal, ohne Tasten-Hinweis.
+    assert.match(html, /<footer class="lesen-ende">[^]*?<form method="post" action="\/aktion\/lesen\/doc\/fertig" class="act" data-decide="fertig">[^]*?Fertig, weg<\/button>/);
+    assert.equal(html.match(/data-decide="fertig"/g).length, 2);
+    // Tastenkürzel zugeklappt am Ende der Seitenleiste.
+    assert.match(html, /<details class="more lesen-keys"><summary>Tastenkürzel<\/summary><dl>/);
+    assert.ok(html.includes('<kbd>F</kbd>'), 'Kürzel F');
     assert.match(html, /Querverbindungen/);
     for (const k of ['H', 'N', 'L', 'E', 'V', 'J / K']) assert.ok(html.includes(`<kbd>${k}</kbd>`), `Kürzel ${k}`);
     assert.match(html, /data-cmd="mark"[^]*data-cmd="note"[^]*data-cmd="link"[^]*data-cmd="inbox"/);
@@ -108,6 +119,7 @@ test('Leseansicht: Archivieren ohne JavaScript mit Meldung und Rückgängig, For
     assert.match(html, /<span class="toast-text">Archiviert: Vom &lt;Lesen&gt;/);
     assert.match(html, /name="status" value="stapel"[^]*?<button type="submit" class="toast-action">Rückgängig/);
     assert.match(html, /Zurück auf den Stapel/);
+    assert.ok(!html.includes('lesen-ende'), 'schon entschieden: am Ende steht nichts mehr');
     assert.equal((await call('/aktion/lesen/doc/status', { method: 'POST', form: { csrf, id: doc.id, status: 'quatsch' }, json: true })).status, 400);
 
     // „Fertig, weg“ (VCP-96) ohne JavaScript: schließt den Artikel, Meldung und Rückgängig kommen in die Liste mit.
@@ -227,6 +239,8 @@ test('Markiert: alle Markierungen, filterbar nach Quelle und Thema, verlinkt auf
     assert.ok(!all.includes('<img') && !all.includes('<script>alert'), 'Zitat und Notiz maskiert');
     assert.ok(all.includes(`href="/lesen/doc?id=${doc.id}#h-${h.id}"`));
     assert.match(all, /<select name="quelle"><option value="">alle<\/option><option value="Anders">Anders<\/option><option value="Blatt">Blatt<\/option><\/select>/);
+    // Der Filter steht als Werkzeugzeile direkt über der Liste, nicht in einer eigenen Karte.
+    assert.match(all, /<main class="lesen">\s*<form method="get" action="\/lesen\/markiert" class="lesen-filter">[^]*?<\/form><section class="markiert"><ul class="lesen-list">/);
     assert.match(all, /<select name="thema">[^]*Gewohnheit[^]*Kochen[^]*Lesen/);
     assert.match(all, /Salz/);
 

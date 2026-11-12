@@ -128,7 +128,7 @@ export function renderInboxPage({ doc, left, today, filter, triage = null, next 
   const later = next.length ? `<template class="inbox-next">${next.map((n, i) => card(n.doc, ctx, { getFeed, more: left - i > 2, triage: n.triage })).join('')}</template>` : '';
   const body = `${groupChips('/lesen/eingang', filter)}<div class="inbox">${progress}${stack}${actions}${later}</div>
 <details class="more inbox-save"${doc && !keptUrl(ctx) ? '' : ' open'}><summary>Adresse speichern</summary>${saveForm(ctx)}</details>`;
-  return readingPage(ctx, { key: 'eingang', title: 'Eingang', body, scripts: [assets.inbox] });
+  return readingPage(ctx, { key: 'eingang', title: 'Eingang', body, scripts: [assets.inbox], bodyClass: 'lesen-spalte' });
 }
 
 /**

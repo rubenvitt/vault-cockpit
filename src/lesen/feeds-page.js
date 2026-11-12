@@ -229,7 +229,7 @@ export function renderFeeds({ feeds, groups = [], inbox = {} }, ctx) {
     if (loose.length) list += `\n<details open class="feed-group" data-gruppe><summary><span class="feed-group-name">Ohne Gruppe</span></summary>${feedList(loose, ctx, groups)}</details>`;
   }
   const body = `<section>
-  <form method="post" action="/aktion/lesen/feed/abonnieren" class="lesen-save">${token}
+  <form method="post" action="/aktion/lesen/feed/abonnieren" class="lesen-save feed-abo">${token}
     <label class="lesen-url"><span class="sr-only">Adresse eines Feeds oder einer Website</span><input type="url" name="url" required placeholder="https://… Feed oder Website" inputmode="url" autocomplete="off" spellcheck="false" enterkeyhint="go"></label>
     ${groupSelect(groups, null, '<span class="sr-only">Gruppe</span>')}
     <button type="submit" class="btn primary">Abonnieren</button>
@@ -253,7 +253,7 @@ ${feeds.length ? bulkBar(groups, ctx) : ''}
   </form>
   <p><a href="/lesen/feeds.opml" class="btn quiet" download="feeds.opml">Als OPML exportieren</a></p>
 </section>`;
-  return readingPage(ctx, { key: 'feeds', title: 'Feeds', body, scripts: [assets.lesenFeeds] });
+  return readingPage(ctx, { key: 'feeds', title: 'Feeds', body, scripts: [assets.lesenFeeds], bodyClass: 'lesen-spalte' });
 }
 
 /** Überblick, Suche und Filter über der Liste; Suche und Filter erst mit JavaScript. */
@@ -313,7 +313,7 @@ export function renderRemove(feeds, ctx) {
   </form>
 </section>`
     : `<p class="empty">Diese Feeds gibt es nicht mehr.</p><p><a href="${back}" class="btn quiet">Zurück zu den Feeds</a></p>`;
-  return readingPage(ctx, { key: 'feeds', title: 'Feeds entfernen', body });
+  return readingPage(ctx, { key: 'feeds', title: 'Feeds entfernen', body, bodyClass: 'lesen-spalte' });
 }
 
 /** Seiten und Aktionen für `readingRoutes` (src/lesen/http.js). */

@@ -702,6 +702,9 @@ test('Feeds-Seite: Feeds einer Gruppe zuordnen, nach Gruppe anzeigen mit neuen E
       assert.match(page, /<details open class="feed-group" data-gruppe>\s*<summary><span class="feed-group-name">Tech<\/span> <span class="count-badge">2 neu<\/span><\/summary>/);
       assert.ok(page.includes(`<a href="/lesen/eingang?gruppe=${tech.id}">2 neue Einträge im Eingang</a>`));
       assert.match(page, /Noch keine Feeds in dieser Gruppe/);
+      // Abonnieren mit Gruppenwahl: eigene Klasse, damit das Formular auf dem iPhone umbricht statt die Adresse zu quetschen.
+      assert.match(page, /<form method="post" action="\/aktion\/lesen\/feed\/abonnieren" class="lesen-save feed-abo">/);
+      assert.match(page, /<body class="page-lesen lesen-spalte">/);
       assert.ok(groupAt(page, 'Tech') < groupAt(page, 'Leer') && groupAt(page, 'Leer') < groupAt(page, 'Ohne Gruppe'));
       assert.match(page, /pausiert \(Gruppe\)/);
       assert.match(page, /direkt auf den Stapel \(Gruppe\)/);

@@ -61,7 +61,14 @@ test('Stapel-Seite: Zeitfenster mit Balken, Weiterlesen und Hinweis auf den Rest
   const html = await page(store, '?zeit=15');
   assert.match(html, /<a href="\/lesen\/stapel\?zeit=15" class="chip" aria-current="true">15 Min\.<\/a>/);
   assert.match(html, /<progress class="stapel-bar" value="15" max="15" aria-hidden="true"><\/progress>\s*<span class="meta">15 von 15 Min\.<\/span>/);
-  assert.match(html, new RegExp(`<a href="/lesen/doc\\?id=${id.Halb}#weiter" class="lesen-title">Halb</a>\\s*<span class="meta">Weiterlesen · noch 4 Min\\.</span>`));
+  // Angefangen: Stand als Balken mit Prozent vor der Restzeit, „Weiterlesen“ bleibt für Screenreader.
+  assert.match(html, new RegExp(`<a href="/lesen/doc\\?id=${id.Halb}#weiter" class="lesen-title">Halb</a>\\s*<span class="meta"><span class="stapel-stand"><progress max="100" value="50" aria-hidden="true"></progress><span class="sr-only">Weiterlesen, </span>50 %</span> · noch 4 Min\\.</span>`));
+  assert.match(html, new RegExp(`<a href="/lesen/doc\\?id=${id.Kurz}" class="lesen-title">Kurz</a>\\s*<span class="meta">1 Min\\.</span>`), 'nicht angefangen: ohne Balken');
+  // Eine Werkzeugzeile: Zeitfenster links, daneben der Füllbalken; die Sortierung gibt es nur ohne Fenster.
+  assert.match(html, /<div class="stapel-werkzeug"><nav class="chips stapel-zeit" aria-label="Zeitfenster">[^]*?<\/nav><div class="stapel-fill">/);
+  assert.ok(!html.includes('stapel-sort'));
+  // „Unterwegs hören“ steht im Seitenkopf neben der Überschrift.
+  assert.match(html, /<div class="page-head"><div class="stapel-kopfzeile"><h1>Stapel<\/h1><p class="stapel-kopf"><a href="\/lesen\/hoeren\?zeit=15" class="btn quiet">Unterwegs hören<\/a><\/p><\/div><\/div>/);
   assert.match(html, new RegExp(`/lesen/doc\\?id=${id.Mittel}"`));
   assert.match(html, new RegExp(`/lesen/doc\\?id=${id.Kurz}"`));
   assert.ok(!html.includes(id.Extra) && !html.includes(id.Lang));
@@ -84,6 +91,9 @@ test('Stapel-Seite: ohne Zeitfenster alle Texte, Sortierung umschaltbar, falsche
   assert.deepEqual(order(def), ['Halb', 'Alt', 'Neu'], 'Passt jetzt: angefangene zuerst, dann kürzeste');
   assert.match(def, /<a href="\/lesen\/stapel" class="chip" aria-current="true">Alle<\/a>/);
   assert.match(def, /<a href="\/lesen\/stapel\?sort=passt" class="chip" aria-current="true">Passt jetzt<\/a>/);
+  assert.match(def, /<div class="stapel-werkzeug"><nav class="chips stapel-zeit" aria-label="Zeitfenster">[^]*?<\/nav><nav class="chips stapel-sort" aria-label="Sortierung">/, 'Zeitfenster und Sortierung in einer Zeile');
+  assert.ok(!def.includes('stapel-fill'), 'ohne Zeitfenster kein Füllbalken');
+  assert.match(def, /<span class="stapel-stand"><progress max="100" value="50" aria-hidden="true"><\/progress>/);
   assert.ok(!def.includes('weitere warten'));
   assert.deepEqual(order(await page(store, '?sort=neu')), ['Neu', 'Halb', 'Alt']);
   assert.deepEqual(order(await page(store, '?sort=kurz')), ['Alt', 'Neu', 'Halb']);
@@ -113,4 +123,18 @@ test('Stapel-Seite: nach Gruppe gefiltert, Zeitfenster- und Sortier-Chips tragen
   assert.match(window, new RegExp(`<a href="/lesen/stapel\\?zeit=15&amp;${g}" class="chip" aria-current="true">Tech</a>`));
   assert.match(window, /<a href="\/lesen\/stapel\?zeit=15&amp;gruppe=ohne" class="chip">Ohne Feed<\/a>/);
   assert.ok(!(await page(stackStore([['X', 5]]).store)).includes('lesen-gruppe'), 'ohne Gruppen keine Gruppen-Chips');
+});
+
+test('Stapel-Seite: Abzeichen und Menü „⋯“ rechts in der Zeile, „Im Vault ablegen“ als Formular im Menü', async () => {
+  const { store, ids: id } = stackStore([['Mit Entwurf', 5], ['Ohne', 7]]);
+  const ctx = { url: new URL('https://vault.test/lesen/stapel'), user: 'ruben', tz: 'Europe/Berlin', write: { csrf: 'c', back: '/lesen/stapel' }, flash: null };
+  const ingest = { statusFor: () => new Map([[id['Mit Entwurf'], 'bereit']]), available: () => ({ ok: false }) };
+  const { html } = await stackRoutes({ store, vault: true, folgen: true, ingest }).pages['/lesen/stapel'](ctx);
+  assert.ok(!/style=|<script>/.test(html), 'keine Inline-Styles oder -Skripte');
+  // Erst das Abzeichen, dann das Menü; das Formular geht auch ohne JavaScript (<details>).
+  assert.match(html, new RegExp(`<div class="lesen-item-acts"><a href="/lesen/ingest/doc\\?id=${id['Mit Entwurf']}" class="ingest-badge is-ready"[^>]*>Ingest bereit<span class="sr-only">: Mit Entwurf</span></a><details class="menu stapel-mehr"><summary class="menu-button" aria-label="Mehr zu: Mit Entwurf"`));
+  assert.match(html, /<div class="lesen-item-acts"><details class="menu stapel-mehr">[^]*?<form method="post" action="\/aktion\/lesen\/ablegen" class="act lesen-ablegen">[^]*?<button type="submit" class="btn">Im Vault ablegen<span class="sr-only">: Ohne<\/span><\/button><\/form>/, 'ohne Entwurf und ohne Claude: nur das Menü');
+  assert.match(html, /<p class="stapel-kopf"><a href="\/lesen\/hoeren\?zeit=15" class="btn quiet">Unterwegs hören<\/a> <a href="\/lesen\/folgen\/neu\?zeit=30" class="btn quiet">Folge erzeugen<\/a><\/p>/);
+  // Ohne Vault und ohne Ingest bleibt die Zeile bei Titel und Meta.
+  assert.ok(!(await page(store)).includes('lesen-item-acts'));
 });
