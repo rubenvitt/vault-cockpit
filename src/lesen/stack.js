@@ -18,6 +18,12 @@ import { ingestBadge } from './ingest-page.js';
  * Gelesene und gehörte Texte (`isRead`) stehen nicht mehr in der Leseliste:
  * Sie warten unter „Weiter“ (src/lesen/weiter.js) auf die Entscheidung, ein
  * Hinweis oben verlinkt dorthin.
+ *
+ * Aufbau der Seite: im Seitenkopf „Unterwegs hören“ (und „Folge erzeugen“),
+ * darunter eine Werkzeugzeile (Zeitfenster links; rechts die Sortierung oder,
+ * mit Zeitfenster, der Füllbalken), dann die Liste. Jeder Eintrag ist Titel
+ * plus eine Metazeile, die ganze Zeile führt zur Leseansicht; das Abzeichen
+ * steht rechts, „Im Vault ablegen“ im Menü „⋯“ (`<details>`).
  */
 
 export const WINDOWS = [5, 15, 30, 60];
@@ -69,17 +75,27 @@ export function fitToWindow(docs, minutes) {
   return { items, total };
 }
 
-/** Ein Eintrag: Titel zur Leseansicht, bei angefangenen „Weiterlesen“ mit Restzeit. */
-function stackItem(d, file) {
+/** Stand eines angefangenen Textes in Prozent, 1 bis 99: 0 sähe aus wie neu, 100 wie gelesen. */
+const percent = (d) => Math.min(99, Math.max(1, Math.round(100 * d.progress)));
+
+/**
+ * Ein Eintrag: Titel zur Leseansicht, darunter eine Metazeile (Restzeit, Quelle).
+ * Angefangene tragen davor den Stand als dünnen Balken mit Prozent statt nur des
+ * Wortes „Weiterlesen“ (das bleibt für Screenreader). `extras(d)`: Abzeichen und Menü.
+ */
+function stackItem(d, extras) {
   const minutes = known(d) ? `${started(d) ? 'noch ' : ''}${d.remaining} Min.` : null;
-  const meta = [started(d) ? 'Weiterlesen' : null, minutes, d.site].filter(Boolean).map(esc).join(' · ');
+  const stand = started(d)
+    ? `<span class="stapel-stand"><progress max="100" value="${percent(d)}" aria-hidden="true"></progress><span class="sr-only">Weiterlesen, </span>${percent(d)} %</span>`
+    : null;
+  const meta = [stand, minutes && esc(minutes), d.site && esc(d.site)].filter(Boolean).join(' · ');
   return `<li class="lesen-item">
     <a href="/lesen/doc?id=${encodeURIComponent(d.id)}${started(d) ? '#weiter' : ''}" class="lesen-title">${esc(d.title || d.url)}</a>
-    <span class="meta">${meta}</span>${file ? file(d) : ''}
+    <span class="meta">${meta}</span>${extras ? extras(d) : ''}
   </li>`;
 }
 
-const list = (docs, file) => `<ul class="lesen-list">${docs.map((d) => stackItem(d, file)).join('')}</ul>`;
+const list = (docs, extras) => `<ul class="lesen-list stapel-list">${docs.map((d) => stackItem(d, extras)).join('')}</ul>`;
 
 const chip = (href, label, current) => `<a href="${esc(href)}" class="chip"${current ? ' aria-current="true"' : ''}>${label}</a>`;
 
@@ -130,20 +146,20 @@ export function stackSelection(docs, { zeit = null, sort = 'passt' } = {}) {
   return { items: all, total: null, rest: 0, fits: true };
 }
 
-function windowBody({ items, total, rest, fits }, zeit, file) {
-  if (!fits) return `<p class="empty">Nichts passt ganz – lies den Anfang eines längeren Textes</p>${list(items, file)}`;
-  return `<div class="stapel-fill">
+/** Füllbalken des Zeitfensters („12 von 15 Min.“), steht rechts in der Werkzeugzeile. */
+const windowFill = ({ total }, zeit) => `<div class="stapel-fill">
     <progress class="stapel-bar" value="${total}" max="${zeit}" aria-hidden="true"></progress>
     <span class="meta">${total} von ${zeit} Min.</span>
-  </div>
-  ${list(items, file)}
+  </div>`;
+
+function windowBody({ items, rest, fits }, extras) {
+  if (!fits) return `<p class="empty">Nichts passt ganz – lies den Anfang eines längeren Textes</p>${list(items, extras)}`;
+  return `${list(items, extras)}
   ${rest ? `<p class="meta stapel-rest">${rest} weitere warten</p>` : ''}`;
 }
 
-function allBody({ items }, sort, file, gruppe) {
-  const sorter = `<nav class="chips stapel-sort" aria-label="Sortierung">${SORTS.map(([key, label]) => chip(link('/lesen/stapel', { sort: key, gruppe }), label, sort === key)).join('')}</nav>`;
-  return `${sorter}${list(items, file)}`;
-}
+/** Sortierung als leise Auswahl rechts in der Werkzeugzeile (nur ohne Zeitfenster). */
+const sorter = (sort, gruppe) => `<nav class="chips stapel-sort" aria-label="Sortierung">${SORTS.map(([key, label]) => chip(link('/lesen/stapel', { sort: key, gruppe }), label, sort === key)).join('')}</nav>`;
 
 /** Eintrag des Stapels als JSON: Restzeit (`null` ohne bekannte Lesezeit) und ob angefangen. */
 export const stackItemJson = (d) => ({ ...docJson(d), remaining: known(d) ? (d.remaining ?? remainingMinutes(d)) : null, started: started(d) });
@@ -168,27 +184,34 @@ export function stackRoutes({ store, vault = false, folgen = false, ingest = nul
     pages: {
       async '/lesen/stapel'(ctx) {
         const { minutes, sortParam, sort, filter, docs, decide } = query(ctx.url);
-        // Im Vault ablegen (VCP-96): je Eintrag ein Formular, die Aktion steht in src/lesen/doc.js.
+        // Im Vault ablegen (VCP-96): je Eintrag ein Formular im Menü „⋯“, die Aktion steht in src/lesen/doc.js.
         // Aus einem Feed „nur lesen“ weder ablegen noch ingestieren: nur lesen, dann „Fertig, weg“.
         const ablegen = vault
-          ? (d) => d.no_ingest ? '' : `<form method="post" action="/aktion/lesen/ablegen" class="act lesen-ablegen">${hidden({ csrf: ctx.write.csrf, back: ctx.write.back, id: d.id })}<button type="submit" class="btn quiet">Im Vault ablegen<span class="sr-only">: ${esc(d.title || d.url)}</span></button></form>`
+          ? (d) => d.no_ingest ? '' : `<details class="menu stapel-mehr"><summary class="menu-button" aria-label="${esc(`Mehr zu: ${d.title || d.url}`)}" title="Im Vault ablegen"><span aria-hidden="true">⋯</span></summary><div class="menu-panel"><p class="menu-title">${esc(d.title || d.url)}</p><form method="post" action="/aktion/lesen/ablegen" class="act lesen-ablegen">${hidden({ csrf: ctx.write.csrf, back: ctx.write.back, id: d.id })}<button type="submit" class="btn">Im Vault ablegen<span class="sr-only">: ${esc(d.title || d.url)}</span></button></form><p class="meta">Ungelesen als Notiz mit Volltext, verlässt den Stapel.</p></div></details>`
           : null;
-        let file = ablegen;
+        let badge = null;
         if (ingest) {
           const statuses = ingest.statusFor(docs.map((d) => d.id));
           const available = Boolean(ingest.available()?.ok);
-          const badge = (d) => d.no_ingest ? '' : ingestBadge(d.id, statusIn(statuses, d.id), { ctx, title: d.title || d.url, available });
-          file = (d) => {
-            const parts = [badge(d), ablegen ? ablegen(d) : ''].filter(Boolean).join('');
-            return parts ? `<div class="lesen-item-acts">${parts}</div>` : '';
-          };
+          badge = (d) => d.no_ingest ? '' : ingestBadge(d.id, statusIn(statuses, d.id), { ctx, title: d.title || d.url, available });
         }
+        // Rechts in der Zeile: erst das Abzeichen, dann das Menü.
+        const extras = badge || ablegen
+          ? (d) => {
+              const parts = [badge ? badge(d) : '', ablegen ? ablegen(d) : ''].filter(Boolean).join('');
+              return parts ? `<div class="lesen-item-acts">${parts}</div>` : '';
+            }
+          : null;
         const selection = stackSelection(docs, { zeit: minutes, sort });
         const weiter = decide ? `<p class="stapel-weiter"><a href="/lesen/weiter#entscheiden">${decide === 1 ? 'Ein Text ist' : `${decide} Texte sind`} gelesen oder gehört – wie weiter?</a></p>` : '';
-        const content = !docs.length ? `<p class="empty">${decide ? 'Alles auf dem Stapel ist gelesen oder gehört.' : 'Auf dem Stapel liegt nichts.'}</p>` : minutes ? windowBody(selection, minutes, file) : allBody(selection, sort, file, filter.group);
+        const content = !docs.length ? `<p class="empty">${decide ? 'Alles auf dem Stapel ist gelesen oder gehört.' : 'Auf dem Stapel liegt nichts.'}</p>` : minutes ? windowBody(selection, extras) : list(selection.items, extras);
         const groups = groupChips('/lesen/stapel', filter, { zeit: minutes, sort: sortParam === sort && !minutes ? sort : null });
+        // Eine Werkzeugzeile: Zeitfenster links; rechts der Füllbalken des Fensters oder die Sortierung.
+        const right = !docs.length ? '' : minutes ? (selection.fits ? windowFill(selection, minutes) : '') : sorter(sort, filter.group);
+        const tools = `<div class="stapel-werkzeug">${windowPicker(minutes, filter.group)}${right}</div>`;
         // „Unterwegs hören“ ohne `gruppe`: /lesen/hoeren kennt nur `zeit`.
-        return { html: readingPage(ctx, { key: 'stapel', title: 'Stapel', body: `<section>${groups}${windowPicker(minutes, filter.group)}<p class="stapel-hoeren"><a href="/lesen/hoeren?zeit=${minutes ?? 15}" class="btn quiet">Unterwegs hören</a>${folgen ? ` <a href="/lesen/folgen/neu?zeit=${minutes ?? 30}" class="btn quiet">Folge erzeugen</a>` : ''}</p>${weiter}${content}</section>`, scripts: ingest ? [assets.lesenIngest] : [] }) };
+        const heading = `<div class="stapel-kopfzeile"><h1>Stapel</h1><p class="stapel-kopf"><a href="/lesen/hoeren?zeit=${minutes ?? 15}" class="btn quiet">Unterwegs hören</a>${folgen ? ` <a href="/lesen/folgen/neu?zeit=${minutes ?? 30}" class="btn quiet">Folge erzeugen</a>` : ''}</p></div>`;
+        return { html: readingPage(ctx, { key: 'stapel', title: 'Stapel', heading, bodyClass: 'lesen-spalte', body: `<div class="stapel">${groups}${tools}${weiter}<section class="stapel-karte">${content}</section></div>`, scripts: ingest ? [assets.lesenIngest] : [] }) };
       },
       /** Stapel als JSON: Einträge mit Restzeit, beim Zeitfenster `window` (x von y Min., n weitere, ob etwas passt). */
       async '/api/lesen/stapel'(ctx) {

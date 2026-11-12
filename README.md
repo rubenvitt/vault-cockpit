@@ -798,8 +798,22 @@ keine Frames, keine Event-Attribute, Links nur `http`, `https` und `mailto`.
 Bilder und Videos werden zu Links, die Content-Security-Policy lädt weiter nichts
 von fremden Servern.
 
+Der **Stapel** (`/lesen/stapel`) hat eine Werkzeugzeile: links das Zeitfenster
+(Alle · 5 · 15 · 30 · 60 Min.), rechts die Sortierung oder, mit Zeitfenster, der
+Füllbalken („12 von 15 Min.“); „Unterwegs hören“ und „Folge erzeugen“ stehen im
+Seitenkopf. Jeder Eintrag ist Titel plus eine Metazeile, die ganze Zeile führt zum
+Text; Angefangenes zeigt den Stand als dünnen Balken mit Prozent. Rechts steht das
+Ingest-Abzeichen, „Im Vault ablegen“ im Menü „⋯“. Eingang, Stapel, Markiert,
+Wiedersehen und Feeds stehen am Desktop in einer ruhigen Spalte (880 px) statt
+über die volle Seitenbreite.
+
 Die **Leseansicht** (`/lesen/doc?id=…`, VCP-71) zeigt den Text in Leseschrift mit
-Fortschritt, Restzeit und der Entscheidung nach dem Lesen (ohne JavaScript als Formular). Mit
+Fortschritt, Restzeit und der Entscheidung nach dem Lesen (ohne JavaScript als Formular),
+über dem Text und noch einmal an seinem Ende. Am Desktop steht links der Stapel als
+schmale Spalte, rechts Querverbindungen, Markierungen und zugeklappt die
+Tastenkürzel. Die Schrift stellt man im Menü „Aa“ neben der Quelle ein; „Fokus“
+(Taste F, wird gemerkt) blendet Unternavigation und Seitenspalten aus, „Verbinden“
+zeigt seine Treffer dann als Blatt unten rechts. Mit
 JavaScript (`/static/lesen-doc.js`) speichert sie die Lesestelle beim Scrollen;
 `#weiter` springt dorthin. Markiert wird per Textauswahl über eine Leiste unten
 (Markieren · Notiz · Verbinden · In Inbox), am iPhone also nicht im Weg des
@@ -810,9 +824,9 @@ Ausliefern als `<mark>` nur um Textstücke. „In Inbox“ legt das Zitat mit Qu
 über die Schnelleingabe als Notiz „Zitat aus <Titel>“ in der Vault-Inbox an.
 Rückgängig nach „Entfernen“ legt die Markierung mit derselben ID und ihrem Stand
 im Wiedersehen neu an. Unter **Markiert** stehen
-alle Markierungen, filterbar nach Quelle und Thema.
+alle Markierungen, filterbar nach Quelle und Thema (Werkzeugzeile über der Liste).
 
-**Unterwegs hören** (`/lesen/hoeren?zeit=15`, VCP-79, Link auf dem Stapel): Die
+**Unterwegs hören** (`/lesen/hoeren?zeit=15`, VCP-79, Knopf im Kopf des Stapels): Die
 Texte des Zeitfensters werden zur Wiedergabeliste. Vorgelesen wird auf dem Gerät
 mit der Web Speech API (`speechSynthesis`, deutsche Stimme bevorzugt), ohne
 Serverkosten, oder mit ElevenLabs (unten, „Stimme vom Server“). Bedienung: Abspielen/Pause, Nächster Text, Tempo (0,8× bis 1,8×,
@@ -1152,7 +1166,7 @@ frischt sie auf, auch ohne Markierungen, mit `lesestatus: gelesen`, `gelesen:`
 und der Kurzfassung; mit Häkchen kommt der Artikel als Markdown in einen
 eigenen generierten Bereich unter „## Text“ (vor „## Eigene Gedanken“) und
 `ingest: offen` ins Frontmatter. Der Text ist dann archiviert (`archiv`). Im
-Eingang (Knopf, Taste A) und auf dem Stapel (je Eintrag ein Knopf) gibt es
+Eingang (Knopf, Taste A) und auf dem Stapel (je Eintrag im Menü „⋯“) gibt es
 **Im Vault ablegen**: Notiz immer mit Volltext, `lesestatus: ungelesen` und
 ohne `gelesen:`; der Text bekommt den Status `abgelegt` und verlässt Eingang
 und Stapel. Wer ihn später doch liest und „In den

@@ -113,7 +113,8 @@ function renderMarked(items, facets, filter, ctx) {
         )
         .join('')}</ul>`
     : `<p class="empty">${filtered ? 'Für diese Auswahl ist nichts markiert.' : 'Noch nichts markiert.'}</p>`;
-  return readingPage(ctx, { key: 'markiert', title: 'Markiert', body: `${filters ? `<section>${filters}</section>` : ''}<section>${body}</section>` });
+  // Der Filter steht als Werkzeugzeile über der Liste, nicht als eigene Karte.
+  return readingPage(ctx, { key: 'markiert', title: 'Markiert', bodyClass: 'lesen-spalte', body: `${filters}<section class="markiert">${body}</section>` });
 }
 
 /**

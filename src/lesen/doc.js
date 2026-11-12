@@ -12,11 +12,14 @@ import { toRead } from './stack.js';
 /**
  * Leseansicht `/lesen/doc?id=…` (VCP-71): Lesetext in Leseschrift mit den
  * Markierungen, Fortschritt und Restzeit, dazu die Entscheidung nach dem Lesen
- * (VCP-96): „Fertig, weg“ oder „In den Vault“ (Notiz, wahlweise mit Volltext).
- * Auf breiten Bildschirmen daneben Bereiche, Stapel und eine Seitenleiste
- * (Querverbindungen, Markierungen, Tastenkürzel). Markieren und Speichern des
- * Fortschritts macht `/static/lesen-doc.js`; ohne JavaScript bleibt der Text
- * lesbar und jede Entscheidung ein Formular.
+ * (VCP-96): „Fertig, weg“ oder „In den Vault“ (Notiz, wahlweise mit Volltext),
+ * über dem Text und noch einmal an seinem Ende.
+ * Der Text ist die Hauptsache: Auf breiten Bildschirmen steht links der Stapel
+ * als schmale, leise Spalte, rechts eine Seitenleiste (Querverbindungen,
+ * Markierungen, Tastenkürzel zugeklappt). Die Schrift stellt man im Menü „Aa“
+ * neben der Quelle ein, „Fokus“ blendet Unternavigation und Seitenspalten aus.
+ * Markieren und Speichern des Fortschritts macht `/static/lesen-doc.js`; ohne
+ * JavaScript bleibt der Text lesbar und jede Entscheidung ein Formular.
  *
  * Link-Vertrag für die anderen Seiten: `/lesen/doc?id=<id>`, mit `#weiter`
  * an die zuletzt gelesene Stelle (`scroll_anchor`, Zeichen im Lesetext).
@@ -46,29 +49,17 @@ const KEYS = [
   ['E', 'fertig, weg'],
   ['V', 'in den Vault'],
   ['J / K', 'Absatz weiter / zurück'],
+  ['F', 'Fokus: nur der Text'],
 ];
 
-/** Bereiche des Lesestapels mit Zählern. */
-function areas(counts) {
-  const items = [
-    ['/lesen/eingang', 'Eingang', counts.eingang],
-    ['/lesen/stapel', 'Stapel', counts.stapel],
-    ['/lesen/markiert', 'Markiert', null],
-    ['/wissen', 'Wissen', null],
-  ];
-  return `<nav class="lesen-col lesen-areas" aria-label="Bereiche"><h2>Bereiche</h2><ul>${items
-    .map(([to, label, n]) => `<li><a href="${to}">${label}${n ? ` <span class="meta">${n}</span>` : ''}</a></li>`)
-    .join('')}</ul></nav>`;
-}
-
-/** Die Dokumente auf dem Stapel, das offene hervorgehoben. */
+/** Die Dokumente auf dem Stapel als schmale Spalte, das offene hervorgehoben; die Überschrift führt zum Stapel. */
 function stack(docs, current) {
   const body = docs.length
     ? `<ol>${docs
-        .map((d) => `<li><a href="${esc(docLink(d.id))}${d.progress > 0 && d.progress < 1 ? '#weiter' : ''}"${d.id === current ? ' aria-current="page"' : ''}>${esc(d.title || d.url)}<span class="meta">${esc([d.site, restLabel(d)].filter(Boolean).join(' · '))}</span></a></li>`)
+        .map((d) => `<li><a href="${esc(docLink(d.id))}${d.progress > 0 && d.progress < 1 ? '#weiter' : ''}"${d.id === current ? ' aria-current="page"' : ''}><span class="lesen-stack-title">${esc(d.title || d.url)}</span><span class="meta">${esc([restLabel(d), d.site].filter(Boolean).join(' · '))}</span></a></li>`)
         .join('')}</ol>`
     : '<p class="empty">Leer.</p>';
-  return `<nav class="lesen-col lesen-stack" aria-label="Stapel"><h2>Stapel</h2>${body}</nav>`;
+  return `<nav class="lesen-col lesen-stack" aria-label="Stapel"><h2><a href="/lesen/stapel">Stapel</a></h2>${body}</nav>`;
 }
 
 /** Markierungen des Dokuments in Lesereihenfolge; verlorene Stellen bleiben mit Hinweis stehen. */
@@ -91,19 +82,22 @@ function highlightList(highlights, orphans, ctx) {
  * mit Wahl „mit Volltext“ (vorab gesetzt: der Volltext ist die Rohquelle fürs
  * Wiki), und nach einer Entscheidung „Zurück auf den Stapel“.
  * Mit dem Ingest-Dienst davor „Ingest prüfen“ bzw. „Ingest entwerfen“ (`ingest`: `{ status, available }`).
+ * `keys: false` (am Ende des Textes): ohne Tasten-Hinweis, die Kürzel lösen die Formulare oben aus.
  */
-function decide(doc, ctx, vault, ingest = null) {
+function decide(doc, ctx, vault, ingest = null, { keys = true } = {}) {
   const form = (action, key, fields, body) => `<form method="post" action="${action}" class="act" data-decide="${key}">${hidden({ csrf: ctx.write.csrf, back: ctx.write.back, id: doc.id, ...fields })}${body}</form>`;
+  const kbd = (k) => (keys ? ` <kbd>${k}</kbd>` : '');
   // Ohne „In den Vault“ (etwa aus einem Feed „nur lesen“) ist „Fertig, weg“ der Hauptknopf.
+  // Das Abzeichen steht als Erstes und rückt per CSS nach links, die Entscheidung nach rechts.
   return `<div class="lesen-decide">
       ${ingest ? ingestBadge(doc.id, ingest.status, { ctx, available: ingest.available, ready: 'Ingest prüfen' }) : ''}
-      ${decisions(doc, vault).fertig ? form('/aktion/lesen/doc/fertig', 'fertig', {}, `<button type="submit" class="btn${vault ? '' : ' primary'}">Fertig, weg <kbd>E</kbd></button>`) : ''}
-      ${vault ? form('/aktion/lesen/doc/vault', 'vault', {}, '<label class="lesen-volltext"><input type="checkbox" name="volltext" value="1" checked> mit Volltext</label><button type="submit" class="btn primary">In den Vault <kbd>V</kbd></button>') : ''}
+      ${decisions(doc, vault).fertig ? form('/aktion/lesen/doc/fertig', 'fertig', {}, `<button type="submit" class="btn${vault ? '' : ' primary'}">Fertig, weg${kbd('E')}</button>`) : ''}
+      ${vault ? form('/aktion/lesen/doc/vault', 'vault', {}, `<label class="lesen-volltext"><input type="checkbox" name="volltext" value="1" checked> mit Volltext</label><button type="submit" class="btn primary">In den Vault${kbd('V')}</button>`) : ''}
       ${decisions(doc, vault).zurueck ? form(STATUS, 'zurueck', { status: 'stapel' }, '<button type="submit" class="btn quiet">Zurück auf den Stapel</button>') : ''}
     </div>`;
 }
 
-function renderDoc(doc, { highlights, stackDocs, counts, vault, ingest }, ctx) {
+function renderDoc(doc, { highlights, stackDocs, vault, ingest }, ctx) {
   const { html, orphans } = markHighlights(doc.content_html ?? '', highlights, { weiter: Number(doc.scroll_anchor) || 0 });
   const meta = [doc.site, doc.author, doc.reading_minutes ? `${doc.reading_minutes} min` : null].filter(Boolean).map(esc).join(' · ');
   const text = doc.content_html
@@ -117,12 +111,27 @@ ${head(doc.title || doc.url, { script: true, scripts: [assets.lesenDoc, assets.l
 ${appHeader({ current: 'lesen', user: ctx.user })}
 ${readingNav(nav, ctx.nav)}
 <main class="lesen-doc">
-${areas(counts)}
 ${stack(stackDocs, doc.id)}
 <article class="lesen-reader" data-doc="${esc(doc.id)}" data-minutes="${doc.reading_minutes}">
   <header class="lesen-doc-head">
     <h1>${esc(doc.title || doc.url)}</h1>
-    <p class="meta">${meta}${meta ? ' · ' : ''}<a href="${esc(href(doc.url))}" rel="noopener noreferrer" target="_blank">Original</a>${doc.comments_url ? ` · <a href="${esc(href(doc.comments_url))}" rel="noopener noreferrer" target="_blank">Kommentare</a>` : ''}</p>
+    <div class="lesen-doc-meta">
+      <p class="meta">${meta}${meta ? ' · ' : ''}<a href="${esc(href(doc.url))}" rel="noopener noreferrer" target="_blank">Original</a>${doc.comments_url ? ` · <a href="${esc(href(doc.comments_url))}" rel="noopener noreferrer" target="_blank">Kommentare</a>` : ''}</p>
+      <div class="lesen-view">
+        <button type="button" class="btn quiet lesen-nur-text" data-nur-text aria-pressed="false" aria-keyshortcuts="f" title="Nur der Text, ohne Seitenspalten (F)">Fokus</button>
+        <details class="menu lesen-ansicht">
+          <summary class="menu-button" aria-label="Darstellung" title="Schrift einstellen"><span aria-hidden="true">Aa</span></summary>
+          <div class="menu-panel">
+            <p class="menu-label">Schrift</p>
+            <div class="lesen-schrift">
+              <button type="button" class="btn" data-size="-1" aria-label="Schrift kleiner">A−</button>
+              <button type="button" class="btn" data-size="1" aria-label="Schrift größer">A+</button>
+              <button type="button" class="btn" data-font aria-pressed="false">Ohne Serifen</button>
+            </div>
+          </div>
+        </details>
+      </div>
+    </div>
   </header>
   <div class="lesen-progress">
     <progress max="1" value="${doc.progress}" aria-label="Gelesen"></progress>
@@ -130,19 +139,18 @@ ${stack(stackDocs, doc.id)}
     ${doc.progress > 0 && doc.progress < 1 ? '<a href="#weiter" class="meta">Weiterlesen</a>' : ''}
   </div>
   <div class="lesen-tools">
-    <div class="lesen-view">
-      <button type="button" class="btn quiet" data-size="-1" aria-label="Schrift kleiner">A−</button>
-      <button type="button" class="btn quiet" data-size="1" aria-label="Schrift größer">A+</button>
-      <button type="button" class="btn quiet" data-font aria-pressed="false">Ohne Serifen</button>
-    </div>
     ${decide(doc, ctx, vault, ingest)}
   </div>
   <div class="lesen-text">${text}</div>
+  ${nav ? `<footer class="lesen-ende">
+    <p class="meta">Zu Ende gelesen?</p>
+    ${decide(doc, ctx, vault, null, { keys: false })}
+  </footer>` : ''}
 </article>
 <aside class="lesen-side">
   <section class="lesen-links" data-verbindungen><h2>Querverbindungen</h2><p class="empty">Markierung antippen oder Text auswählen, dann „Verbinden“: passende Stellen aus anderen Texten, Synthesen und Konzepten.</p></section>
   <section><h2>Markierungen</h2>${highlightList(highlights, orphans, ctx)}</section>
-  <section class="lesen-keys"><h2>Tastenkürzel</h2><dl>${KEYS.map(([k, label]) => `<div><dt><kbd>${k}</kbd></dt><dd>${label}</dd></div>`).join('')}</dl></section>
+  <details class="more lesen-keys"><summary>Tastenkürzel</summary><dl>${KEYS.map(([k, label]) => `<div><dt><kbd>${k}</kbd></dt><dd>${label}</dd></div>`).join('')}</dl></details>
 </aside>
 </main>
 <div class="lesen-selbar" role="toolbar" aria-label="Auswahl" hidden>

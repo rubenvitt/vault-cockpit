@@ -184,7 +184,7 @@ export function renderReviewPage(model, ctx, opts) {
   const undo = renderUndo(model.last, ctx);
   const body = `<div class="inbox wiedersehen">${progress}${card ? renderCard(card, ctx, { ...opts, undo }) : empty}${!card && undo ? `<div class="wiedersehen-actions">${undo}</div>` : ''}</div>
 ${renderWeek(model, ctx, opts)}`;
-  return readingPage(ctx, { key: 'wiedersehen', title: 'Wiedersehen', body, scripts: [assets.inbox] });
+  return readingPage(ctx, { key: 'wiedersehen', title: 'Wiedersehen', body, scripts: [assets.inbox], bodyClass: 'lesen-spalte' });
 }
 
 /**
