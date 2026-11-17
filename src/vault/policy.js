@@ -11,6 +11,9 @@ import { readFileSync } from 'node:fs';
  *                Index, weder Inhalt noch Metadaten.
  *   sensitive  — { "ordner": "label" }. Indexiert, aber nur auf ausdrückliche
  *                Anforderung ausgeliefert.
+ *   graphExclude — Regex-Muster auf den relativen Pfad. Treffer bleiben im
+ *                Index (Suche, Claude), fehlen aber in den Graphen: für
+ *                Verzeichnisse wie einen Wiki-Index, die fast alles verlinken.
  *   readwise   — Ordner mit importierten Fremdtexten. Eigene Indexklasse, die
  *                standardmäßig nicht durchsucht wird.
  *   layoutHint — Freitext, der Claude im Werkzeug vault_list die Ordnerstruktur
@@ -24,11 +27,13 @@ export function compilePolicy(raw = {}) {
   const sensitive = Object.entries(raw.sensitive ?? {}).map(([folder, label]) => [folder.replace(/\/+$/, ''), String(label)]);
   const readwise = raw.readwise ? String(raw.readwise).replace(/\/+$/, '') : null;
   const exclude = [...BUILTIN_EXCLUDES, ...(raw.exclude ?? []).map((p) => new RegExp(p, 'i'))];
+  const graphExclude = (raw.graphExclude ?? []).map((p) => new RegExp(p, 'i'));
   const under = (relPath, prefix) => relPath === prefix || relPath.startsWith(prefix + '/');
 
   return {
     layoutHint: raw.layoutHint ? String(raw.layoutHint) : null,
     isExcluded: (relPath) => exclude.some((re) => re.test(relPath)),
+    isGraphHidden: (relPath) => graphExclude.some((re) => re.test(relPath)),
     classify: (relPath) => (readwise && under(relPath, readwise) ? 'readwise' : 'core'),
     sensitivityOf(relPath) {
       for (const [prefix, label] of sensitive) if (under(relPath, prefix)) return label;

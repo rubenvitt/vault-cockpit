@@ -133,6 +133,10 @@ JSON-Datei, die nur auf dem Server liegt (`POLICY_FILE`, Vorlage
 schützenswerten Notizen liegen.
 
 - `exclude` — Regex auf den relativen Pfad; Treffer kommen nie in den Index.
+- `graphExclude` — Regex auf den relativen Pfad; Treffer bleiben im Index (Suche,
+  Claude), fehlen aber im Graphen über den ganzen Vault und als Nachbar im Graphen
+  um eine Notiz. Für Verzeichnisse wie `wiki/index.md`, die fast alles verlinken
+  und das Layout zu einem Stern um sich ziehen.
 - `sensitive` — indexiert, aber nur mit `include_sensitive` / `allow_sensitive`
   ausgeliefert, `vault_list` zeigt sie nie, und bearbeitet werden sie nie.
 - `readwise` — importierte Fremdtexte als eigene Indexklasse, standardmäßig nicht

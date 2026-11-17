@@ -3,6 +3,9 @@
     "^privat/nachlass/",
     "^wiki/log\\.md$"
   ],
+  "graphExclude": [
+    "^wiki/index\\.md$"
+  ],
   "sensitive": {
     "bereiche/Gesundheit": "gesundheit",
     "bereiche/Finanzen": "finanzen",

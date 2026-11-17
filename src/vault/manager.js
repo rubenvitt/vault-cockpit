@@ -129,6 +129,7 @@ export function createIndexManager({ vaultPath, dbPath, policy = DEFAULT_POLICY,
     resolveLink: (...a) => current.resolveLink(...a),
     tagsOf: (...a) => current.tagsOf(...a),
     wholeGraph: (...a) => current.wholeGraph(...a),
+    graphHidden: (...a) => current.graphHidden(...a),
     imagesNamed: (...a) => current.imagesNamed(...a),
     hasImage: (...a) => current.hasImage(...a),
   };

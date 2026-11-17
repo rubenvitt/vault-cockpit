@@ -62,6 +62,9 @@ export function createGraph({ index, semantic: semanticOrGetter = null, zunder =
   async function around(path, { depth = 1, includeSensitive = false, similar = 8, minSimilarity = 0.55, maxNodes = 80 } = {}) {
     const allowed = index.filterPaths({ includeSensitive });
     if (!allowed.has(path)) return null;
+    // Verzeichnisse wie der Wiki-Index (Policy `graphExclude`) tauchen nicht als
+    // Nachbarn auf; als Mitte bleiben sie erreichbar.
+    for (const p of allowed) if (p !== path && index.graphHidden?.(p)) allowed.delete(p);
     // Index oder Funktion, die den aktuellen liefert (Einstellungen → Embeddings).
     const semantic = typeof semanticOrGetter === 'function' ? semanticOrGetter() : semanticOrGetter;
 

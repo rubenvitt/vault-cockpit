@@ -455,7 +455,8 @@ export function openIndex(dbOrPath, { vaultPath = process.env.VAULT_PATH ?? '/va
     wholeGraph() {
       const notes = db
         .prepare("SELECT path, title, basename, folder, type FROM notes WHERE class = 'core' AND sensitivity IS NULL ORDER BY path")
-        .all();
+        .all()
+        .filter((n) => !policy.isGraphHidden(n.path));
       const links = db
         .prepare(
           `SELECT DISTINCT l.source AS s, l.target_path AS t
@@ -468,8 +469,14 @@ export function openIndex(dbOrPath, { vaultPath = process.env.VAULT_PATH ?? '/va
             ORDER BY l.source, l.target_path`,
         )
         .all()
+        .filter((r) => !policy.isGraphHidden(r.s) && !policy.isGraphHidden(r.t))
         .map((r) => [r.s, r.t]);
       return { notes, links };
+    },
+
+    /** Fehlt die Notiz laut Policy (`graphExclude`) in den Graphen? */
+    graphHidden(path) {
+      return policy.isGraphHidden(path);
     },
 
     /** Eigene Notizen, die eingebettet werden (auch vertrauliche, gefiltert wird beim Ausliefern). */
