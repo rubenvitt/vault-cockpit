@@ -40,6 +40,13 @@ export function createStateStore(file = null) {
       delete data[key];
       save();
     },
+    /** Alle Schlüssel mit diesem Anfang entfernen (einmal speichern); liefert ihre Zahl. */
+    dropPrefix(prefix) {
+      const gone = Object.keys(data).filter((k) => k.startsWith(prefix));
+      for (const k of gone) delete data[k];
+      if (gone.length) save();
+      return gone.length;
+    },
     /** Der ganze Stand als JSON, für die Sicherung. */
     snapshot: () => Buffer.from(JSON.stringify(data, null, 2)),
     /**

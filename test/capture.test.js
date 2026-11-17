@@ -132,7 +132,7 @@ test('dieselbe Capture-ID erzeugt keine zweite Zunder-Aufgabe', async () => {
 function lossyZunder({ lose = 0, down = 0 } = {}) {
   const tasks = [];
   const refs = new Map();
-  const calls = { create: 0, find: 0 };
+  const calls = { create: 0 };
   const url = (id) => `https://zunder.test/#/aufgabe/${id}`;
   return {
     tasks,
@@ -159,11 +159,6 @@ function lossyZunder({ lose = 0, down = 0 } = {}) {
       }
       return { id, ref: task.ref, url: url(id) };
     },
-    async findByMarker(marker) {
-      calls.find++;
-      const t = tasks.find((x) => x.description.includes(`\`${marker}\``));
-      return t ? { id: t.id, ref: t.ref, url: url(t.id) } : null;
-    },
   };
 }
 
@@ -184,7 +179,6 @@ test('Nachsenden nach verlorener Zunder-Antwort legt keine zweite Aufgabe an (VC
   assert.deepEqual(again.location, { kind: 'inbox' });
   assert.equal(zunder.tasks.length, 1);
   assert.equal(zunder.calls.create, 2, 'das Nachsenden fragt Zunder mit demselben Schlüssel');
-  assert.equal(zunder.calls.find, 0, 'keine Suche mehr');
 
   // Danach kennt der Merkzettel die Aufgabe, ohne Zunder zu fragen.
   const third = await restarted.route({ text: '!Paket abholen', source: 'funke', captureId: 'f1' });
@@ -226,8 +220,6 @@ test('Scheitert der Aufruf, bevor Zunder anlegt, legt das Nachsenden genau einma
   const again = await r.route({ text: '!Paket abholen', source: 'mail', captureId: 'm1' });
   assert.equal(again.duplicate, undefined);
   assert.equal(zunder.tasks.length, 1);
-  assert.equal(zunder.calls.find, 0);
-  assert.deepEqual(state.keys('capture-pending:'), [], 'es entsteht kein Vermerk „angefragt“ mehr');
 });
 
 test('Capture-ID geht als client_ref mit, ohne Marker in der Beschreibung; ohne ID kein Schlüssel (VCP-141)', async () => {
@@ -249,26 +241,6 @@ test('Lange Capture-IDs werden für client_ref gehasht und bleiben gültig (VCP-
   assert.equal(ref, clientRef(`capture:ios-kurzbefehl:${id}`), 'immer derselbe Schlüssel');
   assert.notEqual(ref, clientRef(`capture:mail:${id}`));
   assert.equal(clientRef('capture:funke:f1'), 'cockpit-capture:funke:f1');
-});
-
-test('Altbestand: Ein Vermerk „angefragt“ aus VCP-132 findet die Aufgabe noch über den Marker (VCP-141)', async () => {
-  const zunder = lossyZunder();
-  zunder.tasks.push({ id: 't1', ref: 'ZUN-1', description: '_Erfasst über Funke (Vault Cockpit)_ · `cockpit-capture:funke:alt`' });
-  state.set('capture-pending:funke:alt', { at: '2026-11-08T10:00:00Z', plan: { title: 'Paket abholen', due: null, location: null, phoenix: null, notes: [] } });
-  state.set('capture-pending:funke:weg', { at: '2026-11-08T10:00:00Z', plan: { title: 'Weg', due: null, location: null, phoenix: null, notes: [] } });
-  const r = createCaptureRouter({ capture, zunder, state, logger: quiet });
-
-  const found = await r.route({ text: '!Paket abholen', source: 'funke', captureId: 'alt' });
-  assert.equal(found.duplicate, true);
-  assert.equal(found.id, 't1');
-  assert.equal(zunder.calls.create, 0);
-
-  // Kennt Zunder den Marker nicht, wurde nie angelegt: einmal neu, mit Schlüssel.
-  const fresh = await r.route({ text: '!Weg', source: 'funke', captureId: 'weg' });
-  assert.equal(fresh.duplicate, undefined);
-  assert.equal(zunder.calls.create, 1);
-  assert.equal(zunder.tasks.at(-1).clientRef, 'cockpit-capture:funke:weg');
-  assert.deepEqual(state.keys('capture-pending:'), []);
 });
 
 test('dieselbe Capture-ID legt keine zweite Notiz an, auch nach dem Ablegen (VCP-56)', async () => {
@@ -318,6 +290,17 @@ test('Funke-Notizen werten ! nicht aus', async () => {
 test('Zustand überlebt einen Neustart', () => {
   state.set('k', { id: 'x' });
   assert.deepEqual(createStateStore(join(root, '.state', 'capture.json')).get('k'), { id: 'x' });
+});
+
+test('Merkzettel räumt Schlüssel mit einem Anfang auf einmal ab, der Rest bleibt (VCP-143)', () => {
+  const file = join(root, '.state', 'capture.json');
+  state.set('capture-pending:funke:alt', { at: '2026-11-08T10:00:00Z' });
+  state.set('capture-pending:mail:m1', { at: '2026-11-08T10:00:00Z' });
+  state.set('capture:funke:f1', { id: 't1' });
+  assert.equal(state.dropPrefix('capture-pending:'), 2);
+  assert.deepEqual(state.keys('capture-pending:'), []);
+  assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), { 'capture:funke:f1': { id: 't1' } }, 'auch in der Datei');
+  assert.equal(state.dropPrefix('capture-pending:'), 0);
 });
 
 test('Merkzettel aus einer Sicherung gilt sofort, der alte Stand im Speicher überschreibt ihn nicht (VCP-59)', () => {
@@ -387,31 +370,6 @@ test('Zunder-Client meldet Ablehnungen mit der Begründung', async () => {
   await assert.rejects(client.createTask({ title: 'x' }), /Titel zu lang/);
   const down = createZunderClient({ url: 'https://zunder.test', token: 't', fetch: async () => new Response('', { status: 502 }) });
   await assert.rejects(down.createTask({ title: 'x' }), /HTTP 502/);
-});
-
-test('Zunder-Client findet eine Aufgabe nur am vollständigen Marker (VCP-132)', async () => {
-  const calls = [];
-  const tasks = {
-    a: { id: 'a', ref: 'ZUN-1', description: '_Erfasst_ · `cockpit-capture:mail:m10`' },
-    b: { id: 'b', ref: 'ZUN-2', description: '_Erfasst_ · `cockpit-capture:mail:m1`' },
-  };
-  const client = createZunderClient({
-    url: 'https://zunder.test',
-    token: 't',
-    fetch: async (_url, init) => {
-      const { name, arguments: args } = JSON.parse(init.body).params;
-      calls.push({ name, args });
-      const content =
-        name === 'search'
-          ? { hits: [{ entity: 'project', id: 'p' }, { entity: 'task', id: 'a' }, { entity: 'task', id: 'b' }] }
-          : { task: tasks[args.task_id] };
-      return Response.json({ jsonrpc: '2.0', id: 1, result: { structuredContent: content } });
-    },
-  });
-  assert.deepEqual(await client.findByMarker('cockpit-capture:mail:m1'), { id: 'b', ref: 'ZUN-2', url: 'https://zunder.test/#/aufgabe/b' });
-  assert.deepEqual(calls[0], { name: 'search', args: { query: '`cockpit-capture:mail:m1`', limit: 20 } }, 'mit Backticks: nur der ganze Marker');
-  assert.deepEqual(calls.slice(1).map((c) => c.args.task_id), ['a', 'b'], 'nur Aufgaben, kein Projekt');
-  assert.equal(await client.findByMarker('cockpit-capture:mail:m2'), null);
 });
 
 // --- HTTP ---

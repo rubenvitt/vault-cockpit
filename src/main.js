@@ -222,6 +222,10 @@ const zunderSource = () => {
 // Capture von außen (Schritt 2): Weiterleitung an Zunder, Capture-Endpunkte,
 // Mail-Abruf und Zunder-Brücke. Eingerichtet wird alles in den Einstellungen.
 const captureState = createStateStore(process.env.CAPTURE_STATE_FILE ?? '/data/capture-state.json');
+// Vermerke „angefragt“ aus VCP-132 liest seit VCP-141 nichts mehr; was davon
+// noch liegt, fliegt beim Start raus (VCP-143).
+const stalePending = captureState.dropPrefix('capture-pending:');
+if (stalePending) console.log(`Capture: ${stalePending} alte ${stalePending === 1 ? 'Vermerk' : 'Vermerke'} „angefragt“ aus dem Merkzettel entfernt`);
 const captureRouter = createCaptureRouter({ capture, zunder, state: captureState, tz: () => cockpitSettings.get().tz });
 
 // API-Tokens werden im Web-Cockpit unter Einstellungen → API-Tokens angelegt und
