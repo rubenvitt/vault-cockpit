@@ -640,8 +640,24 @@ a:active, a.pressed { opacity: .55; transition-duration: 0s; }
 /* `.inbox` heißt auch der Eingang unter Lesen (Raster mit Abstand); die Inbox der Woche ist ein gewöhnlicher Abschnitt. */
 .week-main .inbox { display: block; }
 
-/* Einstellungen → Anzeige: Reihenfolge der Bereiche, ein Name pro Zeile */
+/* Einstellungen → Anzeige: Reihenfolge der Bereiche, als Liste aus Zunder (VCP-147) oder ein Name pro Zeile */
 .area-order textarea { width: 100%; max-width: 420px; resize: vertical; line-height: 1.5; }
+.area-order-list { list-style: none; margin: var(--s-2) 0 0; padding: 0; max-width: 520px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); }
+.area-order-list li { display: flex; align-items: center; gap: var(--s-2); padding: 4px var(--s-2) 4px var(--s-3); scroll-margin-top: 30vh; }
+.area-order-list li + li { border-top: 1px solid var(--line); }
+.area-order-list li:target { background: var(--accent-soft); }
+.area-order-list .area-rank { flex: none; width: 2ch; text-align: right; color: var(--text-3); font-size: var(--t-sm); font-variant-numeric: tabular-nums; }
+.area-order-list .area-name { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px var(--s-2); }
+.area-order-list li.gone .area-name { color: var(--text-2); }
+.area-order-list .area-moves { flex: none; display: inline-flex; gap: 2px; }
+.area-move { font: inherit; line-height: 1; min-width: 32px; min-height: 32px; border: 1px solid transparent; border-radius: var(--r-sm); background: none; color: var(--text-2); cursor: pointer; }
+.area-move:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent-line); color: var(--text); }
+.area-move:disabled { opacity: .3; cursor: default; }
+.area-order-reset { margin: var(--s-2) 0 var(--s-1); }
+.settings div.area-order { margin-top: var(--s-4); font-size: 14px; }
+.settings div.area-order > span { font-weight: 500; }
+.settings div.area-order > span .hint { font-weight: 400; }
+@media (pointer: coarse) { .area-move { min-width: 40px; min-height: 40px; } }
 .settings .area-order-hint { margin: var(--s-2) 0 0; max-width: 68ch; }
 
 /* Blättern: schmal nur die Pfeile und „Heute“ (render.js `weekPager`, Regeln dazu in „Schmale Bildschirme“) */
