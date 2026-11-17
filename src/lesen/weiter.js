@@ -4,7 +4,7 @@ import { hidden } from '../web/render.js';
 import { readingPage } from './pages.js';
 import { docJson, jsonReply } from './json.js';
 import { isRead, remainingMinutes } from './stack.js';
-import { ENTWERFEN, EINPFLANZEN, INGEST, draftRow, ingestLink } from './ingest-page.js';
+import { ENTWERFEN, EINPFLANZEN, INGEST, draftRow, ingestLink, oldestDraftFirst } from './ingest-page.js';
 import { BYTES_PER_SECOND, KINDS } from './folgen.js';
 import { clock, unheard } from './folgen-page.js';
 
@@ -158,9 +158,11 @@ export function weiterModel({ store, ingest = null, episodes = null }) {
     }
     stages[stage].push({ doc, stage, ingest: e, plant: plantOf(e), read: readInfo(doc, heard), track: trackOf(doc, e) });
   }
-  // Prüfen: älteste Entwürfe zuerst; Entscheiden: zuletzt Gelesenes zuerst (frisch im Kopf); Weiterlesen: kürzeste Restzeit zuerst.
+  // Prüfen: wie Übersicht und Prüfseite, älteste Entwürfe zuerst; Entscheiden: zuletzt Gelesenes zuerst (frisch im Kopf); Weiterlesen: kürzeste Restzeit zuerst.
   const t = (iso) => Date.parse(iso ?? '') || 0;
-  stages.pruefen.sort((a, b) => t(a.ingest.drafted_at) - t(b.ingest.drafted_at));
+  // Gleich alte in der Folge von `ingest.list()`, damit „Ersten prüfen“ genau den ersten der Übersicht öffnet.
+  const rank = new Map([...rows.keys()].map((id, i) => [id, i]));
+  stages.pruefen.sort((a, b) => oldestDraftFirst(a.ingest, b.ingest) || rank.get(a.doc.id) - rank.get(b.doc.id));
   stages.entscheiden.sort((a, b) => t(b.read?.at ?? b.doc.status_changed_at) - t(a.read?.at ?? a.doc.status_changed_at));
   stages.weiterlesen.sort((a, b) => remainingMinutes(a.doc) - remainingMinutes(b.doc));
   // Anhören: angefangene zuerst, sonst die neueste.

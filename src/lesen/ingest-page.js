@@ -353,7 +353,7 @@ const unavailable = (av) => `<p class="problem unconfigured">Claude ist gerade n
 function overview({ store, ingest, planter, now = Date.now }, ctx) {
   const av = ingest.available() ?? { ok: false };
   const all = ingest.list();
-  const ready = all.filter((e) => e.status === 'bereit');
+  const ready = readyDrafts(all);
   const busy = all.filter((e) => BUSY.includes(e.status));
   const failed = all.filter((e) => e.status === 'fehler');
   const at = now();
@@ -680,9 +680,19 @@ function routineBlock(draft, view) {
 /** Satz am Knopf: was übernommen wird. Dieselbe Rechnung macht /static/lesen-ingest.js beim Abhaken. */
 export const applySummary = (n) => (n ? `Source-Page und ${plural(n, 'Vorschlag', 'Vorschläge')}` : 'Nur die Source-Page');
 
+/**
+ * Reihenfolge der bereiten Entwürfe überall (Übersicht, Prüfseite mit J/K und
+ * „1 von N“, „Weiter“, App-JSON): ältester Entwurf zuerst, wie eine
+ * Warteschlange (VCP-146). Stabil: Gleich alte bleiben in der gelieferten Folge.
+ */
+export const oldestDraftFirst = (a, b) => (Date.parse(a.drafted_at ?? '') || 0) - (Date.parse(b.drafted_at ?? '') || 0);
+
+/** Bereite Entwürfe aus `ingest.list()` (oder einer schon geholten Liste), ältester zuerst. */
+export const readyDrafts = (all) => all.filter((e) => e.status === 'bereit').sort(oldestDraftFirst);
+
 /** Bereite Entwürfe in der Reihenfolge der Übersicht: voriger, nächster, Stelle. */
 function neighbours(ingest, id) {
-  const ids = ingest.list({ status: 'bereit' }).map((e) => e.doc_id);
+  const ids = readyDrafts(ingest.list({ status: 'bereit' })).map((e) => e.doc_id);
   const i = ids.indexOf(id);
   if (i < 0) return { prev: null, next: ids[0] ?? null, position: null, total: ids.length };
   return { prev: ids[i - 1] ?? null, next: ids[i + 1] ?? null, position: i + 1, total: ids.length };
@@ -982,7 +992,7 @@ export function ingestRoutes({ store, ingest = null, planter = null, logger = co
         reason: av.ok ? null : (av.reason ?? null),
         counts: ingest.counts(),
         openOnStack: openOnStack(store, ingest),
-        ready: all.filter((e) => e.status === 'bereit').map(ingestJson),
+        ready: readyDrafts(all).map(ingestJson),
         busy: all.filter((e) => BUSY.includes(e.status)).map((e) => ({ ...ingestJson(e), label: busyLabel(e) })),
         failed: all.filter((e) => e.status === 'fehler').map(ingestJson),
         // Einpflanzen nach dem Übernehmen: wartet, läuft, fehlgeschlagen oder in den letzten Tagen fertig.
@@ -1037,7 +1047,7 @@ export function ingestRoutes({ store, ingest = null, planter = null, logger = co
     const e = ingest.get(id);
     return e ? docTitle(e) : (store.get(id)?.title ?? store.get(id)?.url ?? 'Text');
   };
-  const readyIds = () => ingest.list({ status: 'bereit' }).map((e) => e.doc_id);
+  const readyIds = () => readyDrafts(ingest.list({ status: 'bereit' })).map((e) => e.doc_id);
   const fromReview = (form) => String(form.get('back') ?? '').startsWith('/lesen/ingest/doc');
 
   return {

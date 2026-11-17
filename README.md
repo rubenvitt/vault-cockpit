@@ -1167,6 +1167,9 @@ der gewählten Elemente; schmal als Leiste unten, auf
 dem Handy nur der Knopf) führt zum nächsten bereiten Entwurf, die Meldung
 verlinkt die neue Source-Page und nennt Verknüpfungen, Bestätigungen und ergänzte
 Synthesen getrennt.
+Bereite Entwürfe stehen überall ältester zuerst (nach Entwurfszeit, wie eine
+Warteschlange): in der Übersicht, auf der Prüfseite („1 von N“, J/K), unter
+„Weiter“ → Prüfen („Ersten prüfen“) und in der App-JSON.
 Darunter leise **Neu entwerfen**, **Ohne Wiki erledigen** (gelesen, weg, mit
 Rückgängig) und **Entwurf verwerfen** (der Text bleibt auf dem Stapel). Ohne
 JavaScript ist alles ein Formular; mit `/static/lesen-ingest.js` gibt es
