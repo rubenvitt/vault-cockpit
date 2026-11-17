@@ -132,27 +132,6 @@ export function createZunderClient({ url, token, fetch = globalThis.fetch, timeo
     },
 
     /**
-     * Sucht die Aufgabe, deren Beschreibung den Marker `` `marker` `` trägt
-     * (auch erledigte oder verworfene), und liefert `{ id, ref, url }` oder null.
-     * Nur noch für Altbestand: Aufgaben, die vor `client_ref` (VCP-141) mit
-     * Marker angelegt wurden und deren Antwort nie ankam (VCP-132). Die Suche vergleicht Teilzeichen;
-     * gesucht wird darum mit den Backticks, sonst fänden sich bei `m1` auch
-     * `m10`, `m11` … und verdrängten bei vielen solchen IDs den echten Treffer.
-     * `get_task` prüft den Marker zur Sicherheit noch einmal.
-     */
-    async findByMarker(marker) {
-      const out = await callTool('search', { query: `\`${marker}\``, limit: 20 });
-      const hits = (out?.hits ?? []).filter((h) => h.entity === 'task');
-      for (const hit of hits) {
-        const task = (await callTool('get_task', { task_id: hit.id }))?.task;
-        if (task?.id && String(task.description ?? '').includes(`\`${marker}\``)) {
-          return { id: task.id, ref: task.ref ?? null, url: `${base}/#/aufgabe/${task.id}` };
-        }
-      }
-      return null;
-    },
-
-    /**
      * Legt eine Aufgabe an und liefert `{ id, ref, url }`. Ohne `location`
      * landet sie in der Zunder-Inbox; `due` (JJJJ-MM-TT) und `phoenix` sind optional.
      *

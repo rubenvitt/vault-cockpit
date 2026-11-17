@@ -151,9 +151,6 @@ export function createCaptureRouter({ capture, zunder = null, state, tz = 'Europ
     const p = await plan(line, zunder);
     const result = (created, q = p) => ({ ...created, title: q.title, due: q.due, dueLabel: q.dueLabel, location: q.location ?? { kind: 'inbox' }, phoenix: q.phoenix, notes: q.notes });
 
-    const legacy = key ? await findLegacy({ zunder, source, key, p, result }) : null;
-    if (legacy) return legacy;
-
     const footer = `_Erfasst über ${SOURCES[source] ?? source} (Vault Cockpit)_`;
     const created = await zunder.createTask({
       title: p.title,
@@ -189,31 +186,6 @@ export function createCaptureRouter({ capture, zunder = null, state, tz = 'Europ
         ? { kind: loc.kind, id: loc.id ?? null, name: loc.name ?? (loc.kind === 'loose' ? 'Lose' : ''), ...(loc.area_name ? { area_name: loc.area_name } : {}) }
         : null;
     return { title: t.title, due, dueLabel: dueText(due, localDate(now(), currentTz() || 'Europe/Berlin')), location, phoenix: t.phoenix ?? null, notes: [] };
-  }
-
-  /**
-   * Altbestand aus VCP-132: Bis VCP-141 stand vor dem Aufruf im Merkzettel der
-   * Vermerk „angefragt“ (`capture-pending:…`), und die Beschreibung trug den
-   * Marker `` `cockpit-<key>` ``. Solche Aufgaben kennt Zunder nicht unter
-   * `client_ref`. Liegt noch ein Vermerk, sucht das Cockpit deshalb einmal
-   * nach dem Marker, dann ist der Vermerk erledigt. Neue Vermerke entstehen
-   * nicht mehr.
-   */
-  async function findLegacy({ zunder, source, key, p, result }) {
-    const pendingKey = `capture-pending:${key.slice('capture:'.length)}`;
-    const pending = state.get(pendingKey);
-    if (!pending) return null;
-    const found = zunder.findByMarker ? await zunder.findByMarker(`cockpit-${key}`) : null;
-    if (!found) {
-      state.delete(pendingKey);
-      return null;
-    }
-    const before = pending.plan ? { ...pending.plan, dueLabel: dueText(pending.plan.due, localDate(now(), currentTz() || 'Europe/Berlin')) } : p;
-    const task = result(found, before);
-    state.set(key, task);
-    state.delete(pendingKey);
-    logger.info?.(`Capture (${source}) → Zunder ${task.ref ?? task.id} war schon angelegt, Antwort ging verloren`);
-    return { ...task, duplicate: true };
   }
 
   function toVault({ text, title, source, captureId, created }) {
