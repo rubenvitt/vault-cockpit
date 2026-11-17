@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createSettingsStore, validateSettings, loadOrCreateSecret, SettingsError, areaSorter } from '../src/cockpit/settings.js';
+import { createSettingsStore, validateSettings, loadOrCreateSecret, SettingsError, areaSorter, areaOrderRows, reorderAreas } from '../src/cockpit/settings.js';
 import { createIcsClient, createCalendarSources, calendarForGraph } from '../src/cockpit/calendars.js';
 import { describeWeek } from '../src/cockpit/week.js';
 
@@ -292,4 +292,43 @@ test('Einstellungen: Verworfenes im Lesestapel aufräumen, leer = 30 Tage, 0 = n
   s.save({ readingNotes: { trashDays: '' }, calendars: [] });
   assert.equal(s.get().readingNotes.trashDays, 30);
   for (const v of ['-1', '2.5', 'bald', '3651']) assert.throws(() => validateSettings({ readingNotes: { trashDays: v } }), (e) => e instanceof SettingsError && e.field === 'readingNotes.trashDays');
+});
+
+test('Bereichsliste (VCP-147): gespeicherte Rangfolge in Zunders Schreibweise, Verschwundenes markiert, Neues alphabetisch am Ende', () => {
+  const zunder = ['Zuhause', 'Finanzen', 'Arbeitnehmer', 'Gesundheit', 'Meine Liebste'];
+  assert.deepEqual(areaOrderRows([], zunder).map((r) => r.name), ['Arbeitnehmer', 'Finanzen', 'Gesundheit', 'Meine Liebste', 'Zuhause']);
+  assert.ok(areaOrderRows([], zunder).every((r) => !r.ranked && !r.gone));
+  assert.deepEqual(areaOrderRows([' meine liebste', 'Gibt es nicht', 'MEINE LIEBSTE', 'Gesundheit'], zunder), [
+    { name: 'Meine Liebste', ranked: true, gone: false },
+    { name: 'Gibt es nicht', ranked: true, gone: true },
+    { name: 'Gesundheit', ranked: true, gone: false },
+    { name: 'Arbeitnehmer', ranked: false, gone: false },
+    { name: 'Finanzen', ranked: false, gone: false },
+    { name: 'Zuhause', ranked: false, gone: false },
+  ]);
+  // Die Liste zeigt genau die Reihenfolge, die Woche und Planung daraus machen.
+  const order = ['Gesundheit', 'Zuhause'];
+  assert.deepEqual(areaOrderRows(order, zunder).map((r) => r.name), [...zunder].sort(areaSorter(order)));
+});
+
+test('Bereichsliste (VCP-147): Knöpfe verschieben, der alphabetische Schwanz bleibt ungespeichert', () => {
+  const all = ['Arbeitnehmer', 'Finanzen', 'Gesundheit', 'Zuhause'];
+  // „Arbeit zuletzt“ mit einem Klick: gespeichert wird nur, was davor steht; die Wirkung ist dieselbe.
+  const last = reorderAreas(all, '0:unten', []);
+  assert.deepEqual(last, ['Finanzen', 'Gesundheit', 'Zuhause']);
+  assert.deepEqual([...all].sort(areaSorter(last)), ['Finanzen', 'Gesundheit', 'Zuhause', 'Arbeitnehmer']);
+  // Hoch, ganz nach oben, runter; ohne Knopf bleibt die Liste, der unveränderte alphabetische Rest fällt weg.
+  assert.deepEqual(reorderAreas(all, '2:hoch', []), ['Arbeitnehmer', 'Gesundheit']);
+  assert.deepEqual(reorderAreas(all, '3:oben', []), ['Zuhause']);
+  assert.deepEqual(reorderAreas(all, '0:runter', []), ['Finanzen']);
+  assert.deepEqual(reorderAreas(all, null, []), []);
+  // Was schon eingereiht war, bleibt gespeichert, auch wenn es alphabetisch am Ende steht.
+  assert.deepEqual(reorderAreas(all, null, ['zuhause']), all);
+  // Am Rand und mit fremden Werten passiert nichts; „weg“ entfernt; „alphabetisch“ leert.
+  assert.deepEqual(reorderAreas(['Zuhause', 'Finanzen'], '0:hoch', ['Zuhause', 'Finanzen']), ['Zuhause', 'Finanzen']);
+  assert.deepEqual(reorderAreas(['Zuhause', 'Finanzen'], '1:runter', ['Zuhause', 'Finanzen']), ['Zuhause', 'Finanzen']);
+  assert.deepEqual(reorderAreas(['Zuhause', 'Finanzen'], '9:oben', ['Zuhause', 'Finanzen']), ['Zuhause', 'Finanzen']);
+  assert.deepEqual(reorderAreas(['Zuhause', 'Finanzen'], 'x:quer', ['Zuhause', 'Finanzen']), ['Zuhause', 'Finanzen']);
+  assert.deepEqual(reorderAreas(['Alt', 'Zuhause'], '0:weg', ['Alt', 'Zuhause']), ['Zuhause']);
+  assert.deepEqual(reorderAreas(all, 'alphabetisch', all), []);
 });

@@ -131,12 +131,13 @@ async function reloginHref(res) {
   return (await res.text()).match(/href="(\/login\?next=[^"]*)" class="btn primary"/)[1].replace(/&amp;/g, '&');
 }
 
-async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSubjects = ['ruben'], calendars = null, actions = null, notes = null, shortcuts = [], clock = null, search: searchFn = search, zunder = true, wholeGraph = null } = {}) {
+async function withServer(run, idpOptions = {}, { clientSecret = null, allowedSubjects = ['ruben'], calendars = null, actions = null, notes = null, shortcuts = [], clock = null, search: searchFn = search, zunder = true, wholeGraph = null, areas = undefined } = {}) {
   const idp = fakeIdp(idpOptions);
   const settings = createSettingsStore({ defaults: { tz: 'Europe/Berlin', inboxFolder: 'inbox', ...(zunder ? { zunderUrl: 'https://zunder.env', zunderToken: 'zt_env' } : {}) }, logger: quiet });
   const tokens = createTokenStore({ logger: quiet });
   const webHttp = createWebHttp({
-    cockpit,
+    // `areas`: Bereiche aus Zunder für die Einstellungen, eine Liste oder eine Funktion (die auch werfen darf).
+    cockpit: areas === undefined ? cockpit : { ...cockpit, zunder: () => ({ listStructure: async () => (typeof areas === 'function' ? areas() : areas) }) },
     settings,
     actions,
     notes,
@@ -478,6 +479,76 @@ test('Einstellungen: nur angemeldet, Kalender anlegen, Geheimnisse bleiben verbo
     },
     {},
     { calendars },
+  );
+});
+
+test('Einstellungen: Reihenfolge der Bereiche als Liste aus Zunder, Pfeile speichern ohne JavaScript (VCP-147)', async () => {
+  const areas = ['Zuhause', 'Arbeitnehmer', 'Gesundheit', 'Meine Liebste', 'Archiv'].map((name) => ({ id: name, name, state: name === 'Archiv' ? 'archived' : 'active' }));
+  await withServer(
+    async ({ call, login, settings }) => {
+      await login();
+      const page = async () => {
+        const html = await (await call('/einstellungen')).text();
+        const anzeige = html.slice(html.indexOf('<section id="anzeige">'));
+        return { html, anzeige, names: [...anzeige.matchAll(/name="areaOrder\.item" value="([^"]+)"/g)].map((m) => m[1]) };
+      };
+      let { html, anzeige, names } = await page();
+      // Kein Textfeld, sondern alle aktiven Bereiche alphabetisch; nichts zu tippen.
+      assert.doesNotMatch(anzeige, /<textarea name="areaOrder"/);
+      assert.deepEqual(names, ['Arbeitnehmer', 'Gesundheit', 'Meine Liebste', 'Zuhause']);
+      assert.match(anzeige, /<button type="submit" name="areaOrder\.move" value="0:unten" class="area-move" aria-label="Arbeitnehmer ganz nach unten"/);
+      assert.match(anzeige, /value="0:hoch" class="area-move" aria-label="Arbeitnehmer nach oben" title="nach oben" disabled/);
+      assert.doesNotMatch(anzeige, /Wieder alphabetisch/);
+
+      // „Arbeit zuletzt“: ein Klick, gespeichert wird, was davor steht, und die Seite springt zur Zeile.
+      const items = (list) => list.map((n) => ['areaOrder.item', n]);
+      const moved = await call('/einstellungen', { method: 'POST', form: [['csrf', csrfFrom(html)], ...items(names), ['areaOrder.move', '0:unten']] });
+      assert.equal(moved.status, 303);
+      assert.equal(moved.headers.get('location'), '/einstellungen?gespeichert=1#bereich-3');
+      assert.deepEqual(settings.stored().areaOrder, ['Gesundheit', 'Meine Liebste', 'Zuhause']);
+      ({ html, anzeige, names } = await page());
+      assert.deepEqual(names, ['Gesundheit', 'Meine Liebste', 'Zuhause', 'Arbeitnehmer']);
+      assert.match(anzeige, /Wieder alphabetisch/);
+
+      // „Speichern“ ohne Pfeil lässt die Rangfolge, wie sie ist.
+      await call('/einstellungen', { method: 'POST', form: [['csrf', csrfFrom(html)], ...items(names)] });
+      assert.deepEqual(settings.stored().areaOrder, ['Gesundheit', 'Meine Liebste', 'Zuhause']);
+
+      // Ein Bereich, den Zunder nicht mehr kennt, ist markiert und lässt sich entfernen.
+      settings.save({ ...settings.stored(), areaOrder: ['Gesundheit', 'Gibt es nicht', 'Zuhause'] });
+      ({ html, anzeige, names } = await page());
+      assert.deepEqual(names, ['Gesundheit', 'Gibt es nicht', 'Zuhause', 'Arbeitnehmer', 'Meine Liebste']);
+      assert.match(anzeige, /<li id="bereich-1" class="gone">.*Gibt es nicht <span class="pill warn">nicht mehr in Zunder<\/span>.*value="1:weg"/);
+      await call('/einstellungen', { method: 'POST', form: [['csrf', csrfFrom(html)], ...items(names), ['areaOrder.move', '1:weg']] });
+      assert.deepEqual(settings.stored().areaOrder, ['Gesundheit', 'Zuhause']);
+
+      // „Wieder alphabetisch“ leert die Rangfolge.
+      ({ html, names } = await page());
+      await call('/einstellungen', { method: 'POST', form: [['csrf', csrfFrom(html)], ...items(names), ['areaOrder.move', 'alphabetisch']] });
+      assert.deepEqual(settings.stored().areaOrder, []);
+    },
+    {},
+    { areas },
+  );
+});
+
+test('Einstellungen: Antwortet Zunder nicht, bleibt die Reihenfolge der Bereiche ein Textfeld (VCP-147)', async () => {
+  await withServer(
+    async ({ call, login, settings }) => {
+      await login();
+      settings.save({ ...settings.stored(), areaOrder: ['Gesundheit'] });
+      const html = await (await call('/einstellungen')).text();
+      const anzeige = html.slice(html.indexOf('<section id="anzeige">'));
+      assert.match(anzeige, /<textarea name="areaOrder" rows="4"[^>]*>Gesundheit<\/textarea>/);
+      assert.match(anzeige, /Zunder ist gerade nicht erreichbar, deshalb als Text\./);
+      assert.doesNotMatch(anzeige, /areaOrder\.item/);
+    },
+    {},
+    {
+      areas: () => {
+        throw new Error('weg');
+      },
+    },
   );
 });
 

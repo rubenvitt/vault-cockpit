@@ -13,7 +13,7 @@ import { renderReview, REVIEW_CSS } from './review-render.js';
 import { renderPlan, planRoutes, PLAN_CSS } from './plan-page.js';
 import { renderHealth, healthAlert, HEALTH_CSS } from './health-render.js';
 import { offlineFiles, readingOfflineUrls, OFFLINE_CSS, OFFLINE_MARK, FILL_HEADER, SYNTHESIS_FOLDER } from './offline.js';
-import { SettingsError, MAX_CALENDARS, TTS_PROVIDERS, SYNC_ADAPTERS } from '../cockpit/settings.js';
+import { SettingsError, MAX_CALENDARS, TTS_PROVIDERS, SYNC_ADAPTERS, reorderAreas } from '../cockpit/settings.js';
 import { shadowMarkdown, GRACE_MS } from '../sync/shadow-report.js';
 import { describeWeek, weekOf } from '../cockpit/week.js';
 import { ActionError, SETTABLE } from '../cockpit/actions.js';
@@ -45,6 +45,23 @@ const FRAGEN_JS = staticFile('fragen.js', 'utf8');
 const GRAPH_LIB = staticFile('vendor/graph-lib.js', 'utf8');
 // Design-System (Tokens, Bausteine, Wochenansicht) plus die Teile der übrigen Seiten.
 const CSS = staticFile('cockpit.css', 'utf8') + GRAPH_CSS + NOTE_CSS + REVIEW_CSS + PLAN_CSS + HEALTH_CSS + OFFLINE_CSS;
+/** So lange wartet die Einstellungsseite auf die Bereiche aus Zunder, dann bleibt es beim Textfeld. */
+const AREAS_WAIT_MS = 3000;
+
+/**
+ * Sprungmarke nach einem Knopf der Bereichsliste (`areaOrder.move`): die Zeile an
+ * ihrer neuen Stelle, damit die Seite nach dem Neuladen dort steht; sonst keine.
+ */
+function areaAnchor(form) {
+  const move = form.get('areaOrder.move');
+  if (!move) return '';
+  const [at, dir] = move.split(':');
+  const i = Number(at);
+  const last = form.getAll('areaOrder.item').length - 1;
+  const to = { hoch: i - 1, runter: i + 1, oben: 0, unten: last }[dir];
+  return Number.isInteger(to) ? `#bereich-${Math.max(0, Math.min(last, to))}` : '#bereiche';
+}
+
 const hash = (s) => createHash('sha256').update(s).digest('base64url').slice(0, 10);
 const VERSION = { css: hash(CSS), ui: hash(UI_JS), player: hash(PLAYER_JS), js: hash(CLIENT_JS), graph: hash(GRAPH_JS), wholeGraph: hash(WHOLE_GRAPH_JS), graphLib: hash(GRAPH_LIB), offline: hash(OFFLINE_JS), inbox: hash(INBOX_JS), lesenDoc: hash(LESEN_DOC_JS), lesenHoeren: hash(LESEN_HOEREN_JS), lesenFolgen: hash(LESEN_FOLGEN_JS), lesenLinks: hash(LESEN_LINKS_JS), lesenFeeds: hash(LESEN_FEEDS_JS), lesenIngest: hash(LESEN_INGEST_JS), fragen: hash(FRAGEN_JS) };
 versionAssets(VERSION);
@@ -726,9 +743,35 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
   }
   const captureOn = () => (typeof captureEnabled === 'function' ? captureEnabled() : captureEnabled);
 
+  /**
+   * Aktive Bereiche aus Zunder für die sortierbare Rangfolge (VCP-147): `{ names }`,
+   * `{ error }` oder null ohne Zunder. Wartet höchstens `AREAS_WAIT_MS`, damit eine
+   * hängende Verbindung die Seite nicht aufhält; dann bleibt es beim Textfeld.
+   */
+  async function zunderAreas() {
+    const z = cockpit.zunder?.();
+    if (!z?.listStructure) return null;
+    let timer;
+    try {
+      const areas = await Promise.race([
+        z.listStructure(),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('Zeitüberschreitung')), AREAS_WAIT_MS);
+        }),
+      ]);
+      return { names: areas.filter((a) => (a.state ?? 'active') === 'active').map((a) => a.name).filter(Boolean) };
+    } catch (err) {
+      logger.warn?.(`Bereiche aus Zunder für die Einstellungen nicht geladen: ${err.message}`);
+      return { error: 'Zunder ist gerade nicht erreichbar' };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async function settingsPage(req, res, session, { status = 200, notice = null, error = null, created = null } = {}) {
-    const checks = await calendarChecks();
+    const [checks, areas] = await Promise.all([calendarChecks(), zunderAreas()]);
     const html = renderSettings({
+      areas,
       stored: settings.stored(),
       defaults: settings.defaults(),
       checks,
@@ -809,11 +852,18 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       jev: { key: form.get('jev.clear') ? null : field('jev.key') || stored.jev?.key || null, model: field('jev.model') },
       calendars: calendarsIn,
       hiddenEvents: form.has('hiddenEvents') ? field('hiddenEvents').split(',') : stored.hiddenEvents,
-      // Ein Name pro Zeile. Fehlt das Feld (App-JSON, Teilformular), bleibt die gespeicherte Rangfolge.
-      areaOrder: form.has('areaOrder') ? field('areaOrder').split(/\r?\n/) : stored.areaOrder,
+      // Sortierbare Liste aus Zunder (`areaOrder.item` je Zeile, Knopf `areaOrder.move`), sonst
+      // das Textfeld mit einem Namen pro Zeile. Fehlt beides (App-JSON, Teilformular), bleibt die gespeicherte Rangfolge.
+      areaOrder: areaOrderOf(form, stored),
       // Die Generation ändert nur „Überall abmelden“.
       session: { idleDays: field('session.idleDays'), maxDays: field('session.maxDays'), generation: stored.session.generation },
     };
+  }
+
+  function areaOrderOf(form, stored) {
+    const move = form.get('areaOrder.move');
+    if (form.has('areaOrder.item') || move === 'alphabetisch') return reorderAreas(form.getAll('areaOrder.item'), move, stored.areaOrder);
+    return form.has('areaOrder') ? (form.get('areaOrder') ?? '').trim().split(/\r?\n/) : stored.areaOrder;
   }
 
   // Zusätzlich zu SameSite=Lax: Formulare nur von dieser Seite annehmen.
@@ -869,7 +919,7 @@ export function createWebHttp({ cockpit, settings, actions = null, notes = null,
       throw err;
     }
     logger.info?.(`Cockpit-Einstellungen gespeichert von ${session.sub}`);
-    return redirect(res, '/einstellungen?gespeichert=1');
+    return redirect(res, `/einstellungen?gespeichert=1${areaAnchor(form)}`);
   }
 
   /** Antwortet direkt mit der Seite, weil der Klartext nur hier einmal auftaucht. */

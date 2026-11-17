@@ -84,6 +84,58 @@ export function areaSorter(order = []) {
   };
 }
 
+/**
+ * Zeilen der sortierbaren Liste „Reihenfolge der Bereiche“ (VCP-147): erst die
+ * gespeicherte Rangfolge (in Zunders Schreibweise; `gone`, wenn Zunder den
+ * Bereich nicht mehr kennt), dann die übrigen Zunder-Bereiche alphabetisch
+ * (`ranked: false`), genau in der Reihenfolge, die `areaSorter` ergibt.
+ */
+export function areaOrderRows(order = [], names = []) {
+  const known = new Map();
+  for (const name of names) {
+    const key = areaKey(name);
+    if (key && !known.has(key)) known.set(key, String(name).trim());
+  }
+  const rows = [];
+  const seen = new Set();
+  for (const name of order ?? []) {
+    const key = areaKey(name);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    rows.push({ name: known.get(key) ?? String(name).trim(), ranked: true, gone: !known.has(key) });
+  }
+  const rest = [...known].filter(([key]) => !seen.has(key)).map(([, name]) => name);
+  rest.sort((a, b) => a.localeCompare(b, 'de'));
+  return [...rows, ...rest.map((name) => ({ name, ranked: false, gone: false }))];
+}
+
+/** Knöpfe der Liste: `<Zeile>:<Richtung>` bzw. `alphabetisch`. */
+const AREA_MOVES = new Set(['hoch', 'runter', 'oben', 'unten', 'weg']);
+
+/**
+ * Neue Rangfolge aus der Liste der Einstellungsseite: `items` in der gezeigten
+ * Reihenfolge, `move` der gedrückte Knopf (`3:hoch`, `3:unten`, `3:weg`,
+ * `alphabetisch`). Ein Schwanz aus bisher nicht eingereihten Bereichen, der
+ * ohnehin alphabetisch steht, wird nicht gespeichert: Er ergibt dieselbe
+ * Reihenfolge, und später neue Bereiche reihen sich weiter alphabetisch ein,
+ * statt hinter einer zufällig vollständigen Liste zu landen.
+ */
+export function reorderAreas(items, move = null, previous = []) {
+  if (move === 'alphabetisch') return [];
+  const list = items.map((name) => String(name ?? '').trim()).filter(Boolean);
+  const [at, dir] = String(move ?? '').split(':');
+  const i = Number(at);
+  if (AREA_MOVES.has(dir) && Number.isInteger(i) && i >= 0 && i < list.length) {
+    const [name] = list.splice(i, 1);
+    const to = { hoch: Math.max(0, i - 1), runter: Math.min(list.length, i + 1), oben: 0, unten: list.length, weg: -1 }[dir];
+    if (to >= 0) list.splice(to, 0, name);
+  }
+  const ranked = new Set((previous ?? []).map(areaKey));
+  let end = list.length;
+  while (end > 0 && !ranked.has(areaKey(list[end - 1])) && (end === list.length || list[end - 1].localeCompare(list[end], 'de') <= 0)) end--;
+  return list.slice(0, end);
+}
+
 const SENDER = /^(?:[^@\s]+@|@)[^@\s]+\.[^@\s]+$/;
 const TAG = /^[\p{L}\p{N}_/-]{1,50}$/u;
 const VOICE_ID = /^[A-Za-z0-9]{1,64}$/;

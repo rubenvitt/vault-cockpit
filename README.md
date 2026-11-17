@@ -406,8 +406,9 @@ markiert sind. Je Bereich eine Kopfzeile (Name, erledigt/gesamt, Fortschritt als
 Linie) und darunter die Aufgaben als Zeilen, bewusst gewählte Phönix-Schritte
 zuerst und mit dem Schild „Schritt“; komplett erledigte Bereiche sind auf eine
 Zeile eingeklappt. Die Bereiche stehen in der eigenen Rangfolge aus den
-Einstellungen (Anzeige → **Reihenfolge der Bereiche**, ein Name pro Zeile; was
-dort fehlt, folgt alphabetisch). Es folgen die **Termine** der Woche aus allen
+Einstellungen (Anzeige → **Reihenfolge der Bereiche**: die Bereiche aus Zunder
+als Liste, mit Pfeilen umsortiert; ohne Zunder ein Name pro Zeile; was dort
+fehlt, folgt alphabetisch). Es folgen die **Termine** der Woche aus allen
 eingestellten Kalendern (heute hervorgehoben, vergangene Tage der laufenden Woche
 eingeklappt in einer Zeile mit der Zahl), **Aufgaben** in Arbeit oder überfällig
 und die **Inbox** (Ordner im Vault und Zunder-Inbox). Aufgaben und die beiden
@@ -437,7 +438,12 @@ Einrichtung:
    oder als **CalDAV** (Kalender-Home oder einzelner Kalender, mit Benutzer und
    App-Passwort; optional nur bestimmte Kalender). Daneben Zeitzone, Vault-Name
    für „In Obsidian öffnen“, der Inbox-Ordner und die Reihenfolge der Bereiche
-   (nur auf der Web-Seite; die App zeigt und ändert sie nicht).
+   (nur auf der Web-Seite; die App zeigt und ändert sie nicht). Die Seite holt
+   dafür die aktiven Bereiche aus Zunder: Pfeile je Zeile schieben einen Bereich
+   hoch, runter, ganz nach oben oder unten und speichern sofort, ohne
+   JavaScript. Bereiche, die Zunder nicht mehr kennt, sind markiert und lassen
+   sich entfernen; neue stehen alphabetisch am Ende. Antwortet Zunder nicht
+   binnen 3 Sekunden, bleibt es beim Textfeld (ein Name pro Zeile).
 
    Außerdem: Zunder-Zugang, Zunder-Brücke (an/aus, Tag), Flammen in der Feuer-Notiz
    (an/aus), Mail-Abruf (Fastmail-Token, freigegebene Absender, Ordner, Abstand),

@@ -1,5 +1,5 @@
 import { localTime, zonedParts } from '../cockpit/week.js';
-import { DEFAULT_HIDDEN_EVENTS } from '../cockpit/settings.js';
+import { DEFAULT_HIDDEN_EVENTS, areaOrderRows } from '../cockpit/settings.js';
 import { esc, head, appHeader, weekSwitch, icon } from './layout.js';
 import { backupSection, backupHint } from './backup-render.js';
 import { sessionSection, revokeForm } from './session-render.js';
@@ -698,7 +698,45 @@ function shortcutSection(shortcuts, captureEnabled) {
  * zurückgegeben: Ein leeres Feld behält den gespeicherten Wert. Links eine
  * Sprungleiste mit dem Stand jedes Abschnitts, auf dem iPhone oben als Leiste.
  */
-export function renderSettings({ stored, defaults, checks = {}, notice = null, error = null, tokens = null, created = null, shortcuts = [], captureEnabled = false, tz = 'Europe/Berlin', user = null, csrf = '', backup = null, health = false }) {
+/** Ein Knopf der Bereichsliste; abgeschaltet, wo er nichts bewegen würde. */
+const areaMove = (i, dir, symbol, label, name, off) =>
+  `<button type="submit" name="areaOrder.move" value="${i}:${dir}" class="area-move" aria-label="${esc(`${name} ${label}`)}" title="${esc(label)}"${off ? ' disabled' : ''}>${symbol}</button>`;
+
+/**
+ * „Reihenfolge der Bereiche“ (VCP-147). Mit Bereichen aus Zunder eine Liste zum
+ * Umsortieren: Jeder Knopf schickt das Formular ab (ohne JavaScript bedienbar),
+ * speichert und springt zur Zeile. Ohne Zunder (oder ohne Antwort) das Textfeld.
+ */
+function areaOrderField(order, areas) {
+  const rows = areas?.names?.length ? areaOrderRows(order, areas.names) : [];
+  const hint = '<p class="meta area-order-hint">Big Rocks und Planung zeigen die Lebensbereiche in dieser Reihenfolge, das Wichtigste zuerst. Bereiche, die hier fehlen, folgen alphabetisch dahinter.</p>';
+  if (!rows.length) {
+    return `<label class="field area-order"><span>Reihenfolge der Bereiche <span class="hint">ein Name pro Zeile, wie in Zunder; leer = alphabetisch</span></span><textarea name="areaOrder" rows="${Math.min(12, Math.max(4, order.length + 1))}" autocomplete="off" spellcheck="false" placeholder="Selbstverwirklichung&#10;Partnerschaft&#10;Arbeit">${esc(order.join('\n'))}</textarea></label>
+  ${hint}${areas?.error ? `\n  <p class="meta area-order-hint">${esc(areas.error)}, deshalb als Text.</p>` : ''}`;
+  }
+  const last = rows.length - 1;
+  const items = rows
+    .map((r, i) => {
+      const tag = r.gone ? ' <span class="pill warn">nicht mehr in Zunder</span>' : !r.ranked && order.length ? ' <span class="hint">alphabetisch</span>' : '';
+      const moves = r.gone
+        ? `<button type="submit" name="areaOrder.move" value="${i}:weg" class="chip quiet" aria-label="${esc(`${r.name} entfernen`)}">Entfernen</button>`
+        : [
+            areaMove(i, 'oben', '⤒', 'ganz nach oben', r.name, i === 0),
+            areaMove(i, 'hoch', '↑', 'nach oben', r.name, i === 0),
+            areaMove(i, 'runter', '↓', 'nach unten', r.name, i === last),
+            areaMove(i, 'unten', '⤓', 'ganz nach unten', r.name, i === last),
+          ].join('');
+      return `<li id="bereich-${i}"${r.gone ? ' class="gone"' : ''}><input type="hidden" name="areaOrder.item" value="${esc(r.name)}"><span class="area-rank" aria-hidden="true">${i + 1}</span><span class="area-name">${esc(r.name)}${tag}</span><span class="area-moves">${moves}</span></li>`;
+    })
+    .join('');
+  return `<div class="field area-order" id="bereiche"><span id="bereiche-titel">Reihenfolge der Bereiche <span class="hint">aus Zunder, oben = zuerst; jeder Pfeil speichert</span></span>
+  <ol class="area-order-list" aria-labelledby="bereiche-titel">${items}</ol>
+  ${order.length ? '<p class="area-order-reset"><button type="submit" name="areaOrder.move" value="alphabetisch" class="chip quiet">Wieder alphabetisch</button></p>' : ''}
+  </div>
+  <p class="meta area-order-hint">Big Rocks und Planung zeigen die Lebensbereiche in dieser Reihenfolge, das Wichtigste zuerst. Neue Bereiche aus Zunder stehen am Ende.</p>`;
+}
+
+export function renderSettings({ areas = null, stored, defaults, checks = {}, notice = null, error = null, tokens = null, created = null, shortcuts = [], captureEnabled = false, tz = 'Europe/Berlin', user = null, csrf = '', backup = null, health = false }) {
   const d = defaults;
   const token = `<input type="hidden" name="csrf" value="${esc(csrf)}">`;
   // Stand je Abschnitt (Text ohne HTML), derselbe wie in `/api/einstellungen`.
@@ -877,8 +915,7 @@ ${backupHint(backup)}
     <label><span>Vault-Name in Obsidian <span class="hint">für Links</span></span><input name="vaultName" value="${esc(stored.vaultName ?? '')}" placeholder="${esc(d.vaultName ?? '')}"></label>
     <label>Inbox-Ordner im Vault<input name="inboxFolder" value="${esc(stored.inboxFolder ?? '')}" placeholder="${esc(d.inboxFolder)}"></label>
   </div>
-  <label class="field area-order"><span>Reihenfolge der Bereiche <span class="hint">ein Name pro Zeile, wie in Zunder; leer = alphabetisch</span></span><textarea name="areaOrder" rows="${Math.min(12, Math.max(4, (stored.areaOrder ?? []).length + 1))}" autocomplete="off" spellcheck="false" placeholder="Selbstverwirklichung&#10;Partnerschaft&#10;Arbeit">${esc((stored.areaOrder ?? []).join('\n'))}</textarea></label>
-  <p class="meta area-order-hint">Big Rocks und Planung zeigen die Lebensbereiche in dieser Reihenfolge, das Wichtigste zuerst. Bereiche, die hier fehlen, folgen alphabetisch dahinter.</p>
+  ${areaOrderField(stored.areaOrder ?? [], areas)}
 </section>
 ${sessionSection(stored, d)}
 <p class="save-bar"><span class="meta">Leere Geheimnisfelder behalten den gespeicherten Wert.</span><button type="submit" class="primary">Speichern</button></p>
