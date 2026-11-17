@@ -8,12 +8,14 @@ import { buildIndex, openIndex } from '../src/vault/index.js';
 import { compilePolicy } from '../src/vault/policy.js';
 import { createWholeGraph, layoutInWorker } from '../src/graph/whole.js';
 import { computeLayout } from '../src/graph/whole-layout.js';
+import { createGraph } from '../src/graph/graph.js';
 
 const quiet = { info() {}, warn() {}, error() {} };
 const policy = compilePolicy({
   exclude: ['^privat/'],
   sensitive: { 'areas/Gesundheit': 'gesundheit' },
   readwise: 'resources/readwise',
+  graphExclude: ['^wiki/index\\.md$'],
 });
 
 let root;
@@ -32,10 +34,25 @@ before(() => {
   w('areas/Gesundheit/Werte.md', '# Werte\n\n[[Alpha]]');
   w('resources/readwise/Fremdtext.md', '# Fremdtext\n\n[[Alpha]]');
   w('privat/Geheim.md', '# Geheim\n\n[[Alpha]]');
+  w('wiki/index.md', '# Wiki Index\n\n[[Alpha]] [[Beta]] [[Start]] [[Einsam]]');
   buildIndex({ vaultPath: root, dbPath: ':memory:', policy, persist: (db, vp) => (idx = openIndex(db, { vaultPath: vp, policy })) });
 });
 
 after(() => rmSync(root, { recursive: true, force: true }));
+
+test('Index: graphExclude nimmt eine Notiz aus den Graphen, nicht aus dem Index', async () => {
+  assert.ok(idx.getNote('wiki/index.md'), 'bleibt im Index');
+  assert.equal(idx.graphHidden('wiki/index.md'), true);
+  assert.ok(!idx.wholeGraph().notes.some((n) => n.path === 'wiki/index.md'));
+  assert.ok(!idx.wholeGraph().links.flat().includes('wiki/index.md'));
+
+  const graph = createGraph({ index: idx, logger: quiet });
+  const around = await graph.around('projects/Alpha.md', { similar: 0 });
+  assert.ok(!around.nodes.some((n) => n.path === 'wiki/index.md'), 'kein Nachbar');
+  const self = await graph.around('wiki/index.md', { similar: 0 });
+  assert.ok(self, 'als Mitte weiter erreichbar');
+  assert.ok(self.nodes.some((n) => n.path === 'projects/Alpha.md'));
+});
 
 test('Index: wholeGraph liefert eigene, nicht vertrauliche Notizen und ihre Links untereinander', () => {
   const { notes, links } = idx.wholeGraph();

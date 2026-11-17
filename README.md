@@ -1736,7 +1736,9 @@ zeigt `vault_stats` unter `semantic`. Bis dahin und wenn Ollama ausfällt, sucht
   SVG-Bild mit Links. Als JSON unter `/api/graph?pfad=…`.
 - **Ganzer Vault** (Seite `<PUBLIC_URL>/graph/alles`): alle eigenen Notizen mit ihren
   Wikilinks in einem Bild, gefärbt nach oberstem Ordner oder Frontmatter-`type`.
-  Vertrauliche, ausgeschlossene und Readwise-Notizen fehlen. Das Layout rechnet der
+  Vertrauliche, ausgeschlossene und Readwise-Notizen fehlen, ebenso Notizen unter
+  `graphExclude` der Policy (etwa `wiki/index.md`, der sonst alles zu einem Stern
+  um sich zieht; im Index und für Claude bleibt er). Das Layout rechnet der
   Server mit ForceAtlas2 in einem Worker-Thread, beim Start und gebündelt nach
   Änderungen am Index; die Positionen liegen neben dem Index in
   `graph-layout.json`, damit ein Neustart sofort ein Bild hat und neue Notizen sich
