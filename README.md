@@ -854,7 +854,10 @@ Tastenkürzel. Die Schrift stellt man im Menü „Aa“ neben der Quelle ein; �
 (Taste F, wird gemerkt) blendet Unternavigation und Seitenspalten aus, „Verbinden“
 zeigt seine Treffer dann als Blatt unten rechts. Mit
 JavaScript (`/static/lesen-doc.js`) speichert sie die Lesestelle beim Scrollen;
-`#weiter` springt dorthin. Markiert wird per Textauswahl über eine Leiste unten
+`#weiter` springt dorthin. Ein Strich am Rand zeigt den aktiven Absatz; J/K oder
+die Pfeiltasten ↓/↑ springen von Absatz zu Absatz (ein Absatz, der länger als der
+Bildschirm ist, scrollt mit den Pfeilen erst zu Ende), H, N und L wirken ohne
+Auswahl auf ihn. Markiert wird per Textauswahl über eine Leiste unten
 (Markieren · Notiz · Verbinden · In Inbox), am iPhone also nicht im Weg des
 Systemmenüs. Eine Markierung merkt sich Zitat, etwas Text davor und danach und die
 ungefähre Stelle (`src/lesen/anchor.js`). So sitzt sie auch nach erneutem Holen

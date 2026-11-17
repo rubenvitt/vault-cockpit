@@ -375,7 +375,7 @@
 
   // --- Aktiver Absatz ------------------------------------------------------------
 
-  // Wie bei Readwise: Ein Strich am linken Rand zeigt den aktiven Absatz. J/K schieben ihn
+  // Wie bei Readwise: Ein Strich am linken Rand zeigt den aktiven Absatz. J/K und ↓/↑ schieben ihn
   // weiter, ein Klick setzt ihn, beim Scrollen wandert er mit, sobald er aus dem Bild ist.
   // Ohne Auswahl wirken H, N und L auf ihn. Gemerkt wird die Nummer des Absatzes, weil
   // `refresh()` den Lesetext austauscht.
@@ -426,6 +426,15 @@
     const smooth = !matchMedia('(prefers-reduced-motion: reduce)').matches;
     steerUntil = Date.now() + (smooth ? 800 : 100);
     all[i].scrollIntoView({ block: 'start', behavior: smooth ? 'smooth' : 'auto' });
+  }
+
+  /** Ragt der aktive (sichtbare) Absatz nach unten (`1`) oder oben (`-1`) aus dem Bild? Dann ist er noch nicht zu Ende gelesen. */
+  function overhangs(dir) {
+    const b = activeBlock();
+    if (!b) return false;
+    const r = b.getBoundingClientRect();
+    if (!inView(r)) return false;
+    return dir > 0 ? r.bottom > innerHeight + 1 : r.top < LINE - 4;
   }
 
   addEventListener(
@@ -497,6 +506,12 @@
     } else if (key === 'j' || key === 'k') {
       e.preventDefault();
       step(key === 'j' ? 1 : -1);
+    } else if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !e.shiftKey) {
+      // Pfeiltasten wie J/K. Ragt der aktive Absatz in diese Richtung aus dem Bild, scrollt erst der Browser wie gewohnt.
+      const dir = e.key === 'ArrowDown' ? 1 : -1;
+      if (overhangs(dir)) return;
+      e.preventDefault();
+      step(dir);
     } else if (key === 'f') {
       // F: Fokus an oder aus. Auf schmalen Bildschirmen gibt es keine Seitenspalten, dort ändert es nichts.
       e.preventDefault();

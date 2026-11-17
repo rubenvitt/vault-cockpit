@@ -49,6 +49,7 @@ const KEYS = [
   ['E', 'fertig, weg'],
   ['V', 'in den Vault'],
   ['J / K', 'Absatz weiter / zurück'],
+  ['↓ / ↑', 'ebenso, ein langer Absatz scrollt erst zu Ende'],
   ['F', 'Fokus: nur der Text'],
 ];
 

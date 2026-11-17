@@ -101,7 +101,7 @@ test('Leseansicht: Lesetext, Fortschritt, „Fertig, weg“ als Formular, Spalte
     assert.match(html, /<details class="more lesen-keys"><summary>Tastenkürzel<\/summary><dl>/);
     assert.ok(html.includes('<kbd>F</kbd>'), 'Kürzel F');
     assert.match(html, /Querverbindungen/);
-    for (const k of ['H', 'N', 'L', 'E', 'V', 'J / K']) assert.ok(html.includes(`<kbd>${k}</kbd>`), `Kürzel ${k}`);
+    for (const k of ['H', 'N', 'L', 'E', 'V', 'J / K', '↓ / ↑']) assert.ok(html.includes(`<kbd>${k}</kbd>`), `Kürzel ${k}`);
     assert.match(html, /data-cmd="mark"[^]*data-cmd="note"[^]*data-cmd="link"[^]*data-cmd="inbox"/);
 
     assert.equal((await call('/lesen/doc?id=gibtsnicht')).status, 404);
