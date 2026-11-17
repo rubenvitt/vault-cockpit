@@ -380,6 +380,17 @@ public final class IngestReviewStore {
         selection.isDisjoint(with: group.ids)
     }
 
+    /// Wie viele Vorausgewählte abgewählt sind (Hinweis an „Wird übernommen“, VCP-145).
+    public var routineDeselected: Int {
+        (model?.routineGroups.flatMap(\.ids) ?? []).filter { !selection.contains($0) }.count
+    }
+
+    /// Ein Feld der Source-Page stimmt nicht: Die Zeile klappt dann von selbst auf.
+    public var sourceNeedsAttention: Bool {
+        guard !fieldsLocked else { return false }
+        return title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSummaryOver || (!slugLocked && slugProblem != nil)
+    }
+
     /// Gewählte Vorschläge in der Reihenfolge des Entwurfs.
     public var chosen: [String] {
         view?.items.map(\.id).filter(selection.contains) ?? []

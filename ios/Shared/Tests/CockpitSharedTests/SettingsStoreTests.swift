@@ -82,6 +82,25 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(Set(fields.keys), ["mail.token", "mail.clear", "mail.senders", "mail.mailbox", "mail.doneMailbox", "mail.pollMinutes"])
     }
 
+    /// „Reihenfolge der Bereiche“: ein Name pro Zeile, Kommas gehören zum Namen (VCP-148).
+    @MainActor
+    func testAreaOrderIsOneNamePerLine() async throws {
+        let transport = server()
+        let store = SettingsStore(context: try setup(transport))
+        await store.load()
+        let display = try XCTUnwrap(store.model?.section("anzeige"))
+        let order = try XCTUnwrap(display.fields.first { $0.name == "areaOrder" })
+        XCTAssertEqual(order.kind, .lines)
+        XCTAssertEqual(store.value(of: order), "Selbstverwirklichung\nMeine Liebste\nArbeitnehmer, Büro")
+
+        store.setValue("Gesundheit\nFinanzen", for: order)
+        let ok = await store.save(display)
+        XCTAssertTrue(ok)
+        let sent = formFields(try XCTUnwrap(transport.requests.last { $0.httpMethod == "POST" }))
+        XCTAssertEqual(sent["areaOrder"], "Gesundheit\nFinanzen")
+        XCTAssertEqual(sent["tz"], "Europe/Berlin")
+    }
+
     @MainActor
     func testRejectedFieldShowsErrorAndKeepsDraft() async throws {
         let transport = server(post: ["/api/einstellungen": (400, "rest-einstellungen-fehler")])

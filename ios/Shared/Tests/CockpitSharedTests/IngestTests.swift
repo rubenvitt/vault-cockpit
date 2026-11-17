@@ -247,6 +247,30 @@ final class IngestTests: XCTestCase {
         XCTAssertTrue(store.canApply, "leerer Slug: der Server nimmt den aus dem Entwurf")
         store.title = "  "
         XCTAssertFalse(store.canApply)
+        XCTAssertTrue(store.sourceNeedsAttention)
+    }
+
+    /// „Zu entscheiden“ zuerst, das Vorausgewählte gruppiert dahinter (VCP-145, VCP-148).
+    @MainActor
+    func testReviewSplitsPendingFromPreselected() async throws {
+        let store = IngestReviewStore(context: try context(server()), docID: ready)
+        await store.load()
+        let doc = try XCTUnwrap(store.model)
+        XCTAssertEqual(doc.pendingGroups.map(\.key), ["synthese", "neu"])
+        XCTAssertEqual(doc.pendingGroup.ids, ["s1", "q1", "e1", "n1"])
+        XCTAssertEqual(doc.routineGroups.map(\.key), ["verknuepfen", "bestaetigung", "relation"])
+        XCTAssertEqual(doc.routineGroups.flatMap(\.ids), ["v1", "b1", "r1"])
+        XCTAssertEqual(doc.routineTally, "Mit bestehenden Seiten verknüpfen 1 · Bestätigungen 1 · Relationen 1")
+        XCTAssertEqual(doc.nothingPendingText, "Nichts zu entscheiden, alles Routine.")
+        XCTAssertFalse(store.sourceNeedsAttention)
+
+        XCTAssertEqual(store.routineDeselected, 0)
+        store.toggle("b1")
+        XCTAssertEqual(store.routineDeselected, 1)
+        store.selectAll(doc.pendingGroup)
+        XCTAssertEqual(store.chosen, ["v1", "s1", "q1", "n1", "r1", "e1"])
+        store.selectNone(doc.pendingGroup)
+        XCTAssertEqual(store.chosen, ["v1", "r1"])
     }
 
     @MainActor

@@ -264,51 +264,121 @@ struct IngestDigestSection: View {
 
 // MARK: Source-Page
 
-/// Source-Page (`sourceBlock`): Titel, Summary mit Zähler, Slug, Tags; nach einem Abbruch fest.
-/// Der Text der Seite lässt sich aufklappen.
+/// Source-Page als eine Zeile (`sourceBlock` im Web, VCP-145): Titel, Pfad und Konfidenz,
+/// dahinter Titel, Summary mit Zähler, Slug und Tags; nach einem Abbruch fest. Meist stimmt, was
+/// Claude vorschlägt; offen ist die Zeile nur, wenn ein Feld nicht stimmt.
 @MainActor
 struct IngestSourceSection: View {
     @Bindable var store: IngestReviewStore
     let source: IngestSourceView
-    let actions: NoteScreenActions
 
-    @State private var showsBody = false
+    @State private var expanded = false
+
+    /// Pfad mit dem Slug, wie er gerade im Feld steht.
+    private var meta: String {
+        let slug = store.slugLocked || store.slug.isEmpty ? source.slug : store.slug
+        return CockpitFormat.meta([slug.isEmpty ? nil : "wiki/sources/\(slug).md", source.confidenceLabel.map { "Konfidenz: \($0)" }])
+    }
+
+    private var title: String {
+        let typed = store.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return store.fieldsLocked || typed.isEmpty ? source.title : typed
+    }
 
     var body: some View {
-        IngestCard(title: "Source-Page", trailing: source.meta) {
-            IngestField(label: "Titel", locked: store.fieldsLocked) {
-                TextField("Titel", text: $store.title)
-                    .disabled(store.fieldsLocked)
+        DisclosureGroup(isExpanded: $expanded) {
+            VStack(alignment: .leading, spacing: 14) {
+                fields
             }
-            IngestField(label: "Summary", counter: "\(store.summaryCount)/\(store.summaryLimit)", over: store.isSummaryOver, locked: store.fieldsLocked) {
-                TextField("Einzeiler", text: $store.summary, axis: .vertical)
-                    .lineLimit(1...3)
-                    .disabled(store.fieldsLocked)
-            }
-            IngestField(label: "Slug", problem: store.slugLocked ? nil : store.slugProblem, locked: store.slugLocked) {
-                TextField("slug", text: $store.slug)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .disabled(store.slugLocked)
-            }
-            IngestField(label: "Tags", locked: store.fieldsLocked) {
-                TextField("englisch, mit Komma", text: $store.tags)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .disabled(store.fieldsLocked)
-            }
-            if let blocks = source.body, !blocks.isEmpty {
-                DisclosureGroup(isExpanded: $showsBody) {
-                    NoteScreenBlocks(blocks: blocks, actions: actions, prefix: "quelle-")
-                        .padding(.top, 8)
-                } label: {
-                    Text("Text der Source-Page ansehen")
-                        .font(.subheadline)
-                        .foregroundStyle(Theme.text2)
+            .padding(.top, 12)
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("Source-Page")
+                        .font(.headline)
+                        .foregroundStyle(Theme.text)
+                        .accessibilityAddTraits(.isHeader)
+                    if store.fieldsLocked {
+                        Image(systemName: "lock.fill")
+                            .font(.caption2)
+                            .foregroundStyle(Theme.text3)
+                            .accessibilityLabel("fest")
+                    }
+                    Spacer(minLength: 4)
+                    if !expanded {
+                        Text(store.fieldsLocked ? "Ansehen" : "Bearbeiten")
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.accent)
+                    }
                 }
-                .tint(Theme.text2)
+                Text(title.isEmpty ? "ohne Titel" : title)
+                    .font(.subheadline)
+                    .foregroundStyle(title.isEmpty ? Theme.danger : Theme.text)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                if !meta.isEmpty {
+                    Text(meta)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.text3)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
             }
         }
+        .tint(Theme.text2)
+        .cardStyle()
+        .onAppear {
+            if store.sourceNeedsAttention { expanded = true }
+        }
+        .onChange(of: store.sourceNeedsAttention) { _, attention in
+            if attention { expanded = true }
+        }
+    }
+
+    @ViewBuilder private var fields: some View {
+        IngestField(label: "Titel", locked: store.fieldsLocked) {
+            TextField("Titel", text: $store.title)
+                .disabled(store.fieldsLocked)
+        }
+        IngestField(label: "Summary", counter: "\(store.summaryCount)/\(store.summaryLimit)", over: store.isSummaryOver, locked: store.fieldsLocked) {
+            TextField("Einzeiler", text: $store.summary, axis: .vertical)
+                .lineLimit(1...3)
+                .disabled(store.fieldsLocked)
+        }
+        IngestField(label: "Slug", problem: store.slugLocked ? nil : store.slugProblem, locked: store.slugLocked) {
+            TextField("slug", text: $store.slug)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .disabled(store.slugLocked)
+        }
+        IngestField(label: "Tags", locked: store.fieldsLocked) {
+            TextField("englisch, mit Komma", text: $store.tags)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .disabled(store.fieldsLocked)
+        }
+    }
+}
+
+/// Text der Source-Page zum Aufklappen (`ingest-mehr` im Web): selten gebraucht, deshalb leise.
+@MainActor
+struct IngestSourceBodySection: View {
+    let blocks: [NoteBlock]
+    let actions: NoteScreenActions
+
+    @State private var expanded = false
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $expanded) {
+            NoteScreenBlocks(blocks: blocks, actions: actions, prefix: "quelle-")
+                .padding(.top, 8)
+        } label: {
+            Text("Text der Source-Page ansehen")
+                .font(.subheadline)
+                .foregroundStyle(Theme.text2)
+        }
+        .tint(Theme.text2)
+        .padding(.horizontal, 4)
     }
 }
 
@@ -361,6 +431,113 @@ struct IngestField<Field: View>: View {
 }
 
 // MARK: Vorschläge
+
+/// „Zu entscheiden“ (`decideBlock` im Web, VCP-145): alles, was der Entwurf nicht vorausgewählt
+/// hat, in der Reihenfolge der Gruppen und mit Kennzeichen; „alle“/„keine“ gilt für die ganze Liste.
+@MainActor
+struct IngestDecideSection: View {
+    let doc: IngestDocModel
+    let view: IngestDraftView
+    let store: IngestReviewStore
+    let actions: NoteScreenActions
+    let openNote: (String) -> Void
+
+    var body: some View {
+        let pending = doc.pendingGroup
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("Zu entscheiden")
+                        .font(.headline)
+                        .foregroundStyle(Theme.text)
+                    if !pending.items.isEmpty {
+                        Text("\(pending.items.count)")
+                            .font(.subheadline.monospacedDigit())
+                            .foregroundStyle(Theme.text3)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 4)
+                if pending.items.count > 1 {
+                    LesenChip(label: "alle", selected: store.allSelected(pending)) { store.selectAll(pending) }
+                        .accessibilityLabel("Zu entscheiden: alle abhaken")
+                    LesenChip(label: "keine", selected: store.noneSelected(pending)) { store.selectNone(pending) }
+                        .accessibilityLabel("Zu entscheiden: keine abhaken")
+                }
+            }
+            if pending.items.isEmpty {
+                Text(doc.nothingPendingText)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.text3)
+            }
+            ForEach(doc.pendingGroups) { group in
+                ForEach(group.items, id: \.id) { ref in
+                    if let item = view.item(ref.id) {
+                        IngestItemRow(
+                            item: item,
+                            featured: group.featured,
+                            tagged: true,
+                            selected: store.isSelected(item.id),
+                            actions: actions,
+                            toggle: { store.toggle(item.id) },
+                            open: openNote
+                        )
+                    }
+                }
+            }
+        }
+        .padding(.top, 4)
+    }
+}
+
+/// „Wird übernommen“ (`routineBlock`): das Vorausgewählte, zugeklappt mit Zählung, darin nach
+/// Gruppen zum Abwählen. Ist etwas abgewählt, sagt es die Zeile auch zugeklappt.
+@MainActor
+struct IngestRoutineSection: View {
+    let doc: IngestDocModel
+    let view: IngestDraftView
+    let store: IngestReviewStore
+    let actions: NoteScreenActions
+    let openNote: (String) -> Void
+
+    @State private var expanded = false
+
+    var body: some View {
+        let count = doc.routineGroups.reduce(0) { $0 + $1.items.count }
+        let deselected = store.routineDeselected
+        DisclosureGroup(isExpanded: $expanded) {
+            VStack(alignment: .leading, spacing: 16) {
+                ForEach(doc.routineGroups) { group in
+                    IngestGroupSection(group: group, view: view, store: store, actions: actions, openNote: openNote)
+                }
+            }
+            .padding(.top, 10)
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("Wird übernommen")
+                        .font(.headline)
+                        .foregroundStyle(Theme.text)
+                        .accessibilityAddTraits(.isHeader)
+                    if deselected > 0 {
+                        Text("\(deselected) abgewählt")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(Theme.warn)
+                    }
+                }
+                Text("\(count) vorausgewählt: \(doc.routineTally)")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.text3)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .combine)
+        }
+        .tint(Theme.text2)
+        .cardStyle()
+    }
+}
 
 /// Gruppe der Vorschläge (`itemGroups`): Überschrift mit Zahl, „alle“/„keine“, Hinweis und die
 /// Zeilen. „Synthesen & Fragen“ ist hervorgehoben.
@@ -429,6 +606,9 @@ struct IngestGroupSection: View {
 struct IngestItemRow: View {
     let item: IngestItemView
     let featured: Bool
+    /// Kennzeichen auch für Relationen und Bestätigungen, die unter „Zu entscheiden“ ohne ihre
+    /// Gruppe dastehen.
+    var tagged = false
     let selected: Bool
     let actions: NoteScreenActions
     let toggle: () -> Void
@@ -501,7 +681,7 @@ struct IngestItemRow: View {
     /// Kennzeichen, Titel und die kurzen Texte im Knopf.
     private var texts: some View {
         VStack(alignment: .leading, spacing: 4) {
-            if item.showsLabel {
+            if item.showsLabel || tagged {
                 IngestPill(label: item.label, featured: featured)
             }
             if let relation = item.relation {

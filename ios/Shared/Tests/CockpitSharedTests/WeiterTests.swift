@@ -78,6 +78,14 @@ final class WeiterTests: XCTestCase {
         let reading = try XCTUnwrap(model.stages.first { $0.key == "weiterlesen" }?.items.first)
         XCTAssertEqual(reading.remaining, 27)
         XCTAssertEqual(reading.meta(timeZone: berlin), "paulgraham.com · noch 27 Min.")
+        XCTAssertNil(reading.deviation, "Weiterlesen sagt schon die Stufe")
+
+        // Statt der Spur ein Wort, wo etwas vom üblichen Weg abweicht (VCP-145, VCP-148).
+        let review = try XCTUnwrap(model.stages.first { $0.key == "pruefen" }?.items.first)
+        XCTAssertEqual(review.deviation, "noch ungelesen")
+        XCTAssertTrue(review.meta(timeZone: berlin).hasSuffix("noch ungelesen"))
+        XCTAssertNil(heard.deviation)
+        XCTAssertNil(failed.deviation)
     }
 
     func testEmptyWeiterIsClear() throws {

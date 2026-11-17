@@ -312,20 +312,29 @@ test('Einstellungen speichern: einzelne Felder, Geheimnisse bleiben, löschen nu
   });
 });
 
-test('Einstellungen speichern: die Reihenfolge der Bereiche pflegt nur die Web-Seite, die App lässt sie stehen', async () => {
+test('Einstellungen speichern: die Reihenfolge der Bereiche als Feld `lines`, ohne das Feld bleibt sie stehen', async () => {
   await withSettingsApp(async ({ get, post, settings }) => {
-    const order = ['Selbstverwirklichung', 'Meine Liebste', 'Arbeitnehmer'];
+    const order = ['Selbstverwirklichung', 'Meine Liebste', 'Arbeitnehmer, Büro'];
     settings.save({ ...FULL, areaOrder: order });
-    // Die App kennt das Feld nicht (ihre JSON bleibt, wie sie ist) …
+    // Die App bekommt das Feld mit einem Namen pro Zeile (Namen dürfen Kommas enthalten) …
     const anzeige = (await get('/api/einstellungen')).body.sections.find((s) => s.id === 'anzeige');
-    assert.deepEqual(anzeige.fields.map((f) => f.name), ['tz', 'vaultName', 'inboxFolder']);
-    // … und was sie speichert, setzt die Rangfolge nicht zurück: ohne Felder, mit einzelnen, mit Kalendern.
+    assert.deepEqual(anzeige.fields.map((f) => f.name), ['tz', 'vaultName', 'inboxFolder', 'areaOrder']);
+    const field = anzeige.fields.find((f) => f.name === 'areaOrder');
+    assert.equal(field.kind, 'lines');
+    assert.equal(field.value, 'Selbstverwirklichung\nMeine Liebste\nArbeitnehmer, Büro');
+    // … was ohne das Feld gespeichert wird, setzt die Rangfolge nicht zurück: ohne Felder, mit einzelnen, mit Kalendern.
     await post('/api/einstellungen', {});
     await post('/api/einstellungen', { tz: 'UTC', hiddenEvents: 'Fokus', inboxFolder: 'eingang' });
     await post('/api/einstellungen', { 'cal.0.remove': '1' });
     assert.equal(settings.stored().tz, 'UTC');
     assert.deepEqual(settings.stored().areaOrder, order);
-    assert.deepEqual(settings.get().areaOrder, order);
+    // Unverändert zurückgeschickt bleibt sie gleich; geändert gilt die neue, leer heißt alphabetisch.
+    await post('/api/einstellungen', { tz: 'UTC', vaultName: '', inboxFolder: 'eingang', areaOrder: field.value });
+    assert.deepEqual(settings.stored().areaOrder, order);
+    await post('/api/einstellungen', { areaOrder: 'Gesundheit\r\n\r\n  Finanzen \ngesundheit' });
+    assert.deepEqual(settings.get().areaOrder, ['Gesundheit', 'Finanzen']);
+    await post('/api/einstellungen', { areaOrder: '' });
+    assert.deepEqual(settings.stored().areaOrder, []);
   });
 });
 

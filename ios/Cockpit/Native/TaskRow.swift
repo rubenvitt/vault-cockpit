@@ -35,14 +35,17 @@ struct TaskRow: View {
     private var menuHint: String { menu == .inbox ? "Zuordnen, Status, Fälligkeit" : "Status, Fälligkeit" }
     private var flameLabel: String { "\(task.running ? "Flamme stoppen" : "Flamme starten"): \(task.title)" }
     private var writable: Bool { env.can.actions }
+    /// Phönix-Schritt der gezeigten Woche: Schild „Schritt“ wie `taskItem` im Web (VCP-145).
+    private var step: Bool { env.store.isStepOfShownWeek(task) }
 
     var body: some View {
         HStack(alignment: .top, spacing: 4) {
             lead
             VStack(alignment: .leading, spacing: 2) {
                 title
-                if !meta.isEmpty || live || due != nil {
+                if step || !meta.isEmpty || live || due != nil {
                     HStack(spacing: 6) {
+                        if step { StepBadge(week: env.store.model?.week.label, muted: task.isDone) }
                         if let due {
                             DueBadge(tag: due, muted: task.isDone)
                         }

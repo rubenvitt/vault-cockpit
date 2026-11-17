@@ -267,6 +267,32 @@ public struct RockGroup: Decodable, Equatable, Identifiable, Sendable {
     public var allDone: Bool { !tasks.isEmpty && done == tasks.count }
     /// Zählt neu, wie `recount` in cockpit.js nach dem Abhaken.
     public mutating func recount() { done = tasks.filter(\.isDone).count }
+
+    /// Aufgaben mit den Phönix-Schritten der Woche `week` zuerst, sonst in der Reihenfolge des
+    /// Servers (`rockGroup` in render.js, VCP-145).
+    public func stepsFirst(week: String) -> [ZunderTask] {
+        let steps = tasks.filter { $0.isStep(of: week) }
+        return steps + tasks.filter { !$0.isStep(of: week) }
+    }
+}
+
+extension ZunderTask {
+    /// Bewusst gewählter Phönix-Schritt der Woche `week` (nicht bloß fällig).
+    public func isStep(of week: String) -> Bool {
+        !week.isEmpty && stepWeek == week
+    }
+}
+
+/// Lange Listen der Woche (Aufgaben, Inbox) zeigen die ersten Einträge sofort, der Rest steckt
+/// hinter „N weitere“ (`capped` in render.js). Ein einzelner Überhang bleibt sichtbar: „1 weitere“
+/// wäre so hoch wie der Eintrag selbst.
+public enum ShortList {
+    public static let shown = 5
+
+    public static func split<T>(_ items: [T], shown: Int = ShortList.shown) -> (head: [T], rest: [T]) {
+        let cut = items.count > shown + 1 ? shown : items.count
+        return (Array(items.prefix(cut)), Array(items.dropFirst(cut)))
+    }
 }
 
 /// Big Rocks: `partial`, wenn nur eine der beiden Zunder-Abfragen geantwortet hat.

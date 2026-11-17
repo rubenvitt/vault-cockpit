@@ -35,7 +35,8 @@ struct WeekSections: View {
     }
 }
 
-/// Liste von Aufgaben mit Trennlinien; neue und verschwundene gleiten ein und aus.
+/// Liste von Aufgaben mit Trennlinien; neue und verschwundene gleiten ein und aus. `capped`
+/// zeigt die ersten fünf und den Rest hinter „N weitere“ (Aufgaben und Inbox, VCP-145).
 @MainActor
 struct TaskList: View {
     let tasks: [ZunderTask]
@@ -43,28 +44,37 @@ struct TaskList: View {
     var showArea = false
     var showsFlame = false
     var menu = TaskMenuKind.standard
+    var capped = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        VStack(spacing: 0) {
-            ForEach(tasks) { task in
-                TaskRow(
-                    task: task,
-                    env: env,
-                    meta: CockpitFormat.meta([task.ref, showArea ? task.area : task.project]),
-                    due: CockpitFormat.dueTag(task, today: env.today, timeZone: env.timeZone),
-                    live: task.running,
-                    showsFlame: showsFlame,
-                    menu: menu
-                )
-                .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.move(edge: .top).combined(with: .opacity))
-                if task.id != tasks.last?.id {
-                    Divider().padding(.leading, 44)
+        if capped {
+            ShortListView(items: tasks, inset: 44) { task in row(task) }
+        } else {
+            VStack(spacing: 0) {
+                ForEach(tasks) { task in
+                    row(task)
+                        .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.move(edge: .top).combined(with: .opacity))
+                    if task.id != tasks.last?.id {
+                        Divider().padding(.leading, 44)
+                    }
                 }
             }
+            .animation(reduceMotion ? .easeOut(duration: 0.15) : .snappy, value: tasks.map(\.id))
         }
-        .animation(reduceMotion ? .easeOut(duration: 0.15) : .snappy, value: tasks.map(\.id))
+    }
+
+    private func row(_ task: ZunderTask) -> some View {
+        TaskRow(
+            task: task,
+            env: env,
+            meta: CockpitFormat.meta([task.ref, showArea ? task.area : task.project]),
+            due: CockpitFormat.dueTag(task, today: env.today, timeZone: env.timeZone),
+            live: task.running,
+            showsFlame: showsFlame,
+            menu: menu
+        )
     }
 }
 
@@ -359,6 +369,9 @@ struct RockCard: View {
     @State private var collapsible: Bool
     @State private var expanded = false
 
+    /// Phönix-Schritte der gezeigten Woche zuerst, wie im Web (VCP-145).
+    private var tasks: [ZunderTask] { group.stepsFirst(week: env.store.model?.week.id ?? "") }
+
     init(group: RockGroup, env: WeekEnv) {
         self.group = group
         self.env = env
@@ -381,7 +394,7 @@ struct RockCard: View {
 
     private var collapsed: some View {
         DisclosureGroup(isExpanded: $expanded) {
-            TaskList(tasks: group.tasks, env: env, showsFlame: true)
+            TaskList(tasks: tasks, env: env, showsFlame: true)
                 .padding(.top, 4)
         } label: {
             HStack(alignment: .firstTextBaseline) {
@@ -419,7 +432,7 @@ struct RockCard: View {
             ProgressView(value: Double(group.done), total: Double(max(group.tasks.count, 1)))
                 .tint(group.allDone ? Theme.ok : Theme.accent)
                 .accessibilityHidden(true)
-            TaskList(tasks: group.tasks, env: env, showsFlame: true)
+            TaskList(tasks: tasks, env: env, showsFlame: true)
         }
         .padding(12)
         .background(group.allDone ? Theme.okSoft : Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
@@ -603,7 +616,7 @@ struct TasksSection: View {
             case .ok(let tasks) where tasks.isEmpty:
                 EmptyText("Nichts in Arbeit, nichts überfällig.")
             case .ok(let tasks):
-                TaskList(tasks: tasks, env: env, showArea: true)
+                TaskList(tasks: tasks, env: env, showArea: true, capped: true)
             }
         }
     }
@@ -613,8 +626,6 @@ struct TasksSection: View {
 struct InboxSection: View {
     let week: WeekModel
     let env: WeekEnv
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         CardSection("Inbox", badge: week.inbox.count) {
@@ -630,14 +641,7 @@ struct InboxSection: View {
             case .ok(let notes) where notes.isEmpty:
                 EmptyText("Leer.")
             case .ok(let notes):
-                VStack(spacing: 0) {
-                    ForEach(notes) { note in
-                        noteRow(note)
-                            .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.move(edge: .top).combined(with: .opacity))
-                        if note.id != notes.last?.id { Divider() }
-                    }
-                }
-                .animation(.snappy, value: notes.map(\.id))
+                ShortListView(items: notes) { note in noteRow(note) }
             }
             Text("Zunder")
                 .font(.subheadline.weight(.semibold))
@@ -649,7 +653,7 @@ struct InboxSection: View {
             case .ok(let tasks) where tasks.isEmpty:
                 EmptyText("Leer.")
             case .ok(let tasks):
-                TaskList(tasks: tasks, env: env, menu: .inbox)
+                TaskList(tasks: tasks, env: env, menu: .inbox, capped: true)
             }
         }
     }

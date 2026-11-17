@@ -162,7 +162,25 @@ public struct WeiterItem: Decodable, Equatable, Identifiable, Sendable {
         } else {
             nil
         }
-        return CockpitFormat.meta([doc.site, minutes, read?.label(timeZone: timeZone)])
+        return CockpitFormat.meta([doc.site, minutes, read?.label(timeZone: timeZone), deviation])
+    }
+
+    /// Was vom üblichen Weg abweicht, als Wort für die Metazeile (`deviation` in weiter.js,
+    /// VCP-145): Die Stufe sagt schon, wo der Text steht; die vier Schritte der Spur stehen
+    /// deshalb nicht mehr als Schilder an jeder Zeile.
+    public var deviation: String? {
+        switch stage {
+        case "pruefen":
+            switch track.first(where: { $0.key == "gelesen" })?.state {
+            case "todo": return "noch ungelesen"
+            case "busy": return "noch nicht zu Ende gelesen"
+            default: return nil
+            }
+        case "entscheiden":
+            return ingest?.status == "verworfen" ? "Entwurf verworfen" : nil
+        default:
+            return nil
+        }
     }
 }
 

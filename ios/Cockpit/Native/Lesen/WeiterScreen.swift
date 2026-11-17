@@ -2,9 +2,10 @@ import CockpitShared
 import SwiftUI
 
 /// „Weiter“ nativ (`/lesen/weiter` im Web): oben „Als Nächstes“, der eine Schritt mit dem meisten
-/// Wert, darunter die Stufen Prüfen · Anhören · Entscheiden · Fehler · Weiterlesen · Läuft mit
-/// ihren Einträgen, je Text die Spur (Gelesen/Gehört · Entwurf · Im Wiki · Eingepflanzt) und die
-/// Knöpfe dazu, unten Eingang und Stapel als Zahl. Solange Claude an etwas arbeitet und der
+/// Wert, darunter die Stufen Prüfen · Anhören · Entscheiden · Fehler · Weiterlesen · Läuft als
+/// ruhige Zeilen (Titel, eine Metazeile, die Knöpfe der Stufe; VCP-145). Die Stufe sagt, wo ein
+/// Text steht; nur was davon abweicht, steht als Wort in der Metazeile. Unten Eingang und Stapel
+/// als Zahl. Solange Claude an etwas arbeitet und der
 /// Bildschirm zu sehen ist, lädt er alle 5 s neu.
 @MainActor
 struct WeiterScreen: View {
@@ -85,7 +86,8 @@ struct WeiterScreen: View {
     private func section(_ stage: WeiterStage, in weiter: WeiterModel) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             IngestSectionHeader(title: stage.label, count: stage.items.count)
-            if !stage.hint.isEmpty {
+            // Wie im Web nur, wo der Hinweis eine Regel erklärt.
+            if Self.hinted.contains(stage.key), !stage.hint.isEmpty {
                 Text(stage.hint)
                     .font(.footnote)
                     .foregroundStyle(Theme.text3)
@@ -113,21 +115,30 @@ struct WeiterScreen: View {
             .disabled(store.isDraftingAll)
             .accessibilityHint("Claude entwirft einen nach dem anderen; ins Wiki kommt nur, was du danach abhakst")
         }
-        ForEach(stage.items) { item in
-            WeiterItemCard(
-                item: item,
-                weiter: weiter,
-                isBusy: store.busy.contains(item.id),
-                open: { open(item) },
-                act: { action in perform(action, on: item) },
-                openDoc: { id in
-                    toasts.signal(.selection)
-                    model.open(reading: .reader(id: id, highlight: nil, resume: false))
+        VStack(spacing: 0) {
+            ForEach(stage.items) { item in
+                WeiterItemRow(
+                    item: item,
+                    weiter: weiter,
+                    isBusy: store.busy.contains(item.id),
+                    open: { open(item) },
+                    act: { action in perform(action, on: item) },
+                    openDoc: { id in
+                        toasts.signal(.selection)
+                        model.open(reading: .reader(id: id, highlight: nil, resume: false))
+                    }
+                )
+                .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.asymmetric(insertion: .move(edge: .top).combined(with: .opacity), removal: .opacity))
+                if item.id != stage.items.last?.id {
+                    Divider().padding(.leading, 12)
                 }
-            )
-            .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.asymmetric(insertion: .move(edge: .top).combined(with: .opacity), removal: .scale(scale: 0.95).combined(with: .opacity)))
+            }
         }
+        .cardStyle(padding: 0)
     }
+
+    /// Stufen, deren Hinweis eine Regel erklärt (`PAGE_HINTS` in weiter.js).
+    private static let hinted: Set<String> = ["anhoeren", "entscheiden"]
 
     // MARK: Aktionen
 
@@ -235,7 +246,7 @@ struct WeiterButton: Identifiable {
     var id: String { label }
 }
 
-// MARK: Karten
+// MARK: Zeilen
 
 /// „Als Nächstes“ (`.weiter-next`): Satz und ein Knopf; grün, wenn nichts wartet.
 struct WeiterNextCard: View {
@@ -283,9 +294,10 @@ struct WeiterNextCard: View {
     }
 }
 
-/// Ein Eintrag (`.weiter-item`): Titel, Meta, Stand, Spur und die Knöpfe seiner Stufe. Unter
+/// Ein Eintrag als Zeile (`.weiter-item`): Titel, eine Metazeile (mit dem, was gerade läuft, und
+/// was vom üblichen Weg abweicht), bei Fehlern der Grund, darunter die Knöpfe der Stufe. Unter
 /// „Anhören“ eine Folge mit ihren Texten.
-struct WeiterItemCard: View {
+struct WeiterItemRow: View {
     let item: WeiterItem
     let weiter: WeiterModel
     let isBusy: Bool
@@ -293,8 +305,10 @@ struct WeiterItemCard: View {
     let act: (WeiterAction) -> Void
     let openDoc: (String) -> Void
 
+    private var failed: Bool { item.stage == "fehler" }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             Button(action: open) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     if item.stage == "laeuft" {
@@ -310,27 +324,21 @@ struct WeiterItemCard: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            let meta = item.meta()
+            let meta = CockpitFormat.meta([item.meta(), failed ? nil : item.state])
             if !meta.isEmpty {
                 Text(meta)
                     .font(.footnote)
                     .foregroundStyle(Theme.text3)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if let state = item.state {
+            if failed, let state = item.state {
                 Text(state)
                     .font(.footnote)
-                    .foregroundStyle(item.stage == "fehler" ? Theme.text : Theme.text2)
-                    .padding(item.stage == "fehler" ? 8 : 0)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(item.stage == "fehler" ? Theme.warnSoft : Color.clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .foregroundStyle(Theme.danger)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if !item.docs.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(item.docs.count == 1 ? "Text" : "\(item.docs.count) Texte")
-                        .font(.caption)
-                        .foregroundStyle(Theme.text3)
                     ForEach(item.docs) { doc in
                         Button {
                             openDoc(doc.id)
@@ -345,9 +353,6 @@ struct WeiterItemCard: View {
                     }
                 }
             }
-            if !item.track.isEmpty {
-                WeiterTrack(steps: item.track)
-            }
             let buttons = actions
             if !buttons.isEmpty {
                 FlowLayout(spacing: 8) {
@@ -355,7 +360,7 @@ struct WeiterItemCard: View {
                         if button.primary {
                             Button(button.label) { act(button.action) }
                                 .font(.subheadline.weight(.semibold))
-                                .buttonStyle(.borderedProminent)
+                                .buttonStyle(.bordered)
                                 .tint(Theme.accent)
                         } else {
                             Button(button.label) { act(button.action) }
@@ -363,24 +368,14 @@ struct WeiterItemCard: View {
                         }
                     }
                 }
+                .padding(.top, 2)
             }
         }
-        .cardStyle()
-        .overlay {
-            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-                .strokeBorder(borderColor)
-        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .opacity(isBusy ? 0.5 : 1)
         .disabled(isBusy)
         .accessibilityElement(children: .contain)
-    }
-
-    private var borderColor: Color {
-        switch item.stage {
-        case "pruefen", "anhoeren": Theme.accentLine
-        case "fehler": Theme.danger.opacity(0.3)
-        default: Color.clear
-        }
     }
 
     /// Knöpfe je Stufe wie `actions` in src/lesen/weiter.js.
@@ -408,80 +403,6 @@ struct WeiterItemCard: View {
             return [WeiterButton("Weiterlesen", .read, primary: true)]
         default:
             return []
-        }
-    }
-}
-
-/// Spur Gelesen/Gehört · Entwurf · Im Wiki · Eingepflanzt (`.weiter-spur`).
-struct WeiterTrack: View {
-    let steps: [WeiterStep]
-
-    var body: some View {
-        FlowLayout(spacing: 4) {
-            ForEach(steps) { step in
-                HStack(spacing: 3) {
-                    if let mark = mark(step.state) {
-                        Text(mark)
-                            .accessibilityHidden(true)
-                    }
-                    Text(step.label)
-                }
-                .font(.caption2.weight(step.state == "todo" || step.state == "busy" ? .regular : .semibold))
-                .foregroundStyle(foreground(step.state))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 2)
-                .background(background(step.state), in: Capsule())
-                .overlay {
-                    Capsule().strokeBorder(border(step.state), style: StrokeStyle(lineWidth: 1, dash: step.state == "todo" ? [3, 2] : []))
-                }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("\(step.label): \(spoken(step.state))")
-            }
-        }
-    }
-
-    private func mark(_ state: String) -> String? {
-        switch state {
-        case "done": "✓"
-        case "busy": "…"
-        case "failed": "!"
-        default: nil
-        }
-    }
-
-    private func foreground(_ state: String) -> Color {
-        switch state {
-        case "done": Theme.ok
-        case "busy": Theme.accent
-        case "failed": Theme.danger
-        default: Theme.text3
-        }
-    }
-
-    private func background(_ state: String) -> Color {
-        switch state {
-        case "done": Theme.okSoft
-        case "busy": Theme.accentSoft
-        case "failed": Theme.dangerSoft
-        default: Color.clear
-        }
-    }
-
-    private func border(_ state: String) -> Color {
-        switch state {
-        case "busy": Theme.accentLine
-        case "failed": Theme.danger.opacity(0.3)
-        case "todo": Theme.lineStrong
-        default: Color.clear
-        }
-    }
-
-    private func spoken(_ state: String) -> String {
-        switch state {
-        case "done": "erledigt"
-        case "busy": "läuft"
-        case "failed": "fehlgeschlagen"
-        default: "offen"
         }
     }
 }

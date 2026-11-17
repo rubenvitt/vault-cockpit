@@ -306,6 +306,14 @@ struct SettingsFieldRow: View {
                     }
                     .tint(Theme.danger)
                 }
+            case .lines:
+                // Ein Eintrag pro Zeile (Reihenfolge der Bereiche): Zeilenumbruch statt Absenden.
+                label
+                TextField(field.placeholder.isEmpty ? field.label : field.placeholder, text: value, axis: .vertical)
+                    .textInputAutocapitalization(.sentences)
+                    .autocorrectionDisabled()
+                    .lineLimit(3...10)
+                    .accessibilityLabel(field.label)
             case .text, .number, .list:
                 label
                 TextField(field.placeholder.isEmpty ? field.label : field.placeholder, text: value, axis: field.kind == .list ? .vertical : .horizontal)

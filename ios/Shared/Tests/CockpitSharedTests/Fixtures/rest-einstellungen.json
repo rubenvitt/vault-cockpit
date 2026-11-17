@@ -431,6 +431,16 @@
           "placeholder": "inbox",
           "group": null,
           "collapsed": false
+        },
+        {
+          "name": "areaOrder",
+          "label": "Reihenfolge der Bereiche",
+          "hint": "ein Name pro Zeile, wie in Zunder; leer = alphabetisch",
+          "kind": "lines",
+          "value": "Selbstverwirklichung\nMeine Liebste\nArbeitnehmer, Büro",
+          "placeholder": "Selbstverwirklichung\nPartnerschaft\nArbeit",
+          "group": null,
+          "collapsed": false
         }
       ],
       "groups": {}

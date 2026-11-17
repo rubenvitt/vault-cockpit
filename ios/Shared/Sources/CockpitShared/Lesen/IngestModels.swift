@@ -413,6 +413,12 @@ public struct IngestGroupItem: Decodable, Equatable, Hashable, Sendable {
         label = try c.decodeIfPresent(String.self, forKey: .label) ?? ""
         isDefault = try c.decodeIfPresent(Bool.self, forKey: .isDefault) ?? false
     }
+
+    public init(id: String, label: String = "", isDefault: Bool = false) {
+        self.id = id
+        self.label = label
+        self.isDefault = isDefault
+    }
 }
 
 /// Gruppe der Prüfansicht (`groupItems` im Web): Verknüpfen, Bestätigungen, Synthesen & Fragen
@@ -437,7 +443,22 @@ public struct IngestGroup: Decodable, Equatable, Identifiable, Sendable {
         items = try c.decodeIfPresent([IngestGroupItem].self, forKey: .items) ?? []
     }
 
+    public init(key: String, label: String, hint: String = "", featured: Bool = false, items: [IngestGroupItem]) {
+        self.key = key
+        self.label = label
+        self.hint = hint
+        self.featured = featured
+        self.items = items
+    }
+
     public var ids: [String] { items.map(\.id) }
+
+    /// Nur die (nicht) vorausgewählten Vorschläge der Gruppe, nil wenn keiner bleibt.
+    public func only(preselected: Bool) -> IngestGroup? {
+        let kept = items.filter { $0.isDefault == preselected }
+        guard !kept.isEmpty else { return nil }
+        return IngestGroup(key: key, label: label, hint: hint, featured: featured, items: kept)
+    }
 }
 
 /// `GET /api/lesen/ingest/doc?id=`: Eintrag, Entwurf als Baum, Gruppen, Vorauswahl und die
@@ -490,6 +511,28 @@ public struct IngestDocModel: Decodable, Equatable, Sendable {
     public var status: String? { ingest?.status }
     /// Bereit zum Abhaken (mit Entwurf).
     public var isReady: Bool { status == IngestStatus.ready && view != nil }
+
+    /// „Zu entscheiden“ (`decideBlock` im Web, VCP-145): was der Entwurf nicht vorausgewählt hat,
+    /// in der Reihenfolge der Gruppen. Das ist die eigentliche Arbeit an einem Entwurf.
+    public var pendingGroups: [IngestGroup] { groups.compactMap { $0.only(preselected: false) } }
+
+    /// „Wird übernommen“ (`routineBlock`): das Vorausgewählte, gruppiert zum Abwählen.
+    public var routineGroups: [IngestGroup] { groups.compactMap { $0.only(preselected: true) } }
+
+    /// Alles Offene als eine Gruppe, für „alle“/„keine“ über „Zu entscheiden“.
+    public var pendingGroup: IngestGroup {
+        IngestGroup(key: "offen", label: "Zu entscheiden", items: pendingGroups.flatMap(\.items))
+    }
+
+    /// Text unter „Zu entscheiden“, wenn dort nichts steht.
+    public var nothingPendingText: String {
+        groups.contains { !$0.items.isEmpty } ? "Nichts zu entscheiden, alles Routine." : "Claude schlägt nichts über die Source-Page hinaus vor."
+    }
+
+    /// „Verknüpfen 3 · Bestätigungen 2“: das Vorausgewählte nach Gruppen, für die zugeklappte Zeile.
+    public var routineTally: String {
+        routineGroups.map { "\($0.label) \($0.items.count)" }.joined(separator: " · ")
+    }
 }
 
 // MARK: Antworten der Aktionen
