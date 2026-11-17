@@ -3,10 +3,11 @@ import SwiftUI
 import UIKit
 
 /// Prüfansicht nativ (`/lesen/ingest/doc?id=…` im Web), der Lesemoment des Ingests: „Das
-/// Wichtigste“ (Kernaussagen, Neu für dich, Bestätigt, Widerspricht, Dockt an), die Source-Page
-/// mit änderbarem Titel, Summary (Zähler bis 80), Slug und Tags, dann die Vorschläge zum Abhaken
-/// in Gruppen mit „alle“/„keine“. Ein Tipp auf eine Zeile schaltet das Häkchen, das Symbol daneben
-/// öffnet die bestehende Seite als Notiz. Unten fest „Ins Wiki übernehmen (N)“; danach geht es
+/// Wichtigste“ (Kernaussagen, Neu für dich, Bestätigt, Widerspricht, Dockt an), dann „Zu
+/// entscheiden“ (was der Entwurf nicht vorausgewählt hat), „Wird übernommen“ (das
+/// Vorausgewählte, zugeklappt und gruppiert mit „alle“/„keine“) und die Source-Page als eine
+/// Zeile, hinter der Titel, Summary (Zähler bis 80), Slug und Tags stehen. Ein Tipp auf einen
+/// Vorschlag schaltet das Häkchen, das Symbol daneben öffnet die bestehende Seite als Notiz. Unten fest „Ins Wiki übernehmen (N)“; danach geht es
 /// zum nächsten bereiten Entwurf. Daneben „Neu entwerfen“, „Ohne Wiki erledigen“ (mit
 /// Rückgängig) und „Entwurf verwerfen“ (mit Rückfrage).
 ///
@@ -122,15 +123,15 @@ struct IngestReview: View {
                     IngestHaltedNote(halted: halted, openNote: { openNote($0) })
                 }
                 IngestDigestSection(view: view)
-                IngestSourceSection(store: store, source: view.source, actions: blockActions)
-                if doc.groups.isEmpty {
-                    Text("Claude schlägt nichts über die Source-Page hinaus vor.")
-                        .font(.subheadline)
-                        .foregroundStyle(Theme.text3)
-                        .cardStyle()
+                // Wie die Prüfansicht im Web (VCP-145): erst, was zu entscheiden ist, dann das
+                // Vorausgewählte zugeklappt, dann die Source-Page als eine Zeile.
+                IngestDecideSection(doc: doc, view: view, store: store, actions: blockActions, openNote: { openNote($0) })
+                if !doc.routineGroups.isEmpty {
+                    IngestRoutineSection(doc: doc, view: view, store: store, actions: blockActions, openNote: { openNote($0) })
                 }
-                ForEach(doc.groups) { group in
-                    IngestGroupSection(group: group, view: view, store: store, actions: blockActions, openNote: { openNote($0) })
+                IngestSourceSection(store: store, source: view.source)
+                if let blocks = view.source.body, !blocks.isEmpty {
+                    IngestSourceBodySection(blocks: blocks, actions: blockActions)
                 }
                 sideActions(doc)
                     .padding(.top, 4)

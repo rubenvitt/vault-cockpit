@@ -417,10 +417,11 @@ und bleibt beim Abarbeiten aufgeklappt. Mit `?woche=2026-W43` blättert man;
 dieselben Daten gibt es als JSON unter `/api/woche`.
 
 Auf dem iPhone (Web bis 900 px Breite und native App) beginnt die laufende Woche
-mit **Heute**, danach Aufgaben, Feuer, Big Rocks, Termine und Inbox. Im Web sind
-dort Bereiche ohne offenen Phönix-Schritt zunächst zugeklappt (Name und Stand,
-ein Tipp öffnet sie), und der heutige Tag zeigt in den Terminen nur die Zahl,
-weil „Heute“ ihn schon oben ausführt.
+mit **Heute**, danach Aufgaben, Feuer, Big Rocks, Termine und Inbox. Die App
+übernimmt Schritte zuerst mit Schild und „N weitere“; nur im Web sind dort
+Bereiche ohne offenen Phönix-Schritt zunächst zugeklappt (Name und Stand, ein
+Tipp öffnet sie), und der heutige Tag zeigt in den Terminen nur die Zahl, weil
+„Heute“ ihn schon oben ausführt.
 Fälligkeiten stehen als kleines Schild hinter dem Titel („Heute“, „Morgen“,
 überfällig rot). „← Zurück“ auf einer Notizseite führt dorthin, woher man kam
 (Inbox, Graph, Wissen …).
@@ -438,7 +439,7 @@ Einrichtung:
    oder als **CalDAV** (Kalender-Home oder einzelner Kalender, mit Benutzer und
    App-Passwort; optional nur bestimmte Kalender). Daneben Zeitzone, Vault-Name
    für „In Obsidian öffnen“, der Inbox-Ordner und die Reihenfolge der Bereiche
-   (nur auf der Web-Seite; die App zeigt und ändert sie nicht). Die Seite holt
+   (in der App unter Anzeige als Textfeld, ein Name pro Zeile). Die Seite holt
    dafür die aktiven Bereiche aus Zunder: Pfeile je Zeile schieben einen Bereich
    hoch, runter, ganz nach oben oder unten und speichern sofort, ohne
    JavaScript. Bereiche, die Zunder nicht mehr kennt, sind markiert und lassen

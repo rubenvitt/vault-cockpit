@@ -26,8 +26,10 @@ public struct SettingsOption: Decodable, Equatable, Hashable, Identifiable, Send
     public var id: String { value }
 }
 
+/// Art eines Felds; unbekannte Arten eines neueren Servers werden zu `text`.
 public enum SettingsFieldKind: String, Decodable, Equatable, Sendable {
-    case text, number, list, select, secret
+    /// `list`: mit Komma getrennt; `lines`: ein Eintrag pro Zeile (Reihenfolge der Bereiche).
+    case text, number, list, lines, select, secret
 
     public init(from decoder: Decoder) throws {
         self = SettingsFieldKind(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .text

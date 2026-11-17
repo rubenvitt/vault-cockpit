@@ -123,6 +123,73 @@ struct DueBadge: View {
     }
 }
 
+/// Schild „Schritt“ an einem Phönix-Schritt der gezeigten Woche (`.step` im Web, VCP-145):
+/// Punkt und Wort in Akzent, erledigt ruhig.
+struct StepBadge: View {
+    /// „KW 47“ für VoiceOver.
+    var week: String?
+    var muted = false
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Circle().frame(width: 5, height: 5)
+            Text("Schritt")
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(muted ? Theme.text3 : Theme.accent)
+        .fixedSize()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(week.map { "Phönix-Schritt \($0)" } ?? "Phönix-Schritt")
+    }
+}
+
+/// Liste mit den ersten Einträgen; der Rest steckt hinter „N weitere“ (`capped` im Web,
+/// VCP-145). Aufgeklappt bleibt aufgeklappt, auch wenn die Woche nach einer Aktion neu lädt.
+@MainActor
+struct ShortListView<Item: Identifiable, Row: View>: View {
+    let items: [Item]
+    /// Einzug der Trennlinien zwischen Zeilen (44 bei Aufgaben, unter dem Kästchen).
+    var inset: CGFloat = 0
+    @ViewBuilder let row: (Item) -> Row
+
+    @State private var expanded = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let parts = ShortList.split(items)
+        VStack(spacing: 0) {
+            rows(parts.head)
+            if !parts.rest.isEmpty {
+                Divider()
+                DisclosureGroup(isExpanded: $expanded) {
+                    VStack(spacing: 0) {
+                        Divider()
+                        rows(parts.rest)
+                    }
+                } label: {
+                    Text("\(parts.rest.count) weitere")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Theme.text2)
+                        .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .tint(Theme.text3)
+            }
+        }
+        .animation(reduceMotion ? .easeOut(duration: 0.15) : .snappy, value: items.map(\.id))
+    }
+
+    @ViewBuilder private func rows(_ list: [Item]) -> some View {
+        ForEach(list) { item in
+            row(item)
+                .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.move(edge: .top).combined(with: .opacity))
+            if item.id != list.last?.id {
+                Divider().padding(.leading, inset)
+            }
+        }
+    }
+}
+
 /// Zahl in der Überschrift (`count-badge`), zählt sichtbar hoch und runter.
 struct CountBadge: View {
     let count: Int

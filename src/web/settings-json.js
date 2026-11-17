@@ -111,8 +111,8 @@ const str = (v) => (v === null || v === undefined ? '' : String(v));
 const choice = (v) => (v === true ? 'an' : v === false ? 'aus' : '');
 
 /**
- * Ein Feld: `kind` ist `text`, `number`, `list` (mit Komma), `select` (mit `options`)
- * oder `secret` (nie mit Wert; `set` sagt, ob ein eigener gespeichert ist, `clear`
+ * Ein Feld: `kind` ist `text`, `number`, `list` (mit Komma), `lines` (ein Eintrag pro
+ * Zeile), `select` (mit `options`) oder `secret` (nie mit Wert; `set` sagt, ob ein eigener gespeichert ist, `clear`
  * nennt den Haken „… löschen“, den es nur dann gibt). `group`: Unterabschnitt
  * (`collapsed`: auf der Seite zugeklappt).
  */
@@ -241,6 +241,9 @@ function formSections(stored, d) {
         field('tz', 'Zeitzone', { value: stored.tz, placeholder: d.tz }),
         field('vaultName', 'Vault-Name in Obsidian', { hint: 'für Links', value: stored.vaultName, placeholder: d.vaultName }),
         field('inboxFolder', 'Inbox-Ordner im Vault', { value: stored.inboxFolder, placeholder: d.inboxFolder }),
+        // Ein Name pro Zeile wie auf der Seite (Namen dürfen Kommas enthalten). Ältere Apps kennen `lines`
+        // nicht und zeigen ein Textfeld; was sie unverändert zurückschicken, bleibt dieselbe Rangfolge.
+        field('areaOrder', 'Reihenfolge der Bereiche', { kind: 'lines', hint: 'ein Name pro Zeile, wie in Zunder; leer = alphabetisch', value: (stored.areaOrder ?? []).join('\n'), placeholder: 'Selbstverwirklichung\nPartnerschaft\nArbeit' }),
       ],
     },
     anmeldung: {
@@ -348,7 +351,7 @@ const FIELDS = new Set([
   'episodes.host', 'episodes.guest', 'episodes.model', 'episodes.language',
   'ingest.nightly', 'ingest.hour', 'ingest.model', 'ingest.limit', 'ingest.agent',
   'jev.key', 'jev.clear', 'jev.model',
-  'hiddenEvents', 'session.idleDays', 'session.maxDays', 'cal.auth',
+  'hiddenEvents', 'areaOrder', 'session.idleDays', 'session.maxDays', 'cal.auth',
 ]);
 const CAL_FIELD = /^cal\.(\d{1,2})\.(id|name|kind|url|auth|username|password|filter|remove)$/;
 /** Haken: gesetzt heißt an; leer, `0` oder `false` heißt aus (ein Formular ließe ihn dann weg). */
@@ -357,8 +360,8 @@ const OFF = new Set(['', '0', 'false', 'aus', 'nein']);
 
 /**
  * Das Formular, das die Seite mit dem gespeicherten Stand schicken würde, ohne
- * etwas zu ändern: Geheimnisse leer (= unverändert), `hiddenEvents` fehlt (=
- * unverändert, auch der Standard bleibt Standard).
+ * etwas zu ändern: Geheimnisse leer (= unverändert), `hiddenEvents` und
+ * `areaOrder` fehlen (= unverändert, auch der Standard bleibt Standard).
  */
 export function formOfSettings(stored) {
   const f = new URLSearchParams();

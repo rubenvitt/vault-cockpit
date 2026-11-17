@@ -1,9 +1,9 @@
 import CockpitShared
 import SwiftUI
 
-/// Ingest nativ (`/lesen/ingest` im Web): bereite Entwürfe als Karten (Quelle, zwei bis drei
-/// Kernaussagen, „3 Verknüpfungen · 1 Synthese“), darunter „In Arbeit“ und „Fehler“ (mit „Erneut
-/// entwerfen“), oben „Ganzen Stapel entwerfen“. Eine Karte öffnet die Prüfansicht. Solange
+/// Ingest nativ (`/lesen/ingest` im Web): bereite Entwürfe als flache Zeilen (Titel, Quelle, die
+/// erste Kernaussage, „3 Verknüpfungen · 1 Synthese“; VCP-145), darunter „In Arbeit“ und „Fehler“
+/// (mit „Erneut entwerfen“), oben „Ganzen Stapel entwerfen“. Eine Zeile öffnet die Prüfansicht. Solange
 /// Claude entwirft und die Übersicht sichtbar ist, fragt der Store alle 3 s nach; wird ein
 /// Entwurf fertig, meldet er „Entwurf bereit: …“ mit „Prüfen“.
 @MainActor
@@ -112,27 +112,25 @@ struct IngestScreen: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .cardStyle()
                 } else {
-                    ForEach(overview.ready) { entry in
+                    rows(overview.ready) { entry in
                         NavigationLink(value: ReadingRoute.ingestReview(id: entry.id)) {
-                            IngestReadyCard(entry: entry)
+                            IngestReadyRow(entry: entry)
                         }
                         .buttonStyle(.plain)
-                        .transition(cardTransition)
                     }
                 }
                 if !overview.busy.isEmpty {
                     IngestSectionHeader(title: "In Arbeit", count: overview.busy.count)
-                    ForEach(overview.busy) { entry in
+                    rows(overview.busy) { entry in
                         NavigationLink(value: ReadingRoute.reader(id: entry.id, highlight: nil, resume: false)) {
                             IngestBusyRow(entry: entry)
                         }
                         .buttonStyle(.plain)
-                        .transition(cardTransition)
                     }
                 }
                 if !overview.failed.isEmpty {
                     IngestSectionHeader(title: "Fehler", count: overview.failed.count)
-                    ForEach(overview.failed) { entry in
+                    rows(overview.failed) { entry in
                         IngestFailedCard(
                             entry: entry,
                             canDraft: overview.available,
@@ -144,7 +142,6 @@ struct IngestScreen: View {
                                 model.readingPath.append(.reader(id: entry.id, highlight: nil, resume: false))
                             }
                         )
-                        .transition(cardTransition)
                     }
                 }
             }
@@ -177,8 +174,22 @@ struct IngestScreen: View {
         .cardStyle()
     }
 
+    /// Einträge als flache Zeilen mit Haarlinie in einer Fläche (`ingest-zeilen` im Web, VCP-145).
+    private func rows<Row: View>(_ entries: [IngestEntry], @ViewBuilder row: @escaping (IngestEntry) -> Row) -> some View {
+        VStack(spacing: 0) {
+            ForEach(entries) { entry in
+                row(entry)
+                    .transition(cardTransition)
+                if entry.id != entries.last?.id {
+                    Divider().padding(.leading, 12)
+                }
+            }
+        }
+        .cardStyle(padding: 0)
+    }
+
     private var cardTransition: AnyTransition {
-        reduceMotion ? AnyTransition.opacity : AnyTransition.asymmetric(insertion: .move(edge: .top).combined(with: .opacity), removal: .scale(scale: 0.95).combined(with: .opacity))
+        reduceMotion ? AnyTransition.opacity : AnyTransition.asymmetric(insertion: .move(edge: .top).combined(with: .opacity), removal: .opacity)
     }
 
     // MARK: Laden
@@ -193,7 +204,7 @@ struct IngestScreen: View {
     }
 }
 
-// MARK: Karten
+// MARK: Zeilen
 
 /// Überschrift einer Gruppe mit Zahl (`h2` mit `.hint` im Web).
 struct IngestSectionHeader: View {
@@ -216,51 +227,54 @@ struct IngestSectionHeader: View {
     }
 }
 
-/// Bereiter Entwurf (`.ingest-card`): Meta, Titel, bis zu drei Kernaussagen, Zählung, „Synthese
-/// angeboten“ und „Prüfen“. Die ganze Karte öffnet die Prüfansicht.
-struct IngestReadyCard: View {
+/// Bereiter Entwurf als Zeile (`draftRow` im Web, VCP-145): Titel, Meta, eine Zeile Inhalt
+/// (die erste Kernaussage), die Zählung, „Synthese angeboten“ und „Prüfen“. Die ganze Zeile
+/// öffnet die Prüfansicht.
+struct IngestReadyRow: View {
     let entry: IngestEntry
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 4) {
-                let meta = entry.meta()
-                if !meta.isEmpty {
-                    Text(meta)
-                        .font(.footnote)
-                        .foregroundStyle(Theme.text3)
-                }
-                Text(entry.title)
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(Theme.text)
-                    .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 4) {
+            Text(entry.title)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(Theme.text)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+            let meta = entry.meta()
+            if !meta.isEmpty {
+                Text(meta)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.text3)
+                    .lineLimit(1)
             }
-            if !entry.kern.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(Array(entry.kern.enumerated()), id: \.offset) { _, line in
-                        IngestBullet(content: line, style: NoteScreenTextStyle(textStyle: .subheadline, color: Theme.text2))
-                    }
-                }
+            if let first = entry.kern.first {
+                Text(NoteScreenInline.attributed(first, style: NoteScreenTextStyle(textStyle: .subheadline, color: Theme.text2)))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
             }
             HStack(alignment: .center, spacing: 8) {
                 Text(entry.tallyLabel)
                     .font(.footnote)
                     .foregroundStyle(Theme.text3)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1)
                 if let offer = entry.tally.offerLabel {
                     IngestPill(label: offer, featured: true)
                 }
-                Text("Prüfen")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Theme.onAccent)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 7)
-                    .background(Theme.accent, in: Capsule())
+                Spacer(minLength: 4)
+                HStack(spacing: 2) {
+                    Text("Prüfen")
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .accessibilityHidden(true)
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.accent)
             }
+            .padding(.top, 2)
         }
-        .cardStyle()
-        .contentShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityHint("Öffnet die Prüfansicht")
     }
@@ -288,13 +302,14 @@ struct IngestBusyRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .cardStyle(padding: 14)
+        .padding(12)
+        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
 }
 
-/// Fehlgeschlagener Entwurf (`.ingest-row.is-failed`): Titel, Meta, Fehler in Rot, „Erneut
-/// entwerfen“ (nur mit Claude) und „Verwerfen“.
+/// Fehlgeschlagener Entwurf als Zeile (`.ingest-row.is-failed`): Titel, Meta, Fehler in Rot,
+/// „Erneut entwerfen“ (nur mit Claude) und „Verwerfen“.
 struct IngestFailedCard: View {
     let entry: IngestEntry
     let canDraft: Bool
@@ -350,7 +365,8 @@ struct IngestFailedCard: View {
             }
             .disabled(isBusy)
         }
-        .cardStyle()
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
     }
 }
