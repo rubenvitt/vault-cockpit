@@ -405,6 +405,37 @@ test('Ingest: Prüfansicht mit Digest, „Zu entscheiden“, „Wird übernommen
   });
 });
 
+test('Ingest: bereite Entwürfe überall ältester zuerst, „Ersten prüfen“ öffnet „1 von N“ (VCP-146)', async () => {
+  await withIngest(async ({ html, call, add, ingest }) => {
+    const mitte = add('Mitte');
+    const alt = add('Alt');
+    const neu = add('Neu');
+    // Absichtlich nicht in Entwurfsreihenfolge angelegt: Die Liste des Dienstes kommt nach `updated_at`, nicht nach dem Entwurf.
+    ingest.put(mitte.id, 'bereit', { draft: draftFor('Mitte'), drafted_at: '2026-10-25T02:00:00Z' });
+    ingest.put(neu.id, 'bereit', { draft: draftFor('Neu'), drafted_at: '2026-10-25T03:00:00Z' });
+    ingest.put(alt.id, 'bereit', { draft: draftFor('Alt'), drafted_at: '2026-10-25T01:00:00Z' });
+    const order = [alt.id, mitte.id, neu.id];
+
+    // Übersicht
+    const page = await html('/lesen/ingest');
+    assert.deepEqual([...page.matchAll(/<li class="ingest-zeile" data-ingest-doc="([^"]+)"/g)].map((m) => m[1]), order);
+    // Prüfseite: der älteste ist „1 von 3“, J/K laufen in derselben Folge.
+    assert.match(await html(`/lesen/ingest/doc?id=${alt.id}`), new RegExp(`<span class="pager-now">1 von 3</span><a href="/lesen/ingest/doc\\?id=${mitte.id}" rel="next"`));
+    assert.match(await html(`/lesen/ingest/doc?id=${neu.id}`), new RegExp(`<a href="/lesen/ingest/doc\\?id=${mitte.id}" rel="prev" data-ingest-prev aria-label="Voriger Entwurf">‹</a><span class="pager-now">3 von 3</span>`));
+    // App-JSON
+    assert.deepEqual((await (await call('/api/lesen/ingest')).json()).ready.map((e) => e.id), order);
+    const doc = await (await call(`/api/lesen/ingest/doc?id=${mitte.id}`)).json();
+    assert.deepEqual([doc.prev, doc.next, doc.position, doc.total], [alt.id, neu.id, 2, 3]);
+    // „Weiter“: „Ersten prüfen“ und die Prüfen-Stufe in derselben Folge, Seite wie App.
+    const weiter = await (await call('/api/lesen/weiter')).json();
+    assert.equal(weiter.next.label, 'Ersten prüfen');
+    assert.equal(weiter.next.href, `/lesen/ingest/doc?id=${alt.id}`);
+    assert.deepEqual(weiter.stages.find((s) => s.key === 'pruefen').items.map((i) => i.id), order);
+    const section = (await html('/lesen/weiter')).match(/<section class="weiter-stufe" id="pruefen"[^]*?<\/section>/)[0];
+    assert.deepEqual([...section.matchAll(/<li class="ingest-zeile" data-ingest-doc="([^"]+)"/g)].map((m) => m[1]), order);
+  });
+});
+
 test('Ingest: Prüfansicht ohne offene Entscheidung und ohne Vorschläge; im Digest bleibt, wozu es keinen Vorschlag gibt', async () => {
   await withIngest(async ({ html, add, ingest }) => {
     const d = add('Nur Routine');
