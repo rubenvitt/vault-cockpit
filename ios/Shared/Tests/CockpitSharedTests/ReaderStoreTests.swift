@@ -334,11 +334,11 @@ final class ReaderStoreTests: XCTestCase {
         await store.load()
 
         transport.respond(offline)
-        let vault = await store.moveToVault(fullText: true)
+        let vault = await store.moveToVault()
         XCTAssertTrue(vault)
         XCTAssertEqual(store.model?.doc.status, .archive)
         XCTAssertEqual(buffer.entries.map(\.id), ["/aktion/lesen/doc/vault:\(docID)"])
-        XCTAssertEqual(buffer.entries[0].fields, ["id": docID, "volltext": "1"])
+        XCTAssertEqual(buffer.entries[0].fields, ["id": docID, "volltext": "1", "wiki": "1"])
         XCTAssertEqual(context.toasts.toasts.last?.message, "In den Vault wartet auf Netz und geht automatisch raus.")
 
         transport.respond { _ in (409, json(#"{"error":"action_failed","message":"Nicht in den Vault geschrieben"}"#)) }

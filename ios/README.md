@@ -89,8 +89,10 @@ make mac       # macOS-App (Mac Catalyst) ohne Signieren
   zum Aufklappen; `kind`/`action` sind Text, unbekannte Werte brechen nichts), unten fest „Ins
   Wiki übernehmen (N)“, danach der nächste Entwurf; die Meldung danach nennt auch ergänzte
   Synthesen (`extended`). Claudes Text kommt vom Server schon als Baum (`view`), die App parst
-  kein Markdown. Stapel und Leseansicht zeigen das
-  Abzeichen („Ingest bereit“ öffnet die Prüfansicht) oder „Ingest entwerfen“; solange ein Entwurf
+  kein Markdown. Der Stapel zeigt das
+  Abzeichen („Ingest bereit“ öffnet die Prüfansicht) oder „Ingest entwerfen“, die Leseansicht nur
+  das Abzeichen: Dort entwirft „In den Vault“ (`wiki=1`, Notiz mit Volltext); lange drücken ist
+  „Nur in den Vault, ohne Wiki“. Solange ein Entwurf
   entsteht und ein Bildschirm zuschaut, fragt `IngestStore` alle 3 s nach. Ohne Netz meldet jede
   Aktion „Keine Verbindung …“, gepuffert wird nichts. Fixtures: `COCKPIT_FIXTURES=<Ordner> node
   --test test/lesen-ingest-web.test.js` schreibt `lesen-ingest-*.json` (neue Dokument-IDs; die

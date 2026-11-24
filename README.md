@@ -1178,7 +1178,9 @@ JavaScript ist alles ein Formular; mit `/static/lesen-ingest.js` gibt es
 Enter zweimal = übernehmen, E = ohne Wiki erledigen) und den Live-Stand über
 `/lesen/ingest/stand`. Im Stapel trägt jeder Text ein Abzeichen („Ingest
 bereit“, „wird entworfen…“, „Ingest-Fehler“) oder den Knopf **Ingest
-entwerfen**, die Leseansicht hat **Ingest prüfen** bzw. **Ingest entwerfen**.
+entwerfen**. Die Leseansicht zeigt nur das Abzeichen (**Ingest prüfen**); dort
+entwirft **In den Vault** (V) nach dem Lesen. **Ohne Wiki erledigen** lässt einen
+schon archivierten Text (etwa nach V) archiviert, statt ihn auf „Weg“ zu setzen.
 Was Claude schreibt, gilt als Fremdtext: maskiert, Markdown nur über den
 Vorschau-Renderer des Cockpits. Für die App: `/api/lesen/ingest` und
 `/api/lesen/ingest/doc?id=…` (ohne Dienst `enabled: false`), `ingest` je Eintrag
@@ -1211,11 +1213,17 @@ Abhängigkeiten dafür: `@mozilla/readability` und `linkedom` (reines JavaScript
 feste Versionen).
 
 **Nach dem Lesen entscheiden** (VCP-96): In der Leseansicht steht
-**Fertig, weg** (Taste E) neben **In den Vault** (Taste V) mit dem Häkchen
-**mit Volltext** (Standard an, der Volltext ist die Rohquelle fürs Wiki; in der
-iOS-App ist „In den Vault“ mit Volltext, lange drücken bietet „ohne
-Volltext“). Wer `volltext` nicht mitschickt, bekommt wie bisher keinen; nur die
-Oberflächen setzen das Häkchen vorab. „Fertig, weg“ setzt den Status `weg` mit
+**Fertig, weg** (Taste E) neben **In den Vault** (Taste V). V schickt
+`volltext=1` und `wiki=1`: Notiz mit Volltext, Text archiviert, danach reiht das
+Cockpit einen Ingest-Entwurf ein (die Notiz bekommt dann kein `ingest: offen`).
+Ein schon bereiter Entwurf (etwa aus dem Nachtlauf) bleibt, außer es gibt seit
+ihm neue oder geänderte Markierungen, dann wird neu entworfen; Übernommenes
+bleibt. Kann das Cockpit nicht entwerfen (kein Dienst, Claude nicht da), steht
+`ingest: offen` für den Skill in der Notiz und die Meldung sagt es. In der
+iOS-App macht „In den Vault“ dasselbe, lange drücken bietet „Nur in den Vault,
+ohne Wiki“. Ohne `wiki` (etwa **Nur in den Vault** unter „Weiter“ oder ältere
+App-Versionen) bleibt es bei der Notiz, und wer `volltext` nicht mitschickt,
+bekommt wie bisher keinen. „Fertig, weg“ setzt den Status `weg` mit
 Lesedatum (`read_at`) und schreibt nichts in den Vault; eine schon vorhandene
 Notiz bleibt unangetastet. Aus der Leseansicht schließt „Fertig, weg“ den
 Artikel: Im Web geht es zurück in den Eingang (lag er dort) oder auf den
@@ -1226,9 +1234,9 @@ unterscheidet beides: Stündlich löscht das Cockpit Texte, die seit mehr als
 0 = nie) ohne Lesedatum auf „Weg“ stehen; Gehörtes und Texte mit Markierungen
 bleiben, Feed-Einträge kommen danach nicht wieder. „In den Vault“ legt die Lesestapel-Notiz an oder
 frischt sie auf, auch ohne Markierungen, mit `lesestatus: gelesen`, `gelesen:`
-und der Kurzfassung; mit Häkchen kommt der Artikel als Markdown in einen
-eigenen generierten Bereich unter „## Text“ (vor „## Eigene Gedanken“) und
-`ingest: offen` ins Frontmatter. Der Text ist dann archiviert (`archiv`). Im
+und der Kurzfassung; mit `volltext` kommt der Artikel als Markdown in einen
+eigenen generierten Bereich unter „## Text“ (vor „## Eigene Gedanken“) und,
+wenn das Cockpit nicht selbst entwirft, `ingest: offen` ins Frontmatter. Der Text ist dann archiviert (`archiv`). Im
 Eingang (Knopf, Taste A) und auf dem Stapel (je Eintrag im Menü „⋯“) gibt es
 **Im Vault ablegen**: Notiz immer mit Volltext, `lesestatus: ungelesen` und
 ohne `gelesen:`; der Text bekommt den Status `abgelegt` und verlässt Eingang

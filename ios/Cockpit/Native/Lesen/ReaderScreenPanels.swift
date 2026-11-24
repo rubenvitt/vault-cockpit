@@ -206,8 +206,8 @@ struct ReaderSelectionBar: View {
 
 // MARK: Nach dem Lesen
 
-/// Am Ende des Texts: „Fertig, weg“ und „In den Vault“ (mit Volltext; lange drücken: ohne), bis
-/// entschieden oder weggeklickt.
+/// Am Ende des Texts: „Fertig, weg“ und „In den Vault“ (mit Volltext und Entwurf fürs Wiki;
+/// lange drücken: nur in den Vault), bis entschieden oder weggeklickt.
 @MainActor
 struct ReaderDecisionBar: View {
     let fertig: Bool
@@ -230,7 +230,7 @@ struct ReaderDecisionBar: View {
             }
             if vault {
                 Menu {
-                    Button("In den Vault ohne Volltext") { onVault(false) }
+                    Button("Nur in den Vault, ohne Wiki") { onVault(false) }
                 } label: {
                     Text("In den Vault")
                 } primaryAction: {
@@ -239,7 +239,7 @@ struct ReaderDecisionBar: View {
                 .menuStyle(.button)
                 .buttonStyle(.borderedProminent)
                 .disabled(busy.contains("vault"))
-                .accessibilityHint("Mit Volltext; lange drücken für „ohne Volltext“")
+                .accessibilityHint("Mit Volltext und Entwurf fürs Wiki; lange drücken für „nur in den Vault“")
             }
             Button(action: onClose) {
                 Image(systemName: "xmark")

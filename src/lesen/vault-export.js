@@ -263,9 +263,11 @@ export function createReadingExport({ vaultPath, index, editor, policy, store, s
    * `summary` trägt die Kurzfassung nach. `read` (Standard: archiviert) trägt
    * `lesestatus: gelesen` und `gelesen:` nach, `fullText` schreibt den Bereich
    * „text“ (fehlt er, kommt er vor „## Eigene Gedanken“) und `ingest: offen`,
-   * wenn `ingest` fehlt und `markIngest` gilt; `gehoert:` folgt `heard_at`.
+   * wenn `ingest` fehlt und `markIngest` gilt; `claimIngest` nimmt ein
+   * `ingest: offen` zurück (der Ingest des Cockpits übernimmt, der Skill soll
+   * den Text nicht auch holen), ein Datum bleibt. `gehoert:` folgt `heard_at`.
    */
-  function exportDoc(docId, { force = false, link = null, unlink = null, read = undefined, fullText = false, markIngest = true, summary = false } = {}) {
+  function exportDoc(docId, { force = false, link = null, unlink = null, read = undefined, fullText = false, markIngest = true, claimIngest = false, summary = false } = {}) {
     const doc = store.get(docId);
     if (!doc) return { state: 'weg' };
     const found = locate(doc.id);
@@ -296,6 +298,7 @@ export function createReadingExport({ vaultPath, index, editor, policy, store, s
     if (!isRead && fm.lesestatus == null) set.lesestatus = 'ungelesen';
     // `ingest` setzt danach der Skill (ein Datum): nur anlegen, nie überschreiben.
     if (fullText && markIngest && fm.ingest == null) set.ingest = 'offen';
+    if (claimIngest && typeof fm.ingest === 'string' && fm.ingest.trim().toLowerCase() === 'offen') set.ingest = null;
     const gehoert = dayOf(doc.heard_at, settings.get().tz);
     if (laterThan(fm.gehoert, gehoert)) set.gehoert = gehoert;
     if (Object.keys(set).length) editor.setFrontmatter({ path: found.path, set });
@@ -412,9 +415,10 @@ export function createReadingExport({ vaultPath, index, editor, policy, store, s
      * VCP-96): Notiz sofort anlegen oder auffrischen, auch ohne Markierungen;
      * `fullText` schreibt den Volltext dazu, ein vorhandener bleibt sonst
      * unberührt; `markIngest: false` lässt `ingest: offen` weg (Ingest des
-     * Cockpits). Zustand wie `addLink`; Fehler des Editors wirft er.
+     * Cockpits), `claimIngest` nimmt ein vorhandenes zurück. Zustand wie
+     * `addLink`; Fehler des Editors wirft er.
      */
-    save: (docId, { read, fullText = false, markIngest = true }) => exportDoc(String(docId), { force: true, read: Boolean(read), fullText, markIngest, summary: true }),
+    save: (docId, { read, fullText = false, markIngest = true, claimIngest = false }) => exportDoc(String(docId), { force: true, read: Boolean(read), fullText, markIngest, claimIngest, summary: true }),
 
     /**
      * Grund, warum das Cockpit die Notiz zum Dokument nicht schreiben darf

@@ -25,7 +25,7 @@ enum ReaderAnchor: Hashable, Sendable {
 struct ReaderServices {
     let context: CockpitContext
     let buffer: ReadingBuffer
-    /// Ingest der Anmeldung (Abzeichen „Ingest bereit“, „Ingest entwerfen“).
+    /// Ingest der Anmeldung (Abzeichen „Ingest bereit“, „wird entworfen…“).
     var ingest: IngestStore?
 }
 
@@ -270,20 +270,14 @@ struct ReaderScreen: View {
                 .transition(barTransition)
             }
             if selection == nil || !store.canMark, showsIngest(store, model) {
-                ReaderIngestBar(
-                    status: ingestStatus(store, model),
-                    available: model.ingest?.available ?? false,
-                    isDrafting: services?.ingest?.busy.contains(docID) ?? false,
-                    review: { openIngestReview() },
-                    draft: { draftIngest() }
-                )
+                ReaderIngestBar(status: ingestStatus(store, model), review: { openIngestReview() })
                 .transition(barTransition)
             }
             if selection == nil || !store.canMark, showsDecisions(store, model) {
                 ReaderDecisionBar(fertig: model.decisions.fertig, vault: model.vault, busy: store.busy, onFinish: {
                     decide(store, close: true) { await $0.finish() }
-                }, onVault: { fullText in
-                    decide(store) { await $0.moveToVault(fullText: fullText) }
+                }, onVault: { wiki in
+                    moveToVault(store, wiki: wiki)
                 }, onClose: {
                     services?.context.toasts.signal(.selection)
                     decisionsClosed = true
@@ -320,18 +314,21 @@ struct ReaderScreen: View {
         return ingest.status(of: docID, fallback: model.ingest?.status, loadedAt: store.state.lastUpdated)
     }
 
-    /// Am Ende angekommen: das Abzeichen des Ingests (wie `.lesen-decide` im Web), wenn es etwas
-    /// zu zeigen oder zu tun gibt.
+    /// Am Ende angekommen: das Abzeichen des Ingests (wie `.lesen-decide` im Web), wenn es einen
+    /// Entwurf gibt. „Ingest entwerfen“ gibt es hier nicht: Das macht „In den Vault“ nach dem Lesen.
     private func showsIngest(_ store: ReaderStore, _ model: ReadingDocModel) -> Bool {
-        guard let ingest = model.ingest, !decisionsClosed, reachedEnd else { return false }
-        let status = ingestStatus(store, model)
-        if IngestStatus.isActive(status) || status == IngestStatus.applied { return true }
-        return ingest.available
+        guard model.ingest != nil, !decisionsClosed, reachedEnd else { return false }
+        return hasIngestItem(ingestStatus(store, model))
     }
 
-    /// Einträge im Menü „Aktionen“: Prüfen, Fehler ansehen, Stand oder „Ingest entwerfen“.
+    /// Gibt es zum Stand des Entwurfs etwas zu zeigen (bereit, in Arbeit, Fehler, im Wiki)?
+    private func hasIngestItem(_ status: String?) -> Bool {
+        IngestStatus.isActive(status) || status == IngestStatus.applied
+    }
+
+    /// Einträge im Menü „Aktionen“: Prüfen, Fehler ansehen oder Stand.
     @ViewBuilder
-    private func ingestMenuItems(_ status: String?, available: Bool) -> some View {
+    private func ingestMenuItems(_ status: String?) -> some View {
         if status == IngestStatus.ready {
             Button {
                 openIngestReview()
@@ -354,13 +351,6 @@ struct ReaderScreen: View {
                 Label("Im Wiki", systemImage: "checkmark")
             }
             .disabled(true)
-        } else if available {
-            Button {
-                draftIngest()
-            } label: {
-                Label("Ingest entwerfen", systemImage: "sparkles")
-            }
-            .disabled(services?.ingest?.busy.contains(docID) ?? false)
         }
     }
 
@@ -369,12 +359,6 @@ struct ReaderScreen: View {
         guard let services else { return }
         services.context.toasts.signal(.selection)
         services.context.openPath(ReadingRoute.ingestReview(id: docID).webPath)
-    }
-
-    private func draftIngest() {
-        guard let ingest = services?.ingest else { return }
-        let id = docID
-        Task { await ingest.draft(id) }
     }
 
     private var barTransition: AnyTransition {
@@ -447,15 +431,15 @@ struct ReaderScreen: View {
                 }
                 if model.vault {
                     Button {
-                        decide(store) { await $0.moveToVault(fullText: true) }
+                        moveToVault(store, wiki: true)
                     } label: {
-                        Label("In den Vault", systemImage: "archivebox")
+                        Label("In den Vault, mit Entwurf fürs Wiki", systemImage: "archivebox")
                     }
                     .disabled(store.busy.contains("vault"))
                     Button {
-                        decide(store) { await $0.moveToVault(fullText: false) }
+                        moveToVault(store, wiki: false)
                     } label: {
-                        Label("In den Vault ohne Volltext", systemImage: "doc")
+                        Label("Nur in den Vault, ohne Wiki", systemImage: "doc")
                     }
                     .disabled(store.busy.contains("vault"))
                 }
@@ -470,9 +454,9 @@ struct ReaderScreen: View {
             } header: {
                 Text("Status: \(model.doc.status.label)")
             }
-            if let ingest = model.ingest {
+            if model.ingest != nil, hasIngestItem(ingestStatus(store, model)) {
                 Section {
-                    ingestMenuItems(ingestStatus(store, model), available: ingest.available)
+                    ingestMenuItems(ingestStatus(store, model))
                 } header: {
                     Text("Wiki")
                 }
@@ -642,6 +626,17 @@ struct ReaderScreen: View {
     /// „Fertig, weg“, „In den Vault“, „Zurück auf den Stapel“; danach keine Leiste am Ende mehr.
     /// Mit `close` („Fertig, weg“) schließt sich die Leseansicht; die Meldung mit „Rückgängig“
     /// bleibt in der Ansicht darunter stehen.
+    /// „In den Vault“: mit `wiki` entwirft der Server danach; der `IngestStore` erfährt es und fragt
+    /// nach, bis der Entwurf bereit ist (sonst bliebe das Abzeichen bis zum nächsten Laden stehen).
+    private func moveToVault(_ store: ReaderStore, wiki: Bool) {
+        let id = docID
+        decide(store) { reader in
+            guard await reader.moveToVault(wiki: wiki) else { return false }
+            if wiki { services?.ingest?.record(id, status: IngestStatus.waiting) }
+            return true
+        }
+    }
+
     private func decide(_ store: ReaderStore, close: Bool = false, _ action: @escaping @MainActor (ReaderStore) async -> Bool) {
         services?.context.toasts.signal(.selection)
         Task {
