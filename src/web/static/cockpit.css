@@ -1756,18 +1756,16 @@ a.ingest-item-open:hover, a.ingest-item-open:focus-visible { color: var(--accent
 .wissen-form .wissen-check { display: inline-flex; align-items: center; gap: var(--s-1); min-height: 34px; font-size: var(--t-sm); }
 
 /* --- Lesen: Entscheiden nach dem Lesen und Ablegen (VCP-96) --- */
-/* Leseansicht: Fertig, weg · In den Vault (mit Volltext) · Zurück; Eingang und Stapel: Im Vault ablegen */
+/* Leseansicht: Fertig, weg · In den Vault (mit Volltext und Entwurf fürs Wiki) · Zurück; Eingang und Stapel: Im Vault ablegen */
 /* Über dem Text: links das Ingest-Abzeichen (Stand), rechts die Entscheidung, deutlich als Knöpfe */
 .lesen-decide { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--s-2); }
 .lesen-decide > :is(.ingest-badge, .ingest-badge-form) { margin-right: auto; }
 .lesen-ende .lesen-decide { margin-left: auto; }
-.lesen-decide form[data-decide=vault] { display: flex; align-items: center; gap: var(--s-2); }
-.lesen-volltext { display: inline-flex; align-items: center; gap: var(--s-1); min-height: 34px; font-size: var(--t-sm); color: var(--text-2); cursor: pointer; }
 .inbox-ablegen { margin-left: auto; }
 .lesen-ablegen { margin: 0; }
 @media (max-width: 700px) {
-  /* Tippziele: Knöpfe, Abzeichen und die Wahl „mit Volltext“ */
-  .lesen-decide .btn, .lesen-decide .ingest-badge, .lesen-decide .ingest-badge-form .btn, .lesen-decide .lesen-volltext { min-height: 40px; }
+  /* Tippziele: Knöpfe und Abzeichen */
+  .lesen-decide .btn, .lesen-decide .ingest-badge { min-height: 40px; }
 }
 
 /* --- Player: Leiste unten und Hülle beim Seitenwechsel (/static/player.js) --- */

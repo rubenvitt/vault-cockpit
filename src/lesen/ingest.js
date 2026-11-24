@@ -1153,7 +1153,10 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
     return row ? view(row, docInfo(store.get(row.doc_id)), { full: true }) : null;
   };
 
-  /** Entwurf verwerfen; `done`: Dokument „weg“ mit Lesedatum (gelesen, ohne Wiki). */
+  /**
+   * Entwurf verwerfen; `done`: Dokument „weg“ mit Lesedatum (gelesen, ohne Wiki).
+   * Liegt es schon im Vault (archiviert oder abgelegt, etwa nach V), bleibt der Status: Die Notiz steht ja da.
+   */
   function discard(docId, { done = false } = {}) {
     const id = String(docId ?? '');
     if (!store.get(id)) throw new IngestError('Dieses Dokument gibt es nicht', 404);
@@ -1166,7 +1169,10 @@ export function createIngest({ store, writer, search, index, exporter, editor, p
     const at = queue.indexOf(id);
     if (at >= 0) queue.splice(at, 1);
     store.saveIngest(id, { status: 'verworfen', draft: null, error: null });
-    if (done) store.setStatus(id, 'weg', { read: true });
+    if (done) {
+      const doc = store.get(id);
+      store.setStatus(id, ['archiv', 'abgelegt'].includes(doc.status) ? doc.status : 'weg', { read: true });
+    }
     return get(id);
   }
 

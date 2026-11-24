@@ -1141,7 +1141,7 @@ export function ingestRoutes({ store, ingest = null, planter = null, logger = co
         logger.info?.(`Einpflanzen: ${id} eingereiht`);
         return { message: `${status === 'laeuft' ? 'Wird schon eingepflanzt' : 'Wird eingepflanzt'}: ${titleOf(e)}`, plant: { id, status } };
       },
-      /** Verwerfen; `done=1` erledigt den Text ohne Wiki (gelesen, weg), mit Rückgängig. */
+      /** Verwerfen; `done=1` erledigt den Text ohne Wiki (gelesen, weg; im Vault bleibt er archiviert), mit Rückgängig. */
       async [VERWERFEN](form) {
         const id = form.get('id') ?? '';
         const e = must(id);
@@ -1150,7 +1150,8 @@ export function ingestRoutes({ store, ingest = null, planter = null, logger = co
         await run(() => ingest.discard(id, { done }));
         const title = docTitle(e);
         const previous = e.doc?.status;
-        const undo = done && previous && previous !== 'weg' ? { action: DOC_STATUS, fields: { id, status: previous } } : null;
+        // Archiviert oder abgelegt (nach V) bleibt der Status, dann gibt es nichts zurückzunehmen.
+        const undo = done && previous && !['weg', 'archiv', 'abgelegt'].includes(previous) ? { action: DOC_STATUS, fields: { id, status: previous } } : null;
         return {
           message: done ? `Erledigt, ohne Wiki: ${title}` : `Entwurf verworfen: ${title}`,
           ...(undo ? { undo } : {}),

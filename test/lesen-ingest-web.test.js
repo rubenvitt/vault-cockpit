@@ -128,7 +128,7 @@ function fakeIngest(store, { available = { ok: true } } = {}) {
       const r = rows.get(id);
       if (!r) throw new IngestError('Kein Entwurf', 404);
       r.status = 'verworfen';
-      if (done) store.setStatus(id, 'weg', { read: true });
+      if (done && !['archiv', 'abgelegt'].includes(store.get(id).status)) store.setStatus(id, 'weg', { read: true });
     },
   };
   return api;
@@ -608,6 +608,15 @@ test('Ingest: Ohne Wiki erledigen mit Rückgängig, Verwerfen führt aus der Pr�
     assert.equal(plain.headers.get('location'), '/lesen/ingest', 'aus der Übersicht bleibt es dort');
     assert.deepEqual(ingest.calls.at(-1), ['discard', b.id, { done: false }]);
     assert.match(await html('/lesen/ingest'), /<span class="toast-text">Entwurf verworfen: Danach<\/span>/);
+
+    // Nach V liegt der Text archiviert im Vault: Er bleibt dort, ohne Rückgängig.
+    const filed = add('Im Vault');
+    store.setStatus(filed.id, 'archiv');
+    ingest.put(filed.id, 'bereit', { draft: draftFor('Im Vault') });
+    const kept = await (await call('/aktion/lesen/ingest/verwerfen', { method: 'POST', form: { csrf, id: filed.id, done: '1', back: '/lesen/ingest' }, accept: 'application/json' })).json();
+    assert.equal(kept.message, 'Erledigt, ohne Wiki: Im Vault');
+    assert.equal(kept.undo, undefined);
+    assert.equal(store.get(filed.id).status, 'archiv');
   });
 });
 
@@ -635,7 +644,8 @@ test('Ingest: Stapel mit Abzeichen je Eintrag aus einer Abfrage, Leseansicht mit
     assert.deepEqual(Object.fromEntries(json.items.map((i) => [i.title, i.ingest])), { Bereit: 'bereit', Läuft: 'entwirft', Kaputt: 'fehler', Ohne: null });
 
     assert.match(await html(`/lesen/doc?id=${ready.id}`), new RegExp(`<div class="lesen-decide">\\s*<a href="/lesen/ingest/doc\\?id=${ready.id}" class="ingest-badge is-ready"[^>]*>Ingest prüfen</a>`));
-    assert.match(await html(`/lesen/doc?id=${none.id}`), /<div class="lesen-decide">\s*<form method="post" action="\/aktion\/lesen\/ingest\/entwerfen" class="act ingest-badge-form"[^]*?Ingest entwerfen/);
+    // Ohne Entwurf kein „Ingest entwerfen“ in der Leseansicht: Das macht V nach dem Lesen (Notiz und Entwurf).
+    assert.doesNotMatch(await html(`/lesen/doc?id=${none.id}`), /Ingest entwerfen/);
   });
 });
 

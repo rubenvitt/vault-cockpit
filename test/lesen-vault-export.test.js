@@ -316,8 +316,8 @@ test('Lesedatum: vorzeitig angelegte Notiz hat kein „gelesen“, beim Abschlus
 // --- Entscheiden nach dem Lesen (VCP-96) -------------------------------------------
 
 const ARTICLE = sanitizeHtml('<h2>Erster Teil</h2><p>Der Stapel *wächst* &amp; wächst.</p><ul><li>eins</li><li>zwei</li></ul>');
-const decideRoutes = () => {
-  const routes = readingRoutes({ store, exporter, logger: quiet });
+const decideRoutes = ({ ingest = null } = {}) => {
+  const routes = readingRoutes({ store, exporter, ingest, logger: quiet });
   const act = (path, fields) => routes.actions[path](new URLSearchParams(fields), { sub: 'ruben' });
   const page = (path, query = '') => routes.pages[path]({ url: new URL(`https://vault.test${path}${query}`), user: 'ruben', tz: 'Europe/Berlin', write: { csrf: 'c', back: path }, flash: null });
   return { act, page };
@@ -325,11 +325,13 @@ const decideRoutes = () => {
 const textOf = (path) => findSection(read(path), TEXT_SECTION)?.inner ?? null;
 const ids = (status) => store.list({ status }).map((d) => d.id);
 
-test('In den Vault: gelesen ohne Markierungen → Notiz mit Kurzfassung, ohne Volltext; mit Häkchen mit Volltext; Rückgängig lässt die Notiz stehen', async () => {
+test('In den Vault: gelesen ohne Markierungen → Notiz mit Kurzfassung, ohne Volltext; mit `volltext` mit Volltext; Rückgängig lässt die Notiz stehen', async () => {
   store.updateDocument(doc.id, { excerpt: 'Kurz # gesagt, mit [[Link]].', content_html: ARTICLE });
   const { act, page } = decideRoutes();
+  // Die Leseansicht schickt immer Volltext und Entwurf (`wiki`), ohne Häkchen.
   const { html } = await page('/lesen/doc', `?id=${doc.id}`);
-  assert.match(html, /data-decide="vault">[^]*?<input type="checkbox" name="volltext" value="1" checked> mit Volltext<\/label><button type="submit" class="btn primary">In den Vault <kbd>V<\/kbd>/);
+  assert.match(html, /data-decide="vault">[^]*?<input type="hidden" name="volltext" value="1"><input type="hidden" name="wiki" value="1"><button type="submit" class="btn primary"[^>]*>In den Vault <kbd>V<\/kbd>/);
+  assert.doesNotMatch(html, /type="checkbox" name="volltext"/);
 
   const r = await act('/aktion/lesen/doc/vault', { id: doc.id });
   assert.equal(r.message, 'Im Vault: Vom Lesen: Über Stapel');
@@ -779,4 +781,120 @@ test('Kurzfassung nachtragen: dieselbe Zeile in einem Zitat stört die eindeutig
   store.updateDocument(doc.id, { excerpt: 'Kurz.' });
   await act('/aktion/lesen/doc/vault', { id: doc.id });
   assert.match(read(path), /<!-- cockpit:kurzfassung:ende [0-9a-f]{8} -->\n\n## Markierungen\n/);
+});
+
+// --- V mit Ingest-Entwurf (`wiki=1`) ----------------------------------------------
+
+/** Kleiner Ingest-Dienst: Stand je Text, `request` merkt sich die Aufrufe. */
+function fakeIngest({ available = { ok: true }, fail = null } = {}) {
+  const rows = new Map();
+  const calls = [];
+  return {
+    calls,
+    rows,
+    available: () => available,
+    get: (id) => rows.get(id) ?? null,
+    statusFor: (ids) => new Map(ids.filter((id) => rows.has(id)).map((id) => [id, rows.get(id).status])),
+    counts: () => ({ bereit: [...rows.values()].filter((r) => r.status === 'bereit').length }),
+    list: () => [...rows.values()],
+    request(ids, { force = false } = {}) {
+      calls.push([ids, { force }]);
+      if (fail) throw new Error(fail);
+      for (const id of ids) if (force || rows.get(id)?.status !== 'bereit') rows.set(id, { doc_id: id, status: 'wartet' });
+      return { queued: ids, done: Promise.resolve() };
+    },
+  };
+}
+const vaultWiki = (act, id = doc.id) => act('/aktion/lesen/doc/vault', { id, volltext: '1', wiki: '1' });
+
+test('V mit Entwurf: Notiz mit Volltext ohne `ingest: offen`, archiviert, Entwurf eingereiht', async () => {
+  store.updateDocument(doc.id, { content_html: ARTICLE });
+  const ingest = fakeIngest();
+  const { act } = decideRoutes({ ingest });
+  const r = await vaultWiki(act);
+  assert.equal(r.message, 'Im Vault, Entwurf fürs Wiki kommt: Vom Lesen: Über Stapel');
+  assert.equal(store.get(doc.id).status, 'archiv');
+  assert.ok(store.get(doc.id).read_at);
+  assert.ok(textOf(pathOf()), 'mit Volltext');
+  assert.doesNotMatch(read(pathOf()), /^ingest:/m, 'den Ingest macht das Cockpit, nicht der Skill');
+  assert.match(read(pathOf()), /^lesestatus: gelesen$/m);
+  assert.deepEqual(ingest.calls, [[[doc.id], { force: false }]]);
+  assert.equal(ingest.get(doc.id).status, 'wartet');
+  // Rückgängig: zurück auf den Stapel; Notiz und Entwurf bleiben.
+  await act(r.undo.action, r.undo.fields);
+  assert.equal(store.get(doc.id).status, 'stapel');
+});
+
+test('V mit Entwurf ohne Claude oder ohne Dienst: Notiz mit `ingest: offen` für den Skill, die Meldung sagt es', async () => {
+  store.updateDocument(doc.id, { content_html: ARTICLE });
+  const ingest = fakeIngest({ available: { ok: false, reason: 'Claude ist nicht angemeldet' } });
+  const r = await vaultWiki(decideRoutes({ ingest }).act);
+  assert.equal(r.message, 'Im Vault, ohne Entwurf fürs Wiki (Claude ist nicht angemeldet): Vom Lesen: Über Stapel');
+  assert.match(read(pathOf()), /^ingest: offen$/m);
+  assert.ok(textOf(pathOf()));
+  assert.deepEqual(ingest.calls, []);
+  assert.equal(store.get(doc.id).status, 'archiv');
+
+  const { doc: other } = store.addDocument({ url: 'https://blatt.test/ohne-dienst', title: 'Ohne Dienst', status: 'stapel', content_html: ARTICLE });
+  assert.equal((await vaultWiki(decideRoutes().act, other.id)).message, 'Im Vault, ohne Entwurf fürs Wiki (kein Ingest-Dienst): Ohne Dienst');
+  assert.match(read(exporter.notePath(other.id)), /^ingest: offen$/m);
+});
+
+test('V mit Entwurf: ein bereiter Entwurf bleibt, nach neuen Markierungen wird neu entworfen; Übernommenes bleibt', async () => {
+  store.updateDocument(doc.id, { content_html: ARTICLE });
+  const ingest = fakeIngest();
+  const { act } = decideRoutes({ ingest });
+  const later = (id) => store.addDocument({ url: `https://blatt.test/${id}`, title: id, status: 'stapel', content_html: ARTICLE }).doc;
+
+  // Entwurf aus dem Nachtlauf, danach nichts markiert: bleibt.
+  ingest.rows.set(doc.id, { doc_id: doc.id, status: 'bereit', drafted_at: '2026-10-21T03:00:00.000Z' });
+  assert.equal((await vaultWiki(act)).message, 'Im Vault, Entwurf fürs Wiki liegt bereit: Vom Lesen: Über Stapel');
+  assert.deepEqual(ingest.calls, []);
+
+  // Markierung nach dem Auftrag (auch wenn der Entwurf erst danach fertig wurde): neu entwerfen.
+  const marked = later('Markiert');
+  ingest.rows.set(marked.id, { doc_id: marked.id, status: 'bereit', requested_at: '2026-10-19T03:00:00.000Z', drafted_at: '2026-10-21T03:00:00.000Z' });
+  store.addHighlight({ doc_id: marked.id, quote: 'Der Stapel' });
+  assert.equal((await vaultWiki(act, marked.id)).message, 'Im Vault, Entwurf fürs Wiki kommt neu, mit den Markierungen: Markiert');
+  assert.deepEqual(ingest.calls, [[[marked.id], { force: true }]]);
+  assert.equal(ingest.get(marked.id).status, 'wartet');
+
+  // Schon im Wiki: kein neuer Entwurf.
+  const done = later('Fertig');
+  ingest.rows.set(done.id, { doc_id: done.id, status: 'uebernommen' });
+  assert.equal((await vaultWiki(act, done.id)).message, 'Im Vault, schon im Wiki: Fertig');
+  assert.equal(ingest.calls.length, 1);
+});
+
+test('V mit Entwurf nach „Ablegen“: ein vorhandenes `ingest: offen` nimmt das Cockpit zurück, ein Datum bleibt', async () => {
+  store.updateDocument(doc.id, { content_html: ARTICLE });
+  const { act } = decideRoutes({ ingest: fakeIngest() });
+  await act('/aktion/lesen/ablegen', { id: doc.id });
+  assert.match(read(pathOf()), /^ingest: offen$/m);
+  await vaultWiki(act);
+  assert.doesNotMatch(read(pathOf()), /^ingest:/m);
+
+  const { doc: other } = store.addDocument({ url: 'https://blatt.test/datum', title: 'Datum', status: 'stapel', content_html: ARTICLE });
+  await act('/aktion/lesen/ablegen', { id: other.id });
+  editor.setFrontmatter({ path: exporter.notePath(other.id), set: { ingest: '2026-10-01' } });
+  await vaultWiki(act, other.id);
+  assert.match(read(exporter.notePath(other.id)), /^ingest: 2026-10-01$/m);
+});
+
+test('V mit Entwurf: lehnt der Dienst ab, bleibt die Notiz, ohne `ingest: offen`, und die Meldung nennt den Grund', async () => {
+  store.updateDocument(doc.id, { content_html: ARTICLE });
+  const ingest = fakeIngest({ fail: 'Übernehmen angefangen – erst fortsetzen' });
+  const r = await vaultWiki(decideRoutes({ ingest }).act);
+  assert.equal(r.message, 'Im Vault, ohne neuen Entwurf fürs Wiki (Übernehmen angefangen – erst fortsetzen): Vom Lesen: Über Stapel');
+  assert.equal(store.get(doc.id).status, 'archiv');
+  assert.doesNotMatch(read(pathOf()), /^ingest:/m);
+});
+
+test('„Nur in den Vault“ (ohne `wiki`, etwa unter „Weiter“ oder aus der älteren App): kein Entwurf', async () => {
+  store.updateDocument(doc.id, { content_html: ARTICLE });
+  const ingest = fakeIngest();
+  const r = await decideRoutes({ ingest }).act('/aktion/lesen/doc/vault', { id: doc.id, volltext: '1' });
+  assert.equal(r.message, 'Mit Volltext im Vault: Vom Lesen: Über Stapel');
+  assert.deepEqual(ingest.calls, []);
+  assert.match(read(pathOf()), /^ingest: offen$/m);
 });

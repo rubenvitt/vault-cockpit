@@ -469,6 +469,14 @@ test('Verwerfen: Entwurf weg, Text bleibt; „done“ erledigt ohne Wiki mit Les
   assert.throws(() => ingest.discard('nope'), (e) => e.status === 404);
 });
 
+test('Verwerfen mit „done“: ein archivierter Text (nach V im Vault) bleibt archiviert', async () => {
+  const { ingest } = await drafted();
+  store.setStatus(doc.id, 'archiv');
+  ingest.discard(doc.id, { done: true });
+  assert.equal(store.get(doc.id).status, 'archiv');
+  assert.equal(ingest.get(doc.id).status, 'verworfen');
+});
+
 test('Stapel und Nachtlauf: nur Stapel-Dokumente ohne Entwurf, höchstens `limit`, nur wenn eingeschaltet', async () => {
   const more = [1, 2, 3].map((n) => store.addDocument({ url: `https://glaser.test/${n}`, title: `Text ${n}`, status: 'stapel', content_html: HTML }).doc);
   store.addDocument({ url: 'https://glaser.test/eingang', title: 'Eingang', status: 'eingang', content_html: HTML });

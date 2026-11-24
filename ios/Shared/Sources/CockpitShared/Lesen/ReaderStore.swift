@@ -376,11 +376,12 @@ public final class ReaderStore {
         await decide(ReadingAction.finish, ["id": docID], to: .gone, key: "fertig")
     }
 
-    /// „In den Vault“ (V): Notiz (mit `fullText` samt Volltext), dann archiviert.
+    /// „In den Vault“ (V): Notiz mit Volltext, dann archiviert. Mit `wiki` (Standard) entwirft
+    /// der Server danach einen Ingest fürs Wiki; ohne ist es „Nur in den Vault“ wie unter „Weiter“.
     @discardableResult
-    public func moveToVault(fullText: Bool) async -> Bool {
-        var fields = ["id": docID]
-        if fullText { fields["volltext"] = "1" }
+    public func moveToVault(wiki: Bool = true) async -> Bool {
+        var fields = ["id": docID, "volltext": "1"]
+        if wiki { fields["wiki"] = "1" }
         return await decide(ReadingAction.vault, fields, to: .archive, key: "vault")
     }
 

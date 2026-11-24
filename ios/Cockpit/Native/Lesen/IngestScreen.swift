@@ -482,15 +482,12 @@ struct IngestBadge: View {
 }
 
 /// Leiste der Leseansicht am Ende des Texts, über „Gelesen“ (`.lesen-decide` im Web): „Ingest
-/// prüfen“ bzw. „Ingest-Fehler“ öffnen die Prüfansicht, „wird entworfen…“ zeigt den Stand, sonst
-/// „Ingest entwerfen“, wenn Claude da ist.
+/// prüfen“ bzw. „Ingest-Fehler“ öffnen die Prüfansicht, „wird entworfen…“ und „Im Wiki“ zeigen
+/// den Stand. Entworfen wird hier nicht, das macht „In den Vault“.
 @MainActor
 struct ReaderIngestBar: View {
     let status: String?
-    let available: Bool
-    let isDrafting: Bool
     let review: () -> Void
-    let draft: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
@@ -511,18 +508,6 @@ struct ReaderIngestBar: View {
                     .accessibilityHint("Öffnet die Prüfansicht mit dem Fehler")
             } else if IngestStatus.isBusy(status) || status == IngestStatus.applied {
                 IngestBadge(status: status)
-            } else if available {
-                Button(action: draft) {
-                    HStack(spacing: 6) {
-                        if isDrafting {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
-                        Text("Ingest entwerfen")
-                    }
-                }
-                .buttonStyle(.bordered)
-                .disabled(isDrafting)
             }
         }
         .tint(Theme.accent)

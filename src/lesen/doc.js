@@ -12,8 +12,9 @@ import { toRead } from './stack.js';
 /**
  * Leseansicht `/lesen/doc?id=…` (VCP-71): Lesetext in Leseschrift mit den
  * Markierungen, Fortschritt und Restzeit, dazu die Entscheidung nach dem Lesen
- * (VCP-96): „Fertig, weg“ oder „In den Vault“ (Notiz, wahlweise mit Volltext),
- * über dem Text und noch einmal an seinem Ende.
+ * (VCP-96): „Fertig, weg“ oder „In den Vault“ (Notiz mit Volltext und, mit
+ * dem Ingest-Dienst, ein Entwurf fürs Wiki), über dem Text und noch einmal an
+ * seinem Ende.
  * Der Text ist die Hauptsache: Auf breiten Bildschirmen steht links der Stapel
  * als schmale, leise Spalte, rechts eine Seitenleiste (Querverbindungen,
  * Markierungen, Tastenkürzel zugeklappt). Die Schrift stellt man im Menü „Aa“
@@ -47,7 +48,7 @@ const KEYS = [
   ['N', 'Notiz'],
   ['L', 'verbinden'],
   ['E', 'fertig, weg'],
-  ['V', 'in den Vault'],
+  ['V', 'in den Vault, mit Entwurf fürs Wiki'],
   ['J / K', 'Absatz weiter / zurück'],
   ['↓ / ↑', 'ebenso, ein langer Absatz scrollt erst zu Ende'],
   ['F', 'Fokus: nur der Text'],
@@ -79,10 +80,11 @@ function highlightList(highlights, orphans, ctx) {
 }
 
 /**
- * Nach dem Lesen: „Fertig, weg“ (E), „In den Vault“ (V, nur mit Lesestapel-Notizen)
- * mit Wahl „mit Volltext“ (vorab gesetzt: der Volltext ist die Rohquelle fürs
- * Wiki), und nach einer Entscheidung „Zurück auf den Stapel“.
- * Mit dem Ingest-Dienst davor „Ingest prüfen“ bzw. „Ingest entwerfen“ (`ingest`: `{ status, available }`).
+ * Nach dem Lesen: „Fertig, weg“ (E), „In den Vault“ (V, nur mit Lesestapel-Notizen:
+ * Notiz mit Volltext, dazu ein Ingest-Entwurf, `wiki=1`), und nach einer
+ * Entscheidung „Zurück auf den Stapel“.
+ * Mit dem Ingest-Dienst davor das Abzeichen mit dem Stand des Entwurfs (`ingest`: `{ status, available }`);
+ * „Ingest entwerfen“ gibt es hier nicht, das macht V nach dem Lesen.
  * `keys: false` (am Ende des Textes): ohne Tasten-Hinweis, die Kürzel lösen die Formulare oben aus.
  */
 function decide(doc, ctx, vault, ingest = null, { keys = true } = {}) {
@@ -91,9 +93,9 @@ function decide(doc, ctx, vault, ingest = null, { keys = true } = {}) {
   // Ohne „In den Vault“ (etwa aus einem Feed „nur lesen“) ist „Fertig, weg“ der Hauptknopf.
   // Das Abzeichen steht als Erstes und rückt per CSS nach links, die Entscheidung nach rechts.
   return `<div class="lesen-decide">
-      ${ingest ? ingestBadge(doc.id, ingest.status, { ctx, available: ingest.available, ready: 'Ingest prüfen' }) : ''}
+      ${ingest ? ingestBadge(doc.id, ingest.status, { ctx, available: false, ready: 'Ingest prüfen' }) : ''}
       ${decisions(doc, vault).fertig ? form('/aktion/lesen/doc/fertig', 'fertig', {}, `<button type="submit" class="btn${vault ? '' : ' primary'}">Fertig, weg${kbd('E')}</button>`) : ''}
-      ${vault ? form('/aktion/lesen/doc/vault', 'vault', {}, `<label class="lesen-volltext"><input type="checkbox" name="volltext" value="1" checked> mit Volltext</label><button type="submit" class="btn primary">In den Vault${kbd('V')}</button>`) : ''}
+      ${vault ? form('/aktion/lesen/doc/vault', 'vault', { volltext: '1', wiki: '1' }, `<button type="submit" class="btn primary" title="Notiz mit Volltext, dazu ein Entwurf fürs Wiki">In den Vault${kbd('V')}</button>`) : ''}
       ${decisions(doc, vault).zurueck ? form(STATUS, 'zurueck', { status: 'stapel' }, '<button type="submit" class="btn quiet">Zurück auf den Stapel</button>') : ''}
     </div>`;
 }
@@ -263,6 +265,36 @@ export function docRoutes({ store, asAction, onChange = () => {}, exporter = nul
     const status = (m instanceof Map ? m.get(doc.id) : m?.[doc.id]) ?? null;
     return { status, available: Boolean(ingest.available()?.ok) && ['eingang', 'stapel'].includes(doc.status) };
   };
+  /** Kann das Cockpit gerade entwerfen? `{ ok }` oder `{ ok: false, reason }`. */
+  const draftable = () => {
+    if (!ingest) return { ok: false, reason: 'kein Ingest-Dienst' };
+    const av = ingest.available();
+    return av?.ok ? { ok: true } : { ok: false, reason: av?.reason ?? 'Claude ist nicht erreichbar' };
+  };
+  /**
+   * Ingest-Entwurf nach V; die Notiz steht da schon, also scheitert V hier nicht mehr.
+   * Ein bereiter Entwurf bleibt, außer es gibt seitdem neue oder geänderte
+   * Markierungen (der Nachtlauf entwirft meist vor dem Lesen). „Seitdem“ heißt
+   * seit dem Auftrag (`requested_at`): Was während des Entwerfens dazukam, sah
+   * Claude nicht. Gibt den Teil der Meldung zurück.
+   */
+  const requestDraft = (doc) => {
+    const cur = ingest.get?.(doc.id) ?? null;
+    if (cur?.status === 'uebernommen') return 'schon im Wiki';
+    const since = cur?.requested_at ?? cur?.drafted_at ?? null;
+    const newer = cur?.status === 'bereit' && store.listHighlights({ docId: doc.id }).some((h) => !since || h.updated_at > since);
+    if (cur?.status === 'bereit' && !newer) return 'Entwurf fürs Wiki liegt bereit';
+    try {
+      ingest.request([doc.id], { force: newer });
+    } catch (err) {
+      // Etwa angefangenes Übernehmen: Das gehört fortgesetzt, nicht dem Skill übergeben (kein `ingest: offen`).
+      return `ohne neuen Entwurf fürs Wiki (${err.message})`;
+    }
+    const now = ingest.get?.(doc.id)?.status ?? null;
+    if (now === 'bereit') return 'Entwurf fürs Wiki liegt bereit';
+    if (now === 'uebernommen') return 'schon im Wiki';
+    return newer ? 'Entwurf fürs Wiki kommt neu, mit den Markierungen' : 'Entwurf fürs Wiki kommt';
+  };
   const model = (doc) => ({ highlights: store.listHighlights({ docId: doc.id }), stackDocs: toRead(store.list({ status: 'stapel', limit: -1 })).slice(0, 30), counts: store.counts(), vault: Boolean(exporter) && !doc.no_ingest, ingest: ingestOf(doc) });
 
   return {
@@ -297,15 +329,24 @@ export function docRoutes({ store, asAction, onChange = () => {}, exporter = nul
         const out = decided('Fertig, weg', await asAction(() => store.setStatus(form.get('id'), 'weg', { read: true })));
         return fromReader(form) ? { ...out, redirect: listOf(form, out.undo?.fields.status) } : out;
       },
-      /** „In den Vault“: Notiz mit `lesestatus: gelesen`, mit `volltext=1` samt Volltext; dann archiviert. */
+      /**
+       * „In den Vault“: Notiz mit `lesestatus: gelesen`, mit `volltext=1` samt Volltext; dann archiviert.
+       * Mit `wiki=1` (V in der Leseansicht) immer mit Volltext und danach ein Ingest-Entwurf;
+       * ohne das Feld (etwa „Nur in den Vault“ unter „Weiter“, ältere App) bleibt es bei der Notiz.
+       */
       async '/aktion/lesen/doc/vault'(form) {
-        const fullText = form.get('volltext') === '1';
+        const wiki = form.get('wiki') === '1';
+        const fullText = wiki || form.get('volltext') === '1';
         const doc = must(form.get('id'));
         mustWrite(doc);
+        const draft = wiki ? draftable() : null;
         // Erst gelesen (`read_at`, Datum für `gelesen:`), dann die Notiz, dann der Status.
         store.setStatus(doc.id, doc.status, { read: true });
-        toVault(doc, { read: true, fullText });
-        return decided(fullText ? 'Mit Volltext im Vault' : 'Im Vault', store.setStatus(doc.id, 'archiv'));
+        // `ingest: offen` (für den Skill) nur, wenn das Cockpit nicht selbst entwirft; ein altes nimmt es zurück.
+        toVault(doc, { read: true, fullText, ...(draft?.ok ? { markIngest: false, claimIngest: true } : {}) });
+        const r = store.setStatus(doc.id, 'archiv');
+        if (!wiki) return decided(fullText ? 'Mit Volltext im Vault' : 'Im Vault', r);
+        return decided(`Im Vault, ${draft.ok ? requestDraft(doc) : `ohne Entwurf fürs Wiki (${draft.reason})`}`, r);
       },
       /** „Im Vault ablegen“ aus Eingang oder Stapel: ungelesen, immer mit Volltext; verlässt Eingang und Stapel. */
       async '/aktion/lesen/ablegen'(form) {
