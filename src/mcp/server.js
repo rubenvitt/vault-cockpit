@@ -43,6 +43,8 @@ export function createVaultMcpHandler({
   index,
   capture,
   editor,
+  // Session-Journal (src/journal/journal.js); ohne gibt es kein vault_journal.
+  journal = null,
   policy,
   sync = null,
   semantic: semanticOrGetter = null,
@@ -367,6 +369,36 @@ export function createVaultMcpHandler({
       },
       edit((args) => editor.append({ path: args.path, text: args.text, heading: args.heading ?? null })),
     );
+
+    if (journal) {
+      server.registerTool(
+        'vault_journal',
+        {
+          title: 'Eintrag ins Session-Journal schreiben',
+          description:
+            'Hängt einen Arbeitsblock dieser Session an das Tagesjournal an (_System/journal/<sphäre>/<tag>.md), im Format ' +
+            'des lokalen Journal-Mods; fehlt die Tagesdatei, wird sie angelegt. Gedacht für den Skill /journal. Inhalt nach ' +
+            'dessen Regeln: Tätigkeiten statt Implementierungsdetails, keine Personen- oder Kundennamen, keine Zugangsdaten. ' +
+            'to weglassen = jetzt. Derselbe Eintrag (gleiche Session, gleiche Endzeit) wird nicht doppelt geschrieben.',
+          inputSchema: {
+            titel: z.string().describe('Kurztitel, höchstens 60 Zeichen.'),
+            sphaere: z.enum(['privat', 'arbeit']).describe('arbeit bei Beruflichem (Arbeitgeber, Kunden, Kollegen, Vorträge), sonst privat.'),
+            projekt: z.string().describe('Projekt- oder Repo-Name.'),
+            kontext: z.string().describe('Ein Satz: worum es ging.'),
+            punkte: z.array(z.string()).describe('2 bis 4 Stichpunkte: was getan, was erreicht.'),
+            erkenntnis: z.string().optional().describe('Ein übertragbares Learning fürs Wiki, sonst weglassen.'),
+            offen: z.string().optional().describe('Was liegen blieb, sonst weglassen.'),
+            from: z.string().describe('Beginn des Blocks, RFC 3339 mit Offset.'),
+            to: z.string().optional().describe('Ende des Blocks, RFC 3339; weglassen = jetzt.'),
+            session: z.string().describe('Kennung der Session, im Gespräch gleichbleibend, z.B. "chat-k3f9".'),
+            kind: z.enum(['auto', 'manual', 'final']).optional().describe('manual (Standard) für /journal, final zum Abschluss.'),
+            source: z.enum(['code-web', 'chat']).optional().describe('Standard chat.'),
+          },
+          annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+        },
+        edit((args) => journal.write(args), 'Der Journal-Eintrag wurde nicht geschrieben'),
+      );
+    }
 
     server.registerTool(
       'vault_set_frontmatter',
