@@ -28,6 +28,7 @@ const KEYCHAIN_SERVICE = 'dev.rubeen.cockpit-sync';
 const INTERVAL_MS = 5 * 60_000;
 const DEBOUNCE_MS = 3_000;
 const WAIT_S = 25;
+const STUCK_MS = 10 * 60_000;
 
 const toPosix = (p) => p.split(sep).join('/');
 
@@ -95,6 +96,7 @@ export function createRequest(url, token) {
 export function createDaemon({ fs, api, state, save, log = console }) {
   const engine = createSyncEngine({ fs, api, state, save, log: (m) => log.info(m) });
   let running = null;
+  let busySince = null;
   let again = false;
   let stopped = false;
   const pause = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -104,11 +106,14 @@ export function createDaemon({ fs, api, state, save, log = console }) {
       again = true;
       return running;
     }
+    busySince = Date.now();
     running = (async () => {
       do {
         again = false;
         try {
+          const t0 = Date.now();
           const s = await engine.sync();
+          if (Date.now() - t0 > 30_000) log.info(`Abgleich dauerte ${Math.round((Date.now() - t0) / 1000)} s`);
           if (s.down || s.up || s.removed) log.info(`Abgleich: ${s.down} geholt, ${s.up} geschickt, ${s.removed} gelöscht`);
           for (const c of s.conflicts) log.warn(`Konflikt, Kopie: ${c}`);
           for (const p of s.problems) log.warn(`Problem: ${p}`);
@@ -122,6 +127,7 @@ export function createDaemon({ fs, api, state, save, log = console }) {
       await running;
     } finally {
       running = null;
+      busySince = null;
     }
   }
 
@@ -147,7 +153,10 @@ export function createDaemon({ fs, api, state, save, log = console }) {
     }
   }
 
-  return { syncNow, longPoll, stop: () => void (stopped = true) };
+  /** Hängt ein Abgleich länger als `ms`? (Watchdog; launchd startet den Dienst dann neu.) */
+  const stuck = (ms = STUCK_MS, now = Date.now()) => busySince !== null && now - busySince > ms;
+
+  return { syncNow, longPoll, stuck, stop: () => void (stopped = true) };
 }
 
 /** Zustand (Cursor und bekannte Fassungen) als JSON-Datei. */
@@ -188,6 +197,12 @@ async function main() {
     timer = setTimeout(() => daemon.syncNow(), DEBOUNCE_MS);
   });
   setInterval(() => daemon.syncNow(), INTERVAL_MS);
+  // shortcut: Ursache eines Hängers am 25.11. unbekannt; statt still zu stehen beenden, KeepAlive startet neu.
+  setInterval(() => {
+    if (!daemon.stuck()) return;
+    log.error(`Abgleich hängt seit über ${STUCK_MS / 60_000} Minuten, starte neu`);
+    process.exit(1);
+  }, 60_000);
   await daemon.longPoll();
 }
 
