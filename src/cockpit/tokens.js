@@ -19,7 +19,7 @@ import { SettingsError, writePrivate } from './settings.js';
  */
 
 export const MAX_TOKENS = 20;
-export const SCOPES = ['search', 'capture', 'lesestapel', 'app', 'sync'];
+export const SCOPES = ['search', 'capture', 'lesestapel', 'app', 'sync', 'journal'];
 /** Rechte, die ein Recht mit einschließt. */
 const INCLUDES = { app: ['lesestapel'] };
 const PREFIX = 'vct_';

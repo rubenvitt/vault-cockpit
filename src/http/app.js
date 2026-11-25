@@ -37,7 +37,7 @@ function send(res, status, body, headers = {}) {
  * nur die Protected Resource Metadata (RFC 9728), damit Claude den zuständigen
  * Authorization Server findet, und prüfen eingehende Bearer-Tokens.
  */
-export function createApp({ config, verifyToken, mcpHandler, captureHttp = null, readingApi = null, searchHttp = null, syncHttp = null, webHttp = null, degraded = () => false, logger = console }) {
+export function createApp({ config, verifyToken, mcpHandler, captureHttp = null, journalHttp = null, readingApi = null, searchHttp = null, syncHttp = null, webHttp = null, degraded = () => false, logger = console }) {
   const prmUrl = `${config.publicUrl}/.well-known/oauth-protected-resource/mcp`;
 
   const protectedResourceMetadata = () => ({
@@ -85,6 +85,12 @@ export function createApp({ config, verifyToken, mcpHandler, captureHttp = null,
     if (captureHttp?.matches(path)) {
       const body = req.method === 'POST' ? await readBody(req) : null;
       return captureHttp.handle(req, res, url, body);
+    }
+
+    // Session-Journal mit eigenem Token (Mod in Claude Code im Web), siehe journal/http.js.
+    if (journalHttp?.matches(path)) {
+      const body = req.method === 'POST' ? await readBody(req) : null;
+      return journalHttp.handle(req, res, url, body);
     }
 
     // Lesestapel mit eigenem Token; liest den Body selbst (eigene Limits, PDFs), siehe lesen/api.js.
