@@ -55,6 +55,9 @@ die Geräte.
 - Gleicht ab beim Start, kurz nach Änderungen, alle paar Minuten (einstellbar)
   und beim Zurückkommen in die App; per Ribbon-Symbol oder Befehl „Jetzt
   abgleichen“ jederzeit.
+- Solange Obsidian im Vordergrund ist, wartet das Plugin per Long-Polling auf
+  den Server und holt Änderungen anderer Geräte sofort. Im Hintergrund lässt
+  iOS das nicht zu: Dort gleicht es beim Zurückkommen ab.
 - Merkt sich je Datei die Fassung des Servers; offline Geändertes geht beim
   nächsten Abgleich mit dieser Basis hoch. Konflikte löst der Server:
   zusammenführen, sonst bleibt seine Fassung und die des Geräts liegt als

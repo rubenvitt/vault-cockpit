@@ -3,6 +3,9 @@ import { SyncPathError, MAX_FILE_BYTES, SHADOW_KINDS } from './journal.js';
 
 /** Höchstens so viele Abweichungen nimmt ein Vergleichsbericht an. */
 const MAX_REPORT_DIFFS = 2000;
+/** Long-Polling: so lange hält `changes?wait=` höchstens offen (unter den Proxy-Timeouts). */
+const MAX_WAIT_S = 25;
+const WAIT_POLL_MS = 250;
 
 /**
  * Protokoll des eigenen Syncs (VCP-120), Version 1. Jedes Gerät hat einen
@@ -16,7 +19,9 @@ const MAX_REPORT_DIFFS = 2000;
  *   alle vorhandenen Dateien, für den ersten Abgleich.
  * - `GET  /sync/v1/changes?since=<seq>&limit=<n>` — `{cursor, changes, more}`,
  *   Änderungen nach `since` (älteste zuerst, höchstens 1000); `hash: null`
- *   heißt gelöscht. Mit `more` gleich weiter ab `cursor` holen.
+ *   heißt gelöscht. Mit `more` gleich weiter ab `cursor` holen. Mit `wait=<s>`
+ *   (höchstens 25) wartet die Antwort, solange der Server-Stand genau `since`
+ *   ist: Long-Polling, damit Geräte Änderungen sofort sehen.
  * - `GET  /sync/v1/file?path=…[&hash=…]` — Inhalt als Bytes, Kopfzeilen
  *   `x-sync-hash`, `x-sync-seq`, `x-sync-mtime`. Mit `hash` eine frühere
  *   Fassung aus dem Blob-Speicher (für den Merge auf dem Gerät).
@@ -101,6 +106,15 @@ export function createSyncHttp({ tokens, journal: journalOf, onWrite = () => {},
     return json(res, 409, { error: out.reason, current: out.current ?? null });
   }
 
+  // shortcut: fragt den Zähler im Speicher alle 250 ms ab statt Ereignisse; reicht für eine Handvoll Geräte.
+  const changeAfter = (req, journal, since, ms) =>
+    new Promise((resolve) => {
+      const end = Date.now() + ms;
+      const timer = setInterval(() => {
+        if (journal.cursor() !== since || Date.now() >= end || req.socket.destroyed) resolve(clearInterval(timer));
+      }, WAIT_POLL_MS);
+    });
+
   const routes = {
     'GET /sync/v1/state': (req, res, url, dev, journal) => {
       const snap = journal.snapshot();
@@ -108,10 +122,12 @@ export function createSyncHttp({ tokens, journal: journalOf, onWrite = () => {},
       return json(res, 200, journal.readOnly ? { ...snap, readOnly: true } : snap);
     },
 
-    'GET /sync/v1/changes': (req, res, url, dev, journal) => {
+    'GET /sync/v1/changes': async (req, res, url, dev, journal) => {
       const since = intParam(url.searchParams.get('since'), 0);
       const limit = intParam(url.searchParams.get('limit'), 1000);
-      if (since === null || limit === null || limit < 1) return json(res, 400, { error: '„since“ und „limit“ müssen ganze Zahlen ab 0 bzw. 1 sein' });
+      const wait = intParam(url.searchParams.get('wait'), 0);
+      if (since === null || limit === null || limit < 1 || wait === null) return json(res, 400, { error: '„since“, „limit“ und „wait“ müssen ganze Zahlen ab 0 bzw. 1 sein' });
+      if (wait && journal.cursor() === since) await changeAfter(req, journal, since, Math.min(wait, MAX_WAIT_S) * 1000);
       const out = journal.changes(since, Math.min(limit, 1000));
       journal.seen(dev, { pulled: true, cursor: out.cursor });
       return json(res, 200, journal.readOnly ? { ...out, readOnly: true } : out);

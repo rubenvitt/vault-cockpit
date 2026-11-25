@@ -229,6 +229,25 @@ test('changes blättert mit more und cursor', async () => {
   assert.equal((await a.call('GET', '/sync/v1/changes', { since: -1 })).status, 400);
 });
 
+test('changes mit wait wartet auf die nächste Änderung, sonst bis zum Ablauf', async () => {
+  const a = client(mac);
+  const b = client(phone);
+  const since = journal.cursor();
+  const t0 = Date.now();
+  const waiting = a.call('GET', '/sync/v1/changes', { since, wait: 5 }).then((r) => r.json());
+  await new Promise((r) => setTimeout(r, 300));
+  await b.put('projekte/Live.md', '# Live\n', null);
+  const page = await waiting;
+  assert.ok(Date.now() - t0 < 4000, 'kommt mit der Änderung, nicht erst nach dem Ablauf');
+  assert.deepEqual(page.changes.map((c) => c.path), ['projekte/Live.md']);
+
+  const t1 = Date.now();
+  const idle = await (await a.call('GET', '/sync/v1/changes', { since: page.cursor, wait: 1 })).json();
+  assert.ok(Date.now() - t1 >= 900, 'ohne Änderung wartet sie bis zum Ablauf');
+  assert.deepEqual(idle.changes, []);
+  assert.equal((await a.call('GET', '/sync/v1/changes', { since: 0, wait: 'x' })).status, 400);
+});
+
 test('Geräte erscheinen mit Name, Client und Zeitpunkten', () => {
   const devices = journal.devices();
   assert.deepEqual(devices.map((d) => d.name).sort(), ['iPhone', 'r-mac']);

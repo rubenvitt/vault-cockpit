@@ -74,6 +74,7 @@ function device(name, files = {}) {
     state,
     trash,
     raceOnGet: null,
+    api: createApi(request),
   };
   return dev;
 }
@@ -280,4 +281,22 @@ test('eine lokale Änderung während des Holens wird nicht überschrieben', asyn
   assert.equal(s.conflicts.length, 1);
   assert.equal(phone.text('Race.md'), 'zwei\n');
   assert.equal(phone.text(s.conflicts[0]), 'eins\nlokal\n', 'die lokale Änderung ist nicht verloren');
+});
+
+test('Long-Polling: ein wartendes Gerät erfährt eine Änderung des anderen sofort', async () => {
+  const mac = device('lp-mac', { 'Live.md': '# Live\n' });
+  const phone = device('lp-phone');
+  await mac.sync();
+  await phone.sync();
+  const since = phone.state.cursor;
+  const t0 = Date.now();
+  const waiting = phone.api.waitForChanges(since, 5);
+  await new Promise((r) => setTimeout(r, 300));
+  mac.edit('Live.md', '# Live\nneu\n');
+  await mac.sync();
+  const page = await waiting;
+  assert.ok(Date.now() - t0 < 4000);
+  assert.ok(page.cursor > since);
+  await phone.sync();
+  assert.equal(phone.text('Live.md'), '# Live\nneu\n');
 });
