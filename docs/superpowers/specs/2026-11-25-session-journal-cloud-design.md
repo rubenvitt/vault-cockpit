@@ -28,7 +28,7 @@ Ziel: Auch Cloud-Sessions landen im selben Journal, im selben Format, ohne dass 
 
 1. Ein Journal-Eintrag aus einer Cloud-Session landet in derselben Tagesdatei wie lokale Einträge, im selben Format (Kopf, `### HH:MM–HH:MM · Titel`, Stichpunkte, Erkenntnis mit `#mycel-candidate`, Offen).
 2. **Claude Code im Web:** automatisch wie lokal, mit 30-Minuten-Schranke, `/journal` und `/clear`.
-3. **Sessions in der Claude-App:** mindestens ein Skill `/journal`, der auf Zuruf einen Eintrag schreibt. Bestenfalls eine Erinnerung per Hook, damit Ruben nicht daran denken muss.
+3. **Sessions in der Claude-App:** mindestens ein Skill `/journal-save`, der auf Zuruf einen Eintrag schreibt. Bestenfalls eine Erinnerung per Hook, damit Ruben nicht daran denken muss.
 4. Lokale Einträge und Cloud-Einträge kommen sich nicht in die Quere: Es geht nichts verloren und es entsteht kein Konflikt-Duplikat.
 
 ## Nicht-Ziele
@@ -94,7 +94,7 @@ Abnahme: Gleichzeitiges Anhängen auf Mac und Server an dieselbe Tagesdatei ergi
 - **Zeiten (Claudes Entscheidung):** `to` ist optional. Fehlt es, setzt der Server die eigene Uhrzeit ein. `from` ist Pflicht.
 - **Maskieren (Claudes Entscheidung):** Das Cockpit maskiert vor dem Schreiben offensichtliche Zugangsdaten per Muster (`vct_…`, `ghp_…`/`github_pat_…`, `sk-…`, `Bearer …`, `password=`). Das ist ein Ersatz für `$.session.redact`, den der Skill-Weg nicht hat.
 
-### Teil 2: Skill `/journal` für Sessions in der Claude-App
+### Teil 2: Skill `/journal-save` für Sessions in der Claude-App
 
 - Liegt bei den anderen Skills unter `_System/claude-skills/journal/SKILL.md` und wird wie diese in den Account hochgeladen.
 - Ablauf:

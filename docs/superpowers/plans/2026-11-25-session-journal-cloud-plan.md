@@ -127,7 +127,7 @@
   - `vault_journal ohne vault:edit`: Liefert die Meldung `EDIT_SCOPE_MISSING`.
 - [ ] **Step 2:** Tests laufen lassen → FAIL.
 - [ ] **Step 3: Implementieren.**
-  - Die Beschreibung des Werkzeugs sagt, wann es zu nutzen ist (Skill `/journal`), dass die Regeln für den Inhalt beim Aufrufer liegen und dass `to` weggelassen werden darf.
+  - Die Beschreibung des Werkzeugs sagt, wann es zu nutzen ist (Skill `/journal-save`), dass die Regeln für den Inhalt beim Aufrufer liegen und dass `to` weggelassen werden darf.
   - `from` und `to` werden per `Date.parse` umgewandelt. Ungültig → `fail` mit Klartext.
 - [ ] **Step 4:** `npm test` → PASS.
 - [ ] **Step 5: Commit:** `feat(mcp): add vault_journal tool`
@@ -170,7 +170,7 @@
   - Unter Einstellungen → API-Tokens einen Token „session-journal“ mit Recht Journal anlegen.
   - `curl -H "Authorization: Bearer vct_…" https://vault.rubeen.dev/journal` liefert `200`.
 
-### Task 5: Skill `/journal` für Sessions in der Claude-App (Vault)
+### Task 5: Skill `/journal-save` für Sessions in der Claude-App (Vault)
 
 **Files:**
 - Create: `_System/claude-skills/journal/SKILL.md`
@@ -241,7 +241,7 @@
 - Test: `tests/nudge.bats` oder ein Shell-Test mit simuliertem Hook-Input
 
 **Interfaces:**
-- Consumes: Skill `/journal` (Task 5).
+- Consumes: Skill `/journal-save` (Task 5).
 - Produces: `nudge.sh` liest das Hook-JSON von stdin und führt einen Zeitstempel in `$CLAUDE_PROJECT_DIR/.claude/journal-nudge` bzw. in einem Session-Temp-Verzeichnis.
   - Gibt `{"decision":"block","reason":"Journal: /journal ausführen (letzter Eintrag vor über 30 Minuten)."}` erst nach ≥ 30 Minuten aus und dann nur einmal.
   - Bei `stop_hook_active: true` nie.
