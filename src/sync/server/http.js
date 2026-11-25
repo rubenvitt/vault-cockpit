@@ -129,7 +129,8 @@ export function createSyncHttp({ tokens, journal: journalOf, onWrite = () => {},
       if (since === null || limit === null || limit < 1 || wait === null) return json(res, 400, { error: '„since“, „limit“ und „wait“ müssen ganze Zahlen ab 0 bzw. 1 sein' });
       if (wait && journal.cursor() === since) await changeAfter(req, journal, since, Math.min(wait, MAX_WAIT_S) * 1000);
       const out = journal.changes(since, Math.min(limit, 1000));
-      journal.seen(dev, { pulled: true, cursor: out.cursor });
+      // Long-Polling (limit 1) ist kein Abgleich: nur „gesehen“, Zeitpunkt und Cursor des Abgleichs bleiben.
+      journal.seen(dev, wait ? {} : { pulled: true, cursor: out.cursor });
       return json(res, 200, journal.readOnly ? { ...out, readOnly: true } : out);
     },
 

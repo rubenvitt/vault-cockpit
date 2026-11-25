@@ -370,7 +370,11 @@ if (obsidian) {
       this.restartInterval();
       // Mobil: beim Zurückkommen in die App.
       this.registerDomEvent(document, 'visibilitychange', () => {
-        if (document.visibilityState === 'visible') this.syncNow();
+        if (document.visibilityState !== 'visible') return;
+        // iOS kann eine offene Anfrage beim Einfrieren hängen lassen: alte Schleife aufgeben, nach dem Abgleich startet eine neue.
+        this.watchGen = (this.watchGen ?? 0) + 1;
+        this.watching = false;
+        this.syncNow();
       });
     }
 
@@ -385,10 +389,11 @@ if (obsidian) {
     async watch() {
       if (this.watching) return;
       this.watching = true;
+      const gen = (this.watchGen = (this.watchGen ?? 0) + 1);
       const api = createApi((...a) => this.request(...a));
       const pause = (ms) => new Promise((r) => window.setTimeout(r, ms));
       try {
-        while (!this.unloaded && this.settings.mode === 'sync' && this.settings.state.cursor !== null && document.visibilityState === 'visible') {
+        while (gen === this.watchGen && !this.unloaded && this.settings.mode === 'sync' && this.settings.state.cursor !== null && document.visibilityState === 'visible') {
           const since = this.settings.state.cursor;
           const t0 = Date.now();
           try {
@@ -405,7 +410,7 @@ if (obsidian) {
           }
         }
       } finally {
-        this.watching = false;
+        if (gen === this.watchGen) this.watching = false;
       }
     }
 
