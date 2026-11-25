@@ -377,7 +377,7 @@ export function createVaultMcpHandler({
           title: 'Eintrag ins Session-Journal schreiben',
           description:
             'Hängt einen Arbeitsblock dieser Session an das Tagesjournal an (_System/journal/<sphäre>/<tag>.md), im Format ' +
-            'des lokalen Journal-Mods; fehlt die Tagesdatei, wird sie angelegt. Gedacht für den Skill /journal. Inhalt nach ' +
+            'des lokalen Journal-Mods; fehlt die Tagesdatei, wird sie angelegt. Gedacht für den Skill /journal-save. Inhalt nach ' +
             'dessen Regeln: Tätigkeiten statt Implementierungsdetails, keine Personen- oder Kundennamen, keine Zugangsdaten. ' +
             'to weglassen = jetzt. Derselbe Eintrag (gleiche Session, gleiche Endzeit) wird nicht doppelt geschrieben.',
           inputSchema: {
