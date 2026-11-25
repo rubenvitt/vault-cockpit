@@ -119,6 +119,17 @@ export function diffLines(a, b, maxEdits = MAX_EDITS) {
  * `null` bei einem Konflikt.
  */
 export function mergeLines(base, ours, theirs) {
+  // Beide Seiten haben nur ans Ende angehängt (etwa zwei Einträge im
+  // Session-Journal zwischen zwei Abgleichen): beide Anhänge behalten, erst den
+  // des Servers, dann den des Geräts, statt einer Konfliktkopie.
+  const appended = (other) => other.length > base.length && base.every((l, i) => l === other[i]);
+  if (appended(ours) && appended(theirs)) {
+    const a = ours.slice(base.length);
+    const b = theirs.slice(base.length);
+    if (a.length === b.length && a.every((l, i) => l === b[i])) return ours;
+    const last = ours.at(-1);
+    return last.endsWith('\n') ? [...ours, ...b] : [...ours.slice(0, -1), `${last}\n`, ...b];
+  }
   const side = (other, name) => {
     const hunks = diffLines(base, other);
     return hunks && hunks.map((h) => ({ side: name, start: h.aStart, end: h.aEnd, lines: other.slice(h.bStart, h.bEnd) }));

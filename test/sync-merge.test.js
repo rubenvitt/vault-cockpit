@@ -50,7 +50,7 @@ test('getrennte Absätze auf zwei Geräten geändert: beide Änderungen im Ergeb
 test('überlappende oder aneinanderstoßende Änderungen sind ein Konflikt, gleiche nicht', () => {
   assert.equal(merge('a.md', 'a\nb\nc\n', 'a\nX\nc\n', 'a\nY\nc\n'), null);
   assert.equal(merge('a.md', 'a\nb\nc\n', 'a\nX\nc\n', 'a\nb\nY\n'), null, 'Nachbarzeilen');
-  assert.equal(merge('a.md', 'a\n', 'a\nX\n', 'a\nY\n'), null, 'beide hängen an');
+  assert.equal(merge('a.md', 'a\nb\n', 'a\nX\nZ\n', 'a\nb\nY\n'), null, 'Änderung davor plus Anhang');
   assert.equal(merge('a.md', 'a\nb\n', 'a\nX\n', 'a\nX\n'), 'a\nX\n');
   assert.deepEqual(mergeLines(L('a\n'), L('a\n'), L('a\nb\n')), L('a\nb\n'));
 });
@@ -86,4 +86,33 @@ test('Name der Konfliktkopie', () => {
   assert.equal(conflictName('Notiz.md', 'iPhone', '2026-10-29', 2), 'Notiz (Konflikt iPhone 2026-10-29 2).md');
   assert.equal(conflictName('a/b/LIESMICH', '../böse/Gerät', '2026-10-29'), 'a/b/LIESMICH (Konflikt -böse-Gerät 2026-10-29)');
   assert.equal(conflictName('x.tar.gz', '', '2026-10-29'), 'x.tar (Konflikt Gerät 2026-10-29).gz');
+});
+
+// Session-Journal: Mac und Server hängen zwischen zwei Abgleichen beide ans Ende derselben Tagesdatei an.
+test('beide hängen nur ans Ende an: Server zuerst, dann Gerät', () => {
+  const base = L('# T\n\na\n');
+  assert.deepEqual(mergeLines(base, [...base, '\n', 'S\n'], [...base, '\n', 'G\n']), L('# T\n\na\n\nS\n\nG\n'));
+});
+
+test('gleicher Anhang auf beiden Seiten kommt nur einmal', () => {
+  const base = L('a\n');
+  assert.deepEqual(mergeLines(base, L('a\nX\n'), L('a\nX\n')), L('a\nX\n'));
+});
+
+test('Anhang plus Änderung davor: alte Regeln', () => {
+  assert.equal(mergeLines(L('a\n'), L('b\nS\n'), L('a\nG\n')), null);
+});
+
+test('Anhang ohne Zeilenende: Gerät beginnt in neuer Zeile', () => {
+  assert.equal(merge('a.md', 'a\n', 'a\nS', 'a\nG\n'), 'a\nS\nG\n');
+});
+
+test('mergeFile: Journal-Tagesdatei mit Frontmatter, zwei Anhänge', () => {
+  const base = '---\ntype: journal\ndate: 2026-11-26\nsphere: arbeit\n---\n\n# Journal Donnerstag, 26.11.2026 · arbeit\n\n### 09:00–09:30 · Eins\n- a\n';
+  const server = base + '\n### 10:00–10:30 · Cloud\n- b\n';
+  const mac = base + '\n### 10:05–10:40 · Lokal\n- c\n';
+  const out = merge('_System/journal/arbeit/2026-11-26.md', base, server, mac);
+  assert.ok(out.startsWith('---\ntype: journal\ndate: 2026-11-26\nsphere: arbeit\n---\n'));
+  assert.ok(out.includes('### 10:00–10:30 · Cloud') && out.includes('### 10:05–10:40 · Lokal'));
+  assert.ok(out.indexOf('Cloud') < out.indexOf('Lokal'));
 });
