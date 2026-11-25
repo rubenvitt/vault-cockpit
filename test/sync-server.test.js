@@ -175,11 +175,12 @@ test('was das Cockpit selbst schreibt, sehen Geräte, und es wird nicht übersch
   const a = client(mac);
   const before = (await a.get('projekte/Alt.md')).hash;
   // Wie vault_edit: direkt auf der Platte, am Journal vorbei.
-  writeFileSync(join(vault, 'projekte/Alt.md'), '# Alt\n\nvom Cockpit\n');
-  const stale = await a.put('projekte/Alt.md', '# Alt\n\nvom Gerät\n', before);
+  // Beide ändern dieselbe Zeile (reines Anhängen auf beiden Seiten würde zusammengeführt).
+  writeFileSync(join(vault, 'projekte/Alt.md'), '# Alt vom Cockpit\n');
+  const stale = await a.put('projekte/Alt.md', '# Alt vom Gerät\n', before);
   assert.equal(stale.body.resolution, 'copy');
-  assert.equal(stale.body.entry.hash, sha('# Alt\n\nvom Cockpit\n'));
-  assert.equal(readFileSync(join(vault, 'projekte/Alt.md'), 'utf8'), '# Alt\n\nvom Cockpit\n');
+  assert.equal(stale.body.entry.hash, sha('# Alt vom Cockpit\n'));
+  assert.equal(readFileSync(join(vault, 'projekte/Alt.md'), 'utf8'), '# Alt vom Cockpit\n');
   unlinkSync(join(vault, stale.body.copy.path));
   journal.scan();
 
@@ -493,4 +494,14 @@ test('Schattenbetrieb: neben einem anderen Sync läuft das Journal nur lesend mi
   assert.equal(store.get().sync.shadow, false);
   store.save({ ...store.stored(), sync: { adapter: null, shadow: true } });
   assert.equal(store.get().sync.shadow, true);
+});
+
+test('Cockpit und Gerät hängen beide an: zusammengeführt, keine Konfliktkopie', async () => {
+  const a = client(mac);
+  const created = await a.put('projekte/Anhang.md', '# Anhang\n', null);
+  const before = created.body.entry.hash;
+  writeFileSync(join(vault, 'projekte/Anhang.md'), '# Anhang\n\nvom Cockpit\n');
+  const res = await a.put('projekte/Anhang.md', '# Anhang\n\nvom Gerät\n', before);
+  assert.equal(res.body.resolution, 'merged');
+  assert.equal(readFileSync(join(vault, 'projekte/Anhang.md'), 'utf8'), '# Anhang\n\nvom Cockpit\n\nvom Gerät\n');
 });
