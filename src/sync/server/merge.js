@@ -126,9 +126,17 @@ export function mergeLines(base, ours, theirs) {
   if (appended(ours) && appended(theirs)) {
     const a = ours.slice(base.length);
     const b = theirs.slice(base.length);
-    if (a.length === b.length && a.every((l, i) => l === b[i])) return ours;
+    // Gemeinsamer Anfang der Anhänge (veraltetes Nachsenden, dieselbe Zeile auf
+    // beiden Seiten) kommt nur einmal; Leerzeilen davor gehören zum Rest, damit
+    // der Abstand vor dem zweiten Anhang bleibt.
+    let k = 0;
+    while (k < a.length && k < b.length && a[k] === b[k]) k += 1;
+    if (k === b.length) return ours;
+    if (k === a.length) return theirs;
+    while (k > 0 && b[k - 1].trim() === '') k -= 1;
+    const rest = b.slice(k);
     const last = ours.at(-1);
-    return last.endsWith('\n') ? [...ours, ...b] : [...ours.slice(0, -1), `${last}\n`, ...b];
+    return last.endsWith('\n') ? [...ours, ...rest] : [...ours.slice(0, -1), `${last}\n`, ...rest];
   }
   const side = (other, name) => {
     const hunks = diffLines(base, other);

@@ -40,7 +40,7 @@ export function redactSecrets(text) {
   for (const re of SECRETS) out = out.replace(re, '[maskiert]');
   return out
     .replace(/\b(Bearer)\s+[A-Za-z0-9._~+/=-]{6,}/g, '$1 [maskiert]')
-    .replace(/\b(password|passwort|pass|pwd|token|secret)=\S+/gi, '$1=[maskiert]');
+    .replace(/\b(password|passwort|pwd|token|secret)(\s*[=:]\s*)\S+/gi, '$1$2[maskiert]');
 }
 
 function time(value, field) {
@@ -103,6 +103,10 @@ export function fileHeader(day, at, sphere) {
 
 const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+// Die Datei zeigt nur 8 Zeichen der Session. Damit zwei Sessions mit gleichem
+// Anfang nicht als Duplikat gelten, merkt sich der Server, welche vollen
+// Sessions er hinter einem solchen Kürzel geschrieben hat. Nach einem Neustart
+// fehlt das Gedächtnis; dann gilt wieder allein die Datei.
 function isDuplicate(content, e) {
   const head = new RegExp(`^### \\d{2}:\\d{2}–${escape(hhmm(e.to))} · `);
   const marker = `**Session:** \`${e.session.slice(0, 8)}\``;
@@ -114,6 +118,8 @@ function isDuplicate(content, e) {
 
 export function createJournal({ vaultPath, index, now = Date.now }) {
   const vaultReal = realpathSync(vaultPath);
+  const written = new Map();
+  const keyOf = (rel, e) => `${rel}|${hhmm(e.to)}|${e.session.slice(0, 8)}`;
 
   return {
     /** Hängt einen Eintrag an; `{written:false, reason:'duplicate'}`, wenn er schon dasteht. */
@@ -129,7 +135,9 @@ export function createJournal({ vaultPath, index, now = Date.now }) {
 
       const exists = existsSync(absolute);
       const before = exists ? readFileSync(absolute, 'utf8') : null;
-      if (before !== null && isDuplicate(before, e)) return { written: false, reason: 'duplicate' };
+      const key = keyOf(rel, e);
+      const known = written.get(key);
+      if (before !== null && isDuplicate(before, e) && (!known || known.has(e.session))) return { written: false, reason: 'duplicate' };
 
       const base = before ?? fileHeader(day, e.to, e.sphaere);
       const gap = base === '' || base.endsWith('\n\n') ? '' : base.endsWith('\n') ? '\n' : '\n\n';
@@ -137,6 +145,7 @@ export function createJournal({ vaultPath, index, now = Date.now }) {
       const current = existsSync(absolute) ? readFileSync(absolute, 'utf8') : null;
       if (current !== before) throw new Error(`"${rel}" wurde gerade anderweitig geändert. Bitte erneut versuchen.`);
       writeFileSync(absolute, base + gap + text, 'utf8');
+      written.set(key, (known ?? new Set()).add(e.session));
       try {
         index?.refresh?.(rel);
       } catch {

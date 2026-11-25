@@ -115,3 +115,13 @@ test('neue Tagesdatei steht danach im Index', () => {
   assert.ok(idx.getNote(r.path));
   assert.ok(!existsSync(join(root, '_System/journal/arbeit')));
 });
+
+test('Sessions mit gleichem Anfang und gleicher Endzeit sind keine Duplikate', () => {
+  assert.equal(journal.write(input({ session: 'session_01AAAAAAAAAA' })).written, true);
+  assert.equal(journal.write(input({ session: 'session_01BBBBBBBBBB' })).written, true);
+  assert.equal(journal.write(input({ session: 'session_01BBBBBBBBBB' })).written, false);
+});
+
+test('maskiert auch die Doppelpunkt-Form', () => {
+  assert.equal(redactSecrets('Passwort: hunter2 und password : geheim'), 'Passwort: [maskiert] und password : [maskiert]');
+});

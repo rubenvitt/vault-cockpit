@@ -116,3 +116,14 @@ test('mergeFile: Journal-Tagesdatei mit Frontmatter, zwei Anhänge', () => {
   assert.ok(out.includes('### 10:00–10:30 · Cloud') && out.includes('### 10:05–10:40 · Lokal'));
   assert.ok(out.indexOf('Cloud') < out.indexOf('Lokal'));
 });
+
+test('Anhang ist Anfang des anderen Anhangs: nichts doppelt (veraltetes Nachsenden)', () => {
+  const base = L('B\n');
+  assert.deepEqual(mergeLines(base, L('B\nX\nY\n'), L('B\nX\n')), L('B\nX\nY\n'));
+  assert.deepEqual(mergeLines(base, L('B\nX\n'), L('B\nX\nY\n')), L('B\nX\nY\n'));
+});
+
+test('gemeinsamer Anfang beider Anhänge kommt nur einmal, Leerzeile davor bleibt', () => {
+  assert.deepEqual(mergeLines(L('B\n'), L('B\n- milk\n- a\n'), L('B\n- milk\n- b\n')), L('B\n- milk\n- a\n- b\n'));
+  assert.deepEqual(mergeLines(L('B\n'), L('B\n\nS\n'), L('B\n\nG\n')), L('B\n\nS\n\nG\n'));
+});
