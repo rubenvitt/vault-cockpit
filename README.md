@@ -233,7 +233,7 @@ Protokoll (Bearer-Token, nur GET und POST):
 | Aufruf | Zweck |
 |---|---|
 | `GET /sync/v1/state` | alle vorhandenen Dateien mit Hash, Größe, mtime und `seq`, dazu `cursor` |
-| `GET /sync/v1/changes?since=<seq>` | Änderungen danach, älteste zuerst, `hash: null` = gelöscht; bei `more` ab `cursor` weiter |
+| `GET /sync/v1/changes?since=<seq>[&wait=<s>]` | Änderungen danach, älteste zuerst, `hash: null` = gelöscht; bei `more` ab `cursor` weiter. Mit `wait` (höchstens 25 s) Long-Polling: Die Antwort wartet, bis sich etwas ändert |
 | `GET /sync/v1/file?path=…[&hash=…]` | Inhalt als Bytes (`x-sync-hash`, `x-sync-seq`, `x-sync-mtime`); mit `hash` eine frühere Fassung |
 | `POST /sync/v1/file?path=…&base=<hash>[&mtime=<ms>]` | Datei schreiben, Body = Bytes; `base` leer = neu |
 | `POST /sync/v1/delete?path=…&base=<hash>` | Datei löschen |

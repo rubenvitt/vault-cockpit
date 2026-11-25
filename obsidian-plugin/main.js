@@ -74,6 +74,10 @@ function createApi(request) {
     async changes(since) {
       return json(check(await request('GET', '/sync/v1/changes', { since: String(since) })));
     },
+    /** Long-Polling: kehrt zurück, sobald der Server über `since` hinaus ist, spätestens nach `wait` s. */
+    async waitForChanges(since, wait) {
+      return json(check(await request('GET', '/sync/v1/changes', { since: String(since), limit: '1', wait: String(wait) })));
+    },
     /** Inhalt und Fassung einer Datei, oder null, wenn es sie nicht (mehr) gibt. */
     async get(path) {
       const r = await request('GET', '/sync/v1/file', { path });
@@ -370,6 +374,41 @@ if (obsidian) {
       });
     }
 
+    onunload() {
+      this.unloaded = true;
+    }
+
+    /**
+     * Echtzeit im Vordergrund: Long-Polling auf `changes`, bei jeder Änderung auf
+     * dem Server ein Abgleich. Endet im Hintergrund, beim Vergleichen und beim Entladen.
+     */
+    async watch() {
+      if (this.watching) return;
+      this.watching = true;
+      const api = createApi((...a) => this.request(...a));
+      const pause = (ms) => new Promise((r) => window.setTimeout(r, ms));
+      try {
+        while (!this.unloaded && this.settings.mode === 'sync' && this.settings.state.cursor !== null && document.visibilityState === 'visible') {
+          const since = this.settings.state.cursor;
+          const t0 = Date.now();
+          try {
+            const page = await api.waitForChanges(since, 25);
+            if (page.changes.length || page.cursor !== since) {
+              await this.syncNow();
+              // Abgleich kam nicht voran (Fehler): nicht im Takt der Antworten wiederholen.
+              if (this.settings.state.cursor === since) await pause(10_000);
+            }
+            // Server ohne Long-Polling antwortet sofort: nicht im Kreis fragen.
+            else if (Date.now() - t0 < 1000) await pause(60_000);
+          } catch {
+            await pause(10_000);
+          }
+        }
+      } finally {
+        this.watching = false;
+      }
+    }
+
     restartInterval() {
       if (this.timer) window.clearInterval(this.timer);
       const minutes = Number(this.settings.intervalMinutes) || 0;
@@ -475,6 +514,8 @@ if (obsidian) {
       } finally {
         this.running = null;
       }
+      // Nach jedem Abgleich (Start, Zurückkommen, Intervall, von Hand) läuft das Long-Polling, falls noch nicht.
+      if (this.settings.mode === 'sync' && this.settings.state.cursor !== null) this.watch();
     }
   };
 
@@ -530,7 +571,7 @@ if (obsidian) {
         );
       new Setting(containerEl)
         .setName('Abgleich alle … Minuten')
-        .setDesc('Zusätzlich gleicht das Plugin beim Start, nach Änderungen und beim Zurückkommen in die App ab. 0 = nur dann.')
+        .setDesc('Zusätzlich gleicht das Plugin beim Start, nach Änderungen und beim Zurückkommen in die App ab; solange die App offen ist, kommen Änderungen anderer Geräte sofort (Long-Polling). 0 = nur dann.')
         .addText((t) =>
           t.setValue(String(s.intervalMinutes)).onChange(async (v) => {
             s.intervalMinutes = Math.max(0, Number.parseInt(v, 10) || 0);
