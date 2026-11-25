@@ -216,6 +216,10 @@ Obsidian Headless der Standard.
   neben dem Index unter `/data`. Das Journal lässt sich aus dem Vault neu
   aufbauen, Geräte gleichen dann einmal komplett ab.
 
+**Ohne Obsidian im Hintergrund** (VCP-152): Auf dem Desktop gleicht
+[`desktop-sync/`](desktop-sync/README.md) den Ordner als launchd-Dienst ab,
+auch wenn Obsidian geschlossen ist. Dort bleibt das Plugin aus.
+
 **Schattenbetrieb** (VCP-133), solange noch Obsidian Sync abgleicht: unter
 Einstellungen → Sync „Schattenbetrieb“ einschalten, der Sync bleibt Obsidian
 Headless. Das Cockpit führt das Journal dann nur lesend mit (`/sync/v1` lehnt
