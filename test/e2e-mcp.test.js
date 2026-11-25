@@ -9,6 +9,7 @@ import { openIndex, buildIndex } from '../src/vault/index.js';
 import { createCapture } from '../src/vault/capture.js';
 import { createEditor } from '../src/vault/edit.js';
 import { createVaultMcpHandler } from '../src/mcp/server.js';
+import { createJournal } from '../src/journal/journal.js';
 import { toWebRequest, writeWebResponse } from '../src/http/bridge.js';
 import { createGraph } from '../src/graph/graph.js';
 import { compilePolicy } from '../src/vault/policy.js';
@@ -42,6 +43,7 @@ before(async () => {
     index,
     capture,
     editor: createEditor({ vaultPath: root, index }),
+    journal: createJournal({ vaultPath: root, index }),
     policy: compilePolicy({ sensitive: { 'areas/Gesundheit': 'gesundheit' } }),
     graph: createGraph({ index, logger: { warn() {} } }),
     health: { services: () => [{ id: 'mail', name: 'Mail-Abruf', state: 'error', summary: 'Abruf fehlgeschlagen', lastOkAt: null, lastErrorAt: '2026-10-18T12:00:00.000Z', lastError: 'HTTP 401', facts: [{ label: 'Ordner', value: 'Vault' }] }] },
@@ -108,7 +110,7 @@ test('tools/list nennt alle Vault-Werkzeuge', async () => {
   const r = await rpc('tools/list', {});
   const names = r.body.result.tools.map((t) => t.name).sort();
   assert.deepEqual(names, [
-    'vault_append', 'vault_capture', 'vault_edit', 'vault_graph', 'vault_links', 'vault_list',
+    'vault_append', 'vault_capture', 'vault_edit', 'vault_graph', 'vault_journal', 'vault_links', 'vault_list',
     'vault_move', 'vault_read', 'vault_search', 'vault_set_frontmatter', 'vault_similar', 'vault_stats',
   ]);
 });
@@ -273,4 +275,29 @@ test('ein unbekanntes Token wird abgewiesen', async () => {
   });
   assert.equal(res.status, 401, 'ungeprüfte Tokens dürfen nie durchkommen');
   assert.match(res.headers.get('www-authenticate'), /invalid_token/);
+});
+
+const journalArgs = {
+  titel: 'Cloud-Block', sphaere: 'privat', projekt: 'demo', kontext: 'Ein Test.', punkte: ['eins', 'zwei'],
+  from: '2026-01-05T08:00:00Z', to: '2026-01-05T08:30:00Z', session: 'chat-ab12', kind: 'manual',
+};
+
+test('vault_journal schreibt in _System/journal', async () => {
+  const r = await rpc('tools/call', { name: 'vault_journal', arguments: journalArgs }, editToken);
+  assert.equal(r.body.result.isError, undefined);
+  assert.equal(r.body.result.structuredContent.written, true);
+  assert.equal(r.body.result.structuredContent.path, '_System/journal/privat/2026-01-05.md');
+  const text = readFileSync(join(root, '_System/journal/privat/2026-01-05.md'), 'utf8');
+  assert.match(text, /### 09:00–09:30 · Cloud-Block\n- \*\*Projekt:\*\* demo · \*\*Session:\*\* `chat-ab1` · manual · chat\n/);
+  const again = await rpc('tools/call', { name: 'vault_journal', arguments: journalArgs }, editToken);
+  assert.equal(again.body.result.structuredContent.reason, 'duplicate');
+});
+
+test('vault_journal ohne vault:edit und mit ungültiger Eingabe', async () => {
+  const denied = await rpc('tools/call', { name: 'vault_journal', arguments: journalArgs }, captureToken);
+  assert.equal(denied.body.result.isError, true);
+  assert.match(denied.body.result.content[0].text, /vault:edit/);
+  const bad = await rpc('tools/call', { name: 'vault_journal', arguments: { ...journalArgs, from: 'gestern' } }, editToken);
+  assert.equal(bad.body.result.isError, true);
+  assert.match(bad.body.result.content[0].text, /Journal-Eintrag wurde nicht geschrieben: „from“/);
 });

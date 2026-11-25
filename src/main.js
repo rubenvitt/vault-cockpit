@@ -9,6 +9,7 @@ import { createEditor } from './vault/edit.js';
 import { createSyncSwitch } from './sync/index.js';
 import { createSyncHttp } from './sync/server/http.js';
 import { createVaultMcpHandler } from './mcp/server.js';
+import { createJournal } from './journal/journal.js';
 import { toWebRequest, writeWebResponse } from './http/bridge.js';
 import { createZunderClient } from './capture/zunder.js';
 import { createStateStore } from './capture/state.js';
@@ -111,6 +112,7 @@ const index = createIndexManager({
 const CAPTURE_FOLDER = process.env.CAPTURE_FOLDER ?? 'inbox';
 const capture = createCapture({ vaultPath: VAULT_PATH, folder: CAPTURE_FOLDER });
 const editor = createEditor({ vaultPath: VAULT_PATH, index });
+const journal = createJournal({ vaultPath: VAULT_PATH, index });
 
 // Cockpit-Einstellungen (Kalender, Zunder-Zugang, Anzeige) liegen unter /data
 // und werden im Browser gepflegt; leere Felder fallen auf die Umgebung zurück.
@@ -598,6 +600,7 @@ const webHttp = process.env.WEB_CLIENT_ID
 const mcpHttp = createVaultMcpHandler({
   index,
   capture,
+  journal,
   editor,
   // vault_move legt wie das Cockpit nie in oder aus vertraulichen Ordnern ab.
   policy: POLICY,
