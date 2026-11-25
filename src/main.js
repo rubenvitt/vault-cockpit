@@ -10,6 +10,7 @@ import { createSyncSwitch } from './sync/index.js';
 import { createSyncHttp } from './sync/server/http.js';
 import { createVaultMcpHandler } from './mcp/server.js';
 import { createJournal } from './journal/journal.js';
+import { createJournalHttp } from './journal/http.js';
 import { toWebRequest, writeWebResponse } from './http/bridge.js';
 import { createZunderClient } from './capture/zunder.js';
 import { createStateStore } from './capture/state.js';
@@ -628,6 +629,7 @@ const app = createApp({
     return principal;
   },
   captureHttp,
+  journalHttp: createJournalHttp({ tokens: apiTokens, journal }),
   readingApi,
   searchHttp,
   syncHttp,

@@ -26,7 +26,7 @@ export const syncOptions = (d) => [
   { value: '', label: `Standard (${SYNC_LABELS[d.syncAdapter ?? 'obsidian-headless'] ?? d.syncAdapter})` },
   ...Object.entries(SYNC_LABELS).map(([value, label]) => ({ value, label })),
 ];
-export const SCOPE_LABELS = { search: 'Suche', capture: 'Capture', lesestapel: 'Lesestapel', app: 'App', sync: 'Sync' };
+export const SCOPE_LABELS = { search: 'Suche', capture: 'Capture', lesestapel: 'Lesestapel', app: 'App', sync: 'Sync', journal: 'Journal' };
 /** Was ein Token mit diesem Recht darf, wie auf der Einstellungsseite. */
 const SCOPE_TEXT = {
   search: 'GET /api/search (ohne vertrauliche Ordner)',
@@ -34,6 +34,7 @@ const SCOPE_TEXT = {
   lesestapel: '/lesestapel/speichern, nur Artikel und PDFs in den Eingang',
   app: 'Geräte-Token der iOS-App: /api/…, Aktionen und alles, was Lesestapel darf',
   sync: 'Ein Gerät des eigenen Syncs: /sync/v1/…, liest und schreibt den ganzen Vault, auch vertrauliche Ordner',
+  journal: 'POST /journal, nur Einträge ins Session-Journal (_System/journal/)',
 };
 const SET = 'gesetzt (leer lassen = unverändert)';
 /** Was unter „Eingang vorsortieren“ steht (VCP-136). */

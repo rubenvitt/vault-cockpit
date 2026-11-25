@@ -26,6 +26,7 @@ Alle Lesewerkzeuge verlangen den Scope `vault:read`.
 | `vault_append` | Text am Notizende oder unter einer Überschrift anhängen (Scope `vault:edit`) |
 | `vault_set_frontmatter` | Einzelne Frontmatter-Felder setzen oder entfernen (Scope `vault:edit`) |
 | `vault_move` | Notiz in einen Ordner verschieben, optional umbenennen, etwa zum Leeren der Inbox; nie in oder aus vertraulichen Ordnern; Links, die danach ins Leere zeigen, nennt es oder schreibt sie mit `update_links` gleich um (Scope `vault:edit`) |
+| `vault_journal` | Arbeitsblock ans Session-Journal `_System/journal/<sphäre>/<tag>.md` anhängen, legt die Tagesdatei bei Bedarf an (Scope `vault:edit`) |
 
 ## Betrieb
 
@@ -261,6 +262,19 @@ Der Server sieht vor jeder Prüfung auf die Platte. `409 {error: "conflict"}` ko
 nur noch, wenn sich die Datei genau während des Abgleichs ändert (erneut
 versuchen); `409 {error: "case"}` heißt, der Pfad existiert schon in anderer Groß-
 und Kleinschreibung (auf macOS und iOS wäre das dieselbe Datei).
+
+### Journal
+
+`POST /journal` nimmt Einträge des Journal-Mods `session-journal` aus Cloud-Sessions
+an (Claude Code im Web) und hängt sie an `_System/journal/<privat|arbeit>/<YYYY-MM-DD>.md`
+an, im selben Format wie lokal. Body wie das Werkzeug `vault_journal`:
+`{titel, sphaere, projekt, kontext, punkte[], erkenntnis?, offen?, from, to?, session, kind?, source?}`
+(Zeiten RFC 3339, `to` fehlt = jetzt). Gleiche Session mit gleicher Endzeit wird
+nicht doppelt geschrieben (`200 {written:false, reason:"duplicate"}`), sonst `201`.
+Offensichtliche Zugangsdaten werden maskiert.
+
+Token: unter **Einstellungen → API-Tokens** mit dem Recht **Journal** anlegen. Er
+kann nur `/journal`, `GET /journal` ist ein Verbindungstest.
 
 ### Capture
 
