@@ -73,3 +73,15 @@ test('Node-Dateisystem weist Pfade außerhalb des Vaults und versteckte Pfade ab
   }
   await assert.rejects(fs.remove('../draußen.md'), /Ungültiger Pfad/);
 });
+
+test('Watchdog: ein hängender Abgleich gilt nach der Frist als hängend, ein fertiger nicht', async () => {
+  let release;
+  const api = { state: () => new Promise((r) => (release = r)) };
+  const daemon = createDaemon({ fs: createNodeFs(macVault), api, state: { cursor: null, files: {} }, save: async () => {}, log: quiet });
+  const run = daemon.syncNow();
+  assert.equal(daemon.stuck(1000), false);
+  assert.equal(daemon.stuck(1000, Date.now() + 2000), true);
+  release({ cursor: 0, files: [] });
+  await run.catch(() => {});
+  assert.equal(daemon.stuck(0, Date.now() + 2000), false);
+});
