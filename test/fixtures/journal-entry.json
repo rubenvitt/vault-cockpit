@@ -1,0 +1,13 @@
+{
+  "titel": "Beispielblock",
+  "sphaere": "privat",
+  "projekt": "demo",
+  "kontext": "Ein synthetischer Testblock.",
+  "punkte": ["Erster Punkt", "Zweiter Punkt"],
+  "erkenntnis": "Ein übertragbares Learning.",
+  "offen": "Rest für morgen.",
+  "from": "2026-01-05T08:00:00Z",
+  "to": "2026-01-05T08:40:00Z",
+  "session": "abcdef1234567890",
+  "kind": "manual"
+}
