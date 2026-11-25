@@ -42,6 +42,14 @@ const MAX_PATH_LENGTH = 1024;
 
 export class SyncPathError extends Error {}
 
+/** Gemeinsamer Anfang zweier Fassungen in ganzen Zeilen; null, wenn es keinen gibt. */
+function commonPrefix(a, b) {
+  let end = 0;
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n && a[i] === b[i]; i += 1) if (a[i] === 0x0a) end = i + 1;
+  return end > 0 ? a.subarray(0, end) : null;
+}
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS files (
   path     TEXT PRIMARY KEY,
@@ -375,7 +383,10 @@ export function createSyncJournal({
       const ours = readFileSync(abs(rel));
       // Gerade eben auf der Platte geändert: das Gerät soll es noch einmal versuchen.
       if (sha256(ours) !== currentHash) return { ok: false, reason: 'conflict', current: refresh(rel).entry };
-      const baseData = base ? readBlob(base) : null;
+      // Ohne Basis (beide haben die Datei neu angelegt, etwa dieselbe Tagesdatei des
+      // Session-Journals): der gemeinsame Anfang beider Fassungen dient als Basis.
+      // Ohne gemeinsamen Anfang bleibt es bei der Konfliktkopie.
+      const baseData = base ? readBlob(base) : commonPrefix(ours, data);
       const merged = baseData && mergeFile(rel, baseData, ours, data);
       if (merged) {
         if (sha256(merged) === currentHash) return { ok: true, entry: current, unchanged: true, resolution: 'merged' };

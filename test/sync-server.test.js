@@ -505,3 +505,20 @@ test('Cockpit und Gerät hängen beide an: zusammengeführt, keine Konfliktkopie
   assert.equal(res.body.resolution, 'merged');
   assert.equal(readFileSync(join(vault, 'projekte/Anhang.md'), 'utf8'), '# Anhang\n\nvom Cockpit\n\nvom Gerät\n');
 });
+
+test('beide legen dieselbe Tagesdatei neu an: zusammengeführt, keine Konfliktkopie', async () => {
+  const a = client(mac);
+  const head = '---\ntype: journal\ndate: 2026-11-27\nsphere: arbeit\n---\n\n# Journal Freitag, 27.11.2026 · arbeit\n\n';
+  mkdirSync(join(vault, '_System/journal/arbeit'), { recursive: true });
+  writeFileSync(join(vault, '_System/journal/arbeit/2026-11-27.md'), head + '### 10:00–10:30 · Cloud\n- b\n');
+  const res = await a.put('_System/journal/arbeit/2026-11-27.md', head + '### 10:05–10:40 · Lokal\n- c\n', null);
+  assert.equal(res.body.resolution, 'merged');
+  assert.equal(readFileSync(join(vault, '_System/journal/arbeit/2026-11-27.md'), 'utf8'), head + '### 10:00–10:30 · Cloud\n- b\n### 10:05–10:40 · Lokal\n- c\n');
+});
+
+test('zwei verschiedene neue Notizen ohne gemeinsamen Anfang: weiter Konfliktkopie', async () => {
+  const a = client(mac);
+  writeFileSync(join(vault, 'projekte/Neu2.md'), 'Server\n');
+  const res = await a.put('projekte/Neu2.md', 'Gerät\n', null);
+  assert.equal(res.body.resolution, 'copy');
+});
