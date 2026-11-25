@@ -17,7 +17,7 @@ import { execFileSync } from 'node:child_process';
 import { watch } from 'node:fs';
 import { mkdir, readdir, readFile, rename, stat, utimes, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join, relative, sep } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
@@ -33,7 +33,15 @@ const toPosix = (p) => p.split(sep).join('/');
 
 /** Vault auf der Platte, Schnittstelle wie `vaultFs` im Plugin. Versteckte Pfade bleiben außen vor. */
 export function createNodeFs(root) {
-  const abs = (path) => join(root, ...path.split('/'));
+  const rootAbs = resolve(root);
+  // Pfade kommen vom Server: nur sichtbare, relative Pfade innerhalb des Vaults (isHidden schließt `.` und `..` aus).
+  const abs = (path, base = rootAbs) => {
+    const parts = String(path).split('/');
+    if (isHidden(path) || parts.some((p) => p === '' || p.includes('\\'))) throw new Error(`Ungültiger Pfad: ${path}`);
+    const target = resolve(base, ...parts);
+    if (!target.startsWith(base + sep)) throw new Error(`Pfad außerhalb des Vaults: ${path}`);
+    return target;
+  };
   return {
     async list() {
       const out = [];
@@ -62,7 +70,7 @@ export function createNodeFs(root) {
     },
     async remove(path) {
       // Wie Obsidian „in den Papierkorb des Vaults“: wiederherstellbar.
-      const target = join(root, '.trash', ...path.split('/'));
+      const target = abs(path, join(rootAbs, '.trash'));
       await mkdir(dirname(target), { recursive: true });
       await rename(abs(path), target);
     },

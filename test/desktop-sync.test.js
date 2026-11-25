@@ -65,3 +65,11 @@ test('Dienst gleicht den Ordner auf der Platte ab: hoch, runter, Löschen in .tr
   assert.equal(existsSync(join(macVault, 'Mac.md')), false);
   assert.equal(readFileSync(join(macVault, '.trash/Mac.md'), 'utf8'), '# Mac\n');
 });
+
+test('Node-Dateisystem weist Pfade außerhalb des Vaults und versteckte Pfade ab', async () => {
+  const fs = createNodeFs(macVault);
+  for (const p of ['../draußen.md', 'a/../../draußen.md', '/etc/passwd', '.obsidian/app.json', 'a//b.md']) {
+    await assert.rejects(fs.write(p, Buffer.from('x')), /Ungültiger Pfad|außerhalb/, p);
+  }
+  await assert.rejects(fs.remove('../draußen.md'), /Ungültiger Pfad/);
+});
